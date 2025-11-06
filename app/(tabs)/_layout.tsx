@@ -1,26 +1,54 @@
 import { Tabs } from 'expo-router';
-import { Home, Plus, User } from 'lucide-react-native';
+import { Home, User, Users } from 'lucide-react-native';
+import { BlurView } from 'expo-blur';
+import { Platform, StyleSheet } from 'react-native';
 
 export default function TabLayout() {
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: '#00BCD4',
-        tabBarInactiveTintColor: '#9E9E9E',
+        tabBarShowLabel: true,
+        tabBarHideOnKeyboard: true,
+        tabBarActiveTintColor: '#FFFFFF',
+        tabBarInactiveTintColor: 'rgba(255,255,255,0.7)',
         tabBarStyle: {
-          backgroundColor: '#FFF',
-          borderTopWidth: 1,
-          borderTopColor: '#E0E0E0',
-          height: 60,
-          paddingBottom: 8,
-          paddingTop: 8,
+          position: 'absolute',
+          left: 16,
+          right: 16,
+          bottom: 20,
+          height: 72,
+          borderRadius: 24,
+          borderTopWidth: 0,
+          overflow: 'hidden',
+          backgroundColor: 'rgba(28,28,30,0.6)',
+          paddingBottom: 6,
+          paddingTop: 6,
+          ...(Platform.OS === 'ios'
+            ? {
+                shadowColor: '#000',
+                shadowOpacity: 0.15,
+                shadowRadius: 20,
+                shadowOffset: { width: 0, height: 10 },
+              }
+            : { elevation: 20 }),
         },
+        tabBarBackground: () => (
+          <BlurView tint="dark" intensity={40} style={StyleSheet.absoluteFill} />
+        ),
         tabBarLabelStyle: {
           fontSize: 12,
           fontWeight: '600',
+          marginBottom: Platform.OS === 'ios' ? 0 : 2,
         },
       }}>
+      <Tabs.Screen
+        name="profile"
+        options={{
+          title: 'פרופיל',
+          tabBarIcon: ({ size, color }) => <User size={size} color={color} />,
+        }}
+      />
       <Tabs.Screen
         name="home"
         options={{
@@ -29,17 +57,10 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
-        name="add-apartment"
+        name="partners"
         options={{
-          title: 'הוסף דירה',
-          tabBarIcon: ({ size, color }) => <Plus size={size} color={color} />,
-        }}
-      />
-      <Tabs.Screen
-        name="profile"
-        options={{
-          title: 'פרופיל',
-          tabBarIcon: ({ size, color }) => <User size={size} color={color} />,
+          title: 'שותפים',
+          tabBarIcon: ({ size, color }) => <Users size={size} color={color} />,
         }}
       />
     </Tabs>

@@ -22,14 +22,14 @@
 
 CREATE TABLE IF NOT EXISTS users (
   id uuid PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
-  email text UNIQUE NOT NULL,
   full_name text NOT NULL,
   age integer,
+  gender text,
   bio text,
-  interests text,
+  email text,
+  phone text,
   avatar_url text,
-  created_at timestamptz DEFAULT now(),
-  updated_at timestamptz DEFAULT now()
+  created_at timestamp DEFAULT now()
 );
 
 ALTER TABLE users ENABLE ROW LEVEL SECURITY;

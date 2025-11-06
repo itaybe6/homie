@@ -16,6 +16,7 @@ export default function ApartmentCard({
       <Image
         source={{
           uri:
+            (apartment as any).image_urls?.[0] ||
             apartment.image_url ||
             'https://images.pexels.com/photos/1457842/pexels-photo-1457842.jpeg',
         }}

@@ -6,24 +6,79 @@ export interface AuthUser {
 }
 
 export const authService = {
-  async signUp(email: string, password: string, fullName: string) {
-    const { data: authData, error: authError } = await supabase.auth.signUp({
+  async signUp(params: {
+    email: string;
+    password: string;
+    fullName: string;
+    phone?: string;
+    age?: number;
+    bio?: string;
+    avatarUrl?: string;
+    createProfile?: boolean; // when false, do not upsert into users table
+  }) {
+    const {
+      email,
+      password,
+      fullName,
+      age,
+      bio,
+      avatarUrl,
+      createProfile = true,
+    } = params;
+
+    // Try to sign up. If the user already exists (422), fall back to sign-in
+    const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
       email,
       password,
     });
 
-    if (authError) throw authError;
-    if (!authData.user) throw new Error('No user returned');
+    let userId: string | null = null;
+    let userEmail: string | null = null;
 
-    const { error: profileError } = await supabase.from('users').insert({
-      id: authData.user.id,
-      email: authData.user.email!,
-      full_name: fullName,
-    });
+    if (signUpError) {
+      // Handle 'User already registered' gracefully by signing in
+      // Supabase error code is 422 in this case
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const status = (signUpError as any).status;
+      if (status === 422) {
+        const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
+        if (signInError) throw signInError;
+        userId = signInData.user?.id ?? null;
+        userEmail = signInData.user?.email ?? null;
+      } else {
+        throw signUpError;
+      }
+    } else {
+      userId = signUpData.user?.id ?? null;
+      userEmail = signUpData.user?.email ?? null;
+    }
 
-    if (profileError) throw profileError;
+    if (!userId || !userEmail) throw new Error('No user returned');
 
-    return authData;
+    // Optionally ensure profile row exists (idempotent)
+    if (createProfile) {
+      const { error: profileError } = await supabase
+        .from('users')
+        .upsert(
+          {
+            id: userId,
+            email: userEmail,
+            full_name: fullName,
+            // phone omitted to avoid schema mismatch across envs
+            age: typeof age === 'number' ? age : null,
+            bio: bio || null,
+            avatar_url: avatarUrl || null,
+          },
+          { onConflict: 'id' }
+        );
+
+      if (profileError) throw profileError;
+    }
+
+    return { user: { id: userId, email: userEmail } } as any;
   },
 
   async signIn(email: string, password: string) {

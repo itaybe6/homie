@@ -3,8 +3,8 @@ export interface User {
   email: string;
   full_name: string;
   age?: number;
+  phone?: string;
   bio?: string;
-  interests?: string;
   avatar_url?: string;
   created_at: string;
   updated_at: string;
@@ -22,14 +22,19 @@ export interface Apartment {
   bedrooms: number;
   bathrooms: number;
   image_url?: string;
+  image_urls?: string[]; // new: multiple images
   created_at: string;
   updated_at: string;
 }
 
 export interface ApartmentMember {
+  // removed; kept for backward-compat notice
+}
+
+export interface ApartmentOwner {
   id: string;
-  apartment_id: string;
-  user_id: string;
-  role: 'owner' | 'roommate';
-  joined_at: string;
+  email: string;
+  full_name: string;
+  phone?: string;
+  apartment_id?: string | null;
 }

@@ -26,8 +26,7 @@ CREATE TABLE IF NOT EXISTS apartment_members (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   apartment_id uuid NOT NULL REFERENCES apartments(id) ON DELETE CASCADE,
   user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  role text NOT NULL DEFAULT 'roommate' CHECK (role IN ('owner', 'roommate')),
-  joined_at timestamptz DEFAULT now(),
+  joined_at timestamp DEFAULT now(),
   UNIQUE(apartment_id, user_id)
 );
 

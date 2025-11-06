@@ -30,15 +30,13 @@ CREATE TABLE IF NOT EXISTS apartments (
   owner_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   title text NOT NULL,
   description text,
-  address text NOT NULL,
   city text NOT NULL,
+  address text NOT NULL,
   price numeric NOT NULL DEFAULT 0,
-  room_type text NOT NULL DEFAULT 'private',
-  bedrooms integer NOT NULL DEFAULT 1,
-  bathrooms integer NOT NULL DEFAULT 1,
-  image_url text,
-  created_at timestamptz DEFAULT now(),
-  updated_at timestamptz DEFAULT now()
+  roommates_count integer NOT NULL DEFAULT 1,
+  max_roommates integer NOT NULL DEFAULT 1,
+  images text[],
+  created_at timestamp DEFAULT now()
 );
 
 ALTER TABLE apartments ENABLE ROW LEVEL SECURITY;
