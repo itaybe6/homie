@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -18,6 +18,7 @@ import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/authStore';
 import { useApartmentStore } from '@/stores/apartmentStore';
 import * as ImagePicker from 'expo-image-picker';
+import { autocompleteCities, autocompleteAddresses, createSessionToken, PlacePrediction } from '@/lib/googlePlaces';
 
 export default function AddApartmentScreen() {
   const router = useRouter();
@@ -28,12 +29,59 @@ export default function AddApartmentScreen() {
   const [description, setDescription] = useState('');
   const [address, setAddress] = useState('');
   const [city, setCity] = useState('');
+  const [neighborhood, setNeighborhood] = useState('');
   const [price, setPrice] = useState('');
   const [bedrooms, setBedrooms] = useState('');
   const [bathrooms, setBathrooms] = useState('');
   const [images, setImages] = useState<string[]>([]); // local URIs before upload
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
+  const [citySuggestions, setCitySuggestions] = useState<PlacePrediction[]>([]);
+  const [sessionToken, setSessionToken] = useState<string>('');
+  const [cityPlaceId, setCityPlaceId] = useState<string | null>(null);
+  const [addressSuggestions, setAddressSuggestions] = useState<string[]>([]);
+
+  useEffect(() => {
+    setSessionToken(createSessionToken());
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    const run = async () => {
+      const q = city.trim();
+      if (!q || q.length < 2) { setCitySuggestions([]); return; }
+      const preds = await autocompleteCities(q, sessionToken);
+      if (active) setCitySuggestions(preds.slice(0, 8));
+    };
+    run();
+    return () => { active = false; };
+  }, [city, sessionToken]);
+
+  useEffect(() => {
+    let active = true;
+    const run = async () => {
+      const q = address.trim();
+      if (!q || q.length < 2) { setAddressSuggestions([]); return; }
+      const preds = await autocompleteAddresses(q, cityPlaceId, sessionToken, city);
+      if (active) setAddressSuggestions(preds.slice(0, 8));
+    };
+    run();
+    return () => { active = false; };
+  }, [address, cityPlaceId, sessionToken, city]);
+
+  const handleBack = () => {
+    try {
+      // Go back if possible; otherwise fall back to home
+      // @ts-ignore - canGoBack exists on Expo Router
+      if (typeof (router as any).canGoBack === 'function' && (router as any).canGoBack()) {
+        router.back();
+      } else {
+        router.replace('/(tabs)/home');
+      }
+    } catch {
+      router.replace('/(tabs)/home');
+    }
+  };
 
   const pickImages = async () => {
     try {
@@ -174,6 +222,7 @@ export default function AddApartmentScreen() {
           description: description || null,
           address,
           city,
+          neighborhood: neighborhood || null,
           price: priceNum,
           bedrooms: bedroomsNum,
           bathrooms: bathroomsNum,
@@ -205,6 +254,7 @@ export default function AddApartmentScreen() {
     setDescription('');
     setAddress('');
     setCity('');
+    setNeighborhood('');
     setPrice('');
     // room type removed
     setBedrooms('');
@@ -221,7 +271,7 @@ export default function AddApartmentScreen() {
         <ScrollView contentContainerStyle={styles.scrollContent}>
           <View style={styles.header}>
             <View style={styles.headerRow}>
-              <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
+              <TouchableOpacity style={styles.backBtn} onPress={handleBack}>
                 <Text style={styles.backBtnText}>חזור</Text>
               </TouchableOpacity>
               <Text style={styles.title}>הוסף דירה חדשה</Text>
@@ -262,6 +312,47 @@ export default function AddApartmentScreen() {
 
             <View style={styles.inputGroup}>
               <Text style={styles.label}>
+                עיר <Text style={styles.required}>*</Text>
+              </Text>
+              <TextInput
+                style={styles.input}
+                placeholder="לדוגמה: תל אביב"
+                value={city}
+                onChangeText={(t) => { setCity(t); setCityPlaceId(null); }}
+                editable={!isLoading}
+                placeholderTextColor="#9AA0A6"
+              />
+              {citySuggestions.length > 0 ? (
+                <View style={styles.suggestionsBox}>
+                  {citySuggestions.map((p) => (
+                    <TouchableOpacity
+                      key={p.placeId}
+                      style={styles.suggestionItem}
+                      onPress={() => { setCity(p.description); setCityPlaceId(p.placeId); setCitySuggestions([]); }}
+                    >
+                      <Text style={styles.suggestionText}>{p.description}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              ) : null}
+            </View>
+
+            
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>שכונה</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="לדוגמה: נווה צדק"
+                value={neighborhood}
+                onChangeText={setNeighborhood}
+                editable={!isLoading}
+                placeholderTextColor="#9AA0A6"
+              />
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>
                 כתובת <Text style={styles.required}>*</Text>
               </Text>
               <TextInput
@@ -272,20 +363,19 @@ export default function AddApartmentScreen() {
                 editable={!isLoading}
                 placeholderTextColor="#9AA0A6"
               />
-            </View>
-
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>
-                עיר <Text style={styles.required}>*</Text>
-              </Text>
-              <TextInput
-                style={styles.input}
-                placeholder="לדוגמה: תל אביב"
-                value={city}
-                onChangeText={setCity}
-                editable={!isLoading}
-                placeholderTextColor="#9AA0A6"
-              />
+              {addressSuggestions.length > 0 ? (
+                <View style={styles.suggestionsBox}>
+                  {addressSuggestions.map((desc) => (
+                    <TouchableOpacity
+                      key={desc}
+                      style={styles.suggestionItem}
+                      onPress={() => { setAddress(desc); setAddressSuggestions([]); }}
+                    >
+                      <Text style={styles.suggestionText}>{desc}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              ) : null}
             </View>
 
             <View style={styles.inputGroup}>
@@ -310,7 +400,7 @@ export default function AddApartmentScreen() {
                 <Text style={styles.label}>
                   חדרי שינה <Text style={styles.required}>*</Text>
                 </Text>
-                <TextInput
+              <TextInput
                   style={styles.input}
                   placeholder="3"
                   value={bedrooms}
@@ -340,7 +430,7 @@ export default function AddApartmentScreen() {
             <View style={styles.inputGroup}>
               <Text style={styles.label}>תמונות הדירה</Text>
               <View style={styles.galleryHeader}>
-                <Text style={styles.galleryHint}>עד 12 תמונות • גרור לשינוי סדר לאחר שמירה</Text>
+              <Text style={styles.galleryHint}>עד 12 תמונות</Text>
                 <TouchableOpacity style={styles.addImagesBtn} onPress={pickImages} disabled={isLoading}>
                   <Text style={styles.addImagesBtnText}>הוסף תמונות</Text>
                 </TouchableOpacity>
@@ -391,7 +481,7 @@ export default function AddApartmentScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F5F5F5',
+    backgroundColor: '#0F0F14',
   },
   keyboardAvoid: {
     flex: 1,
@@ -408,60 +498,81 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   title: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: '#212121',
+    fontSize: 22,
+    fontWeight: '800',
+    color: '#FFFFFF',
     textAlign: 'right',
   },
   backBtn: {
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#E0E0E0',
-    borderRadius: 8,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 10,
     paddingVertical: 8,
     paddingHorizontal: 12,
   },
   backBtnText: {
-    color: '#424242',
+    color: '#FFFFFF',
     fontSize: 14,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   card: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#141420',
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: '#2A2A37',
     padding: 16,
-    shadowColor: '#000',
-    shadowOpacity: 0.08,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 4 },
   },
   form: {
     gap: 16,
   },
   inputGroup: {
     gap: 8,
+    position: 'relative',
   },
   label: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#424242',
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#C9CDD6',
     textAlign: 'right',
   },
   required: {
-    color: '#F44336',
+    color: '#F87171',
   },
   input: {
-    backgroundColor: '#FFF',
+    backgroundColor: '#17171F',
     paddingHorizontal: 16,
     paddingVertical: 14,
-    borderRadius: 8,
+    borderRadius: 10,
     fontSize: 16,
     borderWidth: 1,
-    borderColor: '#E0E0E0',
+    borderColor: '#2A2A37',
+    color: '#FFFFFF',
     textAlign: 'right',
     writingDirection: 'rtl',
+  },
+  suggestionsBox: {
+    position: 'absolute',
+    top: '100%',
+    left: 0,
+    right: 0,
+    zIndex: 20,
+    marginTop: 6,
+    backgroundColor: '#17171F',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#2A2A37',
+    overflow: 'hidden',
+    maxHeight: 220,
+  },
+  suggestionItem: {
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#2A2A37',
+  },
+  suggestionText: {
+    color: '#E5E7EB',
+    fontSize: 14,
+    textAlign: 'right',
   },
   textArea: {
     minHeight: 100,
@@ -475,9 +586,9 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   button: {
-    backgroundColor: '#00BCD4',
+    backgroundColor: '#7C5CFF',
     paddingVertical: 16,
-    borderRadius: 8,
+    borderRadius: 12,
     alignItems: 'center',
     marginTop: 8,
   },
@@ -485,28 +596,28 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
   buttonText: {
-    color: '#FFF',
+    color: '#0F0F14',
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: '800',
   },
   resetButton: {
-    backgroundColor: '#FFF',
+    backgroundColor: '#1B1B28',
     paddingVertical: 16,
-    borderRadius: 8,
+    borderRadius: 12,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#E0E0E0',
+    borderColor: '#2A2A37',
   },
   resetButtonText: {
-    color: '#757575',
+    color: '#C9CDD6',
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   error: {
-    backgroundColor: '#FFEBEE',
-    color: '#C62828',
+    backgroundColor: 'rgba(255,59,48,0.12)',
+    color: '#FF9AA2',
     padding: 12,
-    borderRadius: 8,
+    borderRadius: 12,
     textAlign: 'center',
     marginBottom: 16,
   },
@@ -516,18 +627,18 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   addImagesBtn: {
-    backgroundColor: '#00BCD4',
+    backgroundColor: '#7C5CFF',
     paddingVertical: 10,
     paddingHorizontal: 14,
-    borderRadius: 8,
+    borderRadius: 10,
   },
   addImagesBtnText: {
-    color: '#FFFFFF',
-    fontWeight: '700',
+    color: '#0F0F14',
+    fontWeight: '800',
     fontSize: 14,
   },
   galleryHint: {
-    color: '#757575',
+    color: '#9DA4AE',
     fontSize: 12,
     textAlign: 'right',
   },
@@ -543,7 +654,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     overflow: 'hidden',
     position: 'relative',
-    backgroundColor: '#F3F4F6',
+    backgroundColor: '#1F1F29',
   },
   thumb: {
     width: '100%',
@@ -567,9 +678,9 @@ const styles = StyleSheet.create({
     marginTop: -1,
   },
   galleryPlaceholder: {
-    backgroundColor: '#F9FAFB',
+    backgroundColor: '#17171F',
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: '#2A2A37',
     borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
@@ -577,7 +688,7 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   galleryPlaceholderText: {
-    color: '#9AA0A6',
+    color: '#9DA4AE',
     fontSize: 13,
   },
 });

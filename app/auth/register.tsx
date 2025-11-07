@@ -32,6 +32,7 @@ export default function RegisterScreen() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [phone, setPhone] = useState('');
   const [age, setAge] = useState('');
+  const [city, setCity] = useState('');
   const [avatarUrl, setAvatarUrl] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
@@ -120,6 +121,7 @@ export default function RegisterScreen() {
         fullName,
         phone: mode === 'user' ? (phone.trim() || undefined) : undefined,
         age: age ? Number(age) : undefined,
+        city: city.trim() || undefined,
         avatarUrl: avatarForSignup,
         // Always create users profile so FK from apartments(owner_id) -> users(id) passes
         createProfile: true,
@@ -320,19 +322,18 @@ export default function RegisterScreen() {
                 />
               )}
 
+              <TextInput
+                style={styles.input}
+                placeholder="עיר"
+                value={city}
+                onChangeText={setCity}
+                editable={!isLoading}
+                placeholderTextColor="#9AA0A6"
+              />
+
               {/* Owner fills apartment later on a dedicated screen */}
 
-              {mode === 'user' ? (
-                <TextInput
-                  style={styles.input}
-                  placeholder="קישור לתמונת פרופיל (לא חובה)"
-                  value={avatarUrl}
-                  onChangeText={setAvatarUrl}
-                  autoCapitalize="none"
-                  editable={!isLoading}
-                  placeholderTextColor="#9AA0A6"
-                />
-              ) : null}
+              
 
               <View style={styles.divider} />
 
@@ -372,7 +373,7 @@ export default function RegisterScreen() {
 
             <TouchableOpacity
               style={styles.linkContainer}
-              onPress={() => router.back()}
+              onPress={() => router.replace('/auth/login')}
               disabled={isLoading}>
               <Text style={styles.linkText}>יש לך חשבון? התחבר כאן</Text>
             </TouchableOpacity>

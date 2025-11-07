@@ -9,9 +9,14 @@ import {
   ActivityIndicator,
   Alert,
   SafeAreaView,
+  Image,
+  Platform,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { LogOut, Edit, Save, X } from 'lucide-react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { LogOut, Edit, Save, X, MapPin, Plus } from 'lucide-react-native';
+import { LinearGradient } from 'expo-linear-gradient';
+import * as ImagePicker from 'expo-image-picker';
 import { supabase } from '@/lib/supabase';
 import { authService } from '@/lib/auth';
 import { useAuthStore } from '@/stores/authStore';
@@ -22,6 +27,7 @@ export default function ProfileScreen() {
   const router = useRouter();
   const { user, setUser } = useAuthStore();
   const apartments = useApartmentStore((state) => state.apartments);
+  const insets = useSafeAreaInsets();
 
   const [profile, setProfile] = useState<User | null>(null);
   const [userApartments, setUserApartments] = useState<Apartment[]>([]);
@@ -32,14 +38,17 @@ export default function ProfileScreen() {
   const [fullName, setFullName] = useState('');
   const [age, setAge] = useState('');
   const [bio, setBio] = useState('');
-  const [interests, setInterests] = useState('');
+  // Removed deprecated interests field
 
   useEffect(() => {
     fetchProfile();
   }, [user]);
 
   const fetchProfile = async () => {
-    if (!user) return;
+    if (!user) {
+      setIsLoading(false);
+      return;
+    }
 
     try {
       const { data: profileData, error: profileError } = await supabase
@@ -54,7 +63,6 @@ export default function ProfileScreen() {
         setFullName(profileData.full_name);
         setAge(profileData.age?.toString() || '');
         setBio(profileData.bio || '');
-        setInterests(profileData.interests || '');
       }
 
       const { data: aptData, error: aptError } = await supabase
@@ -94,7 +102,6 @@ export default function ProfileScreen() {
           full_name: fullName,
           age: ageNum,
           bio: bio || null,
-          interests: interests || null,
           updated_at: new Date().toISOString(),
         })
         .eq('id', user!.id);
@@ -116,185 +123,321 @@ export default function ProfileScreen() {
       setFullName(profile.full_name);
       setAge(profile.age?.toString() || '');
       setBio(profile.bio || '');
-      setInterests(profile.interests || '');
     }
     setIsEditing(false);
   };
 
   const handleSignOut = async () => {
-    Alert.alert('התנתקות', 'האם אתה בטוח שברצונך להתנתק?', [
-      { text: 'ביטול', style: 'cancel' },
-      {
-        text: 'התנתק',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            await authService.signOut();
-            setUser(null);
-            router.replace('/auth/login');
-          } catch (error) {
-            Alert.alert('שגיאה', 'לא ניתן להתנתק');
-          }
+    try {
+      if (Platform.OS === 'web') {
+        const confirmed = typeof confirm === 'function' ? confirm('האם אתה בטוח שברצונך להתנתק?') : true;
+        if (!confirmed) return;
+        await authService.signOut();
+        setUser(null);
+        router.replace('/auth/login');
+        return;
+      }
+
+      Alert.alert('התנתקות', 'האם אתה בטוח שברצונך להתנתק?', [
+        { text: 'ביטול', style: 'cancel' },
+        {
+          text: 'התנתק',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await authService.signOut();
+              setUser(null);
+              router.replace('/auth/login');
+            } catch (error) {
+              Alert.alert('שגיאה', 'לא ניתן להתנתק');
+            }
+          },
         },
-      },
-    ]);
+      ]);
+    } catch (error) {
+      Alert.alert('שגיאה', 'לא ניתן להתנתק');
+    }
+  };
+
+  const pickAndUploadAvatar = async () => {
+    try {
+      const perms = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perms.granted) {
+        Alert.alert('הרשאה נדרשת', 'יש לאפשר גישה לגלריה כדי להעלות תמונה');
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.9,
+      });
+
+      if (result.canceled || !result.assets?.length || !user) return;
+
+      setIsSaving(true);
+      const asset = result.assets[0];
+      const response = await fetch(asset.uri);
+      const blob = await response.blob();
+      const fileExt = (asset.fileName || 'avatar.jpg').split('.').pop() || 'jpg';
+      const fileName = `${user.id}-${Date.now()}.${fileExt}`;
+      const filePath = `users/${user.id}/${fileName}`;
+      const filePayload: any = typeof File !== 'undefined'
+        ? new File([blob], fileName, { type: blob.type || 'image/jpeg' })
+        : blob;
+
+      const { error: uploadError } = await supabase.storage
+        .from('user-images')
+        .upload(filePath, filePayload, { contentType: (blob as any).type || 'image/jpeg', upsert: true });
+      if (uploadError) throw uploadError;
+
+      const { data } = supabase.storage.from('user-images').getPublicUrl(filePath);
+      const publicUrl = data.publicUrl;
+
+      const { error: updateError } = await supabase
+        .from('users')
+        .update({ avatar_url: publicUrl, updated_at: new Date().toISOString() })
+        .eq('id', user.id);
+      if (updateError) throw updateError;
+
+      setProfile((prev) => (prev ? { ...prev, avatar_url: publicUrl } : prev));
+      Alert.alert('הצלחה', 'התמונה עודכנה');
+    } catch (e: any) {
+      Alert.alert('שגיאה', e.message || 'לא ניתן להעלות תמונה');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const pickAndUploadExtraPhotos = async () => {
+    try {
+      if (!user) return;
+
+      const current = (profile?.image_urls ?? []).filter(Boolean);
+      const remaining = Math.max(0, 6 - current.length);
+      if (remaining <= 0) {
+        Alert.alert('מגבלה', 'ניתן לשמור עד 6 תמונות נוספות');
+        return;
+      }
+
+      const perms = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perms.granted) {
+        Alert.alert('הרשאה נדרשת', 'יש לאפשר גישה לגלריה כדי להעלות תמונות');
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: false,
+        allowsMultipleSelection: true,
+        selectionLimit: remaining,
+        quality: 0.9,
+      } as any);
+
+      if ((result as any).canceled || !(result as any).assets?.length) return;
+
+      setIsSaving(true);
+      const newUrls: string[] = [];
+      for (const asset of (result as any).assets) {
+        const response = await fetch(asset.uri);
+        const blob = await response.blob();
+        const fileExt = (asset.fileName || 'image.jpg').split('.').pop() || 'jpg';
+        const fileName = `${user.id}-${Date.now()}-${Math.random().toString(36).slice(2)}.${fileExt}`;
+        const filePath = `users/${user.id}/gallery/${fileName}`;
+        const filePayload: any = typeof File !== 'undefined'
+          ? new File([blob], fileName, { type: (blob as any).type || 'image/jpeg' })
+          : blob;
+
+        const { error: upErr } = await supabase.storage
+          .from('user-images')
+          .upload(filePath, filePayload, { contentType: (blob as any).type || 'image/jpeg', upsert: true });
+        if (upErr) throw upErr;
+        const { data } = supabase.storage.from('user-images').getPublicUrl(filePath);
+        newUrls.push(data.publicUrl);
+      }
+
+      const merged = [...current, ...newUrls].slice(0, 6);
+      const { error: updateErr } = await supabase
+        .from('users')
+        .update({ image_urls: merged, updated_at: new Date().toISOString() })
+        .eq('id', user.id);
+      if (updateErr) throw updateErr;
+
+      setProfile((prev) => (prev ? { ...prev, image_urls: merged } as any : prev));
+      Alert.alert('הצלחה', 'התמונות נוספו');
+    } catch (e: any) {
+      Alert.alert('שגיאה', e.message || 'לא ניתן להעלות תמונות');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   if (isLoading) {
     return (
       <View style={styles.centerContainer}>
-        <ActivityIndicator size="large" color="#00BCD4" />
+        <ActivityIndicator size="large" color="#7C5CFF" />
       </View>
     );
   }
 
-  return (
-    <SafeAreaView style={styles.container}>
-      <ScrollView>
-        <View style={styles.header}>
-          <Text style={styles.title}>הפרופיל שלי</Text>
-          <View style={styles.headerActions}>
-            {isEditing ? (
-              <>
-                <TouchableOpacity
-                  style={styles.cancelButton}
-                  onPress={handleCancelEdit}
-                  disabled={isSaving}>
-                  <X size={20} color="#757575" />
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.saveButton}
-                  onPress={handleSaveProfile}
-                  disabled={isSaving}>
-                  {isSaving ? (
-                    <ActivityIndicator size="small" color="#FFF" />
-                  ) : (
-                    <Save size={20} color="#FFF" />
-                  )}
-                </TouchableOpacity>
-              </>
-            ) : (
-              <TouchableOpacity
-                style={styles.editButton}
-                onPress={() => setIsEditing(true)}>
-                <Edit size={20} color="#00BCD4" />
-              </TouchableOpacity>
-            )}
-          </View>
-        </View>
-
-        <View style={styles.content}>
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>פרטים אישיים</Text>
-
-            {isEditing ? (
-              <View style={styles.form}>
-                <View style={styles.inputGroup}>
-                  <Text style={styles.label}>שם מלא</Text>
-                  <TextInput
-                    style={styles.input}
-                    value={fullName}
-                    onChangeText={setFullName}
-                    editable={!isSaving}
-                  />
-                </View>
-
-                <View style={styles.inputGroup}>
-                  <Text style={styles.label}>גיל</Text>
-                  <TextInput
-                    style={styles.input}
-                    value={age}
-                    onChangeText={setAge}
-                    keyboardType="numeric"
-                    placeholder="לא חובה"
-                    editable={!isSaving}
-                  />
-                </View>
-
-                <View style={styles.inputGroup}>
-                  <Text style={styles.label}>אודות</Text>
-                  <TextInput
-                    style={[styles.input, styles.textArea]}
-                    value={bio}
-                    onChangeText={setBio}
-                    multiline
-                    numberOfLines={4}
-                    placeholder="ספר קצת על עצמך..."
-                    editable={!isSaving}
-                  />
-                </View>
-
-                <View style={styles.inputGroup}>
-                  <Text style={styles.label}>תחומי עניין</Text>
-                  <TextInput
-                    style={styles.input}
-                    value={interests}
-                    onChangeText={setInterests}
-                    placeholder="ספורט, מוזיקה, קולנוע..."
-                    editable={!isSaving}
-                  />
-                </View>
-              </View>
-            ) : (
-              <View style={styles.infoCard}>
-                <View style={styles.infoRow}>
-                  <Text style={styles.infoLabel}>שם מלא:</Text>
-                  <Text style={styles.infoValue}>{profile?.full_name}</Text>
-                </View>
-
-                <View style={styles.infoRow}>
-                  <Text style={styles.infoLabel}>אימייל:</Text>
-                  <Text style={styles.infoValue}>{profile?.email}</Text>
-                </View>
-
-                {profile?.age && (
-                  <View style={styles.infoRow}>
-                    <Text style={styles.infoLabel}>גיל:</Text>
-                    <Text style={styles.infoValue}>{profile.age}</Text>
-                  </View>
-                )}
-
-                {profile?.bio && (
-                  <View style={styles.infoRow}>
-                    <Text style={styles.infoLabel}>אודות:</Text>
-                    <Text style={styles.infoValue}>{profile.bio}</Text>
-                  </View>
-                )}
-
-                {profile?.interests && (
-                  <View style={styles.infoRow}>
-                    <Text style={styles.infoLabel}>תחומי עניין:</Text>
-                    <Text style={styles.infoValue}>{profile.interests}</Text>
-                  </View>
-                )}
-              </View>
-            )}
-          </View>
-
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>הדירות שלי</Text>
-            {userApartments.length > 0 ? (
-              userApartments.map((apt) => (
-                <TouchableOpacity
-                  key={apt.id}
-                  style={styles.apartmentCard}
-                  onPress={() => router.push(`/apartment/${apt.id}`)}>
-                  <Text style={styles.apartmentTitle}>{apt.title}</Text>
-                  <Text style={styles.apartmentLocation}>
-                    {apt.city} • ₪{apt.price}/חודש
-                  </Text>
-                </TouchableOpacity>
-              ))
-            ) : (
-              <Text style={styles.emptyText}>אין לך דירות</Text>
-            )}
-          </View>
-
-          <TouchableOpacity style={styles.signOutButton} onPress={handleSignOut}>
-            <LogOut size={20} color="#F44336" />
-            <Text style={styles.signOutText}>התנתק</Text>
+  if (!user) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={{ padding: 16, alignItems: 'center', gap: 12 }}>
+          <Text style={{ color: '#FFFFFF', fontSize: 18, fontWeight: '800' }}>לא מחובר/ת</Text>
+          <Text style={{ color: '#9DA4AE', textAlign: 'center' }}>
+            כדי לראות את הפרופיל שלך, יש להתחבר או להירשם.
+          </Text>
+          <TouchableOpacity
+            onPress={() => router.push('/auth/login')}
+            style={{ backgroundColor: '#7C5CFF', paddingHorizontal: 18, paddingVertical: 12, borderRadius: 10 }}>
+            <Text style={{ color: '#0F0F14', fontWeight: '800' }}>כניסה / הרשמה</Text>
           </TouchableOpacity>
         </View>
+      </SafeAreaView>
+    );
+  }
+
+  return (
+      <SafeAreaView style={styles.container}>
+        <ScrollView contentContainerStyle={[styles.scrollContent, { paddingBottom: Math.max(220, 120 + insets.bottom) }]}>
+
+        {!isEditing ? (
+          <View style={styles.profileCard}>
+            <View style={styles.photoWrap}>
+              <Image
+                source={{
+                  uri:
+                    profile?.avatar_url ||
+                    'https://cdn-icons-png.flaticon.com/512/847/847969.png',
+                }}
+                style={styles.photo}
+              />
+              <LinearGradient
+                colors={["rgba(0,0,0,0.0)", "rgba(0,0,0,0.6)"]}
+                style={styles.photoBottomGradient}
+              />
+
+              <TouchableOpacity style={styles.addPhotoBtn} onPress={pickAndUploadAvatar} activeOpacity={0.9}>
+                <Plus size={20} color="#0F0F14" />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.infoPanel}>
+              <Text style={styles.nameText}>
+                {(profile?.full_name || 'משתמש/ת')} {profile?.age ? `, ${profile.age}` : ''}
+              </Text>
+              <View style={styles.locationRow}> 
+                <MapPin size={16} color="#C7CBD1" />
+                <Text style={styles.locationText}> Brooklyn • 2 מייל</Text>
+              </View>
+
+              <View style={styles.tagsRow}>
+                {['מקצועי/ת', 'נקי/ה', 'נוהג/ת לילה'].map((tag) => (
+                  <View key={tag} style={styles.tagChip}>
+                    <Text style={styles.tagText}>{tag}</Text>
+                  </View>
+                ))}
+              </View>
+
+              <View style={styles.whyInlineWrap}>
+                <Text style={styles.whyInlineTitle}>למה זה מתאים:</Text>
+                <View style={styles.tagsRow}>
+                  {['תחביב משותף: טיולים', 'שניכם ערים בלילה', 'תקציב דומה'].map((t) => (
+                    <View key={t} style={styles.whyChip}>
+                      <Text style={styles.whyChipText}>{t}</Text>
+                    </View>
+                  ))}
+                </View>
+              </View>
+
+              {profile?.bio ? (
+                <Text style={styles.bioText}>{profile.bio}</Text>
+              ) : (
+                <Text style={styles.bioText}>
+                  אוהב/ת מוזיקה וקפה טוב. מחפש/ת שותף/פה נוח/ה ונקי/ה לשיתוף דירה חמימה.
+                </Text>
+              )}
+
+              <Text style={styles.seeMoreText}>See more</Text>
+
+              <View style={styles.galleryActionsRow}>
+                <TouchableOpacity style={styles.galleryAddBtn} onPress={pickAndUploadExtraPhotos}>
+                  <Text style={styles.galleryAddBtnText}>הוסף תמונות נוספות (עד 6)</Text>
+                </TouchableOpacity>
+                {!!profile?.image_urls?.length && (
+                  <Text style={styles.galleryCountText}>{profile.image_urls.length}/6</Text>
+                )}
+              </View>
+            </View>
+          </View>
+        ) : (
+          <View style={styles.editCard}>
+            <View style={styles.editHeaderRow}>
+              <Text style={styles.editTitle}>עריכת פרופיל</Text>
+              <View style={styles.headerActions}>
+                <TouchableOpacity style={styles.cancelButton} onPress={handleCancelEdit} disabled={isSaving}>
+                  <X size={20} color="#9DA4AE" />
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.saveButton} onPress={handleSaveProfile} disabled={isSaving}>
+                  {isSaving ? <ActivityIndicator size="small" color="#FFF" /> : <Save size={20} color="#FFF" />}
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            <View style={styles.form}>
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>שם מלא</Text>
+                <TextInput style={styles.input} value={fullName} onChangeText={setFullName} editable={!isSaving} />
+              </View>
+
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>גיל</Text>
+                <TextInput
+                  style={styles.input}
+                  value={age}
+                  onChangeText={setAge}
+                  keyboardType="numeric"
+                  placeholder="לא חובה"
+                  editable={!isSaving}
+                />
+              </View>
+
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>אודות</Text>
+                <TextInput
+                  style={[styles.input, styles.textArea]}
+                  value={bio}
+                  onChangeText={setBio}
+                  multiline
+                  numberOfLines={4}
+                  placeholder="ספר/י קצת על עצמך..."
+                  editable={!isSaving}
+                />
+              </View>
+            </View>
+          </View>
+        )}
+
+        <View style={styles.sectionDark}>
+          <Text style={styles.sectionTitleDark}>הדירות שלי</Text>
+          {userApartments.length > 0 ? (
+            userApartments.map((apt) => (
+              <TouchableOpacity key={apt.id} style={styles.apartmentCardDark} onPress={() => router.push(`/apartment/${apt.id}`)}>
+                <Text style={styles.apartmentTitleDark}>{apt.title}</Text>
+                <Text style={styles.apartmentLocationDark}>{apt.city} • ₪{apt.price}/חודש</Text>
+              </TouchableOpacity>
+            ))
+          ) : (
+            <Text style={styles.emptyTextDark}>אין לך דירות</Text>
+          )}
+        </View>
+
+        <TouchableOpacity style={styles.signOutButtonDark} onPress={handleSignOut}>
+          <LogOut size={20} color="#FCA5A5" />
+          <Text style={styles.signOutTextDark}>התנתק</Text>
+        </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
   );
@@ -303,74 +446,211 @@ export default function ProfileScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F5F5F5',
+    backgroundColor: '#0F0F14',
   },
   centerContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#F5F5F5',
+    backgroundColor: '#0F0F14',
   },
-  header: {
+  scrollContent: {
+    paddingBottom: 120,
+  },
+  headerGradient: {
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 20,
+    borderBottomLeftRadius: 24,
+    borderBottomRightRadius: 24,
+    overflow: 'hidden',
+  },
+  headerTopRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    backgroundColor: '#FFF',
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#E0E0E0',
+    justifyContent: 'space-between',
   },
-  title: {
-    fontSize: 24,
+  iconButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerTitle: {
+    color: '#FFFFFF',
+    fontSize: 20,
+    fontWeight: '800',
+    letterSpacing: 0.3,
+  },
+  profileCard: {
+    marginHorizontal: 16,
+    marginTop: 16,
+    borderRadius: 24,
+    overflow: 'hidden',
+    backgroundColor: '#15151C',
+  },
+  photoWrap: {
+    position: 'relative',
+    backgroundColor: '#22232E',
+  },
+  photo: {
+    width: '100%',
+    height: 360,
+  },
+  photoBottomGradient: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: 140,
+  },
+  addPhotoBtn: {
+    position: 'absolute',
+    right: 16,
+    bottom: 16,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#A78BFA',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  matchBadgeWrap: {
+    // removed (badge no longer displayed)
+  },
+  matchBadgeCircle: {
+    // removed
+  },
+  matchBadgeText: {
+    // removed
+  },
+  whyMatchWrap: {
+    // removed (moved below image)
+  },
+  whyMatchTitle: {
+    // removed
+  },
+  whyChip: {
+    backgroundColor: 'rgba(255,255,255,0.85)',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+  },
+  whyChipText: {
+    color: '#1F2937',
     fontWeight: '700',
-    color: '#212121',
+    fontSize: 13,
+  },
+  infoPanel: {
+    padding: 16,
+    backgroundColor: '#15151C',
+  },
+  nameText: {
+    color: '#FFFFFF',
+    fontSize: 32,
+    fontWeight: '900',
+    marginBottom: 6,
+  },
+  locationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  locationText: {
+    color: '#C7CBD1',
+    fontSize: 16,
+  },
+  tagsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginBottom: 12,
+  },
+  tagChip: {
+    backgroundColor: '#1E1F2A',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 18,
+  },
+  tagText: {
+    color: '#E5E7EB',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  whyInlineWrap: {
+    marginBottom: 8,
+  },
+  whyInlineTitle: {
+    color: '#FFFFFF',
+    fontWeight: '800',
+    marginBottom: 6,
+  },
+  bioText: {
+    color: '#C7CBD1',
+    fontSize: 16,
+    lineHeight: 22,
+    marginBottom: 8,
+  },
+  seeMoreText: {
+    color: '#FFFFFF',
+    fontWeight: '800',
+  },
+
+  galleryActionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 12,
+  },
+  galleryAddBtn: {
+    backgroundColor: '#7C5CFF',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 10,
+  },
+  galleryAddBtnText: {
+    color: '#0F0F14',
+    fontWeight: '800',
+  },
+  galleryCountText: {
+    color: '#9DA4AE',
+    fontWeight: '700',
+  },
+
+  editCard: {
+    marginTop: 16,
+    marginHorizontal: 16,
+    padding: 16,
+    backgroundColor: '#15151C',
+    borderRadius: 16,
+  },
+  editHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  editTitle: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '800',
   },
   headerActions: {
     flexDirection: 'row',
     gap: 12,
   },
-  editButton: {
-    padding: 8,
-  },
   cancelButton: {
     padding: 8,
   },
   saveButton: {
-    backgroundColor: '#00BCD4',
+    backgroundColor: '#7C5CFF',
     paddingHorizontal: 16,
     paddingVertical: 8,
-    borderRadius: 8,
-  },
-  content: {
-    padding: 16,
-  },
-  section: {
-    marginBottom: 24,
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#212121',
-    marginBottom: 12,
-  },
-  infoCard: {
-    backgroundColor: '#FFF',
-    padding: 16,
-    borderRadius: 12,
-    gap: 12,
-  },
-  infoRow: {
-    gap: 4,
-  },
-  infoLabel: {
-    fontSize: 12,
-    color: '#757575',
-    fontWeight: '600',
-  },
-  infoValue: {
-    fontSize: 16,
-    color: '#212121',
+    borderRadius: 10,
   },
   form: {
     gap: 16,
@@ -380,59 +660,109 @@ const styles = StyleSheet.create({
   },
   label: {
     fontSize: 14,
-    fontWeight: '600',
-    color: '#424242',
+    fontWeight: '700',
+    color: '#E5E7EB',
   },
   input: {
-    backgroundColor: '#FFF',
+    backgroundColor: '#1B1C27',
     paddingHorizontal: 16,
     paddingVertical: 14,
-    borderRadius: 8,
+    borderRadius: 10,
     fontSize: 16,
     borderWidth: 1,
-    borderColor: '#E0E0E0',
+    borderColor: 'rgba(255,255,255,0.06)',
+    color: '#FFFFFF',
   },
   textArea: {
     minHeight: 100,
     textAlignVertical: 'top',
   },
-  apartmentCard: {
-    backgroundColor: '#FFF',
+  sectionDark: {
+    marginTop: 16,
+    paddingHorizontal: 16,
+  },
+  sectionTitleDark: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '800',
+    marginBottom: 10,
+  },
+  apartmentCardDark: {
+    backgroundColor: '#15151C',
     padding: 16,
     borderRadius: 12,
     marginBottom: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
   },
-  apartmentTitle: {
+  apartmentTitleDark: {
+    color: '#FFFFFF',
     fontSize: 16,
-    fontWeight: '600',
-    color: '#212121',
+    fontWeight: '700',
     marginBottom: 4,
   },
-  apartmentLocation: {
+  apartmentLocationDark: {
+    color: '#9DA4AE',
     fontSize: 14,
-    color: '#757575',
   },
-  emptyText: {
+  emptyTextDark: {
     fontSize: 14,
-    color: '#9E9E9E',
+    color: '#6B7280',
     textAlign: 'center',
     paddingVertical: 20,
   },
-  signOutButton: {
+  signOutButtonDark: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    backgroundColor: '#FFF',
+    backgroundColor: '#15151C',
     paddingVertical: 16,
-    borderRadius: 8,
+    borderRadius: 10,
     borderWidth: 1,
-    borderColor: '#FFCDD2',
-    marginTop: 16,
+    borderColor: 'rgba(252,165,165,0.3)',
+    marginHorizontal: 16,
+    marginTop: 12,
   },
-  signOutText: {
-    color: '#F44336',
+  signOutTextDark: {
+    color: '#FCA5A5',
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: '700',
+  },
+
+  bottomActions: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 24,
+    flexDirection: 'row',
+    justifyContent: 'space-evenly',
+    alignItems: 'center',
+  },
+  actionCircle: {
+    width: 84,
+    height: 84,
+    borderRadius: 42,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  actionNo: {
+    shadowColor: '#EF4444',
+    shadowOpacity: 0.3,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 6 },
+  },
+  actionStar: {
+    shadowColor: '#7C3AED',
+    shadowOpacity: 0.3,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 6 },
+  },
+  actionYes: {
+    shadowColor: '#10B981',
+    shadowOpacity: 0.3,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 6 },
   },
 });

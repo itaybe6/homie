@@ -13,6 +13,7 @@ export const authService = {
     phone?: string;
     age?: number;
     bio?: string;
+    city?: string;
     avatarUrl?: string;
     createProfile?: boolean; // when false, do not upsert into users table
   }) {
@@ -22,6 +23,7 @@ export const authService = {
       fullName,
       age,
       bio,
+      city,
       avatarUrl,
       createProfile = true,
     } = params;
@@ -70,6 +72,7 @@ export const authService = {
             // phone omitted to avoid schema mismatch across envs
             age: typeof age === 'number' ? age : null,
             bio: bio || null,
+            city: city || null,
             avatar_url: avatarUrl || null,
           },
           { onConflict: 'id' }

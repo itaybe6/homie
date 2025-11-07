@@ -63,6 +63,7 @@ export default function TabLayout() {
           tabBarIcon: ({ size, color }) => <Users size={size} color={color} />,
         }}
       />
+      <Tabs.Screen name="add-apartment" options={{ href: null }} />
     </Tabs>
   );
 }
