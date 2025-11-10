@@ -12,6 +12,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Image,
+  Switch,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
@@ -45,6 +46,7 @@ export default function AddApartmentScreen() {
   const [neighborhoodSuggestions, setNeighborhoodSuggestions] = useState<string[]>([]);
   const [neighborhoodOptions, setNeighborhoodOptions] = useState<string[]>([]);
   const [isNeighborhoodOpen, setIsNeighborhoodOpen] = useState(false);
+  const [includeAsPartner, setIncludeAsPartner] = useState(false);
 
   useEffect(() => {
     setSessionToken(createSessionToken());
@@ -247,7 +249,7 @@ export default function AddApartmentScreen() {
         .from('apartments')
         .insert({
           owner_id: authUser.id,
-          partner_ids: [authUser.id],
+          partner_ids: includeAsPartner ? [authUser.id] : [],
           title,
           description: description || null,
           address,
@@ -263,9 +265,9 @@ export default function AddApartmentScreen() {
 
       if (insertError) throw insertError;
 
-      // Ensure partner_ids contains the creator (fallback if DB ignored the field)
+      // Ensure partner_ids contains the creator if user chose to be a partner (fallback if DB ignored the field)
       let apartmentRow = data;
-      if (!apartmentRow.partner_ids || apartmentRow.partner_ids.length === 0) {
+      if (includeAsPartner && (!apartmentRow.partner_ids || apartmentRow.partner_ids.length === 0)) {
         const { data: fixed, error: fixErr } = await supabase
           .from('apartments')
           .update({ partner_ids: [authUser.id] })
@@ -493,6 +495,15 @@ export default function AddApartmentScreen() {
               </View>
             </View>
 
+            <View style={[styles.inputGroup, styles.switchRow]}>
+              <Text style={styles.label}>האם אתה שותף בדירה?</Text>
+              <Switch
+                value={includeAsPartner}
+                onValueChange={setIncludeAsPartner}
+                disabled={isLoading}
+              />
+            </View>
+
             <View style={styles.inputGroup}>
               <Text style={styles.label}>תמונות הדירה</Text>
               <View style={styles.galleryHeader}>
@@ -656,6 +667,11 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     gap: 12,
+  },
+  switchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
   halfWidth: {
     flex: 1,

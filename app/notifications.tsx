@@ -253,6 +253,11 @@ export default function NotificationsScreen() {
                   }}
                 >
                   <View style={styles.bubbleInner}>
+                    {aptImage ? (
+                      <View style={styles.thumbWrap}>
+                        <Image source={{ uri: aptImage }} style={styles.thumbImg} />
+                      </View>
+                    ) : null}
                     <View style={styles.bubbleTextArea}>
                       <Text style={styles.cardTitle} numberOfLines={1}>{item.title}</Text>
                       {!!sender?.full_name && (
@@ -280,11 +285,6 @@ export default function NotificationsScreen() {
                         </View>
                       ) : null}
                     </View>
-                    {aptImage ? (
-                      <View style={styles.thumbWrap}>
-                        <Image source={{ uri: aptImage }} style={styles.thumbImg} />
-                      </View>
-                    ) : null}
                   </View>
                 </TouchableOpacity>
                 <View style={styles.avatarRing}>

@@ -10,6 +10,7 @@ export const authService = {
     email: string;
     password: string;
     fullName: string;
+    role: 'user' | 'owner';
     phone?: string;
     age?: number;
     bio?: string;
@@ -21,6 +22,7 @@ export const authService = {
       email,
       password,
       fullName,
+      role,
       age,
       bio,
       city,
@@ -62,19 +64,29 @@ export const authService = {
 
     // Optionally ensure profile row exists (idempotent)
     if (createProfile) {
+      // Always create a users row. For owners, keep minimal fields.
+      const baseProfile: Record<string, unknown> = {
+        id: userId,
+        email: userEmail,
+        full_name: fullName,
+        role,
+      };
+
+      const extendedForRegularUser: Record<string, unknown> =
+        role === 'user'
+          ? {
+              // phone intentionally omitted unless schema guarantees it
+              age: typeof age === 'number' ? age : null,
+              bio: bio || null,
+              city: city || null,
+              avatar_url: avatarUrl || null,
+            }
+          : {};
+
       const { error: profileError } = await supabase
         .from('users')
         .upsert(
-          {
-            id: userId,
-            email: userEmail,
-            full_name: fullName,
-            // phone omitted to avoid schema mismatch across envs
-            age: typeof age === 'number' ? age : null,
-            bio: bio || null,
-            city: city || null,
-            avatar_url: avatarUrl || null,
-          },
+          { ...baseProfile, ...extendedForRegularUser },
           { onConflict: 'id' }
         );
 

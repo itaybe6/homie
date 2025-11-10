@@ -153,6 +153,7 @@ export default function RegisterScreen() {
         email,
         password,
         fullName,
+        role: mode === 'owner' ? 'owner' : 'user',
         phone: mode === 'user' ? (phone.trim() || undefined) : undefined,
         age: age ? Number(age) : undefined,
         city: city.trim() || undefined,
@@ -166,34 +167,6 @@ export default function RegisterScreen() {
           await uploadAvatar(user.id, avatarUrl);
         }
         if (mode === 'owner') {
-          // Create/ensure owner record; apartment will be added in the next step
-          const { error: ownerError } = await supabase
-            .from('apartment_owners')
-            .upsert(
-              {
-                id: user.id,
-                email: user.email!,
-                full_name: fullName,
-                phone: phone.trim() || null,
-                apartment_id: null,
-              },
-              { onConflict: 'id' }
-            );
-
-          if (ownerError) {
-            // Allow flow to continue if the table doesn't exist yet (migration not applied)
-            const msg = ownerError.message || '';
-            if (msg.includes("Could not find the table 'public.apartment_owners'")) {
-              console.warn(
-                'apartment_owners table missing; continuing without owner row until migrations are applied.'
-              );
-            } else {
-              console.error('Failed to create apartment_owners row:', ownerError);
-              setError(ownerError.message);
-              return;
-            }
-          }
-
           setUser({ id: user.id, email: user.email! });
           router.replace('/(tabs)/add-apartment');
         } else {

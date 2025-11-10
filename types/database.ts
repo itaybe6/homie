@@ -2,6 +2,7 @@ export interface User {
   id: string;
   email: string;
   full_name: string;
+  role?: 'user' | 'owner';
   age?: number;
   phone?: string;
   city?: string;
@@ -33,13 +34,6 @@ export interface Apartment {
 }
 
 
-export interface ApartmentOwner {
-  id: string;
-  email: string;
-  full_name: string;
-  phone?: string;
-  apartment_id?: string | null;
-}
 
 export interface Matches {
   id: string;
