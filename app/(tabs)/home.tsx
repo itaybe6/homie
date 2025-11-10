@@ -12,7 +12,7 @@ import {
   Modal,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { Search, Home, SlidersHorizontal, X, Plus } from 'lucide-react-native';
+import { Search, SlidersHorizontal, X, Plus } from 'lucide-react-native';
 import { autocompleteCities, autocompleteNeighborhoods, createSessionToken, PlacePrediction } from '@/lib/googlePlaces';
 import { supabase } from '@/lib/supabase';
 import { useApartmentStore } from '@/stores/apartmentStore';
@@ -170,12 +170,7 @@ export default function HomeScreen() {
     <SafeAreaView style={styles.container}>
       <NotificationsButton style={{ left: 16 }} />
       <View style={styles.topBar}>
-        <View style={styles.brandRow}>
-          <View style={styles.brandIconWrap}>
-            <Home size={18} color="#FFFFFF" />
-          </View>
-          <Text style={styles.brandText}>Homie</Text>
-        </View>
+        <View style={styles.brandRow} />
         <View style={styles.actionsRow}>
           <TouchableOpacity
             activeOpacity={0.8}

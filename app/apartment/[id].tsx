@@ -11,6 +11,7 @@ import {
   Dimensions,
   Modal,
   TextInput,
+  Platform,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import {
@@ -49,6 +50,19 @@ export default function ApartmentDetailsScreen() {
   const [addCandidates, setAddCandidates] = useState<User[]>([]);
   const [isAdding, setIsAdding] = useState(false);
   const [addSearch, setAddSearch] = useState('');
+  const [removingId, setRemovingId] = useState<string | null>(null);
+  const [confirmState, setConfirmState] = useState<{
+    visible: boolean;
+    title: string;
+    message: string;
+    confirmLabel?: string;
+    cancelLabel?: string;
+    onConfirm?: () => void;
+  }>({
+    visible: false,
+    title: '',
+    message: '',
+  });
   const galleryRef = useRef<ScrollView>(null);
   const screenWidth = Dimensions.get('window').width;
 
@@ -246,6 +260,81 @@ export default function ApartmentDetailsScreen() {
     }
   };
 
+  const confirmAddPartner = (candidate: User) => {
+    if (Platform.OS === 'web') {
+      setConfirmState({
+        visible: true,
+        title: 'אישור הוספה',
+        message: `להוסיף את ${candidate.full_name} כשותף לדירה?`,
+        confirmLabel: 'הוסף',
+        cancelLabel: 'ביטול',
+        onConfirm: () => handleAddPartner(candidate.id),
+      });
+    } else {
+      Alert.alert(
+        'אישור הוספה',
+        `להוסיף את ${candidate.full_name} כשותף לדירה?`,
+        [
+          { text: 'ביטול', style: 'cancel' },
+          { text: 'הוסף', onPress: () => handleAddPartner(candidate.id) },
+        ]
+      );
+    }
+  };
+
+  const handleRemovePartner = async (partnerId: string) => {
+    if (!apartment || !isOwner) return;
+    if (partnerId === apartment.owner_id) {
+      Alert.alert('שגיאה', 'לא ניתן להסיר את בעל הדירה');
+      return;
+    }
+    setRemovingId(partnerId);
+    try {
+      const currentPartnerIds = Array.isArray((apartment as any).partner_ids)
+        ? ((apartment as any).partner_ids as string[])
+        : [];
+      const newPartnerIds = currentPartnerIds.filter((id) => id !== partnerId);
+
+      const { error: updateErr } = await supabase
+        .from('apartments')
+        .update({ partner_ids: newPartnerIds })
+        .eq('id', apartment.id);
+      if (updateErr) throw updateErr;
+
+      setMembers((prev) => prev.filter((m) => m.id !== partnerId));
+      setApartment((prev) => (prev ? { ...prev, partner_ids: newPartnerIds } as Apartment : prev));
+
+      Alert.alert('הצלחה', 'השותף הוסר מהדירה');
+    } catch (e: any) {
+      console.error('Failed to remove partner', e);
+      Alert.alert('שגיאה', e?.message || 'לא ניתן להסיר את השותף');
+    } finally {
+      setRemovingId(null);
+    }
+  };
+
+  const confirmRemovePartner = (u: User) => {
+    if (Platform.OS === 'web') {
+      setConfirmState({
+        visible: true,
+        title: 'אישור הסרה',
+        message: `להסיר את ${u.full_name} מרשימת השותפים?`,
+        confirmLabel: 'הסר',
+        cancelLabel: 'ביטול',
+        onConfirm: () => handleRemovePartner(u.id),
+      });
+    } else {
+      Alert.alert(
+        'אישור הסרה',
+        `להסיר את ${u.full_name} מרשימת השותפים?`,
+        [
+          { text: 'ביטול', style: 'cancel' },
+          { text: 'הסר', style: 'destructive', onPress: () => handleRemovePartner(u.id) },
+        ]
+      );
+    }
+  };
+
   const goPrev = () => {
     if (activeIdx <= 0) return;
     const next = activeIdx - 1;
@@ -347,7 +436,11 @@ export default function ApartmentDetailsScreen() {
             ) : null}
           </View>
 
-          <View style={styles.heroOverlay}>
+          {/* moved textual info below the image */}
+        </View>
+
+        <View style={styles.content}>
+          <View style={styles.infoCard}>
             <View style={styles.pricePill}>
               <Text style={styles.currencyText}>₪</Text>
               <Text style={styles.priceText}>{apartment.price}</Text>
@@ -367,9 +460,6 @@ export default function ApartmentDetailsScreen() {
               {apartment.bedrooms} חדרים · {roommatesNeeded} מחפשי שותף
             </Text>
           </View>
-        </View>
-
-        <View style={styles.content}>
           <View style={styles.detailsRow}>
             <View style={styles.detailBoxDark}>
               <Bed size={20} color="#7C5CFF" />
@@ -435,24 +525,33 @@ export default function ApartmentDetailsScreen() {
             <ScrollView contentContainerStyle={styles.sheetContent}>
               {members.length > 0 ? (
                 members.map((m) => (
-                  <TouchableOpacity
-                    key={m.id}
-                    style={styles.memberRow}
-                    activeOpacity={0.9}
-                    onPress={() => {
-                      setIsMembersOpen(false);
-                      router.push({ pathname: '/user/[id]', params: { id: m.id } });
-                    }}
-                  >
-                    <Image
-                      source={{ uri: (m as any).avatar_url || 'https://cdn-icons-png.flaticon.com/512/847/847969.png' }}
-                      style={styles.avatarLarge}
-                    />
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.memberName}>{m.full_name}</Text>
-                      {m.email ? <Text style={styles.memberEmail}>{m.email}</Text> : null}
-                    </View>
-                  </TouchableOpacity>
+                  <View key={m.id} style={styles.memberRow}>
+                    <TouchableOpacity
+                      activeOpacity={0.9}
+                      onPress={() => {
+                        setIsMembersOpen(false);
+                        router.push({ pathname: '/user/[id]', params: { id: m.id } });
+                      }}
+                      style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 }}
+                    >
+                      <Image
+                        source={{ uri: (m as any).avatar_url || 'https://cdn-icons-png.flaticon.com/512/847/847969.png' }}
+                        style={styles.avatarLarge}
+                      />
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.memberName}>{m.full_name}</Text>
+                      </View>
+                    </TouchableOpacity>
+                    {isOwner && m.id !== apartment.owner_id ? (
+                      <TouchableOpacity
+                        onPress={() => confirmRemovePartner(m)}
+                        style={styles.removeBtn}
+                        activeOpacity={0.85}
+                      >
+                        <Trash2 size={16} color="#F87171" />
+                      </TouchableOpacity>
+                    ) : null}
+                  </View>
                 ))
               ) : (
                 <Text style={styles.emptyMembers}>אין שותפים להצגה</Text>
@@ -497,7 +596,7 @@ export default function ApartmentDetailsScreen() {
                     key={u.id}
                     style={styles.candidateRow}
                     activeOpacity={0.9}
-                    onPress={() => handleAddPartner(u.id)}
+                    onPress={() => confirmAddPartner(u)}
                   >
                     <View style={styles.candidateLeft}>
                       <Image
@@ -521,6 +620,46 @@ export default function ApartmentDetailsScreen() {
                 <Text style={styles.emptyMembers}>לא נמצאו תוצאות</Text>
               )}
             </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Confirm Modal (RTL) */}
+      <Modal
+        visible={confirmState.visible}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setConfirmState((s) => ({ ...s, visible: false }))}
+      >
+        <View style={styles.confirmOverlay}>
+          <TouchableOpacity
+            style={styles.confirmBackdrop}
+            activeOpacity={1}
+            onPress={() => setConfirmState((s) => ({ ...s, visible: false }))}
+          />
+          <View style={styles.confirmCard}>
+            <Text style={styles.confirmTitle}>{confirmState.title}</Text>
+            <Text style={styles.confirmMessage}>{confirmState.message}</Text>
+            <View style={styles.confirmActions}>
+              <TouchableOpacity
+                style={[styles.confirmBtn, styles.confirmCancel]}
+                onPress={() => setConfirmState((s) => ({ ...s, visible: false }))}
+                activeOpacity={0.9}
+              >
+                <Text style={styles.confirmCancelText}>{confirmState.cancelLabel || 'ביטול'}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.confirmBtn, styles.confirmApprove]}
+                onPress={() => {
+                  const fn = confirmState.onConfirm;
+                  setConfirmState((s) => ({ ...s, visible: false }));
+                  fn?.();
+                }}
+                activeOpacity={0.9}
+              >
+                <Text style={styles.confirmApproveText}>{confirmState.confirmLabel || 'אישור'}</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </Modal>
@@ -640,6 +779,14 @@ const styles = StyleSheet.create({
     gap: 6,
     justifyContent: 'center',
   },
+  infoCard: {
+    backgroundColor: '#17171F',
+    borderWidth: 1,
+    borderColor: '#2A2A37',
+    borderRadius: 14,
+    padding: 16,
+    marginBottom: 14,
+  },
   dot: {
     width: 6,
     height: 6,
@@ -686,9 +833,10 @@ const styles = StyleSheet.create({
     fontSize: 22,
     fontWeight: '800',
     lineHeight: 28,
+    textAlign: 'right',
   },
   heroLocation: {
-    flexDirection: 'row',
+    flexDirection: 'row-reverse',
     alignItems: 'center',
     gap: 6,
     marginTop: 6,
@@ -696,11 +844,13 @@ const styles = StyleSheet.create({
   heroLocationText: {
     color: '#C9CDD6',
     fontSize: 14,
+    textAlign: 'right',
   },
   subMeta: {
     color: '#B0B4BF',
     fontSize: 13,
     marginTop: 6,
+    textAlign: 'right',
   },
   content: {
     padding: 16,
@@ -815,6 +965,7 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 20,
     overflow: 'hidden',
     maxHeight: '70%',
+    writingDirection: 'rtl',
   },
   sheetHeader: {
     flexDirection: 'row',
@@ -846,6 +997,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 10,
     gap: 12,
+    writingDirection: 'rtl',
   },
   searchWrap: {
     flexDirection: 'row',
@@ -940,15 +1092,97 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 15,
     fontWeight: '700',
+    textAlign: 'right',
   },
   memberEmail: {
     color: '#9DA4AE',
     fontSize: 13,
+    textAlign: 'right',
   },
   emptyMembers: {
     color: '#9DA4AE',
     textAlign: 'center',
     paddingVertical: 12,
+  },
+  removeBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(248,113,113,0.10)',
+    borderWidth: 1,
+    borderColor: 'rgba(248,113,113,0.28)',
+  },
+  // Confirm modal styles
+  confirmOverlay: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.45)',
+  },
+  confirmBackdrop: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
+  confirmCard: {
+    backgroundColor: '#141420',
+    marginHorizontal: 16,
+    marginBottom: 0,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#2A2A37',
+    padding: 16,
+    writingDirection: 'rtl',
+  },
+  confirmTitle: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '900',
+    marginBottom: 8,
+    textAlign: 'right',
+  },
+  confirmMessage: {
+    color: '#C9CDD6',
+    fontSize: 14,
+    lineHeight: 20,
+    marginBottom: 14,
+    textAlign: 'right',
+  },
+  confirmActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  confirmBtn: {
+    flex: 1,
+    height: 44,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  confirmCancel: {
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+  },
+  confirmApprove: {
+    backgroundColor: 'rgba(248,113,113,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(248,113,113,0.28)',
+  },
+  confirmCancelText: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  confirmApproveText: {
+    color: '#F87171',
+    fontSize: 15,
+    fontWeight: '900',
   },
 });
 

@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { I18nManager, Platform } from 'react-native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useFrameworkReady } from '@/hooks/useFrameworkReady';
@@ -11,6 +12,20 @@ export default function RootLayout() {
 
   useEffect(() => {
     let isMounted = true;
+
+    // Ensure RTL on native devices (Hebrew)
+    (async () => {
+      try {
+        if (Platform.OS !== 'web' && !I18nManager.isRTL) {
+          I18nManager.allowRTL(true);
+          I18nManager.swapLeftAndRightInRTL(true);
+          I18nManager.forceRTL(true);
+          // Note: a manual app restart may be required on some devices
+        }
+      } catch {
+        // ignore
+      }
+    })();
 
     // Ensure auth state is initialized on any route (not only index)
     (async () => {
