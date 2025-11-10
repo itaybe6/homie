@@ -18,6 +18,7 @@ import { supabase } from '@/lib/supabase';
 import { useApartmentStore } from '@/stores/apartmentStore';
 import { Apartment } from '@/types/database';
 import ApartmentCard from '@/components/ApartmentCard';
+import NotificationsButton from '@/components/NotificationsButton';
 
 export default function HomeScreen() {
   const router = useRouter();
@@ -154,7 +155,7 @@ export default function HomeScreen() {
   };
 
   const handleApartmentPress = (apartment: Apartment) => {
-    router.push(`/apartment/${apartment.id}`);
+    router.push({ pathname: '/apartment/[id]', params: { id: apartment.id } });
   };
 
   if (isLoading && !refreshing) {
@@ -167,6 +168,7 @@ export default function HomeScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
+      <NotificationsButton style={{ left: 16 }} />
       <View style={styles.topBar}>
         <View style={styles.brandRow}>
           <View style={styles.brandIconWrap}>
@@ -199,9 +201,7 @@ export default function HomeScreen() {
         />
       </View>
 
-      <View style={styles.heroCard}>
-        <Text style={styles.heroText}>מצא/י את השותף/ה הבא/ה או הדירה המושלמת!</Text>
-      </View>
+      {/* Removed hero banner */}
 
       <FlatList
         data={filteredApartments}

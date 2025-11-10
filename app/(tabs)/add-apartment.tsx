@@ -18,7 +18,9 @@ import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/authStore';
 import { useApartmentStore } from '@/stores/apartmentStore';
 import * as ImagePicker from 'expo-image-picker';
-import { autocompleteCities, autocompleteAddresses, createSessionToken, PlacePrediction } from '@/lib/googlePlaces';
+import { autocompleteCities, autocompleteAddresses, autocompleteNeighborhoods, createSessionToken, PlacePrediction, getPlaceLocation } from '@/lib/googlePlaces';
+import { fetchNeighborhoodsForCity } from '@/lib/neighborhoods';
+import NotificationsButton from '@/components/NotificationsButton';
 
 export default function AddApartmentScreen() {
   const router = useRouter();
@@ -40,6 +42,9 @@ export default function AddApartmentScreen() {
   const [sessionToken, setSessionToken] = useState<string>('');
   const [cityPlaceId, setCityPlaceId] = useState<string | null>(null);
   const [addressSuggestions, setAddressSuggestions] = useState<string[]>([]);
+  const [neighborhoodSuggestions, setNeighborhoodSuggestions] = useState<string[]>([]);
+  const [neighborhoodOptions, setNeighborhoodOptions] = useState<string[]>([]);
+  const [isNeighborhoodOpen, setIsNeighborhoodOpen] = useState(false);
 
   useEffect(() => {
     setSessionToken(createSessionToken());
@@ -56,6 +61,32 @@ export default function AddApartmentScreen() {
     run();
     return () => { active = false; };
   }, [city, sessionToken]);
+
+  // Load full neighborhoods list for selected city (dropdown)
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      if (!cityPlaceId) { setNeighborhoodOptions([]); return; }
+      const loc = await getPlaceLocation(cityPlaceId);
+      if (!loc) { setNeighborhoodOptions([]); return; }
+      const list = await fetchNeighborhoodsForCity({ lat: loc.lat, lng: loc.lng, radiusMeters: 25000 });
+      if (!cancelled) setNeighborhoodOptions(list);
+    };
+    load();
+    return () => { cancelled = true; };
+  }, [cityPlaceId]);
+
+  useEffect(() => {
+    let active = true;
+    const run = async () => {
+      const q = neighborhood.trim();
+      if (!q || q.length < 1) { setNeighborhoodSuggestions([]); return; }
+      const list = await autocompleteNeighborhoods(q, cityPlaceId, sessionToken, city);
+      if (active) setNeighborhoodSuggestions(list.slice(0, 10));
+    };
+    run();
+    return () => { active = false; };
+  }, [neighborhood, cityPlaceId, sessionToken, city]);
 
   useEffect(() => {
     let active = true;
@@ -118,15 +149,13 @@ export default function AddApartmentScreen() {
     const ext = match ? match[1].toLowerCase() : 'jpg';
     const fileName = `${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
     const path = `apartments/${userId}/${fileName}`;
+    // On native, Response.blob/File may not exist; use arrayBuffer instead
     const res = await fetch(uri);
-    const blob = await res.blob();
-    const filePayload: any = typeof File !== 'undefined'
-      ? new File([blob], fileName, { type: blob.type || 'image/jpeg' })
-      : blob;
+    const arrayBuffer = await res.arrayBuffer();
     const { error: upErr } = await supabase
       .storage
       .from('apartment-images')
-      .upload(path, filePayload, { upsert: true, contentType: blob.type || 'image/jpeg' });
+      .upload(path, arrayBuffer, { upsert: true, contentType: `image/${ext === 'png' ? 'png' : 'jpeg'}` });
     if (upErr) throw upErr;
     const { data } = supabase.storage.from('apartment-images').getPublicUrl(path);
     return data.publicUrl;
@@ -218,6 +247,7 @@ export default function AddApartmentScreen() {
         .from('apartments')
         .insert({
           owner_id: authUser.id,
+          partner_ids: [authUser.id],
           title,
           description: description || null,
           address,
@@ -233,13 +263,21 @@ export default function AddApartmentScreen() {
 
       if (insertError) throw insertError;
 
-      await supabase.from('apartment_members').insert({
-        apartment_id: data.id,
-        user_id: authUser.id,
-        role: 'owner',
-      });
+      // Ensure partner_ids contains the creator (fallback if DB ignored the field)
+      let apartmentRow = data;
+      if (!apartmentRow.partner_ids || apartmentRow.partner_ids.length === 0) {
+        const { data: fixed, error: fixErr } = await supabase
+          .from('apartments')
+          .update({ partner_ids: [authUser.id] })
+          .eq('id', apartmentRow.id)
+          .select()
+          .single();
+        if (!fixErr && fixed) {
+          apartmentRow = fixed;
+        }
+      }
 
-      addApartment(data);
+      addApartment(apartmentRow);
       Alert.alert('הצלחה', 'הדירה נוספה בהצלחה');
       router.replace('/(tabs)/home');
     } catch (err: any) {
@@ -265,6 +303,7 @@ export default function AddApartmentScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
+      <NotificationsButton style={{ left: 16 }} />
       <KeyboardAvoidingView
         style={styles.keyboardAvoid}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
@@ -310,7 +349,7 @@ export default function AddApartmentScreen() {
               />
             </View>
 
-            <View style={styles.inputGroup}>
+            <View style={[styles.inputGroup, citySuggestions.length > 0 ? styles.inputGroupRaised : null]}>
               <Text style={styles.label}>
                 עיר <Text style={styles.required}>*</Text>
               </Text>
@@ -339,19 +378,46 @@ export default function AddApartmentScreen() {
 
             
 
-            <View style={styles.inputGroup}>
+            <View style={[styles.inputGroup, (isNeighborhoodOpen && neighborhoodOptions.length > 0) || neighborhoodSuggestions.length > 0 ? styles.inputGroupRaised : null]}>
               <Text style={styles.label}>שכונה</Text>
               <TextInput
-                style={styles.input}
-                placeholder="לדוגמה: נווה צדק"
+                style={[styles.input, !city ? { opacity: 0.6 } : null]}
+                placeholder={city ? 'בחר שכונה' : 'בחר עיר קודם'}
                 value={neighborhood}
-                onChangeText={setNeighborhood}
-                editable={!isLoading}
+                onChangeText={(t) => { setNeighborhood(t); setIsNeighborhoodOpen(true); }}
+                editable={!isLoading && !!city}
                 placeholderTextColor="#9AA0A6"
+                onFocus={() => setIsNeighborhoodOpen(true)}
               />
+              {isNeighborhoodOpen && neighborhoodOptions.length > 0 ? (
+                <View style={styles.suggestionsBox}>
+                  {(neighborhood ? neighborhoodOptions.filter((n) => n.includes(neighborhood)) : neighborhoodOptions).slice(0, 50).map((name) => (
+                    <TouchableOpacity
+                      key={name}
+                      style={styles.suggestionItem}
+                      onPress={() => { setNeighborhood(name); setIsNeighborhoodOpen(false); }}
+                    >
+                      <Text style={styles.suggestionText}>{name}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              ) : null}
+              {neighborhoodSuggestions.length > 0 ? (
+                <View style={styles.suggestionsBox}>
+                  {neighborhoodSuggestions.map((name) => (
+                    <TouchableOpacity
+                      key={name}
+                      style={styles.suggestionItem}
+                      onPress={() => { setNeighborhood(name); setNeighborhoodSuggestions([]); setIsNeighborhoodOpen(false); }}
+                    >
+                      <Text style={styles.suggestionText}>{name}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              ) : null}
             </View>
 
-            <View style={styles.inputGroup}>
+            <View style={[styles.inputGroup, addressSuggestions.length > 0 ? styles.inputGroupRaised : null]}>
               <Text style={styles.label}>
                 כתובת <Text style={styles.required}>*</Text>
               </Text>
@@ -528,6 +594,10 @@ const styles = StyleSheet.create({
     gap: 8,
     position: 'relative',
   },
+  inputGroupRaised: {
+    zIndex: 1000,
+    elevation: 16,
+  },
   label: {
     fontSize: 13,
     fontWeight: '700',
@@ -554,7 +624,7 @@ const styles = StyleSheet.create({
     top: '100%',
     left: 0,
     right: 0,
-    zIndex: 20,
+    zIndex: 1000,
     marginTop: 6,
     backgroundColor: '#17171F',
     borderRadius: 12,
@@ -562,6 +632,11 @@ const styles = StyleSheet.create({
     borderColor: '#2A2A37',
     overflow: 'hidden',
     maxHeight: 220,
+    shadowColor: '#000',
+    shadowOpacity: 0.15,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 16,
   },
   suggestionItem: {
     paddingVertical: 10,

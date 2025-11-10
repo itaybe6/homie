@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -19,9 +19,10 @@ import { useAuthStore } from '@/stores/authStore';
 import { Home, Camera, Edit3 } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { supabase } from '@/lib/supabase';
+import { autocompleteCities, createSessionToken, PlacePrediction } from '@/lib/googlePlaces';
 
-// App primary brand color (purple)
-const PRIMARY = '#7256B2';
+// App primary accent color (align with dark theme)
+const PRIMARY = '#7C5CFF';
 
 export default function RegisterScreen() {
   const router = useRouter();
@@ -34,12 +35,36 @@ export default function RegisterScreen() {
   const [age, setAge] = useState('');
   const [city, setCity] = useState('');
   const [avatarUrl, setAvatarUrl] = useState('');
+  const [citySuggestions, setCitySuggestions] = useState<PlacePrediction[]>([]);
+  const [sessionToken, setSessionToken] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [mode, setMode] = useState<'user' | 'owner'>('user');
   const [segWidth, setSegWidth] = useState(0);
   const segAnim = useRef(new Animated.Value(0)).current;
   // Owner apartment details will be collected later in a dedicated screen
+
+  useEffect(() => {
+    setSessionToken(createSessionToken());
+  }, []);
+
+  // Autocomplete cities using Google Places
+  useEffect(() => {
+    let active = true;
+    const run = async () => {
+      const q = city.trim();
+      if (!q || q.length < 2) {
+        setCitySuggestions([]);
+        return;
+      }
+      const preds = await autocompleteCities(q, sessionToken);
+      if (active) setCitySuggestions(preds.slice(0, 8));
+    };
+    run();
+    return () => {
+      active = false;
+    };
+  }, [city, sessionToken]);
 
   const handlePickImage = async () => {
     try {
@@ -311,25 +336,42 @@ export default function RegisterScreen() {
                   />
                 </View>
               ) : (
-                <TextInput
-                  style={styles.input}
-                  placeholder="טלפון"
-                  value={phone}
-                  onChangeText={setPhone}
-                  keyboardType="phone-pad"
-                  editable={!isLoading}
-                  placeholderTextColor="#9AA0A6"
-                />
+              <TextInput
+                style={styles.input}
+                placeholder="טלפון"
+                value={phone}
+                onChangeText={setPhone}
+                keyboardType="phone-pad"
+                editable={!isLoading}
+                placeholderTextColor="#9DA4AE"
+              />
               )}
 
               <TextInput
                 style={styles.input}
                 placeholder="עיר"
                 value={city}
-                onChangeText={setCity}
+                onChangeText={(t) => { setCity(t); if (!t) setCitySuggestions([]); }}
                 editable={!isLoading}
-                placeholderTextColor="#9AA0A6"
+                placeholderTextColor="#9DA4AE"
               />
+
+              {citySuggestions.length > 0 ? (
+                <View style={styles.suggestionsBox}>
+                  {citySuggestions.map((p) => (
+                    <TouchableOpacity
+                      key={p.placeId}
+                      style={styles.suggestionItem}
+                      onPress={() => {
+                        setCity(p.description);
+                        setCitySuggestions([]);
+                      }}
+                    >
+                      <Text style={styles.suggestionText}>{p.description}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              ) : null}
 
               {/* Owner fills apartment later on a dedicated screen */}
 
@@ -387,7 +429,7 @@ export default function RegisterScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#0F0F14',
   },
   scrollContent: {
     flexGrow: 1,
@@ -417,9 +459,9 @@ const styles = StyleSheet.create({
     width: 96,
     height: 96,
     borderRadius: 48,
-    backgroundColor: '#F3F4F6',
+    backgroundColor: '#17171F',
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: '#2A2A37',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -444,13 +486,13 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 28,
     fontWeight: '700',
-    color: '#0A0A0A',
+    color: '#FFFFFF',
     marginTop: 16,
     textAlign: 'right',
   },
   subtitle: {
     fontSize: 16,
-    color: '#6B7280',
+    color: '#9DA4AE',
     marginTop: 8,
     textAlign: 'right',
   },
@@ -458,9 +500,9 @@ const styles = StyleSheet.create({
     gap: 16,
   },
   card: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#141420',
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: '#2A2A37',
     padding: 16,
     borderRadius: 16,
     gap: 12,
@@ -470,14 +512,14 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 4 },
   },
   input: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#17171F',
     paddingHorizontal: 16,
     paddingVertical: 14,
     borderRadius: 12,
     fontSize: 16,
     borderWidth: 1,
-    borderColor: '#E5E7EB',
-    color: '#0A0A0A',
+    borderColor: '#2A2A37',
+    color: '#FFFFFF',
     textAlign: 'right',
     writingDirection: 'rtl',
   },
@@ -495,7 +537,7 @@ const styles = StyleSheet.create({
   },
   divider: {
     height: 1,
-    backgroundColor: '#E5E7EB',
+    backgroundColor: '#2A2A37',
     marginVertical: 4,
   },
   button: {
@@ -524,7 +566,7 @@ const styles = StyleSheet.create({
   },
   error: {
     backgroundColor: 'rgba(255,59,48,0.12)',
-    color: '#FF3B30',
+    color: '#FF6B6B',
     padding: 12,
     borderRadius: 12,
     textAlign: 'right',
@@ -534,7 +576,7 @@ const styles = StyleSheet.create({
     width: 64,
     height: 64,
     borderRadius: 16,
-    backgroundColor: PRIMARY,
+    backgroundColor: 'rgba(255,255,255,0.08)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -542,7 +584,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignSelf: 'stretch',
     marginBottom: 12,
-    backgroundColor: '#F3F4F6',
+    backgroundColor: '#17171F',
     borderRadius: 14,
     padding: 2,
     position: 'relative',
@@ -552,7 +594,7 @@ const styles = StyleSheet.create({
     top: 2,
     bottom: 2,
     left: 2,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#2B2141',
     borderRadius: 12,
     shadowColor: '#000',
     shadowOpacity: 0.08,
@@ -566,11 +608,30 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   segmentText: {
-    color: '#6B7280',
+    color: '#9DA4AE',
     fontSize: 14,
     fontWeight: '600',
   },
   segmentTextActive: {
-    color: '#0A0A0A',
+    color: '#FFFFFF',
+  },
+  suggestionsBox: {
+    marginTop: 6,
+    backgroundColor: '#17171F',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#2A2A37',
+    overflow: 'hidden',
+  },
+  suggestionItem: {
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#2A2A37',
+  },
+  suggestionText: {
+    color: '#E5E7EB',
+    fontSize: 14,
+    textAlign: 'right',
   },
 });

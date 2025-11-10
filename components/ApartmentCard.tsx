@@ -1,6 +1,7 @@
 import { View, Text, StyleSheet, TouchableOpacity, Image } from 'react-native';
-import { MapPin, Bed, Bath, DollarSign, Filter, MessageSquare } from 'lucide-react-native';
+import { MapPin, Bed, Bath, Filter } from 'lucide-react-native';
 import { Apartment } from '@/types/database';
+import { useState, useMemo } from 'react';
 
 interface ApartmentCardProps {
   apartment: Apartment;
@@ -11,17 +12,38 @@ export default function ApartmentCard({
   apartment,
   onPress,
 }: ApartmentCardProps) {
+  const PLACEHOLDER =
+    'https://images.pexels.com/photos/1457842/pexels-photo-1457842.jpeg';
+
+  const primaryImage = useMemo(() => {
+    const value: any = (apartment as any).image_urls;
+    if (Array.isArray(value) && value[0]) return value[0] as string;
+    if (typeof value === 'string') {
+      try {
+        const parsed = JSON.parse(value);
+        if (Array.isArray(parsed) && parsed[0]) return parsed[0] as string;
+      } catch {
+        const asArray = value
+          .replace(/^{|}$/g, '')
+          .split(',')
+          .map((s: string) => s.replace(/^"+|"+$/g, '').trim())
+          .filter(Boolean);
+        if (asArray[0]) return asArray[0];
+      }
+    }
+    return PLACEHOLDER;
+  }, [apartment]);
+
+  const [failed, setFailed] = useState(false);
+
   return (
     <TouchableOpacity style={styles.card} onPress={onPress}>
       <View style={styles.imageWrap}>
         <Image
-          source={{
-            uri:
-              (apartment as any).image_urls?.[0] ||
-              apartment.image_url ||
-              'https://images.pexels.com/photos/1457842/pexels-photo-1457842.jpeg',
-          }}
+          source={{ uri: failed ? PLACEHOLDER : primaryImage }}
           style={styles.image}
+          resizeMode="cover"
+          onError={() => setFailed(true)}
         />
 
         <TouchableOpacity activeOpacity={0.85} style={styles.overlayButton}>
@@ -34,7 +56,7 @@ export default function ApartmentCard({
             {apartment.title}
           </Text>
           <View style={styles.priceContainer}>
-            <DollarSign size={16} color="#22C55E" />
+            <Text style={styles.currency}>₪</Text>
             <Text style={styles.price}>{apartment.price}</Text>
             <Text style={styles.priceUnit}>/חודש</Text>
           </View>
@@ -73,11 +95,6 @@ export default function ApartmentCard({
           ) : (
             <View />
           )}
-
-          <TouchableOpacity activeOpacity={0.9} style={styles.chatBtn}>
-            <MessageSquare size={16} color="#0F0F14" />
-            <Text style={styles.chatBtnText}>צ׳אט</Text>
-          </TouchableOpacity>
         </View>
       </View>
     </TouchableOpacity>
@@ -119,6 +136,7 @@ const styles = StyleSheet.create({
   },
   content: {
     padding: 16,
+    direction: 'rtl',
   },
   titleRow: {
     flexDirection: 'row',
@@ -129,22 +147,28 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: '#FFFFFF',
     marginBottom: 8,
+    textAlign: 'right',
+    writingDirection: 'rtl',
   },
   locationRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
     marginBottom: 12,
+    direction: 'rtl',
   },
   location: {
     fontSize: 14,
     color: '#9DA4AE',
+    textAlign: 'right',
+    writingDirection: 'rtl',
   },
   detailsRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 16,
     marginBottom: 12,
+    direction: 'rtl',
   },
   detail: {
     flexDirection: 'row',
@@ -155,27 +179,40 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#E5E7EB',
     fontWeight: '700',
+    textAlign: 'right',
+    writingDirection: 'rtl',
   },
   priceContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginLeft: 'auto',
+    marginRight: 'auto',
   },
   price: {
     fontSize: 18,
     fontWeight: '900',
     color: '#22C55E',
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
+  currency: {
+    fontSize: 16,
+    fontWeight: '900',
+    color: '#22C55E',
+    marginRight: 4,
   },
   priceUnit: {
     fontSize: 12,
     color: '#9DA4AE',
     marginLeft: 2,
+    textAlign: 'right',
+    writingDirection: 'rtl',
   },
   chipsRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
     marginBottom: 12,
+    direction: 'rtl',
   },
   chip: {
     paddingHorizontal: 10,
@@ -189,16 +226,21 @@ const styles = StyleSheet.create({
     color: '#E5E7EB',
     fontSize: 12,
     fontWeight: '600',
+    textAlign: 'right',
+    writingDirection: 'rtl',
   },
   footerRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    direction: 'rtl',
   },
   description: {
     fontSize: 14,
     color: '#C7CBD1',
     lineHeight: 20,
     flex: 1,
+    textAlign: 'right',
+    writingDirection: 'rtl',
   },
   chatBtn: {
     flexDirection: 'row',
@@ -214,5 +256,7 @@ const styles = StyleSheet.create({
     color: '#0F0F14',
     fontSize: 14,
     fontWeight: '800',
+    textAlign: 'right',
+    writingDirection: 'rtl',
   },
 });

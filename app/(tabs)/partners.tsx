@@ -1,25 +1,32 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   SafeAreaView,
   StyleSheet,
   Text,
   View,
-  FlatList,
   ActivityIndicator,
-  RefreshControl,
   TouchableOpacity,
+  Animated,
+  Dimensions,
+  Easing,
 } from 'react-native';
-import { Home, SlidersHorizontal } from 'lucide-react-native';
+import { Home, SlidersHorizontal, ChevronLeft, ChevronRight } from 'lucide-react-native';
+import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/authStore';
 import { User } from '@/types/database';
 import RoommateCard from '@/components/RoommateCard';
+import NotificationsButton from '@/components/NotificationsButton';
 
 export default function PartnersScreen() {
+  const router = useRouter();
   const currentUser = useAuthStore((s) => s.user);
   const [users, setUsers] = useState<User[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
+  const [currentIndex, setCurrentIndex] = useState(0);
+
+  const screenWidth = Dimensions.get('window').width;
+  const translateX = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     fetchUsers();
@@ -38,6 +45,7 @@ export default function PartnersScreen() {
         ? list.filter((u) => u.id !== currentUser.id)
         : list;
       setUsers(filtered);
+      setCurrentIndex(0);
     } catch (e) {
       console.error('Failed to fetch users', e);
       setUsers([]);
@@ -46,11 +54,28 @@ export default function PartnersScreen() {
     }
   };
 
-  const onRefresh = async () => {
-    setRefreshing(true);
-    await fetchUsers();
-    setRefreshing(false);
+  const slideTo = (nextIndex: number, direction: 'next' | 'prev') => {
+    if (nextIndex < 0 || nextIndex >= users.length) return;
+    const outTarget = direction === 'next' ? -screenWidth : screenWidth;
+    Animated.timing(translateX, {
+      toValue: outTarget,
+      duration: 220,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start(() => {
+      setCurrentIndex(nextIndex);
+      translateX.setValue(direction === 'next' ? screenWidth : -screenWidth);
+      Animated.spring(translateX, {
+        toValue: 0,
+        useNativeDriver: true,
+        friction: 8,
+        tension: 50,
+      }).start();
+    });
   };
+
+  const goNext = () => slideTo(currentIndex + 1, 'next');
+  const goPrev = () => slideTo(currentIndex - 1, 'prev');
 
   const handleLike = (user: User) => {
     // Placeholder handler; backend connections table can be wired later
@@ -66,7 +91,7 @@ export default function PartnersScreen() {
     console.log('message', user.id);
   };
 
-  if (isLoading && !refreshing) {
+  if (isLoading) {
     return (
       <View style={styles.centerContainer}>
         <ActivityIndicator size="large" color="#7C5CFF" />
@@ -76,6 +101,7 @@ export default function PartnersScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
+      <NotificationsButton style={{ left: 16 }} />
       <View style={styles.topBar}>
         <View style={styles.brandRow}>
           <View style={styles.brandIconWrap}>
@@ -95,29 +121,69 @@ export default function PartnersScreen() {
         <Text style={styles.headerSubtitle}>גללו כדי לגלות התאמות סביבכם</Text>
       </View>
 
-      <FlatList
-        data={users}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={styles.listContent}
-        renderItem={({ item }) => (
-          <RoommateCard
-            user={item}
-            onLike={handleLike}
-            onPass={handlePass}
-            onFavorite={handleFavorite}
-            onMessage={handleMessage}
-          />
-        )}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#7C5CFF" />
-        }
-        ListEmptyComponent={
+      <View style={styles.listContent}>
+        {users.length === 0 ? (
           <View style={styles.emptyContainer}>
             <Text style={styles.emptyText}>לא נמצאו שותפים</Text>
             <Text style={styles.emptySubtext}>חזרו מאוחר יותר</Text>
           </View>
-        }
-      />
+        ) : (
+          <View>
+            <Animated.View
+              style={[
+                styles.animatedCard,
+                {
+                  transform: [
+                    { translateX },
+                    {
+                      scale: translateX.interpolate({
+                        inputRange: [-screenWidth, 0, screenWidth],
+                        outputRange: [0.96, 1, 0.96],
+                      }),
+                    },
+                  ],
+                  opacity: translateX.interpolate({
+                    inputRange: [-screenWidth, 0, screenWidth],
+                    outputRange: [0.85, 1, 0.85],
+                  }),
+                },
+              ]}
+            >
+              <RoommateCard
+                user={users[currentIndex]}
+                onLike={handleLike}
+                onPass={handlePass}
+                onFavorite={handleFavorite}
+                onMessage={handleMessage}
+                onOpen={(u) => router.push({ pathname: '/user/[id]', params: { id: u.id } })}
+              />
+            </Animated.View>
+
+            <View style={styles.arrowRow}>
+              <TouchableOpacity
+                activeOpacity={0.9}
+                style={[styles.arrowBtn, currentIndex === 0 && styles.arrowBtnDisabled]}
+                onPress={goPrev}
+                disabled={currentIndex === 0}
+              >
+                <ChevronRight size={22} color="#FFFFFF" />
+              </TouchableOpacity>
+              <View style={{ flex: 1 }} />
+              <TouchableOpacity
+                activeOpacity={0.9}
+                style={[
+                  styles.arrowBtn,
+                  currentIndex === users.length - 1 && styles.arrowBtnDisabled,
+                ]}
+                onPress={goNext}
+                disabled={currentIndex === users.length - 1}
+              >
+                <ChevronLeft size={22} color="#FFFFFF" />
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+      </View>
     </SafeAreaView>
   );
 }
@@ -192,6 +258,9 @@ const styles = StyleSheet.create({
   listContent: {
     padding: 16,
   },
+  animatedCard: {
+    // separate style for Animated.View wrapper
+  },
   emptyContainer: {
     alignItems: 'center',
     justifyContent: 'center',
@@ -206,5 +275,23 @@ const styles = StyleSheet.create({
   emptySubtext: {
     fontSize: 14,
     color: '#6B7280',
+  },
+  arrowRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 6,
+  },
+  arrowBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  arrowBtnDisabled: {
+    opacity: 0.4,
   },
 });

@@ -8,6 +8,7 @@ interface RoommateCardProps {
   onPass?: (user: User) => void;
   onFavorite?: (user: User) => void;
   onMessage?: (user: User) => void;
+  onOpen?: (user: User) => void;
 }
 
 const DEFAULT_AVATAR =
@@ -39,12 +40,13 @@ export default function RoommateCard({
   onPass,
   onFavorite,
   onMessage,
+  onOpen,
 }: RoommateCardProps) {
   const match = computeMatchPercent(user.id, user.bio || user.full_name);
   const reasons = buildReasons(user);
 
   return (
-    <View style={styles.card}>
+    <TouchableOpacity style={styles.card} activeOpacity={0.9} onPress={() => onOpen?.(user)}>
       <View style={styles.imageWrap}>
         <Image
           source={{ uri: user.avatar_url || DEFAULT_AVATAR }}
@@ -131,7 +133,7 @@ export default function RoommateCard({
           </TouchableOpacity>
         </View>
       </View>
-    </View>
+    </TouchableOpacity>
   );
 }
 

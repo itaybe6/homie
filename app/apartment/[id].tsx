@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -8,6 +8,9 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Alert,
+  Dimensions,
+  Modal,
+  TextInput,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import {
@@ -15,14 +18,19 @@ import {
   MapPin,
   Bed,
   Bath,
-  DollarSign,
   Users,
   Trash2,
+  ChevronLeft,
+  ChevronRight,
+  X,
+  UserPlus,
+  Search,
 } from 'lucide-react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/authStore';
 import { useApartmentStore } from '@/stores/apartmentStore';
-import { Apartment, User, ApartmentMember } from '@/types/database';
+import { Apartment, User } from '@/types/database';
 
 export default function ApartmentDetailsScreen() {
   const router = useRouter();
@@ -34,7 +42,15 @@ export default function ApartmentDetailsScreen() {
   const [owner, setOwner] = useState<User | null>(null);
   const [members, setMembers] = useState<User[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [isMember, setIsMember] = useState(false);
+  const [activeIdx, setActiveIdx] = useState(0);
+  const [failed, setFailed] = useState<Record<number, boolean>>({});
+  const [isMembersOpen, setIsMembersOpen] = useState(false);
+  const [isAddOpen, setIsAddOpen] = useState(false);
+  const [addCandidates, setAddCandidates] = useState<User[]>([]);
+  const [isAdding, setIsAdding] = useState(false);
+  const [addSearch, setAddSearch] = useState('');
+  const galleryRef = useRef<ScrollView>(null);
+  const screenWidth = Dimensions.get('window').width;
 
   useEffect(() => {
     fetchApartmentDetails();
@@ -66,27 +82,14 @@ export default function ApartmentDetailsScreen() {
       if (ownerError) throw ownerError;
       setOwner(ownerData);
 
-      const { data: membersData, error: membersError } = await supabase
-        .from('apartment_members')
-        .select('user_id')
-        .eq('apartment_id', id);
-
-      if (membersError) throw membersError;
-
-      if (membersData && membersData.length > 0) {
-        const userIds = membersData.map((m) => m.user_id);
+      const partnerIds = (aptData as any).partner_ids as string[] | undefined;
+      if (partnerIds && partnerIds.length > 0) {
         const { data: usersData, error: usersError } = await supabase
           .from('users')
           .select('*')
-          .in('id', userIds);
-
+          .in('id', partnerIds);
         if (usersError) throw usersError;
         setMembers(usersData || []);
-
-        const currentUserMember = membersData.find(
-          (m) => m.user_id === user?.id
-        );
-        setIsMember(!!currentUserMember);
       }
     } catch (error) {
       console.error('Error fetching apartment:', error);
@@ -96,56 +99,8 @@ export default function ApartmentDetailsScreen() {
     }
   };
 
-  const handleJoinApartment = async () => {
-    if (!user || !apartment) return;
-
-    try {
-      const { error } = await supabase.from('apartment_members').insert({
-        apartment_id: apartment.id,
-        user_id: user.id,
-        role: 'roommate',
-      });
-
-      if (error) throw error;
-
-      Alert.alert('הצלחה', 'הצטרפת לדירה בהצלחה');
-      fetchApartmentDetails();
-    } catch (error: any) {
-      Alert.alert('שגיאה', error.message || 'לא ניתן להצטרף לדירה');
-    }
-  };
-
-  const handleLeaveApartment = async () => {
-    if (!user || !apartment) return;
-
-    Alert.alert('עזיבת הדירה', 'האם אתה בטוח שברצונך לעזוב את הדירה?', [
-      { text: 'ביטול', style: 'cancel' },
-      {
-        text: 'עזוב',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            const { error } = await supabase
-              .from('apartment_members')
-              .delete()
-              .eq('apartment_id', apartment.id)
-              .eq('user_id', user.id);
-
-            if (error) throw error;
-
-            Alert.alert('הצלחה', 'עזבת את הדירה');
-            fetchApartmentDetails();
-          } catch (error: any) {
-            Alert.alert('שגיאה', error.message || 'לא ניתן לעזוב את הדירה');
-          }
-        },
-      },
-    ]);
-  };
-
   const handleDeleteApartment = async () => {
     if (!apartment) return;
-
     Alert.alert('מחיקת דירה', 'האם אתה בטוח שברצונך למחוק את הדירה?', [
       { text: 'ביטול', style: 'cancel' },
       {
@@ -157,12 +112,10 @@ export default function ApartmentDetailsScreen() {
               .from('apartments')
               .delete()
               .eq('id', apartment.id);
-
             if (error) throw error;
-
             removeApartment(apartment.id);
             Alert.alert('הצלחה', 'הדירה נמחקה בהצלחה');
-            router.back();
+            router.replace('/(tabs)/home');
           } catch (error: any) {
             Alert.alert('שגיאה', error.message || 'לא ניתן למחוק את הדירה');
           }
@@ -174,7 +127,7 @@ export default function ApartmentDetailsScreen() {
   if (isLoading) {
     return (
       <View style={styles.centerContainer}>
-        <ActivityIndicator size="large" color="#00BCD4" />
+        <ActivityIndicator size="large" color="#7C5CFF" />
       </View>
     );
   }
@@ -184,116 +137,393 @@ export default function ApartmentDetailsScreen() {
   }
 
   const isOwner = user?.id === apartment.owner_id;
+  const PLACEHOLDER =
+    'https://images.pexels.com/photos/1457842/pexels-photo-1457842.jpeg';
+
+  const normalizeImages = (value: any): string[] => {
+    if (Array.isArray(value)) return value.filter(Boolean);
+    if (typeof value === 'string') {
+      try {
+        const parsed = JSON.parse(value);
+        if (Array.isArray(parsed)) return parsed.filter(Boolean);
+      } catch {}
+      return value
+        .replace(/^{|}$/g, '')
+        .split(',')
+        .map((s: string) => s.replace(/^"+|"+$/g, '').trim())
+        .filter(Boolean);
+    }
+    return [];
+  };
+
+  const images: string[] = (() => {
+    const arr = normalizeImages((apartment as any).image_urls);
+    return arr.length ? arr : [PLACEHOLDER];
+  })();
+
+  const roommatesCount = members.length;
+  const roommatesNeeded = Math.max(
+    0,
+    (apartment.bedrooms || 0) - (roommatesCount + 1)
+  );
+
+  const filteredCandidates = (() => {
+    const q = (addSearch || '').trim().toLowerCase();
+    if (!q) return addCandidates;
+    return addCandidates.filter((u) => (u.full_name || '').toLowerCase().includes(q));
+  })();
+
+  const openAddPartnerModal = async () => {
+    if (!apartment) return;
+    try {
+      setIsAdding(true);
+      const currentIds = new Set<string>([apartment.owner_id, ...(apartment.partner_ids || [])]);
+      const { data, error } = await supabase
+        .from('users')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      const all = (data || []) as User[];
+      const candidates = all.filter((u) => !currentIds.has(u.id));
+      setAddCandidates(candidates);
+      setIsAddOpen(true);
+    } catch (e) {
+      console.error('Failed to load candidates', e);
+      Alert.alert('שגיאה', 'לא ניתן לטעון משתמשים להוספה');
+    } finally {
+      setIsAdding(false);
+    }
+  };
+
+  const handleAddPartner = async (partnerId: string) => {
+    if (!apartment || !user?.id) return;
+    setIsAdding(true);
+    try {
+      const currentPartnerIds = Array.isArray((apartment as any).partner_ids)
+        ? ((apartment as any).partner_ids as string[])
+        : [];
+      if (currentPartnerIds.includes(partnerId)) {
+        Alert.alert('שים לב', 'המשתמש כבר שותף בדירה');
+        return;
+      }
+      const newPartnerIds = Array.from(new Set([...(currentPartnerIds || []), partnerId]));
+
+      const { error: updateErr } = await supabase
+        .from('apartments')
+        .update({ partner_ids: newPartnerIds })
+        .eq('id', apartment.id);
+      if (updateErr) throw updateErr;
+
+      const { data: addedUser, error: addedErr } = await supabase
+        .from('users')
+        .select('*')
+        .eq('id', partnerId)
+        .maybeSingle();
+      if (addedErr) throw addedErr;
+      if (addedUser) {
+        setMembers((prev) => [...prev, addedUser as User]);
+      }
+
+      const title = 'התווספת כשותף לדירה';
+      const description = `${owner?.full_name || 'בעל הדירה'} הוסיף אותך כשותף לדירה: ${apartment.title} (${apartment.city})`;
+      const { error: notifErr } = await supabase.from('notifications').insert({
+        sender_id: user.id,
+        recipient_id: partnerId,
+        title,
+        description,
+      });
+      if (notifErr) throw notifErr;
+
+      setApartment((prev) => (prev ? { ...prev, partner_ids: newPartnerIds } as Apartment : prev));
+
+      Alert.alert('הצלחה', 'שותף נוסף וההתראה נשלחה');
+      setIsAddOpen(false);
+    } catch (e: any) {
+      console.error('Failed to add partner', e);
+      Alert.alert('שגיאה', e?.message || 'לא ניתן להוסיף את השותף');
+    } finally {
+      setIsAdding(false);
+    }
+  };
+
+  const goPrev = () => {
+    if (activeIdx <= 0) return;
+    const next = activeIdx - 1;
+    galleryRef.current?.scrollTo({ x: next * screenWidth, animated: true });
+    setActiveIdx(next);
+  };
+
+  const goNext = () => {
+    if (activeIdx >= images.length - 1) return;
+    const next = activeIdx + 1;
+    galleryRef.current?.scrollTo({ x: next * screenWidth, animated: true });
+    setActiveIdx(next);
+  };
 
   return (
     <View style={styles.container}>
-      <ScrollView>
-        <View style={styles.imageContainer}>
-          <Image
-            source={{
-              uri:
-                apartment.image_url ||
-                'https://images.pexels.com/photos/1457842/pexels-photo-1457842.jpeg',
+      <ScrollView contentContainerStyle={{ paddingBottom: 16 }}>
+        <View style={styles.galleryContainer}>
+          <ScrollView
+            ref={galleryRef}
+            horizontal
+            pagingEnabled
+            showsHorizontalScrollIndicator={false}
+            onMomentumScrollEnd={(e) => {
+              const idx = Math.round(
+                e.nativeEvent.contentOffset.x / e.nativeEvent.layoutMeasurement.width
+              );
+              setActiveIdx(idx);
             }}
-            style={styles.image}
-          />
+          >
+            {images.map((uri, idx) => (
+              <View key={`${uri}-${idx}`} style={[styles.slide, { width: screenWidth }]}>
+                <Image
+                  source={{ uri: failed[idx] ? PLACEHOLDER : uri }}
+                  style={styles.image}
+                  resizeMode="cover"
+                  onError={() => setFailed((f) => ({ ...f, [idx]: true }))}
+                />
+                <LinearGradient
+                  colors={['transparent', 'rgba(15,15,20,0.6)', 'rgba(15,15,20,0.95)']}
+                  style={styles.imageGradient}
+                />
+              </View>
+            ))}
+          </ScrollView>
+
+          {images.length > 1 ? (
+            <>
+              <TouchableOpacity onPress={goPrev} style={[styles.navBtn, styles.navBtnLeft]} activeOpacity={0.85}>
+                <ChevronLeft size={18} color="#FFFFFF" />
+              </TouchableOpacity>
+              <TouchableOpacity onPress={goNext} style={[styles.navBtn, styles.navBtnRight]} activeOpacity={0.85}>
+                <ChevronRight size={18} color="#FFFFFF" />
+              </TouchableOpacity>
+              <View style={styles.dotsRow}>
+                {images.map((_, i) => (
+                  <View key={`dot-${i}`} style={[styles.dot, i === activeIdx && styles.dotActive]} />
+                ))}
+              </View>
+            </>
+          ) : null}
+
           <TouchableOpacity
             style={styles.backButton}
-            onPress={() => router.back()}>
-            <ArrowLeft size={24} color="#FFF" />
+            onPress={() => router.replace('/(tabs)/home')}>
+            <ArrowLeft size={22} color="#FFFFFF" />
           </TouchableOpacity>
+
+          <View style={styles.avatarStack}>
+            {members.slice(0, 5).map((m, idx) => (
+              <TouchableOpacity
+                key={m.id}
+                onPress={() => router.push({ pathname: '/user/[id]', params: { id: m.id } })}
+                activeOpacity={0.9}
+              >
+                <Image
+                  source={{
+                    uri:
+                      (m as any).avatar_url ||
+                      'https://cdn-icons-png.flaticon.com/512/847/847969.png',
+                  }}
+                  style={[styles.avatar, idx > 0 ? { marginLeft: -10 } : null]}
+                />
+              </TouchableOpacity>
+            ))}
+            {members.length > 5 ? (
+              <View style={[styles.avatar, styles.moreAvatar]}>
+                <Text style={styles.moreAvatarText}>+{members.length - 5}</Text>
+              </View>
+            ) : null}
+            {isOwner ? (
+              <TouchableOpacity
+                onPress={openAddPartnerModal}
+                activeOpacity={0.9}
+                style={styles.addAvatar}
+              >
+                <UserPlus size={16} color="#FFFFFF" />
+              </TouchableOpacity>
+            ) : null}
+          </View>
+
+          <View style={styles.heroOverlay}>
+            <View style={styles.pricePill}>
+              <Text style={styles.currencyText}>₪</Text>
+              <Text style={styles.priceText}>{apartment.price}</Text>
+              <Text style={styles.priceUnitDark}>/חודש</Text>
+            </View>
+            <Text style={styles.heroTitle} numberOfLines={2}>
+              {apartment.title}
+            </Text>
+            <View style={styles.heroLocation}>
+              <MapPin size={16} color="#C9CDD6" />
+              <Text style={styles.heroLocationText} numberOfLines={1}>
+                {apartment.neighborhood ? `${apartment.neighborhood}, ` : ''}
+                {apartment.city}
+              </Text>
+            </View>
+            <Text style={styles.subMeta}>
+              {apartment.bedrooms} חדרים · {roommatesNeeded} מחפשי שותף
+            </Text>
+          </View>
         </View>
 
         <View style={styles.content}>
-          <View style={styles.headerSection}>
-            <Text style={styles.title}>{apartment.title}</Text>
-            <View style={styles.priceRow}>
-              <DollarSign size={24} color="#4CAF50" />
-              <Text style={styles.price}>{apartment.price}</Text>
-              <Text style={styles.priceUnit}>/חודש</Text>
-            </View>
-          </View>
-
-          <View style={styles.locationRow}>
-            <MapPin size={20} color="#757575" />
-            <Text style={styles.locationText}>{apartment.address}</Text>
-          </View>
-
           <View style={styles.detailsRow}>
-            <View style={styles.detailBox}>
-              <Bed size={24} color="#00BCD4" />
-              <Text style={styles.detailLabel}>חדרי שינה</Text>
-              <Text style={styles.detailValue}>{apartment.bedrooms}</Text>
+            <View style={styles.detailBoxDark}>
+              <Bed size={20} color="#7C5CFF" />
+              <Text style={styles.detailValueDark}>{apartment.bedrooms}</Text>
+              <Text style={styles.detailLabelDark}>חדרי שינה</Text>
             </View>
-
-            <View style={styles.detailBox}>
-              <Bath size={24} color="#00BCD4" />
-              <Text style={styles.detailLabel}>חדרי אמבטיה</Text>
-              <Text style={styles.detailValue}>{apartment.bathrooms}</Text>
+            <View style={styles.detailBoxDark}>
+              <Bath size={20} color="#7C5CFF" />
+              <Text style={styles.detailValueDark}>{apartment.bathrooms}</Text>
+              <Text style={styles.detailLabelDark}>חדרי רחצה</Text>
             </View>
-
-            <View style={styles.detailBox}>
-              <Users size={24} color="#00BCD4" />
-              <Text style={styles.detailLabel}>שותפים</Text>
-              <Text style={styles.detailValue}>{members.length}</Text>
-            </View>
+            <TouchableOpacity style={styles.detailBoxDark} onPress={() => setIsMembersOpen(true)} activeOpacity={0.9}>
+              <Users size={20} color="#7C5CFF" />
+              <Text style={styles.detailValueDark}>{roommatesCount}</Text>
+              <Text style={styles.detailLabelDark}>שותפים</Text>
+            </TouchableOpacity>
           </View>
 
           {apartment.description ? (
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>תיאור</Text>
-              <Text style={styles.description}>{apartment.description}</Text>
+              <Text style={styles.descriptionDark}>{apartment.description}</Text>
             </View>
           ) : null}
 
-          {owner && (
+          {owner ? (
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>בעל הדירה</Text>
-              <View style={styles.ownerCard}>
-                <Text style={styles.ownerName}>{owner.full_name}</Text>
-                <Text style={styles.ownerEmail}>{owner.email}</Text>
+              <View style={styles.ownerCardDark}>
+                <Text style={styles.ownerNameDark}>{owner.full_name}</Text>
+                <Text style={styles.ownerEmailDark}>{owner.email}</Text>
               </View>
             </View>
-          )}
-
-          {members.length > 0 && (
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>שותפים</Text>
-              {members.map((member) => (
-                <View key={member.id} style={styles.memberCard}>
-                  <Text style={styles.memberName}>{member.full_name}</Text>
-                  {member.age && (
-                    <Text style={styles.memberDetail}>גיל: {member.age}</Text>
-                  )}
-                </View>
-              ))}
-            </View>
-          )}
+          ) : null}
         </View>
       </ScrollView>
 
-      <View style={styles.footer}>
-        {isOwner ? (
-          <TouchableOpacity
-            style={styles.deleteButton}
-            onPress={handleDeleteApartment}>
-            <Trash2 size={20} color="#FFF" />
+      {isOwner ? (
+        <View style={[styles.footer, { marginBottom: 92 }]}>
+          <TouchableOpacity style={styles.deleteButton} onPress={handleDeleteApartment} activeOpacity={0.9}>
+            <Trash2 size={18} color="#FFFFFF" />
             <Text style={styles.deleteButtonText}>מחק דירה</Text>
           </TouchableOpacity>
-        ) : isMember ? (
-          <TouchableOpacity
-            style={styles.leaveButton}
-            onPress={handleLeaveApartment}>
-            <Text style={styles.leaveButtonText}>עזוב דירה</Text>
-          </TouchableOpacity>
-        ) : (
-          <TouchableOpacity
-            style={styles.joinButton}
-            onPress={handleJoinApartment}>
-            <Text style={styles.joinButtonText}>הצטרף לדירה</Text>
-          </TouchableOpacity>
-        )}
-      </View>
+        </View>
+      ) : null}
+
+      {/* Members Modal */}
+      <Modal visible={isMembersOpen} animationType="slide" transparent onRequestClose={() => setIsMembersOpen(false)}>
+        <View style={styles.modalOverlay}>
+          <TouchableOpacity style={styles.modalBackdrop} activeOpacity={1} onPress={() => setIsMembersOpen(false)} />
+
+          <View style={styles.sheet}>
+            <View style={styles.sheetHeader}>
+              <Text style={styles.sheetTitle}>שותפים</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Text style={styles.sheetCount}>{roommatesCount} שותפים</Text>
+                <TouchableOpacity onPress={() => setIsMembersOpen(false)} style={styles.closeBtn}>
+                  <X size={18} color="#FFFFFF" />
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            <ScrollView contentContainerStyle={styles.sheetContent}>
+              {members.length > 0 ? (
+                members.map((m) => (
+                  <TouchableOpacity
+                    key={m.id}
+                    style={styles.memberRow}
+                    activeOpacity={0.9}
+                    onPress={() => {
+                      setIsMembersOpen(false);
+                      router.push({ pathname: '/user/[id]', params: { id: m.id } });
+                    }}
+                  >
+                    <Image
+                      source={{ uri: (m as any).avatar_url || 'https://cdn-icons-png.flaticon.com/512/847/847969.png' }}
+                      style={styles.avatarLarge}
+                    />
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.memberName}>{m.full_name}</Text>
+                      {m.email ? <Text style={styles.memberEmail}>{m.email}</Text> : null}
+                    </View>
+                  </TouchableOpacity>
+                ))
+              ) : (
+                <Text style={styles.emptyMembers}>אין שותפים להצגה</Text>
+              )}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Add Partner Modal */}
+      <Modal visible={isAddOpen} animationType="slide" transparent onRequestClose={() => setIsAddOpen(false)}>
+        <View style={styles.modalOverlay}>
+          <TouchableOpacity style={styles.modalBackdrop} activeOpacity={1} onPress={() => setIsAddOpen(false)} />
+          <View style={styles.sheet}>
+            <View style={styles.sheetHeader}>
+              <Text style={styles.sheetTitle}>הוסף שותף</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Text style={styles.sheetCount}>{filteredCandidates.length} מועמדים</Text>
+                <TouchableOpacity onPress={() => setIsAddOpen(false)} style={styles.closeBtn}>
+                  <X size={18} color="#FFFFFF" />
+                </TouchableOpacity>
+              </View>
+            </View>
+            <View style={styles.searchWrap}>
+              <Search size={16} color="#9DA4AE" style={{ marginRight: 8 }} />
+              <TextInput
+                value={addSearch}
+                onChangeText={setAddSearch}
+                placeholder="חיפוש לפי שם..."
+                placeholderTextColor="#9DA4AE"
+                style={styles.searchInput}
+              />
+            </View>
+            <ScrollView contentContainerStyle={styles.sheetContent}>
+              {isAdding ? (
+                <View style={{ paddingVertical: 20, alignItems: 'center' }}>
+                  <ActivityIndicator size="small" color="#7C5CFF" />
+                </View>
+              ) : filteredCandidates.length > 0 ? (
+                filteredCandidates.map((u) => (
+                  <TouchableOpacity
+                    key={u.id}
+                    style={styles.candidateRow}
+                    activeOpacity={0.9}
+                    onPress={() => handleAddPartner(u.id)}
+                  >
+                    <View style={styles.candidateLeft}>
+                      <Image
+                        source={{ uri: (u as any).avatar_url || 'https://cdn-icons-png.flaticon.com/512/847/847969.png' }}
+                        style={styles.candidateAvatar}
+                      />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.candidateName} numberOfLines={1}>{u.full_name}</Text>
+                      <View style={styles.candidateBadges}>
+                        <View style={styles.candidateBadge}><Text style={styles.candidateBadgeText}>זמין</Text></View>
+                        <View style={styles.candidateBadge}><Text style={styles.candidateBadgeText}>מתאים</Text></View>
+                      </View>
+                    </View>
+                    <View style={styles.candidateRight}>
+                      <UserPlus size={16} color="#A78BFA" />
+                    </View>
+                  </TouchableOpacity>
+                ))
+              ) : (
+                <Text style={styles.emptyMembers}>לא נמצאו תוצאות</Text>
+              )}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -301,182 +531,426 @@ export default function ApartmentDetailsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FFF',
+    backgroundColor: '#0F0F14',
+  },
+  addAvatar: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.10)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
+    marginLeft: -10,
   },
   centerContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#F5F5F5',
+    backgroundColor: '#0F0F14',
   },
-  imageContainer: {
+  galleryContainer: {
     position: 'relative',
+  },
+  slide: {
+    width: '100%',
   },
   image: {
     width: '100%',
-    height: 300,
-    backgroundColor: '#E0E0E0',
+    height: 280,
+    backgroundColor: '#22232E',
+  },
+  imageGradient: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    top: 0,
   },
   backButton: {
     position: 'absolute',
-    top: 40,
+    top: 44,
     left: 16,
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    backgroundColor: 'rgba(0,0,0,0.45)',
     width: 40,
     height: 40,
     borderRadius: 20,
     justifyContent: 'center',
     alignItems: 'center',
   },
+  avatarStack: {
+    position: 'absolute',
+    top: 44,
+    right: 16,
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+  },
+  avatar: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 2,
+    borderColor: 'rgba(15,15,20,0.9)',
+    backgroundColor: '#1F1F29',
+  },
+  moreAvatar: {
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    borderColor: 'rgba(15,15,20,0.9)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  moreAvatarText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  navBtn: {
+    position: 'absolute',
+    top: '45%',
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  navBtnLeft: {
+    left: 12,
+  },
+  navBtnRight: {
+    right: 12,
+  },
+  heroOverlay: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    paddingHorizontal: 16,
+    paddingBottom: 16,
+  },
+  dotsRow: {
+    position: 'absolute',
+    bottom: 12,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    gap: 6,
+    justifyContent: 'center',
+  },
+  dot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: 'rgba(255,255,255,0.35)',
+  },
+  dotActive: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#FFFFFF',
+  },
+  pricePill: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(34,197,94,0.18)',
+    borderWidth: 1,
+    borderColor: 'rgba(34,197,94,0.35)',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 14,
+    marginBottom: 8,
+  },
+  priceText: {
+    color: '#22C55E',
+    fontSize: 16,
+    fontWeight: '900',
+  },
+  currencyText: {
+    color: '#22C55E',
+    fontSize: 16,
+    fontWeight: '900',
+    marginRight: 4,
+  },
+  priceUnitDark: {
+    color: '#C9F7D7',
+    fontSize: 12,
+    marginLeft: 2,
+  },
+  heroTitle: {
+    color: '#FFFFFF',
+    fontSize: 22,
+    fontWeight: '800',
+    lineHeight: 28,
+  },
+  heroLocation: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 6,
+  },
+  heroLocationText: {
+    color: '#C9CDD6',
+    fontSize: 14,
+  },
+  subMeta: {
+    color: '#B0B4BF',
+    fontSize: 13,
+    marginTop: 6,
+  },
   content: {
     padding: 16,
-  },
-  headerSection: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: 16,
-  },
-  title: {
-    flex: 1,
-    fontSize: 24,
-    fontWeight: '700',
-    color: '#212121',
-  },
-  priceRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  price: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: '#4CAF50',
-    marginLeft: 4,
-  },
-  priceUnit: {
-    fontSize: 14,
-    color: '#757575',
-    marginLeft: 4,
-  },
-  locationRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 24,
-  },
-  locationText: {
-    fontSize: 16,
-    color: '#757575',
-    flex: 1,
   },
   detailsRow: {
     flexDirection: 'row',
     gap: 12,
-    marginBottom: 24,
+    marginBottom: 16,
   },
-  detailBox: {
+  detailBoxDark: {
     flex: 1,
-    backgroundColor: '#F5F5F5',
-    padding: 16,
+    backgroundColor: '#17171F',
+    padding: 14,
     borderRadius: 12,
     alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#2A2A37',
   },
-  detailLabel: {
+  detailLabelDark: {
     fontSize: 12,
-    color: '#757575',
-    marginTop: 8,
+    color: '#9DA4AE',
+    marginTop: 6,
   },
-  detailValue: {
+  detailValueDark: {
     fontSize: 18,
-    fontWeight: '700',
-    color: '#212121',
-    marginTop: 4,
+    fontWeight: '800',
+    color: '#FFFFFF',
+    marginTop: 2,
   },
   section: {
-    marginBottom: 24,
+    marginTop: 8,
+    marginBottom: 20,
   },
   sectionTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#212121',
-    marginBottom: 12,
-  },
-  description: {
     fontSize: 16,
-    color: '#424242',
-    lineHeight: 24,
+    fontWeight: '800',
+    color: '#FFFFFF',
+    marginBottom: 10,
   },
-  ownerCard: {
-    backgroundColor: '#F5F5F5',
-    padding: 16,
+  descriptionDark: {
+    fontSize: 15,
+    color: '#C7CBD1',
+    lineHeight: 22,
+  },
+  ownerCardDark: {
+    backgroundColor: '#17171F',
+    padding: 14,
     borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#2A2A37',
   },
-  ownerName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#212121',
+  ownerNameDark: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#FFFFFF',
     marginBottom: 4,
   },
-  ownerEmail: {
-    fontSize: 14,
-    color: '#757575',
-  },
-  memberCard: {
-    backgroundColor: '#F5F5F5',
-    padding: 12,
-    borderRadius: 8,
-    marginBottom: 8,
-  },
-  memberName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#212121',
-    marginBottom: 4,
-  },
-  memberDetail: {
-    fontSize: 14,
-    color: '#757575',
+  ownerEmailDark: {
+    fontSize: 13,
+    color: '#9DA4AE',
   },
   footer: {
     padding: 16,
     borderTopWidth: 1,
-    borderTopColor: '#E0E0E0',
-    backgroundColor: '#FFF',
+    borderTopColor: '#1F2030',
+    backgroundColor: '#0F0F14',
+    flexDirection: 'row',
+    gap: 12,
   },
-  joinButton: {
-    backgroundColor: '#00BCD4',
-    paddingVertical: 16,
-    borderRadius: 8,
+  addButton: {
+    flex: 1,
+    backgroundColor: '#A78BFA',
+    paddingVertical: 14,
+    borderRadius: 12,
     alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 8,
   },
-  joinButtonText: {
-    color: '#FFF',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  leaveButton: {
-    backgroundColor: '#FF9800',
-    paddingVertical: 16,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  leaveButtonText: {
-    color: '#FFF',
-    fontSize: 16,
-    fontWeight: '600',
+  addButtonText: {
+    color: '#0F0F14',
+    fontSize: 15,
+    fontWeight: '800',
   },
   deleteButton: {
-    backgroundColor: '#F44336',
-    paddingVertical: 16,
-    borderRadius: 8,
+    flex: 1,
+    backgroundColor: '#DC2626',
+    paddingVertical: 14,
+    borderRadius: 12,
     alignItems: 'center',
     flexDirection: 'row',
     justifyContent: 'center',
     gap: 8,
   },
   deleteButtonText: {
-    color: '#FFF',
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  // Modal styles
+  modalOverlay: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(0,0,0,0.45)',
+  },
+  modalBackdrop: {
+    flex: 1,
+  },
+  sheet: {
+    backgroundColor: '#141420',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    overflow: 'hidden',
+    maxHeight: '70%',
+  },
+  sheetHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    backgroundColor: '#1B1B28',
+  },
+  sheetTitle: {
+    color: '#FFFFFF',
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: '800',
+  },
+  sheetCount: {
+    color: '#C9CDD6',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  closeBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  sheetContent: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    gap: 12,
+  },
+  searchWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginHorizontal: 16,
+    marginTop: 12,
+    marginBottom: 6,
+    paddingHorizontal: 12,
+    height: 40,
+    borderRadius: 10,
+    backgroundColor: '#17171F',
+    borderWidth: 1,
+    borderColor: '#2A2A37',
+  },
+  searchInput: {
+    flex: 1,
+    color: '#FFFFFF',
+    fontSize: 14,
+    textAlign: 'right',
+  },
+  memberRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#1F2030',
+  },
+  candidateRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    padding: 12,
+    backgroundColor: '#17171F',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#2A2A37',
+  },
+  candidateLeft: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    overflow: 'hidden',
+    backgroundColor: '#1F1F29',
+  },
+  candidateAvatar: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+  },
+  candidateRight: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(124,92,255,0.10)',
+    borderWidth: 1,
+    borderColor: 'rgba(124,92,255,0.25)',
+  },
+  candidateName: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '800',
+    marginBottom: 4,
+    textAlign: 'right',
+  },
+  candidateBadges: {
+    flexDirection: 'row-reverse',
+    gap: 6,
+  },
+  candidateBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    backgroundColor: '#1F1F29',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
+  },
+  candidateBadgeText: {
+    color: '#C9CDD6',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  avatarLarge: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#1F1F29',
+  },
+  memberName: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  memberEmail: {
+    color: '#9DA4AE',
+    fontSize: 13,
+  },
+  emptyMembers: {
+    color: '#9DA4AE',
+    textAlign: 'center',
+    paddingVertical: 12,
   },
 });
+
+
+

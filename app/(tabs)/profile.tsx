@@ -22,6 +22,7 @@ import { authService } from '@/lib/auth';
 import { useAuthStore } from '@/stores/authStore';
 import { useApartmentStore } from '@/stores/apartmentStore';
 import { User, Apartment } from '@/types/database';
+import NotificationsButton from '@/components/NotificationsButton';
 
 export default function ProfileScreen() {
   const router = useRouter();
@@ -179,17 +180,16 @@ export default function ProfileScreen() {
       setIsSaving(true);
       const asset = result.assets[0];
       const response = await fetch(asset.uri);
-      const blob = await response.blob();
+      const arrayBuffer = await response.arrayBuffer();
       const fileExt = (asset.fileName || 'avatar.jpg').split('.').pop() || 'jpg';
       const fileName = `${user.id}-${Date.now()}.${fileExt}`;
       const filePath = `users/${user.id}/${fileName}`;
-      const filePayload: any = typeof File !== 'undefined'
-        ? new File([blob], fileName, { type: blob.type || 'image/jpeg' })
-        : blob;
+      // Use arrayBuffer on native (Blob/File may not exist)
+      const filePayload: any = arrayBuffer as any;
 
       const { error: uploadError } = await supabase.storage
         .from('user-images')
-        .upload(filePath, filePayload, { contentType: (blob as any).type || 'image/jpeg', upsert: true });
+        .upload(filePath, filePayload, { contentType: 'image/jpeg', upsert: true });
       if (uploadError) throw uploadError;
 
       const { data } = supabase.storage.from('user-images').getPublicUrl(filePath);
@@ -241,17 +241,15 @@ export default function ProfileScreen() {
       const newUrls: string[] = [];
       for (const asset of (result as any).assets) {
         const response = await fetch(asset.uri);
-        const blob = await response.blob();
+        const arrayBuffer = await response.arrayBuffer();
         const fileExt = (asset.fileName || 'image.jpg').split('.').pop() || 'jpg';
         const fileName = `${user.id}-${Date.now()}-${Math.random().toString(36).slice(2)}.${fileExt}`;
         const filePath = `users/${user.id}/gallery/${fileName}`;
-        const filePayload: any = typeof File !== 'undefined'
-          ? new File([blob], fileName, { type: (blob as any).type || 'image/jpeg' })
-          : blob;
+        const filePayload: any = arrayBuffer as any;
 
         const { error: upErr } = await supabase.storage
           .from('user-images')
-          .upload(filePath, filePayload, { contentType: (blob as any).type || 'image/jpeg', upsert: true });
+          .upload(filePath, filePayload, { contentType: 'image/jpeg', upsert: true });
         if (upErr) throw upErr;
         const { data } = supabase.storage.from('user-images').getPublicUrl(filePath);
         newUrls.push(data.publicUrl);
@@ -284,6 +282,7 @@ export default function ProfileScreen() {
   if (!user) {
     return (
       <SafeAreaView style={styles.container}>
+        <NotificationsButton style={{ left: 16 }} />
         <View style={{ padding: 16, alignItems: 'center', gap: 12 }}>
           <Text style={{ color: '#FFFFFF', fontSize: 18, fontWeight: '800' }}>לא מחובר/ת</Text>
           <Text style={{ color: '#9DA4AE', textAlign: 'center' }}>
@@ -301,6 +300,7 @@ export default function ProfileScreen() {
 
   return (
       <SafeAreaView style={styles.container}>
+        <NotificationsButton style={{ left: 16 }} />
         <ScrollView contentContainerStyle={[styles.scrollContent, { paddingBottom: Math.max(220, 120 + insets.bottom) }]}>
 
         {!isEditing ? (
@@ -319,7 +319,7 @@ export default function ProfileScreen() {
                 style={styles.photoBottomGradient}
               />
 
-              <TouchableOpacity style={styles.addPhotoBtn} onPress={pickAndUploadAvatar} activeOpacity={0.9}>
+              <TouchableOpacity style={styles.addPhotoBtn} onPress={pickAndUploadAvatar} activeOpacity={0.9} disabled={isSaving}>
                 <Plus size={20} color="#0F0F14" />
               </TouchableOpacity>
             </View>
@@ -363,13 +363,23 @@ export default function ProfileScreen() {
               <Text style={styles.seeMoreText}>See more</Text>
 
               <View style={styles.galleryActionsRow}>
-                <TouchableOpacity style={styles.galleryAddBtn} onPress={pickAndUploadExtraPhotos}>
+                <TouchableOpacity style={[styles.galleryAddBtn, isSaving && { opacity: 0.6 }]} onPress={pickAndUploadExtraPhotos} disabled={isSaving}>
                   <Text style={styles.galleryAddBtnText}>הוסף תמונות נוספות (עד 6)</Text>
                 </TouchableOpacity>
                 {!!profile?.image_urls?.length && (
                   <Text style={styles.galleryCountText}>{profile.image_urls.length}/6</Text>
                 )}
               </View>
+
+              {profile?.image_urls?.length ? (
+                <View style={styles.galleryGrid}>
+                  {profile.image_urls.map((url, idx) => (
+                    <View key={url + idx} style={[styles.galleryItem, (idx % 7 === 0) && styles.galleryItemTall]}>
+                      <Image source={{ uri: url }} style={styles.galleryImg} />
+                    </View>
+                  ))}
+                </View>
+              ) : null}
             </View>
           </View>
         ) : (
@@ -424,7 +434,11 @@ export default function ProfileScreen() {
           <Text style={styles.sectionTitleDark}>הדירות שלי</Text>
           {userApartments.length > 0 ? (
             userApartments.map((apt) => (
-              <TouchableOpacity key={apt.id} style={styles.apartmentCardDark} onPress={() => router.push(`/apartment/${apt.id}`)}>
+              <TouchableOpacity
+                key={apt.id}
+                style={styles.apartmentCardDark}
+                onPress={() => router.push({ pathname: '/apartment/[id]', params: { id: apt.id } })}
+              >
                 <Text style={styles.apartmentTitleDark}>{apt.title}</Text>
                 <Text style={styles.apartmentLocationDark}>{apt.city} • ₪{apt.price}/חודש</Text>
               </TouchableOpacity>
@@ -439,6 +453,11 @@ export default function ProfileScreen() {
           <Text style={styles.signOutTextDark}>התנתק</Text>
         </TouchableOpacity>
       </ScrollView>
+      {isSaving && (
+        <View style={styles.fullScreenLoader}>
+          <ActivityIndicator size="large" color="#FFFFFF" />
+        </View>
+      )}
     </SafeAreaView>
   );
 }
@@ -505,6 +524,17 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     height: 140,
+  },
+  fullScreenLoader: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 100,
   },
   addPhotoBtn: {
     position: 'absolute',
@@ -619,6 +649,27 @@ const styles = StyleSheet.create({
   galleryCountText: {
     color: '#9DA4AE',
     fontWeight: '700',
+  },
+  galleryGrid: {
+    marginTop: 12,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  galleryItem: {
+    width: '31%',
+    aspectRatio: 1,
+    borderRadius: 18,
+    overflow: 'hidden',
+    backgroundColor: '#1B1C27',
+  },
+  galleryItemTall: {
+    aspectRatio: 0.8,
+    borderRadius: 22,
+  },
+  galleryImg: {
+    width: '100%',
+    height: '100%',
   },
 
   editCard: {

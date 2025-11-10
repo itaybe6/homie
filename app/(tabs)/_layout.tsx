@@ -64,6 +64,9 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen name="add-apartment" options={{ href: null }} />
+      {/* Hide nested detail stacks from the tab bar */}
+      <Tabs.Screen name="apartment" options={{ href: null }} />
+      <Tabs.Screen name="user" options={{ href: null }} />
     </Tabs>
   );
 }

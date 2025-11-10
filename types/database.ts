@@ -8,6 +8,7 @@ export interface User {
   bio?: string;
   avatar_url?: string;
   image_urls?: string[]; // up to 6 additional images
+  favorites?: string[]; // national IDs of favorited users
   created_at: string;
   updated_at: string;
 }
@@ -26,13 +27,11 @@ export interface Apartment {
   bathrooms: number;
   image_url?: string;
   image_urls?: string[]; // new: multiple images
+  partner_ids?: string[]; // national IDs of roommates associated to the apartment
   created_at: string;
   updated_at: string;
 }
 
-export interface ApartmentMember {
-  // removed; kept for backward-compat notice
-}
 
 export interface ApartmentOwner {
   id: string;
@@ -40,4 +39,22 @@ export interface ApartmentOwner {
   full_name: string;
   phone?: string;
   apartment_id?: string | null;
+}
+
+export interface Matches {
+  id: string;
+  sender_id: string;
+  receiver_id: string;
+  approved: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Notification {
+  id: string;
+  sender_id: string;
+  recipient_id: string;
+  title: string;
+  description: string;
+  created_at: string;
 }

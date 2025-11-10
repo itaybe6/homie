@@ -13,6 +13,12 @@ declare global {
           ): void;
         }
         class AutocompleteSessionToken {}
+        class AutocompleteSuggestionService {
+          getSuggestions(
+            request: any,
+            callback: (response: { suggestions: any[] } | null, status: string) => void
+          ): void;
+        }
       }
     }
   }
@@ -59,12 +65,19 @@ function loadGoogleMapsJs(): Promise<void> {
     const script = document.createElement('script');
     script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(
       GOOGLE_KEY
-    )}&libraries=places&language=he&region=IL&callback=${cbName}`;
+    )}&libraries=places&v=weekly&language=he&region=IL&callback=${cbName}`;
     script.async = true;
     script.onerror = (e) => reject(e);
     document.head.appendChild(script);
   });
   return mapsJsPromise;
+}
+
+function buildDescriptionFromSuggestion(s: any): string {
+  const main = s?.structuredFormat?.mainText?.text || s?.structuredFormat?.mainText || '';
+  const secondary = s?.structuredFormat?.secondaryText?.text || s?.structuredFormat?.secondaryText || '';
+  if (main && secondary) return `${main}, ${secondary}`;
+  return s?.placePrediction?.text?.text || s?.placePrediction?.text || s?.description || '';
 }
 
 export function createSessionToken(): string {
@@ -83,27 +96,54 @@ export async function autocompleteCities(query: string, sessionToken?: string): 
     // If maps failed to load (no key), return []
     const g = (window as any).google;
     if (!g?.maps?.places) return [];
-    const service = new g.maps.places.AutocompleteService();
-    if (!webSessionToken) webSessionToken = new g.maps.places.AutocompleteSessionToken();
-    return new Promise((resolve) => {
-      service.getPlacePredictions(
-        {
-          input: query,
-          types: ['(cities)'],
-          componentRestrictions: { country: 'il' },
-          sessionToken: webSessionToken,
-        },
-        (predictions: any[] | null) => {
-          resolve(
-            (predictions || []).map((p: any) => ({
-              description: p.description,
-              placeId: p.place_id,
-              types: p.types,
-            }))
-          );
-        }
-      );
-    });
+    // Prefer new AutocompleteSuggestionService where available
+    if (g.maps.places.AutocompleteSuggestionService) {
+      const svc = new g.maps.places.AutocompleteSuggestionService();
+      if (!webSessionToken) webSessionToken = new g.maps.places.AutocompleteSessionToken();
+      return new Promise((resolve) => {
+        svc.getSuggestions(
+          {
+            input: query,
+            includedPrimaryTypes: ['locality'],
+            language: 'he',
+            region: 'IL',
+            sessionToken: webSessionToken,
+          },
+          (resp: any) => {
+            const list: any[] = resp?.suggestions || [];
+            resolve(
+              list.map((s: any) => ({
+                description: buildDescriptionFromSuggestion(s),
+                placeId: s?.placePrediction?.placeId || s?.placePrediction?.place_id || s?.place_id || '',
+                types: s?.placePrediction?.types || s?.types,
+              }))
+            );
+          }
+        );
+      });
+    } else {
+      const service = new g.maps.places.AutocompleteService();
+      if (!webSessionToken) webSessionToken = new g.maps.places.AutocompleteSessionToken();
+      return new Promise((resolve) => {
+        service.getPlacePredictions(
+          {
+            input: query,
+            types: ['(cities)'],
+            componentRestrictions: { country: 'il' },
+            sessionToken: webSessionToken,
+          },
+          (predictions: any[] | null) => {
+            resolve(
+              (predictions || []).map((p: any) => ({
+                description: p.description,
+                placeId: p.place_id,
+                types: p.types,
+              }))
+            );
+          }
+        );
+      });
+    }
   }
   if (!GOOGLE_KEY) return [];
   const url = new URL('https://maps.googleapis.com/maps/api/place/autocomplete/json');
@@ -123,7 +163,7 @@ export async function autocompleteCities(query: string, sessionToken?: string): 
   }));
 }
 
-async function getPlaceLocation(placeId: string): Promise<{ lat: number; lng: number } | null> {
+export async function getPlaceLocation(placeId: string): Promise<{ lat: number; lng: number } | null> {
   if (!GOOGLE_KEY || !placeId) return null;
   const url = new URL('https://maps.googleapis.com/maps/api/place/details/json');
   url.searchParams.set('place_id', placeId);
@@ -149,28 +189,58 @@ export async function autocompleteNeighborhoods(
     await loadGoogleMapsJs();
     const g = (window as any).google;
     if (!g?.maps?.places) return [];
-    const service = new g.maps.places.AutocompleteService();
-    if (!webSessionToken) webSessionToken = new g.maps.places.AutocompleteSessionToken();
-    return new Promise((resolve) => {
-      service.getPlacePredictions(
-        {
+    if (g.maps.places.AutocompleteSuggestionService) {
+      const svc = new g.maps.places.AutocompleteSuggestionService();
+      if (!webSessionToken) webSessionToken = new g.maps.places.AutocompleteSessionToken();
+      let origin: any = undefined;
+      if (cityPlaceId) {
+        const loc = await getPlaceLocation(cityPlaceId);
+        if (loc) origin = new g.maps.LatLng(loc.lat, loc.lng);
+      }
+      return new Promise((resolve) => {
+        const req: any = {
           input: query,
-          types: ['geocode'],
-          componentRestrictions: { country: 'il' },
+          includedPrimaryTypes: ['neighborhood', 'sublocality'],
+          language: 'he',
+          region: 'IL',
           sessionToken: webSessionToken,
-        },
-        (preds: any[] | null) => {
-          const filtered = (preds || []).filter((p: any) => {
-            const types: string[] = p.types || [];
-            const isHood = types.includes('neighborhood') || types.some((t) => t.startsWith('sublocality'));
-            if (!isHood) return false;
-            if (cityNameForFilter) return String(p.description).includes(cityNameForFilter);
-            return true;
-          });
-          resolve(filtered.map((p: any) => p.structured_formatting?.main_text || p.description));
-        }
-      );
-    });
+        };
+        if (origin) req.locationBias = { circle: { center: origin, radius: 30000 } };
+        svc.getSuggestions(req, (resp: any) => {
+          const arr: any[] = resp?.suggestions || [];
+          const names = arr
+            .filter((s: any) => {
+              if (cityNameForFilter) return buildDescriptionFromSuggestion(s).includes(cityNameForFilter);
+              return true;
+            })
+            .map((s: any) => s?.structuredFormat?.mainText?.text || s?.structuredFormat?.mainText || buildDescriptionFromSuggestion(s));
+          resolve(names);
+        });
+      });
+    } else {
+      const service = new g.maps.places.AutocompleteService();
+      if (!webSessionToken) webSessionToken = new g.maps.places.AutocompleteSessionToken();
+      return new Promise((resolve) => {
+        service.getPlacePredictions(
+          {
+            input: query,
+            types: ['geocode'],
+            componentRestrictions: { country: 'il' },
+            sessionToken: webSessionToken,
+          },
+          (preds: any[] | null) => {
+            const filtered = (preds || []).filter((p: any) => {
+              const types: string[] = p.types || [];
+              const isHood = types.includes('neighborhood') || types.some((t) => t.startsWith('sublocality'));
+              if (!isHood) return false;
+              if (cityNameForFilter) return String(p.description).includes(cityNameForFilter);
+              return true;
+            });
+            resolve(filtered.map((p: any) => p.structured_formatting?.main_text || p.description));
+          }
+        );
+      });
+    }
   }
 
   let locationParams = '';
@@ -216,28 +286,52 @@ export async function autocompleteAddresses(
     await loadGoogleMapsJs();
     const g = (window as any).google;
     if (!g?.maps?.places) return [];
-    const service = new g.maps.places.AutocompleteService();
-    if (!webSessionToken) webSessionToken = new g.maps.places.AutocompleteSessionToken();
-    return new Promise((resolve) => {
-      service.getPlacePredictions(
-        {
+    if (g.maps.places.AutocompleteSuggestionService) {
+      const svc = new g.maps.places.AutocompleteSuggestionService();
+      if (!webSessionToken) webSessionToken = new g.maps.places.AutocompleteSessionToken();
+      let origin: any = undefined;
+      if (cityPlaceId) {
+        const loc = await getPlaceLocation(cityPlaceId);
+        if (loc) origin = new g.maps.LatLng(loc.lat, loc.lng);
+      }
+      return new Promise((resolve) => {
+        const req: any = {
           input: query,
-          types: ['geocode'],
-          componentRestrictions: { country: 'il' },
+          includedPrimaryTypes: ['street_address', 'route', 'premise'],
+          language: 'he',
+          region: 'IL',
           sessionToken: webSessionToken,
-        },
-        (preds: any[] | null) => {
-          const filtered = (preds || []).filter((p: any) => {
-            const types: string[] = p.types || [];
-            const isAddressLike = types.includes('street_address') || types.includes('premise') || types.includes('route') || types.includes('geocode');
-            if (!isAddressLike) return false;
-            if (cityNameForFilter) return String(p.description).includes(cityNameForFilter);
-            return true;
-          });
-          resolve(filtered.map((p: any) => p.description));
-        }
-      );
-    });
+        };
+        if (origin) req.locationBias = { circle: { center: origin, radius: 30000 } };
+        svc.getSuggestions(req, (resp: any) => {
+          const arr: any[] = resp?.suggestions || [];
+          resolve(arr.map((s: any) => buildDescriptionFromSuggestion(s)));
+        });
+      });
+    } else {
+      const service = new g.maps.places.AutocompleteService();
+      if (!webSessionToken) webSessionToken = new g.maps.places.AutocompleteSessionToken();
+      return new Promise((resolve) => {
+        service.getPlacePredictions(
+          {
+            input: query,
+            types: ['geocode'],
+            componentRestrictions: { country: 'il' },
+            sessionToken: webSessionToken,
+          },
+          (preds: any[] | null) => {
+            const filtered = (preds || []).filter((p: any) => {
+              const types: string[] = p.types || [];
+              const isAddressLike = types.includes('street_address') || types.includes('premise') || types.includes('route') || types.includes('geocode');
+              if (!isAddressLike) return false;
+              if (cityNameForFilter) return String(p.description).includes(cityNameForFilter);
+              return true;
+            });
+            resolve(filtered.map((p: any) => p.description));
+          }
+        );
+      });
+    }
   }
 
   let locationParams = '';
