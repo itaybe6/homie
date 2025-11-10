@@ -14,7 +14,7 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { LogOut, Edit, Save, X, MapPin, Plus } from 'lucide-react-native';
+import { LogOut, Edit, Save, X, Plus, MapPin } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
 import { supabase } from '@/lib/supabase';
@@ -35,6 +35,7 @@ export default function ProfileScreen() {
   const [isLoading, setIsLoading] = useState(true);
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [aptMembers, setAptMembers] = useState<Record<string, User[]>>({});
 
   const [fullName, setFullName] = useState('');
   const [age, setAge] = useState('');
@@ -44,6 +45,29 @@ export default function ProfileScreen() {
   useEffect(() => {
     fetchProfile();
   }, [user]);
+
+  const getApartmentPrimaryImage = (apartment: Apartment): string => {
+    const PLACEHOLDER = 'https://images.pexels.com/photos/1457842/pexels-photo-1457842.jpeg';
+    const anyValue: any = (apartment as any).image_urls;
+    if (Array.isArray(anyValue) && anyValue[0]) return anyValue[0] as string;
+    if (typeof anyValue === 'string') {
+      try {
+        const parsed = JSON.parse(anyValue);
+        if (Array.isArray(parsed) && parsed[0]) return parsed[0] as string;
+      } catch {
+        try {
+          const asArray = anyValue
+            .replace(/^{|}$/g, '')
+            .split(',')
+            .map((s: string) => s.replace(/^"+|"+$/g, '').trim())
+            .filter(Boolean);
+          if (asArray[0]) return asArray[0] as string;
+        } catch {}
+      }
+    }
+    if (apartment.image_url) return apartment.image_url;
+    return PLACEHOLDER;
+  };
 
   const fetchProfile = async () => {
     if (!user) {
@@ -73,6 +97,24 @@ export default function ProfileScreen() {
 
       if (aptError) throw aptError;
       setUserApartments(aptData || []);
+
+      // Load roommates (partners) avatars per apartment
+      const membersMap: Record<string, User[]> = {};
+      await Promise.all(
+        (aptData || []).map(async (apt) => {
+          const ids = (apt as any).partner_ids as string[] | undefined;
+          if (ids && ids.length > 0) {
+            const { data: usersData, error: usersError } = await supabase
+              .from('users')
+              .select('id, full_name, avatar_url')
+              .in('id', ids);
+            if (!usersError && usersData) {
+              membersMap[apt.id] = usersData as any;
+            }
+          }
+        })
+      );
+      setAptMembers(membersMap);
     } catch (error) {
       console.error('Error fetching profile:', error);
     } finally {
@@ -326,41 +368,22 @@ export default function ProfileScreen() {
 
             <View style={styles.infoPanel}>
               <Text style={styles.nameText}>
-                {(profile?.full_name || 'משתמש/ת')} {profile?.age ? `, ${profile.age}` : ''}
+                {(profile?.full_name || 'משתמש/ת')} {profile?.age ? `, ${profile.age}` : ''}{profile?.city ? ` • ${profile.city}` : ''}
               </Text>
-              <View style={styles.locationRow}> 
-                <MapPin size={16} color="#C7CBD1" />
-                <Text style={styles.locationText}> Brooklyn • 2 מייל</Text>
-              </View>
-
-              <View style={styles.tagsRow}>
-                {['מקצועי/ת', 'נקי/ה', 'נוהג/ת לילה'].map((tag) => (
-                  <View key={tag} style={styles.tagChip}>
-                    <Text style={styles.tagText}>{tag}</Text>
-                  </View>
-                ))}
-              </View>
-
-              <View style={styles.whyInlineWrap}>
-                <Text style={styles.whyInlineTitle}>למה זה מתאים:</Text>
-                <View style={styles.tagsRow}>
-                  {['תחביב משותף: טיולים', 'שניכם ערים בלילה', 'תקציב דומה'].map((t) => (
-                    <View key={t} style={styles.whyChip}>
-                      <Text style={styles.whyChipText}>{t}</Text>
-                    </View>
-                  ))}
-                </View>
-              </View>
-
+              
+            
               {profile?.bio ? (
                 <Text style={styles.bioText}>{profile.bio}</Text>
-              ) : (
-                <Text style={styles.bioText}>
-                  אוהב/ת מוזיקה וקפה טוב. מחפש/ת שותף/פה נוח/ה ונקי/ה לשיתוף דירה חמימה.
-                </Text>
-              )}
+              ) : null}
 
-              <Text style={styles.seeMoreText}>See more</Text>
+              <TouchableOpacity
+                style={styles.editProfileBtn}
+                onPress={() => router.push('/profile/edit')}
+                activeOpacity={0.9}
+              >
+                <Edit size={18} color="#0F0F14" />
+                <Text style={styles.editProfileBtnText}>עריכת פרופיל</Text>
+              </TouchableOpacity>
 
               <View style={styles.galleryActionsRow}>
                 <TouchableOpacity style={[styles.galleryAddBtn, isSaving && { opacity: 0.6 }]} onPress={pickAndUploadExtraPhotos} disabled={isSaving}>
@@ -430,23 +453,41 @@ export default function ProfileScreen() {
           </View>
         )}
 
-        <View style={styles.sectionDark}>
-          <Text style={styles.sectionTitleDark}>הדירות שלי</Text>
-          {userApartments.length > 0 ? (
-            userApartments.map((apt) => (
-              <TouchableOpacity
-                key={apt.id}
-                style={styles.apartmentCardDark}
-                onPress={() => router.push({ pathname: '/apartment/[id]', params: { id: apt.id } })}
-              >
-                <Text style={styles.apartmentTitleDark}>{apt.title}</Text>
-                <Text style={styles.apartmentLocationDark}>{apt.city} • ₪{apt.price}/חודש</Text>
-              </TouchableOpacity>
-            ))
-          ) : (
-            <Text style={styles.emptyTextDark}>אין לך דירות</Text>
-          )}
-        </View>
+        {userApartments.length > 0 && (
+          <View style={styles.sectionDark}>
+            <Text style={styles.sectionTitleDark}>הדירות שלי</Text>
+            {userApartments.map((apt) => {
+              const thumb = getApartmentPrimaryImage(apt);
+              return (
+                <TouchableOpacity
+                  key={apt.id}
+                  style={styles.apartmentRow}
+                  onPress={() => router.push({ pathname: '/apartment/[id]', params: { id: apt.id } })}
+                >
+                  <Image source={{ uri: thumb }} style={styles.aptThumb} />
+                  <View style={styles.aptTextWrap}>
+                    <Text style={styles.aptTitle} numberOfLines={1}>{apt.title}</Text>
+                    <Text style={styles.aptSub} numberOfLines={1}>{apt.city}</Text>
+                    {!!aptMembers[apt.id]?.length && (
+                      <View style={styles.aptAvatarsRow}>
+                        {aptMembers[apt.id].slice(0, 4).map((u) => (
+                          <Image
+                            key={u.id}
+                            source={{ uri: u.avatar_url || 'https://cdn-icons-png.flaticon.com/512/847/847969.png' }}
+                            style={styles.aptAvatar}
+                          />
+                        ))}
+                      </View>
+                    )}
+                    <View style={styles.aptPricePill}>
+                      <Text style={styles.aptPriceText}>₪{apt.price}/חודש</Text>
+                    </View>
+                  </View>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        )}
 
         <TouchableOpacity style={styles.signOutButtonDark} onPress={handleSignOut}>
           <LogOut size={20} color="#FCA5A5" />
@@ -738,29 +779,85 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     marginBottom: 10,
   },
-  apartmentCardDark: {
+  apartmentRow: {
     backgroundColor: '#15151C',
-    padding: 16,
-    borderRadius: 12,
-    marginBottom: 8,
+    padding: 14,
+    borderRadius: 16,
+    marginBottom: 12,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.06)',
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 14,
+    minHeight: 120,
   },
-  apartmentTitleDark: {
+  aptThumb: {
+    width: 120,
+    height: 90,
+    borderRadius: 14,
+    backgroundColor: '#1B1C27',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  aptTextWrap: {
+    flex: 1,
+    gap: 6,
+  },
+  aptTitle: {
     color: '#FFFFFF',
     fontSize: 16,
-    fontWeight: '700',
+    fontWeight: '800',
     marginBottom: 4,
+    textAlign: 'right',
   },
-  apartmentLocationDark: {
+  aptSub: {
     color: '#9DA4AE',
     fontSize: 14,
+    textAlign: 'right',
   },
-  emptyTextDark: {
+  aptAvatarsRow: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 6,
+  },
+  aptAvatar: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#1B1C27',
+    borderWidth: 2,
+    borderColor: '#0F0F14',
+  },
+  aptPricePill: {
+    alignSelf: 'flex-end',
+    backgroundColor: 'rgba(34,197,94,0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(34,197,94,0.25)',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+  },
+  aptPriceText: {
+    color: '#22C55E',
+    fontWeight: '900',
+    fontSize: 13,
+  },
+  editProfileBtn: {
+    marginTop: 10,
+    alignSelf: 'flex-end',
+    backgroundColor: '#7C5CFF',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  editProfileBtnText: {
+    color: '#0F0F14',
+    fontWeight: '900',
     fontSize: 14,
-    color: '#6B7280',
-    textAlign: 'center',
-    paddingVertical: 20,
   },
   signOutButtonDark: {
     flexDirection: 'row',

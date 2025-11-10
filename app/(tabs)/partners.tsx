@@ -118,7 +118,6 @@ export default function PartnersScreen() {
 
       <View style={styles.headerArea}>
         <Text style={styles.headerTitle}>מצא/י שותפים</Text>
-        <Text style={styles.headerSubtitle}>גללו כדי לגלות התאמות סביבכם</Text>
       </View>
 
       <View style={styles.listContent}>

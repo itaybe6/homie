@@ -91,19 +91,28 @@ export default function RegisterScreen() {
 
   const uploadAvatar = async (userId: string, uri: string) => {
     try {
-      const fileExt = (uri.split('.').pop() || 'jpg').split('?')[0];
-      const path = `avatars/${userId}.${fileExt}`;
+      // On native, prefer arrayBuffer over Blob/File
+      const match = uri.match(/\.([a-zA-Z0-9]{1,5})(?:\?.*)?$/);
+      const ext = match ? match[1].toLowerCase() : 'jpg';
+      const fileName = `${userId}-${Date.now()}.${ext}`;
+      const filePath = `users/${userId}/${fileName}`;
+
       const res = await fetch(uri);
-      const blob = await res.blob();
+      const arrayBuffer = await res.arrayBuffer();
+
       const { error: uploadError } = await supabase.storage
-        .from('avatars')
-        .upload(path, blob, { upsert: true, contentType: blob.type || 'image/jpeg' });
+        .from('user-images')
+        .upload(filePath, arrayBuffer, {
+          upsert: true,
+          contentType: `image/${ext === 'png' ? 'png' : 'jpeg'}`,
+        });
       if (uploadError) throw uploadError;
-      const { data } = supabase.storage.from('avatars').getPublicUrl(path);
+
+      const { data } = supabase.storage.from('user-images').getPublicUrl(filePath);
       const publicUrl = data.publicUrl;
       const { error: updateError } = await supabase
         .from('users')
-        .update({ avatar_url: publicUrl })
+        .update({ avatar_url: publicUrl, updated_at: new Date().toISOString() })
         .eq('id', userId);
       if (updateError) throw updateError;
     } catch (err) {

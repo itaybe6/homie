@@ -1,8 +1,10 @@
-import { memo } from 'react';
-import { TouchableOpacity, StyleSheet, View, ViewStyle } from 'react-native';
+import { memo, useEffect, useState } from 'react';
+import { TouchableOpacity, StyleSheet, View, ViewStyle, Text } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Bell } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { supabase } from '@/lib/supabase';
+import { useAuthStore } from '@/stores/authStore';
 
 type Props = {
   style?: ViewStyle;
@@ -12,6 +14,44 @@ type Props = {
 function NotificationsButtonBase({ style, badgeCount = 0 }: Props) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const user = useAuthStore((s) => s.user);
+  const [count, setCount] = useState<number>(badgeCount || 0);
+
+  useEffect(() => {
+    let isMounted = true;
+    const fetchCount = async () => {
+      if (!user?.id) {
+        if (isMounted) setCount(0);
+        return;
+      }
+      const { count: c } = await supabase
+        .from('notifications')
+        .select('id', { count: 'exact', head: true })
+        .eq('recipient_id', user.id)
+        .eq('is_read', false);
+      if (isMounted) setCount(c || 0);
+    };
+
+    fetchCount();
+
+    // Realtime updates for this user
+    const channel = supabase
+      .channel(`notifications-count:${user?.id || 'anon'}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'notifications', filter: user?.id ? `recipient_id=eq.${user.id}` : undefined },
+        () => fetchCount()
+      )
+      .subscribe();
+
+    return () => {
+      isMounted = false;
+      supabase.removeChannel(channel);
+    };
+  }, [user?.id]);
+
+  const shownCount = typeof badgeCount === 'number' && badgeCount >= 0 ? badgeCount : count;
+  const shownLabel = shownCount > 99 ? '99+' : String(shownCount);
   return (
     <View style={[styles.wrap, { marginTop: Math.max(6, insets.top + 2) }, style]}>
       <TouchableOpacity
@@ -22,7 +62,11 @@ function NotificationsButtonBase({ style, badgeCount = 0 }: Props) {
         style={styles.btn}
       >
         <Bell size={18} color="#FFFFFF" />
-        {badgeCount > 0 ? <View style={styles.badge} /> : null}
+        {shownCount > 0 ? (
+          <View style={styles.badge}>
+            <Text style={styles.badgeText}>{shownLabel}</Text>
+          </View>
+        ) : null}
       </TouchableOpacity>
     </View>
   );
@@ -48,12 +92,22 @@ const styles = StyleSheet.create({
   },
   badge: {
     position: 'absolute',
-    top: 6,
-    right: 6,
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#F43F5E',
+    top: -4,
+    right: -4,
+    minWidth: 18,
+    height: 18,
+    paddingHorizontal: 4,
+    borderRadius: 9,
+    backgroundColor: '#EF4444',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(15,15,20,0.8)',
+  },
+  badgeText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '800',
   },
 });
 

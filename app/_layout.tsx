@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { I18nManager, Platform } from 'react-native';
+import { I18nManager, Platform, View } from 'react-native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useFrameworkReady } from '@/hooks/useFrameworkReady';
@@ -26,6 +26,23 @@ export default function RootLayout() {
         // ignore
       }
     })();
+
+    // Ensure RTL on web (Hebrew)
+    if (Platform.OS === 'web' && typeof document !== 'undefined') {
+      try {
+        const root = document.documentElement;
+        if (root.getAttribute('dir') !== 'rtl') {
+          root.setAttribute('dir', 'rtl');
+        }
+        if (root.getAttribute('lang') !== 'he') {
+          root.setAttribute('lang', 'he');
+        }
+        document.body.style.direction = 'rtl';
+        document.body.style.textAlign = 'right';
+      } catch {
+        // ignore
+      }
+    }
 
     // Ensure auth state is initialized on any route (not only index)
     (async () => {
@@ -55,11 +72,11 @@ export default function RootLayout() {
   }, [setUser, setLoading]);
 
   return (
-    <>
+    <View style={{ flex: 1, writingDirection: 'rtl', direction: 'rtl' }}>
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="+not-found" />
       </Stack>
       <StatusBar style="auto" />
-    </>
+    </View>
   );
 }
