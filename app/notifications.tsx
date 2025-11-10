@@ -287,7 +287,15 @@ export default function NotificationsScreen() {
                     </View>
                   </View>
                 </TouchableOpacity>
-                <View style={styles.avatarRing}>
+                <TouchableOpacity
+                  style={styles.avatarRing}
+                  activeOpacity={0.85}
+                  onPress={() => {
+                    if (sender?.id) {
+                      router.push({ pathname: '/user/[id]', params: { id: sender.id } });
+                    }
+                  }}
+                >
                   <View style={styles.avatarShadow} />
                   <View style={styles.avatarWrap}>
                     <Image
@@ -295,7 +303,7 @@ export default function NotificationsScreen() {
                       style={styles.avatarImg}
                     />
                   </View>
-                </View>
+                </TouchableOpacity>
               </View>
             );
           }}
@@ -375,7 +383,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 12 as any,
     alignItems: 'center',
-    paddingRight: 56,
+    paddingRight: 70,
   },
   bubble: {
     flex: 1,
@@ -393,7 +401,6 @@ const styles = StyleSheet.create({
   },
   bubbleTextArea: {
     flex: 1,
-    writingDirection: 'rtl',
     alignItems: 'flex-end',
   },
   thumbWrap: {
@@ -410,9 +417,9 @@ const styles = StyleSheet.create({
     height: '100%',
   },
   avatarRing: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
+    width: 60,
+    height: 60,
+    borderRadius: 30,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'rgba(124,92,255,0.12)',
@@ -423,9 +430,9 @@ const styles = StyleSheet.create({
   },
   avatarShadow: {
     position: 'absolute',
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 54,
+    height: 54,
+    borderRadius: 27,
     backgroundColor: 'rgba(0,0,0,0.20)',
     top: 3,
     left: 3,
@@ -434,9 +441,9 @@ const styles = StyleSheet.create({
     opacity: 0.35,
   },
   avatarWrap: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 54,
+    height: 54,
+    borderRadius: 27,
     overflow: 'hidden',
     backgroundColor: '#1F1F29',
     borderWidth: 1,
@@ -452,6 +459,7 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     marginBottom: 4,
     textAlign: 'right',
+    writingDirection: 'rtl',
   },
   senderName: {
     color: '#E6E9F0',
