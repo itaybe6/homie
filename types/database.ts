@@ -72,6 +72,7 @@ export interface UserSurveyResponse {
   user_id: string;
   is_completed?: boolean;
   occupation?: string;
+  student_year?: number; // if occupation === 'student', 1–8
   is_shomer_shabbat?: boolean;
   diet_type?: string;
   is_smoker?: boolean;

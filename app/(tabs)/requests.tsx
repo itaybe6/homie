@@ -121,7 +121,7 @@ export default function RequestsScreen() {
       if (userIds.length) {
         const { data: usersData } = await supabase
           .from('users')
-          .select('id, full_name, avatar_url')
+          .select('id, full_name, avatar_url, phone')
           .in('id', userIds);
         const map: Record<string, Partial<User>> = {};
         (usersData || []).forEach((u: any) => { map[u.id] = u; });
@@ -339,6 +339,28 @@ export default function RequestsScreen() {
                           >
                             <Text style={styles.rejectBtnText}>דחייה</Text>
                           </TouchableOpacity>
+                        </View>
+                      )}
+                      {/* Recipient view (incoming): after approval allow WhatsApp to requester */}
+                      {incoming && item.kind === 'APT' && item.status === 'APPROVED' && (
+                        <View style={{ marginTop: 10, alignItems: 'flex-end', gap: 6 as any }}>
+                          <Text style={styles.cardMeta}>
+                            מספר הפונה: {otherUser?.phone ? otherUser.phone : 'לא זמין'}
+                          </Text>
+                          {otherUser?.phone ? (
+                            <TouchableOpacity
+                              style={[styles.approveBtn]}
+                              activeOpacity={0.85}
+                              onPress={() =>
+                                openWhatsApp(
+                                  otherUser.phone as string,
+                                  `היי${otherUser?.full_name ? ` ${otherUser.full_name.split(' ')[0]}` : ''}, ראיתי שהתעניינת לאחרונה בדירה שלי${apt?.title ? `: ${apt.title}` : ''}${apt?.city ? ` (${apt.city})` : ''} ב-Homie. הבקשה אושרה, אשמח לתאם שיחה או צפייה.`
+                                )
+                              }
+                            >
+                              <Text style={styles.approveBtnText}>שליחת וואטסאפ למתעניין/ת</Text>
+                            </TouchableOpacity>
+                          ) : null}
                         </View>
                       )}
                       {/* Sender view: expose owner's phone and WhatsApp action once approved */}

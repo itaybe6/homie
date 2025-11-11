@@ -16,6 +16,8 @@ import { Check, ChevronRight, ArrowLeft } from 'lucide-react-native';
 import { useAuthStore } from '@/stores/authStore';
 import { UserSurveyResponse } from '@/types/database';
 import { fetchUserSurvey, upsertUserSurvey } from '@/lib/survey';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 
 type SurveyState = Partial<UserSurveyResponse>;
 
@@ -40,10 +42,13 @@ const partnerShabbatPrefOptions = ['אין בעיה', 'מעדיפ/ה שלא'];
 const partnerDietPrefOptions = ['אין בעיה', 'מעדיפ/ה שלא טבעוני', 'כשר בלבד'];
 const partnerSmokingPrefOptions = ['אין בעיה', 'מעדיפ/ה שלא'];
 const yesNo = ['כן', 'לא'] as const;
+const studentYearOptions = ['שנה א׳', 'שנה ב׳', 'שנה ג׳', 'שנה ד׳', 'שנה ה׳', 'שנה ו׳', 'שנה ז׳'];
 
 export default function SurveyScreen() {
   const router = useRouter();
   const { user } = useAuthStore();
+  const insets = useSafeAreaInsets();
+  const tabBarHeight = useBottomTabBarHeight();
 
   const [currentStep, setCurrentStep] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -128,14 +133,26 @@ export default function SurveyScreen() {
                     value={normalizeToTextChoice(state.occupation, ['סטודנט', 'עובד'])}
                     onChange={(v) => {
                       setField('occupation', v || null);
+                      if (v !== 'סטודנט') setField('student_year', undefined as any);
                     }}
                   />
                   {state.occupation === 'סטודנט' && (
-                    <LabeledInput
-                      label="שנה בתואר (אופציונלי)"
-                      value={extractDetailFromOccupation(state.occupation) || ''}
-                      placeholder="לדוגמה: שנה ב׳"
-                      onChangeText={(txt) => setField('occupation', txt ? `סטודנט - ${txt}` : 'סטודנט')}
+                    <ChipSelect
+                      label="שנה בתואר"
+                      options={studentYearOptions}
+                      value={
+                        state.student_year && state.student_year >= 1 && state.student_year <= 7
+                          ? studentYearOptions[state.student_year - 1]
+                          : null
+                      }
+                      onChange={(label) => {
+                        if (!label) {
+                          setField('student_year', undefined as any);
+                          return;
+                        }
+                        const index = studentYearOptions.indexOf(label);
+                        setField('student_year', index >= 0 ? ((index + 1) as any) : (undefined as any));
+                      }}
                     />
                   )}
                   {state.occupation === 'עובד' && (
@@ -373,9 +390,11 @@ export default function SurveyScreen() {
                 </Section>
               </View>
             )}
-          </ScrollView>
 
-          <View style={styles.footer}>
+            <View style={[
+              styles.footer,
+              { marginBottom: Math.max(12, Math.ceil(tabBarHeight + insets.bottom)) }
+            ]}>
             <View style={styles.footerRow}>
               <TouchableOpacity
                 onPress={handleBack}
@@ -400,7 +419,8 @@ export default function SurveyScreen() {
                 </TouchableOpacity>
               )}
             </View>
-          </View>
+            </View>
+          </ScrollView>
         </>
       )}
     </SafeAreaView>
@@ -412,6 +432,7 @@ function normalizePayload(userId: string, s: SurveyState) {
     user_id: userId,
     is_completed: true,
     occupation: s.occupation ?? null,
+    student_year: s.student_year ?? null,
     is_shomer_shabbat: s.is_shomer_shabbat ?? null,
     diet_type: s.diet_type ?? null,
     is_smoker: s.is_smoker ?? null,
@@ -517,7 +538,7 @@ function ToggleRow({ label, value, onToggle }: { label: string; value: boolean; 
   return (
     <View style={styles.toggleRow}>
       <Text style={styles.label}>{label}</Text>
-      <View style={{ flexDirection: 'row-reverse', gap: 8 }}>
+      <View style={styles.toggleOptions}>
         <TouchableOpacity
           style={[styles.toggleBtn, value ? styles.toggleActive : null]}
           onPress={() => onToggle(true)}
@@ -587,6 +608,9 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#0F0F14',
+    writingDirection: 'rtl',
+    // @ts-expect-error RN Web supports CSS direction
+    direction: 'rtl',
   },
   header: {
     paddingHorizontal: 16,
@@ -649,7 +673,7 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     padding: 16,
-    paddingBottom: 140,
+    paddingBottom: 24,
   },
   stepCard: {
     backgroundColor: '#15151C',
@@ -686,10 +710,16 @@ const styles = StyleSheet.create({
     textAlign: Platform.select({ ios: 'right', android: 'right', default: 'right' }) as any,
   },
   toggleRow: {
-    flexDirection: 'row-reverse',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    flexDirection: 'column',
+    alignItems: 'flex-end',
     gap: 12,
+  },
+  toggleOptions: {
+    flexDirection: 'row',
+    gap: 8,
+    writingDirection: 'rtl',
+    // @ts-expect-error RN Web supports CSS direction
+    direction: 'rtl',
   },
   toggleBtn: {
     flexDirection: 'row-reverse',
@@ -714,9 +744,13 @@ const styles = StyleSheet.create({
     color: '#0F0F14',
   },
   chipsWrap: {
-    flexDirection: 'row-reverse',
+    flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
+    justifyContent: 'flex-start',
+    writingDirection: 'rtl',
+    // @ts-expect-error RN Web supports CSS direction
+    direction: 'rtl',
   },
   chip: {
     backgroundColor: '#1E1F2A',
@@ -766,10 +800,6 @@ const styles = StyleSheet.create({
     color: '#0F0F14',
   },
   footer: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
     padding: 16,
     backgroundColor: 'rgba(15,15,20,0.9)',
     borderTopWidth: 1,
