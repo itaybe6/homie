@@ -30,19 +30,7 @@ export default function RootLayout() {
       // ignore
     }
 
-    // Ensure RTL on native devices (Hebrew)
-    (async () => {
-      try {
-        if (Platform.OS !== 'web' && !I18nManager.isRTL) {
-          I18nManager.allowRTL(true);
-          I18nManager.swapLeftAndRightInRTL(true);
-          I18nManager.forceRTL(true);
-          // Note: a manual app restart may be required on some devices
-        }
-      } catch {
-        // ignore
-      }
-    })();
+    // I18nManager-based RTL enforcement removed to avoid native reload issues.
 
     // Ensure RTL on web (Hebrew)
     if (Platform.OS === 'web' && typeof document !== 'undefined') {

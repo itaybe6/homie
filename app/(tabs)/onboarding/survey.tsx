@@ -18,6 +18,8 @@ import { UserSurveyResponse } from '@/types/database';
 import { fetchUserSurvey, upsertUserSurvey } from '@/lib/survey';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
+import { createSessionToken, autocompleteCities, PlacePrediction, getPlaceLocation } from '@/lib/googlePlaces';
+import { fetchNeighborhoodsForCity } from '@/lib/neighborhoods';
 
 type SurveyState = Partial<UserSurveyResponse>;
 
@@ -29,7 +31,7 @@ const steps = [
 ] as const;
 
 const lifestyleOptions = ['רגוע', 'פעיל', 'ספונטני', 'ביתי', 'חברתי'];
-const dietOptions = ['רגיל', 'צמחוני', 'טבעוני', 'כשר'];
+const dietOptions = ['ללא הגבלה', 'צמחוני', 'טבעוני'];
 const relationOptions = ['רווק/ה', 'בזוגיות'];
 const cleaningFrequencyOptions = ['פעם בשבוע', 'פעמיים בשבוע', 'פעם בשבועיים', 'כאשר צריך'];
 const hostingOptions = ['פעם בשבוע', 'לפעמים', 'כמה שיותר'];
@@ -54,6 +56,12 @@ export default function SurveyScreen() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [state, setState] = useState<SurveyState>({});
+  const [cityQuery, setCityQuery] = useState('');
+  const [citySuggestions, setCitySuggestions] = useState<PlacePrediction[]>([]);
+  const [cityPlaceId, setCityPlaceId] = useState<string | null>(null);
+  const [sessionToken, setSessionToken] = useState<string | null>(null);
+  const [neighborhoodOptions, setNeighborhoodOptions] = useState<string[]>([]);
+  const [neighborhoodSearch, setNeighborhoodSearch] = useState('');
 
   useEffect(() => {
     (async () => {
@@ -61,9 +69,14 @@ export default function SurveyScreen() {
         if (!user) return;
         const existing = await fetchUserSurvey(user.id);
         if (existing) {
-          setState(existing);
+          const hydrated = hydrateSurvey(existing);
+          setState(hydrated);
+          setCityQuery(hydrated.preferred_city || '');
+          setNeighborhoodSearch('');
         } else {
           setState({ is_completed: false });
+          setCityQuery('');
+          setNeighborhoodSearch('');
         }
       } catch (e) {
         // eslint-disable-next-line no-console
@@ -74,7 +87,75 @@ export default function SurveyScreen() {
     })();
   }, [user]);
 
+  useEffect(() => {
+    setSessionToken(createSessionToken());
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      const query = cityQuery.trim();
+      if (!query || query.length < 2) {
+        if (!cancelled) setCitySuggestions([]);
+        return;
+      }
+      if (state.preferred_city && cityPlaceId && query === state.preferred_city) {
+        if (!cancelled) setCitySuggestions([]);
+        return;
+      }
+      const preds = await autocompleteCities(query, sessionToken || undefined);
+      if (!cancelled) setCitySuggestions(preds.slice(0, 8));
+    };
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, [cityQuery, sessionToken, state.preferred_city, cityPlaceId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      if (!cityPlaceId) {
+        if (!cancelled) setNeighborhoodOptions([]);
+        return;
+      }
+      const loc = await getPlaceLocation(cityPlaceId);
+      if (!loc) {
+        if (!cancelled) setNeighborhoodOptions([]);
+        return;
+      }
+      const list = await fetchNeighborhoodsForCity({ lat: loc.lat, lng: loc.lng, radiusMeters: 25000 });
+      if (!cancelled) setNeighborhoodOptions(list);
+    };
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [cityPlaceId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const ensurePlaceId = async () => {
+      if (cityPlaceId || !state.preferred_city || !sessionToken) return;
+      const preds = await autocompleteCities(state.preferred_city, sessionToken);
+      if (cancelled) return;
+      const exact = preds.find((p) => p.description === state.preferred_city);
+      if (exact) {
+        setCityPlaceId(exact.placeId);
+      }
+    };
+    ensurePlaceId();
+    return () => {
+      cancelled = true;
+    };
+  }, [cityPlaceId, state.preferred_city, sessionToken]);
+
   const progress = useMemo(() => (currentStep + 1) / steps.length, [currentStep]);
+  const filteredNeighborhoods = useMemo(() => {
+    if (!neighborhoodSearch.trim()) return neighborhoodOptions;
+    const query = neighborhoodSearch.trim();
+    return neighborhoodOptions.filter((opt) => opt.includes(query));
+  }, [neighborhoodOptions, neighborhoodSearch]);
 
   const setField = <K extends keyof SurveyState>(key: K, value: SurveyState[K]) => {
     setState((prev) => ({ ...prev, [key]: value }));
@@ -132,8 +213,12 @@ export default function SurveyScreen() {
                     options={['סטודנט', 'עובד']}
                     value={normalizeToTextChoice(state.occupation, ['סטודנט', 'עובד'])}
                     onChange={(v) => {
-                      setField('occupation', v || null);
-                      if (v !== 'סטודנט') setField('student_year', undefined as any);
+                      setState((prev) => {
+                        const next: SurveyState = { ...prev, occupation: v || null };
+                        if (v !== 'סטודנט') next.student_year = undefined;
+                        if (v !== 'עובד') next.works_from_home = undefined;
+                        return next;
+                      });
                     }}
                   />
                   {state.occupation === 'סטודנט' && (
@@ -147,11 +232,11 @@ export default function SurveyScreen() {
                       }
                       onChange={(label) => {
                         if (!label) {
-                          setField('student_year', undefined as any);
+                          setField('student_year', undefined);
                           return;
                         }
                         const index = studentYearOptions.indexOf(label);
-                        setField('student_year', index >= 0 ? ((index + 1) as any) : (undefined as any));
+                        setField('student_year', index >= 0 ? (index + 1) : undefined);
                       }}
                     />
                   )}
@@ -159,10 +244,19 @@ export default function SurveyScreen() {
                     <ChipSelect
                       label="עובד מהבית?"
                       options={['כן', 'לא']}
-                      value={null}
+                      value={
+                        state.works_from_home === undefined
+                          ? null
+                          : state.works_from_home
+                          ? 'כן'
+                          : 'לא'
+                      }
                       onChange={(v) => {
-                        if (v === 'כן') setField('occupation', 'עובד - מהבית');
-                        else setField('occupation', 'עובד');
+                        if (!v) {
+                          setField('works_from_home', undefined);
+                          return;
+                        }
+                        setField('works_from_home', v === 'כן');
                       }}
                     />
                   )}
@@ -179,6 +273,24 @@ export default function SurveyScreen() {
                     options={dietOptions}
                     value={state.diet_type || null}
                     onChange={(v) => setField('diet_type', v || null)}
+                  />
+                  <ChipSelect
+                    label="אוכל כשר"
+                    options={['כשר', 'לא כשר']}
+                    value={
+                      state.keeps_kosher === undefined
+                        ? null
+                        : state.keeps_kosher
+                        ? 'כשר'
+                        : 'לא כשר'
+                    }
+                    onChange={(v) => {
+                      if (!v) {
+                        setField('keeps_kosher', undefined);
+                        return;
+                      }
+                      setField('keeps_kosher', v === 'כשר');
+                    }}
                   />
                   <ToggleRow
                     label="מעשן?"
@@ -251,12 +363,77 @@ export default function SurveyScreen() {
                     value={state.bills_included === undefined ? null : state.bills_included ? 'כלול' : 'לא כלול'}
                     onChange={(v) => setField('bills_included', v === 'כלול')}
                   />
-                  <LabeledInput
-                    label="מיקום רצוי (שכונה/עיר)"
-                    value={state.preferred_location || ''}
-                    placeholder="לדוגמה: לב תל אביב"
-                    onChangeText={(txt) => setField('preferred_location', txt)}
-                  />
+                  <View style={{ gap: 12 }}>
+                    <View style={{ gap: 8 }}>
+                      <Text style={styles.label}>עיר מועדפת</Text>
+                      <TextInput
+                        style={styles.input}
+                        placeholder="לדוגמה: תל אביב"
+                        placeholderTextColor="#6B7280"
+                        value={cityQuery}
+                        onChangeText={(txt) => {
+                          setCityQuery(txt);
+                          setCityPlaceId(null);
+                          setNeighborhoodSearch('');
+                          setField('preferred_city', txt ? txt : undefined);
+                          setField('preferred_neighborhoods', undefined);
+                        }}
+                      />
+                      {citySuggestions.length > 0 ? (
+                        <View style={styles.suggestionsBox}>
+                          {citySuggestions.map((suggestion, idx) => (
+                            <TouchableOpacity
+                              key={suggestion.placeId}
+                              style={[
+                                styles.suggestionItem,
+                                idx === citySuggestions.length - 1 ? styles.suggestionItemLast : null,
+                              ]}
+                              onPress={() => {
+                                setCityQuery(suggestion.description);
+                                setCityPlaceId(suggestion.placeId);
+                                setCitySuggestions([]);
+                                setNeighborhoodSearch('');
+                                setField('preferred_city', suggestion.description);
+                                setField('preferred_neighborhoods', []);
+                              }}
+                            >
+                              <Text style={styles.suggestionText}>{suggestion.description}</Text>
+                            </TouchableOpacity>
+                          ))}
+                        </View>
+                      ) : null}
+                    </View>
+                    {state.preferred_city ? (
+                      <View style={{ gap: 8 }}>
+                        <Text style={styles.label}>שכונות מועדפות</Text>
+                        <TextInput
+                          style={styles.input}
+                          placeholder={neighborhoodOptions.length ? 'חפש שכונה (לא חובה)' : 'בחר עיר מהרשימה כדי לטעון שכונות'}
+                          placeholderTextColor="#6B7280"
+                          value={neighborhoodSearch}
+                          onChangeText={setNeighborhoodSearch}
+                          editable={neighborhoodOptions.length > 0}
+                        />
+                        {neighborhoodOptions.length ? (
+                          <MultiChipSelect
+                            options={filteredNeighborhoods}
+                            values={state.preferred_neighborhoods || []}
+                            onToggle={(option, isActive) => {
+                              setState((prev) => {
+                                const current = prev.preferred_neighborhoods || [];
+                                const set = new Set(current);
+                                if (isActive) set.add(option);
+                                else set.delete(option);
+                                return { ...prev, preferred_neighborhoods: Array.from(set) };
+                              });
+                            }}
+                          />
+                        ) : (
+                          <Text style={styles.helperText}>בחר עיר מהרשימה כדי לראות שכונות זמינות.</Text>
+                        )}
+                      </View>
+                    ) : null}
+                  </View>
                   <ChipSelect
                     label="קומה"
                     options={floorOptions}
@@ -433,6 +610,8 @@ function normalizePayload(userId: string, s: SurveyState) {
     is_completed: true,
     occupation: s.occupation ?? null,
     student_year: s.student_year ?? null,
+    works_from_home: s.works_from_home ?? null,
+    keeps_kosher: s.keeps_kosher ?? null,
     is_shomer_shabbat: s.is_shomer_shabbat ?? null,
     diet_type: s.diet_type ?? null,
     is_smoker: s.is_smoker ?? null,
@@ -446,7 +625,9 @@ function normalizePayload(userId: string, s: SurveyState) {
     home_vibe: s.home_vibe ?? null,
     price_range: s.price_range ?? null,
     bills_included: s.bills_included ?? null,
-    preferred_location: s.preferred_location ?? null,
+    preferred_city: s.preferred_city ?? null,
+    preferred_neighborhoods:
+      s.preferred_neighborhoods && s.preferred_neighborhoods.length > 0 ? s.preferred_neighborhoods : null,
     floor_preference: s.floor_preference ?? null,
     has_balcony: s.has_balcony ?? null,
     has_elevator: s.has_elevator ?? null,
@@ -491,6 +672,43 @@ function extractDetailFromOccupation(value?: string | null): string | null {
   if (!value) return null;
   const parts = value.split('-').map((s) => s.trim());
   return parts.length > 1 ? parts.slice(1).join(' - ') : null;
+}
+
+function hydrateSurvey(existing: UserSurveyResponse): SurveyState {
+  const next: SurveyState = { ...existing };
+
+  if (existing.occupation) {
+    if (existing.occupation.startsWith('סטודנט')) {
+      next.occupation = 'סטודנט';
+      if (!existing.student_year) {
+        const detail = extractDetailFromOccupation(existing.occupation);
+        if (detail) {
+          const idx = studentYearOptions.indexOf(detail);
+          if (idx >= 0) {
+            next.student_year = idx + 1;
+          }
+        }
+      }
+    } else if (existing.occupation === 'עובד - מהבית') {
+      next.occupation = 'עובד';
+      next.works_from_home = true;
+    }
+  }
+
+  if (existing.works_from_home !== undefined) {
+    next.works_from_home = existing.works_from_home;
+  }
+  if (existing.keeps_kosher !== undefined) {
+    next.keeps_kosher = existing.keeps_kosher;
+  } else if (existing.diet_type === 'כשר') {
+    next.keeps_kosher = true;
+    next.diet_type = null;
+  }
+  if (existing.preferred_neighborhoods) {
+    next.preferred_neighborhoods = [...existing.preferred_neighborhoods];
+  }
+
+  return next;
 }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
@@ -585,6 +803,53 @@ function ChipSelect({
           );
         })}
       </View>
+    </View>
+  );
+}
+
+function MultiChipSelect({
+  label,
+  options,
+  values,
+  onToggle,
+}: {
+  label?: string;
+  options: string[];
+  values: string[];
+  onToggle: (option: string, isActive: boolean) => void;
+}) {
+  const uniqueOptions = useMemo(() => {
+    const arr = [...options];
+    const selected = values || [];
+    for (const sel of selected) {
+      if (!arr.includes(sel)) arr.push(sel);
+    }
+    return arr;
+  }, [options, values]);
+
+  const selectedSet = useMemo(() => new Set(values || []), [values]);
+
+  return (
+    <View style={{ gap: 8 }}>
+      {!!label && <Text style={styles.label}>{label}</Text>}
+      {uniqueOptions.length > 0 ? (
+        <View style={styles.chipsWrap}>
+          {uniqueOptions.map((opt) => {
+            const active = selectedSet.has(opt);
+            return (
+              <TouchableOpacity
+                key={opt}
+                style={[styles.chip, active ? styles.chipActive : null]}
+                onPress={() => onToggle(opt, !active)}
+              >
+                <Text style={[styles.chipText, active ? styles.chipTextActive : null]}>{opt}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      ) : (
+        <Text style={styles.helperText}>לא נמצאו שכונות תואמות.</Text>
+      )}
     </View>
   );
 }
@@ -743,6 +1008,11 @@ const styles = StyleSheet.create({
   toggleTextActive: {
     color: '#0F0F14',
   },
+  helperText: {
+    color: '#9DA4AE',
+    fontSize: 13,
+    textAlign: 'right',
+  },
   chipsWrap: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -771,6 +1041,29 @@ const styles = StyleSheet.create({
   },
   chipTextActive: {
     color: '#0F0F14',
+  },
+  suggestionsBox: {
+    marginTop: 4,
+    backgroundColor: '#1E1F2A',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    overflow: 'hidden',
+  },
+  suggestionItem: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.06)',
+  },
+  suggestionItemLast: {
+    borderBottomWidth: 0,
+  },
+  suggestionText: {
+    color: '#E5E7EB',
+    fontSize: 14,
+    fontWeight: '700',
+    textAlign: 'right',
   },
   scaleRow: {
     flexDirection: 'row-reverse',

@@ -1,3 +1,4 @@
+import { AuthApiError } from '@supabase/supabase-js';
 import { supabase } from './supabase';
 
 export interface AuthUser {
@@ -134,9 +135,27 @@ export const authService = {
 
   async getCurrentUser() {
     const {
-      data: { user },
-    } = await supabase.auth.getUser();
+      data: { session },
+      error: sessionError,
+    } = await supabase.auth.getSession();
 
+    if (sessionError) {
+      if (
+        sessionError instanceof AuthApiError &&
+        sessionError.message.toLowerCase().includes('invalid refresh token')
+      ) {
+        // Clear the broken session so app can continue to login screen without noisy errors
+        try {
+          await supabase.auth.signOut({ scope: 'local' });
+        } catch {
+          // ignore secondary errors when clearing local session
+        }
+        return null;
+      }
+      throw sessionError;
+    }
+
+    const user = session?.user;
     if (!user) return null;
 
     let role: 'user' | 'owner' | 'admin' | undefined = undefined;

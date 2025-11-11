@@ -73,6 +73,8 @@ export interface UserSurveyResponse {
   is_completed?: boolean;
   occupation?: string;
   student_year?: number; // if occupation === 'student', 1–8
+  works_from_home?: boolean; // if occupation === 'עובד'
+  keeps_kosher?: boolean; // does the user eat kosher only
   is_shomer_shabbat?: boolean;
   diet_type?: string;
   is_smoker?: boolean;
@@ -86,7 +88,8 @@ export interface UserSurveyResponse {
   home_vibe?: string;
   price_range?: number;
   bills_included?: boolean;
-  preferred_location?: string;
+  preferred_city?: string;
+  preferred_neighborhoods?: string[];
   floor_preference?: string;
   has_balcony?: boolean;
   has_elevator?: boolean;

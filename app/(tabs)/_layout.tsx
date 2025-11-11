@@ -10,18 +10,36 @@ export default function TabLayout() {
   const router = useRouter();
   const { user } = useAuthStore();
   const hasPromptedRef = useRef(false);
+  const prevUserIdRef = useRef<string | null>(null);
+  const isCheckingSurveyRef = useRef(false);
 
   useEffect(() => {
     // Admins should not see the regular tabs – redirect them into admin
     if ((user as any)?.role === 'admin') {
       router.replace('/admin' as any);
+      prevUserIdRef.current = user?.id ?? null;
+      hasPromptedRef.current = false;
+      isCheckingSurveyRef.current = false;
       return;
     }
-    // reset prompt flag on user change so it can show again on new logins
-    hasPromptedRef.current = false;
+
+    if (!user) {
+      prevUserIdRef.current = null;
+      hasPromptedRef.current = false;
+      isCheckingSurveyRef.current = false;
+      return;
+    }
+
+    if (prevUserIdRef.current !== user.id) {
+      prevUserIdRef.current = user.id;
+      hasPromptedRef.current = false;
+      isCheckingSurveyRef.current = false;
+    }
+
+    if (hasPromptedRef.current || isCheckingSurveyRef.current) return;
+
     const maybePromptSurvey = async () => {
-      if (!user) return;
-      if (hasPromptedRef.current) return;
+      isCheckingSurveyRef.current = true;
       try {
         const survey = await fetchUserSurvey(user.id);
         const hasRow = !!survey;
@@ -40,9 +58,13 @@ export default function TabLayout() {
             ],
             { cancelable: true }
           );
+        } else {
+          hasPromptedRef.current = true;
         }
       } catch {
         // ignore failures silently
+      } finally {
+        isCheckingSurveyRef.current = false;
       }
     };
     maybePromptSurvey();
