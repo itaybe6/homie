@@ -33,6 +33,7 @@ import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/authStore';
 import { useApartmentStore } from '@/stores/apartmentStore';
 import { Apartment, User } from '@/types/database';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function ApartmentDetailsScreen() {
   const router = useRouter();
@@ -68,6 +69,7 @@ export default function ApartmentDetailsScreen() {
   });
   const galleryRef = useRef<ScrollView>(null);
   const screenWidth = Dimensions.get('window').width;
+  const insets = useSafeAreaInsets();
 
   useEffect(() => {
     fetchApartmentDetails();
@@ -241,6 +243,7 @@ export default function ApartmentDetailsScreen() {
         title,
         // Important: do NOT embed INVITE_APT metadata here to avoid showing an approve button for recipients
         description,
+        is_read: false,
       }));
 
       const { error: insertErr } = await supabase.from('notifications').insert(rows);
@@ -321,6 +324,7 @@ export default function ApartmentDetailsScreen() {
         recipient_id: partnerId,
         title,
         description,
+        is_read: false,
       });
       if (notifErr) throw notifErr;
 
@@ -427,7 +431,7 @@ export default function ApartmentDetailsScreen() {
 
   return (
     <View style={styles.container}>
-      <ScrollView contentContainerStyle={{ paddingBottom: 16, paddingTop: 16 }}>
+      <ScrollView contentContainerStyle={{ paddingBottom: 400, paddingTop: 16 }}>
         {/* Owner actions pinned to top of the page */}
         {isOwner ? (
           <View style={styles.topActionsRow}>
@@ -602,7 +606,7 @@ export default function ApartmentDetailsScreen() {
 
       {/* Join as roommate button (for non-owner, non-member viewers) */}
       {!isOwner && !isMember ? (
-        <View style={styles.footer}>
+        <View style={[styles.footer, { bottom: (insets.bottom || 0) + 78 }]}>
           <TouchableOpacity
             activeOpacity={0.9}
             onPress={handleRequestJoin}
@@ -1080,7 +1084,7 @@ const styles = StyleSheet.create({
   },
   joinBtn: {
     flex: 1,
-    backgroundColor: '#7C5CFF',
+    backgroundColor: 'transparent',
     paddingVertical: 14,
     borderRadius: 12,
     alignItems: 'center',
@@ -1089,7 +1093,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(124,92,255,0.45)',
   },
   joinBtnDisabled: {
-    backgroundColor: 'rgba(124,92,255,0.45)',
+    backgroundColor: 'transparent',
     borderColor: 'rgba(124,92,255,0.25)',
   },
   joinBtnText: {
@@ -1098,12 +1102,16 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
   footer: {
-    padding: 16,
-    borderTopWidth: 1,
-    borderTopColor: '#1F2030',
-    backgroundColor: '#0F0F14',
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    padding: 0,
+    backgroundColor: 'transparent',
     flexDirection: 'row',
     gap: 12,
+    // bottom offset is applied inline to respect safe area
+    zIndex: 100,
+    elevation: 8,
   },
   // deprecated old bottom action buttons kept for potential reuse
   editButton: {

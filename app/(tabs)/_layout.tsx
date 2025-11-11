@@ -1,9 +1,48 @@
-import { Tabs } from 'expo-router';
+import { Tabs, useRouter } from 'expo-router';
 import { Home, User, Users } from 'lucide-react-native';
 import { BlurView } from 'expo-blur';
-import { Platform, StyleSheet } from 'react-native';
+import { Platform, StyleSheet, Alert } from 'react-native';
+import { useEffect, useRef } from 'react';
+import { useAuthStore } from '@/stores/authStore';
+import { fetchUserSurvey } from '@/lib/survey';
 
 export default function TabLayout() {
+  const router = useRouter();
+  const { user } = useAuthStore();
+  const hasPromptedRef = useRef(false);
+
+  useEffect(() => {
+    // reset prompt flag on user change so it can show again on new logins
+    hasPromptedRef.current = false;
+    const maybePromptSurvey = async () => {
+      if (!user) return;
+      if (hasPromptedRef.current) return;
+      try {
+        const survey = await fetchUserSurvey(user.id);
+        const hasRow = !!survey;
+        const completed = !!survey?.is_completed;
+        if (!hasRow || !completed) {
+          hasPromptedRef.current = true;
+          Alert.alert(
+            'שאלון העדפות',
+            'כדי שנמצא לך התאמות טובות, נשמח שתמלא/י את השאלון הקצר.',
+            [
+              { text: 'לא עכשיו', style: 'cancel' },
+              {
+                text: 'לשאלון',
+                onPress: () => router.push('/(tabs)/onboarding/survey'),
+              },
+            ],
+            { cancelable: true }
+          );
+        }
+      } catch {
+        // ignore failures silently
+      }
+    };
+    maybePromptSurvey();
+  }, [user]);
+
   return (
     <Tabs
       screenOptions={{

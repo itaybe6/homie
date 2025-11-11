@@ -92,8 +92,7 @@ export default function NotificationsScreen() {
       await supabase
         .from('notifications')
         .update({ is_read: true })
-        .eq('recipient_id', user.id)
-        .eq('is_read', false);
+        .eq('recipient_id', user.id);
     } catch (e) {
       console.error('Failed to load notifications', e);
       setItems([]);
@@ -203,7 +202,17 @@ export default function NotificationsScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.iconBtn} activeOpacity={0.85}>
+        <TouchableOpacity
+          onPress={() => {
+            if ((router as any).canGoBack?.()) {
+              router.back();
+            } else {
+              router.replace('/(tabs)/home');
+            }
+          }}
+          style={styles.iconBtn}
+          activeOpacity={0.85}
+        >
           <ArrowRight size={18} color="#FFFFFF" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>התראות</Text>

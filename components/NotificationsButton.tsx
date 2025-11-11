@@ -11,7 +11,7 @@ type Props = {
   badgeCount?: number;
 };
 
-function NotificationsButtonBase({ style, badgeCount = 0 }: Props) {
+function NotificationsButtonBase({ style, badgeCount }: Props) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const user = useAuthStore((s) => s.user);
@@ -28,7 +28,7 @@ function NotificationsButtonBase({ style, badgeCount = 0 }: Props) {
         .from('notifications')
         .select('id', { count: 'exact', head: true })
         .eq('recipient_id', user.id)
-        .eq('is_read', false);
+        .or('is_read.is.null,is_read.eq.false');
       if (isMounted) setCount(c || 0);
     };
 
@@ -50,7 +50,7 @@ function NotificationsButtonBase({ style, badgeCount = 0 }: Props) {
     };
   }, [user?.id]);
 
-  const shownCount = typeof badgeCount === 'number' && badgeCount >= 0 ? badgeCount : count;
+  const shownCount = typeof badgeCount === 'number' ? badgeCount : count;
   const shownLabel = shownCount > 99 ? '99+' : String(shownCount);
   return (
     <View style={[styles.wrap, { marginTop: Math.max(6, insets.top + 2) }, style]}>
@@ -98,7 +98,7 @@ const styles = StyleSheet.create({
     height: 18,
     paddingHorizontal: 4,
     borderRadius: 9,
-    backgroundColor: '#EF4444',
+    backgroundColor: 'rgba(239,68,68,0.75)',
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,

@@ -54,6 +54,18 @@ export interface Notification {
   created_at: string;
 }
 
+export interface Request {
+  id: string;
+  sender_id: string;        // who initiated the request
+  recipient_id: string;     // who should act on the request
+  apartment_id?: string;    // optional: apartment this request relates to
+  type: 'JOIN_APT' | 'GENERAL'; // request type
+  status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED';
+  metadata?: any;           // free-form context
+  created_at: string;
+  updated_at: string;
+}
+
 export interface UserSurveyResponse {
   id: number;
   user_id: string;
