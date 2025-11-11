@@ -12,6 +12,11 @@ export default function TabLayout() {
   const hasPromptedRef = useRef(false);
 
   useEffect(() => {
+    // Admins should not see the regular tabs – redirect them into admin
+    if ((user as any)?.role === 'admin') {
+      router.replace('/admin' as any);
+      return;
+    }
     // reset prompt flag on user change so it can show again on new logins
     hasPromptedRef.current = false;
     const maybePromptSurvey = async () => {
@@ -107,6 +112,7 @@ export default function TabLayout() {
       <Tabs.Screen name="apartment/[id]" options={{ href: null }} />
       <Tabs.Screen name="apartment/edit/[id]" options={{ href: null }} />
       <Tabs.Screen name="user/[id]" options={{ href: null }} />
+      <Tabs.Screen name="requests" options={{ href: null }} />
       <Tabs.Screen name="onboarding/survey" options={{ href: null }} />
     </Tabs>
   );

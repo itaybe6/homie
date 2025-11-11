@@ -107,6 +107,11 @@ export default function NotificationsScreen() {
     setRefreshing(false);
   };
 
+  const isPartnerRequestNotification = (n: Notification): boolean => {
+    const t = (n?.title || '').trim();
+    return t.includes('בקשת שותפות חדשה');
+  };
+
   const extractInviteApartmentId = (description: string): string | null => {
     if (!description) return null;
     const parts = description.split('---');
@@ -258,6 +263,8 @@ export default function NotificationsScreen() {
                   onPress={() => {
                     if (aptId) {
                       router.push({ pathname: '/apartment/[id]', params: { id: aptId } });
+                    } else if (isPartnerRequestNotification(item)) {
+                      router.push('/requests');
                     }
                   }}
                 >

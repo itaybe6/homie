@@ -21,7 +21,7 @@ import { useApartmentStore } from '@/stores/apartmentStore';
 import * as ImagePicker from 'expo-image-picker';
 import { autocompleteCities, autocompleteAddresses, autocompleteNeighborhoods, createSessionToken, PlacePrediction, getPlaceLocation } from '@/lib/googlePlaces';
 import { fetchNeighborhoodsForCity } from '@/lib/neighborhoods';
-import NotificationsButton from '@/components/NotificationsButton';
+
 
 export default function AddApartmentScreen() {
   const router = useRouter();
@@ -310,7 +310,6 @@ export default function AddApartmentScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <NotificationsButton style={{ left: 16 }} />
       <KeyboardAvoidingView
         style={styles.keyboardAvoid}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>

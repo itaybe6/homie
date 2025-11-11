@@ -200,7 +200,7 @@ export default function ApartmentDetailsScreen() {
 
       setIsRequestingJoin(true);
 
-      // Optional lightweight dedupe: check if a recent request was sent to the owner in the last day
+      // Optional dedupe for notifications only (still create a request either way)
       const yesterdayIso = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
       const { count: recentCount } = await supabase
         .from('notifications')
@@ -208,11 +208,7 @@ export default function ApartmentDetailsScreen() {
         .eq('sender_id', user.id)
         .eq('recipient_id', apartment.owner_id)
         .gte('created_at', yesterdayIso);
-      if ((recentCount || 0) > 0) {
-        setHasRequestedJoin(true);
-        Alert.alert('נשלח', 'כבר שלחת בקשה לאחרונה');
-        return;
-      }
+      const shouldSkipNotifications = (recentCount || 0) > 0;
 
       const recipients = Array.from(
         new Set<string>([apartment.owner_id, ...currentPartnerIds].filter((rid) => rid && rid !== user.id))
@@ -246,11 +242,35 @@ export default function ApartmentDetailsScreen() {
         is_read: false,
       }));
 
-      const { error: insertErr } = await supabase.from('notifications').insert(rows);
-      if (insertErr) throw insertErr;
+      if (!shouldSkipNotifications) {
+        const { error: insertErr } = await supabase.from('notifications').insert(rows);
+        if (insertErr) throw insertErr;
+      }
+
+      // Also create request rows so user can track status
+      try {
+        const requestRows = recipients.map((rid) => ({
+          sender_id: user.id!,
+          recipient_id: rid,
+          apartment_id: apartment.id,
+          type: 'JOIN_APT',
+          status: 'PENDING',
+          metadata: null,
+        }));
+        const { error: reqErr } = await supabase
+          .from('apartments_request')
+          .insert(requestRows as any)
+          .select('id'); // force RLS check and return for debugging
+        if (reqErr) {
+          throw reqErr;
+        }
+      } catch (e: any) {
+        console.error('requests insert failed', e);
+        Alert.alert('אזהרה', e?.message || 'לא ניתן ליצור שורת בקשה כרגע');
+      }
 
       setHasRequestedJoin(true);
-      Alert.alert('נשלח', 'בקשתך נשלחה לבעל הדירה והשותפים');
+      Alert.alert('נשלח', shouldSkipNotifications ? 'נוצרה בקשה חדשה' : 'בקשתך נשלחה לבעל הדירה והשותפים');
     } catch (e: any) {
       console.error('request join failed', e);
       Alert.alert('שגיאה', e?.message || 'לא ניתן לשלוח בקשה כעת');
@@ -431,7 +451,7 @@ export default function ApartmentDetailsScreen() {
 
   return (
     <View style={styles.container}>
-      <ScrollView contentContainerStyle={{ paddingBottom: 400, paddingTop: 16 }}>
+      <ScrollView contentContainerStyle={{ paddingBottom: 400, paddingTop: 50 }}>
         {/* Owner actions pinned to top of the page */}
         {isOwner ? (
           <View style={styles.topActionsRow}>
@@ -924,7 +944,7 @@ const styles = StyleSheet.create({
   },
   topActionsRow: {
     paddingHorizontal: 16,
-    marginTop: 12,
+    marginTop: 0,
     marginBottom: 8,
     flexDirection: 'row',
     justifyContent: 'flex-end',

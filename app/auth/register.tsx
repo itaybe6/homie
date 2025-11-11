@@ -43,6 +43,8 @@ export default function RegisterScreen() {
   const [segWidth, setSegWidth] = useState(0);
   const segAnim = useRef(new Animated.Value(0)).current;
   // Owner apartment details will be collected later in a dedicated screen
+  const [gender, setGender] = useState<'male' | 'female' | ''>('');
+  const [bio, setBio] = useState('');
 
   useEffect(() => {
     setSessionToken(createSessionToken());
@@ -157,6 +159,8 @@ export default function RegisterScreen() {
         phone: mode === 'user' ? (phone.trim() || undefined) : undefined,
         age: age ? Number(age) : undefined,
         city: city.trim() || undefined,
+        bio: mode === 'user' ? (bio.trim() || undefined) : undefined,
+        gender: mode === 'user' && gender ? gender : undefined,
         avatarUrl: avatarForSignup,
         // Always create users profile so FK from apartments(owner_id) -> users(id) passes
         createProfile: true,
@@ -364,7 +368,57 @@ export default function RegisterScreen() {
 
               {/* Owner fills apartment later on a dedicated screen */}
 
-              
+              {mode === 'user' ? (
+                <>
+                  <View style={styles.row}>
+                    <TouchableOpacity
+                      style={[
+                        styles.choiceButton,
+                        gender === 'female' && styles.choiceButtonActive,
+                      ]}
+                      activeOpacity={0.85}
+                      onPress={() => setGender('female')}
+                      disabled={isLoading}
+                    >
+                      <Text
+                        style={[
+                          styles.choiceText,
+                          gender === 'female' && styles.choiceTextActive,
+                        ]}
+                      >
+                        נקבה
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[
+                        styles.choiceButton,
+                        gender === 'male' && styles.choiceButtonActive,
+                      ]}
+                      activeOpacity={0.85}
+                      onPress={() => setGender('male')}
+                      disabled={isLoading}
+                    >
+                      <Text
+                        style={[
+                          styles.choiceText,
+                          gender === 'male' && styles.choiceTextActive,
+                        ]}
+                      >
+                        זכר
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                  <TextInput
+                    style={[styles.input, styles.inputMultiline]}
+                    placeholder="ביו"
+                    value={bio}
+                    onChangeText={setBio}
+                    multiline
+                    editable={!isLoading}
+                    placeholderTextColor="#9AA0A6"
+                  />
+                </>
+              ) : null}
 
               <View style={styles.divider} />
 
@@ -543,6 +597,27 @@ const styles = StyleSheet.create({
     color: '#FFF',
     fontSize: 16,
     fontWeight: '600',
+  },
+  choiceButton: {
+    flex: 1,
+    backgroundColor: '#17171F',
+    borderWidth: 1,
+    borderColor: '#2A2A37',
+    paddingVertical: 12,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  choiceButtonActive: {
+    backgroundColor: '#2B2141',
+    borderColor: PRIMARY,
+  },
+  choiceText: {
+    color: '#9DA4AE',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  choiceTextActive: {
+    color: '#FFFFFF',
   },
   linkContainer: {
     alignItems: 'flex-end',

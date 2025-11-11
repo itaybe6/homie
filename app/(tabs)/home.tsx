@@ -18,7 +18,7 @@ import { supabase } from '@/lib/supabase';
 import { useApartmentStore } from '@/stores/apartmentStore';
 import { Apartment } from '@/types/database';
 import ApartmentCard from '@/components/ApartmentCard';
-import NotificationsButton from '@/components/NotificationsButton';
+
 
 export default function HomeScreen() {
   const router = useRouter();
@@ -168,7 +168,6 @@ export default function HomeScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <NotificationsButton style={{ left: 16 }} />
       <View style={[styles.topBar, { paddingTop: 52 }]}>
         <View style={styles.brandRow} />
         <View style={styles.actionsRow}>

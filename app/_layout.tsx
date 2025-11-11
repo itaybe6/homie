@@ -5,13 +5,30 @@ import { StatusBar } from 'expo-status-bar';
 import { useFrameworkReady } from '@/hooks/useFrameworkReady';
 import { authService } from '@/lib/auth';
 import { useAuthStore } from '@/stores/authStore';
+import * as Notifications from 'expo-notifications';
+import { usePushNotifications } from '@/hooks/usePushNotifications';
+import GlobalTopBar from '@/components/GlobalTopBar';
 
 export default function RootLayout() {
   useFrameworkReady();
   const { setUser, setLoading } = useAuthStore();
+  usePushNotifications();
 
   useEffect(() => {
     let isMounted = true;
+
+    // Show notifications in foreground as alerts with sound/badge
+    try {
+      Notifications.setNotificationHandler({
+        handleNotification: async () => ({
+          shouldShowAlert: true,
+          shouldPlaySound: true,
+          shouldSetBadge: true,
+        }),
+      });
+    } catch {
+      // ignore
+    }
 
     // Ensure RTL on native devices (Hebrew)
     (async () => {
@@ -51,7 +68,7 @@ export default function RootLayout() {
         const currentUser = await authService.getCurrentUser();
         if (!isMounted) return;
         if (currentUser) {
-          setUser({ id: currentUser.id, email: currentUser.email! });
+          setUser({ id: currentUser.id, email: currentUser.email!, role: (currentUser as any).role });
         }
       } catch {
         // ignore
@@ -76,6 +93,8 @@ export default function RootLayout() {
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="+not-found" />
       </Stack>
+      {/* Global transparent top bar: notifications (left), Homie (center), requests (right) */}
+      <GlobalTopBar />
       <StatusBar style="auto" />
     </View>
   );

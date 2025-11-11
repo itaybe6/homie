@@ -3,6 +3,7 @@ import { supabase } from './supabase';
 export interface AuthUser {
   id: string;
   email: string;
+  role?: 'user' | 'owner' | 'admin';
 }
 
 export const authService = {
@@ -14,6 +15,7 @@ export const authService = {
     phone?: string;
     age?: number;
     bio?: string;
+    gender?: 'male' | 'female';
     city?: string;
     avatarUrl?: string;
     createProfile?: boolean; // when false, do not upsert into users table
@@ -23,8 +25,10 @@ export const authService = {
       password,
       fullName,
       role,
+      phone,
       age,
       bio,
+      gender,
       city,
       avatarUrl,
       createProfile = true,
@@ -75,9 +79,10 @@ export const authService = {
       const extendedForRegularUser: Record<string, unknown> =
         role === 'user'
           ? {
-              // phone intentionally omitted unless schema guarantees it
+              phone: phone || null,
               age: typeof age === 'number' ? age : null,
               bio: bio || null,
+              gender: gender || null,
               city: city || null,
               avatar_url: avatarUrl || null,
             }
@@ -103,7 +108,23 @@ export const authService = {
     });
 
     if (error) throw error;
-    return data;
+
+    const authedUser = data.user;
+    let role: 'user' | 'owner' | 'admin' | undefined = undefined;
+    if (authedUser?.id) {
+      try {
+        const { data: profile } = await supabase
+          .from('users')
+          .select('role')
+          .eq('id', authedUser.id)
+          .maybeSingle();
+        role = (profile as any)?.role;
+      } catch {
+        // ignore
+      }
+    }
+
+    return { user: authedUser, role } as any;
   },
 
   async signOut() {
@@ -115,16 +136,43 @@ export const authService = {
     const {
       data: { user },
     } = await supabase.auth.getUser();
-    return user;
+
+    if (!user) return null;
+
+    let role: 'user' | 'owner' | 'admin' | undefined = undefined;
+    try {
+      const { data: profile } = await supabase
+        .from('users')
+        .select('role')
+        .eq('id', user.id)
+        .maybeSingle();
+      role = (profile as any)?.role;
+    } catch {
+      // ignore
+    }
+
+    return { ...user, role } as any;
   },
 
   onAuthStateChange(callback: (user: AuthUser | null) => void) {
     supabase.auth.onAuthStateChange((event, session) => {
       (async () => {
         if (session?.user) {
+          let role: 'user' | 'owner' | 'admin' | undefined = undefined;
+          try {
+            const { data: profile } = await supabase
+              .from('users')
+              .select('role')
+              .eq('id', session.user.id)
+              .maybeSingle();
+            role = (profile as any)?.role;
+          } catch {
+            // ignore
+          }
           callback({
             id: session.user.id,
             email: session.user.email!,
+            role,
           });
         } else {
           callback(null);

@@ -12,7 +12,7 @@ import {
   Platform,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { Check, ChevronRight } from 'lucide-react-native';
+import { Check, ChevronRight, ArrowLeft } from 'lucide-react-native';
 import { useAuthStore } from '@/stores/authStore';
 import { UserSurveyResponse } from '@/types/database';
 import { fetchUserSurvey, upsertUserSurvey } from '@/lib/survey';
@@ -103,12 +103,10 @@ export default function SurveyScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <View style={styles.headerTopRow}>
-          <TouchableOpacity onPress={handleExit} style={styles.backBtn} accessibilityLabel="חזור">
-            <ChevronRight size={18} color="#0F0F14" />
-            <Text style={styles.backBtnText}>חזור</Text>
-          </TouchableOpacity>
-        </View>
+        <View style={styles.headerTopRow} />
+        <TouchableOpacity onPress={handleExit} style={styles.backBtn} accessibilityLabel="חזור">
+          <ArrowLeft size={18} color="#FFFFFF" />
+        </TouchableOpacity>
         <Text style={styles.headerTitle}>שאלון העדפות</Text>
         <Text style={styles.headerSubtitle}>{steps[currentStep].title}</Text>
         <View style={styles.progressTrack}>
@@ -592,7 +590,7 @@ const styles = StyleSheet.create({
   },
   header: {
     paddingHorizontal: 16,
-    paddingTop: 10,
+    paddingTop: 52,
     paddingBottom: 8,
   },
   headerTopRow: {
@@ -601,14 +599,17 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   backBtn: {
-    flexDirection: 'row-reverse',
+    position: 'absolute',
+    left: 16,
+    top: 52,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     alignItems: 'center',
-    gap: 6,
-    backgroundColor: '#E5E7EB',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 999,
-    alignSelf: 'flex-start',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
   },
   backBtnText: {
     color: '#0F0F14',

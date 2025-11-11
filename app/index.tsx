@@ -23,6 +23,8 @@ export default function Index() {
         setUser({
           id: currentUser.id,
           email: currentUser.email!,
+          // @ts-expect-error runtime role from profile
+          role: (currentUser as any).role,
         });
       }
     } catch (error) {
@@ -44,6 +46,10 @@ export default function Index() {
     return <Redirect href="/auth/login" />;
   }
 
+  // Redirect admins into the admin interface
+  if ((user as any)?.role === 'admin') {
+    return <Redirect href="/admin" />;
+  }
   return <Redirect href="/(tabs)/home" />;
 }
 

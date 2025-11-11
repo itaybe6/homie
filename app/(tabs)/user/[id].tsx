@@ -95,13 +95,13 @@ const styles = StyleSheet.create({
   },
   header: {
     alignItems: 'center',
-    paddingTop: 24,
+    paddingTop: 52,
     paddingBottom: 12,
   },
   backBtn: {
     position: 'absolute',
     left: 16,
-    top: 24,
+    top: 52,
     width: 36,
     height: 36,
     borderRadius: 18,

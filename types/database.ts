@@ -2,11 +2,12 @@ export interface User {
   id: string;
   email: string;
   full_name: string;
-  role?: 'user' | 'owner';
+  role?: 'user' | 'owner' | 'admin';
   age?: number;
   phone?: string;
   city?: string;
   bio?: string;
+  gender?: 'male' | 'female';
   avatar_url?: string;
   image_urls?: string[]; // up to 6 additional images
   favorites?: string[]; // national IDs of favorited users

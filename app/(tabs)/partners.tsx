@@ -17,7 +17,7 @@ import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/authStore';
 import { User } from '@/types/database';
 import RoommateCard from '@/components/RoommateCard';
-import NotificationsButton from '@/components/NotificationsButton';
+
 
 export default function PartnersScreen() {
   const router = useRouter();
@@ -85,13 +85,39 @@ export default function PartnersScreen() {
         Alert.alert('שגיאה', 'יש להתחבר כדי לבצע פעולה זו');
         return;
       }
+      // prevent duplicate request rows
+      const { data: existing, error: existingErr } = await supabase
+        .from('matches')
+        .select('id')
+        .eq('sender_id', currentUser.id)
+        .eq('receiver_id', likedUser.id)
+        .maybeSingle();
+      if (existingErr && !String(existingErr?.message || '').includes('PGRST')) {
+        // non-not-found error
+        throw existingErr;
+      }
+      if (existing) {
+        Alert.alert('שמת לב', 'כבר שלחת בקשת שותפות למשתמש זה');
+        return;
+      }
+
+      // create a match request (approved=false means pending)
+      const { error: insertErr } = await supabase.from('matches').insert({
+        sender_id: currentUser.id,
+        receiver_id: likedUser.id,
+        approved: false,
+      } as any);
+      if (insertErr) throw insertErr;
+
+      // optional: also notify the recipient
       await supabase.from('notifications').insert({
         sender_id: currentUser.id,
         recipient_id: likedUser.id,
         title: 'בקשת שותפות חדשה',
         description: 'המשתמש מעוניין להיות שותף שלך.',
       });
-      Alert.alert('נשלח', 'הודעה נשלחה למשתמש');
+
+      Alert.alert('נשלח', 'נוצרה בקשת שותפות ונשלחה הודעה למשתמש');
     } catch (e: any) {
       console.error('like failed', e);
       Alert.alert('שגיאה', e?.message || 'לא ניתן לשלוח בקשה');
@@ -112,7 +138,6 @@ export default function PartnersScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <NotificationsButton style={{ left: 16 }} />
       <View style={styles.topBar}>
         <View style={styles.brandRow}>
           <View style={styles.brandIconWrap}>

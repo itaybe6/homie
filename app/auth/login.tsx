@@ -34,10 +34,11 @@ export default function LoginScreen() {
     setIsLoading(true);
     setError('');
     try {
-      const { user } = await authService.signIn(email, password);
+      const { user, role } = await authService.signIn(email, password) as any;
       if (user) {
-        setUser({ id: user.id, email: user.email! });
-        router.replace('/(tabs)/home');
+        const next = role === 'admin' ? '/admin' : '/(tabs)/home';
+        setUser({ id: user.id, email: user.email!, role });
+        router.replace(next as any);
       }
     } catch (e: any) {
       setError(e.message || 'שגיאה בהתחברות');

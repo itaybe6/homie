@@ -14,7 +14,7 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { LogOut, Edit, Save, X, Plus, MapPin } from 'lucide-react-native';
+import { LogOut, Edit, Save, X, Plus, MapPin, Inbox } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
 import { supabase } from '@/lib/supabase';
@@ -22,7 +22,7 @@ import { authService } from '@/lib/auth';
 import { useAuthStore } from '@/stores/authStore';
 import { useApartmentStore } from '@/stores/apartmentStore';
 import { User, Apartment } from '@/types/database';
-import NotificationsButton from '@/components/NotificationsButton';
+
 
 export default function ProfileScreen() {
   const router = useRouter();
@@ -252,66 +252,7 @@ export default function ProfileScreen() {
     }
   };
 
-  const pickAndUploadExtraPhotos = async () => {
-    try {
-      if (!user) return;
-
-      const current = (profile?.image_urls ?? []).filter(Boolean);
-      const remaining = Math.max(0, 6 - current.length);
-      if (remaining <= 0) {
-        Alert.alert('מגבלה', 'ניתן לשמור עד 6 תמונות נוספות');
-        return;
-      }
-
-      const perms = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!perms.granted) {
-        Alert.alert('הרשאה נדרשת', 'יש לאפשר גישה לגלריה כדי להעלות תמונות');
-        return;
-      }
-
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: false,
-        allowsMultipleSelection: true,
-        selectionLimit: remaining,
-        quality: 0.9,
-      } as any);
-
-      if ((result as any).canceled || !(result as any).assets?.length) return;
-
-      setIsSaving(true);
-      const newUrls: string[] = [];
-      for (const asset of (result as any).assets) {
-        const response = await fetch(asset.uri);
-        const arrayBuffer = await response.arrayBuffer();
-        const fileExt = (asset.fileName || 'image.jpg').split('.').pop() || 'jpg';
-        const fileName = `${user.id}-${Date.now()}-${Math.random().toString(36).slice(2)}.${fileExt}`;
-        const filePath = `users/${user.id}/gallery/${fileName}`;
-        const filePayload: any = arrayBuffer as any;
-
-        const { error: upErr } = await supabase.storage
-          .from('user-images')
-          .upload(filePath, filePayload, { contentType: 'image/jpeg', upsert: true });
-        if (upErr) throw upErr;
-        const { data } = supabase.storage.from('user-images').getPublicUrl(filePath);
-        newUrls.push(data.publicUrl);
-      }
-
-      const merged = [...current, ...newUrls].slice(0, 6);
-      const { error: updateErr } = await supabase
-        .from('users')
-        .update({ image_urls: merged, updated_at: new Date().toISOString() })
-        .eq('id', user.id);
-      if (updateErr) throw updateErr;
-
-      setProfile((prev) => (prev ? { ...prev, image_urls: merged } as any : prev));
-      Alert.alert('הצלחה', 'התמונות נוספו');
-    } catch (e: any) {
-      Alert.alert('שגיאה', e.message || 'לא ניתן להעלות תמונות');
-    } finally {
-      setIsSaving(false);
-    }
-  };
+  // moved extra-photos upload to edit profile screen
 
   if (isLoading) {
     return (
@@ -324,7 +265,6 @@ export default function ProfileScreen() {
   if (!user) {
     return (
       <SafeAreaView style={styles.container}>
-        <NotificationsButton style={{ left: 16 }} />
         <View style={{ padding: 16, alignItems: 'center', gap: 12 }}>
           <Text style={{ color: '#FFFFFF', fontSize: 18, fontWeight: '800' }}>לא מחובר/ת</Text>
           <Text style={{ color: '#9DA4AE', textAlign: 'center' }}>
@@ -342,8 +282,14 @@ export default function ProfileScreen() {
 
   return (
       <SafeAreaView style={styles.container}>
-        <NotificationsButton style={{ left: 16 }} />
-        <ScrollView contentContainerStyle={[styles.scrollContent, { paddingBottom: Math.max(220, 120 + insets.bottom) }]}>
+        <ScrollView contentContainerStyle={[
+          styles.scrollContent,
+          {
+            // add top spacer so the global top bar won't overlap the photo
+            paddingTop: 60,
+            paddingBottom: Math.max(220, 120 + insets.bottom),
+          },
+        ]}>
 
         {!isEditing ? (
           <View style={styles.profileCard}>
@@ -376,32 +322,36 @@ export default function ProfileScreen() {
                 <Text style={styles.bioText}>{profile.bio}</Text>
               ) : null}
 
-              <TouchableOpacity
-                style={styles.editProfileBtn}
-                onPress={() => router.push('/profile/edit')}
-                activeOpacity={0.9}
-              >
-                <Edit size={18} color="#0F0F14" />
-                <Text style={styles.editProfileBtnText}>עריכת פרופיל</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.editProfileBtn, { backgroundColor: '#34D399', alignSelf: 'flex-end', marginTop: 10 }]}
-                onPress={() => router.push('/(tabs)/onboarding/survey')}
-                activeOpacity={0.9}
-              >
-                <MapPin size={18} color="#0F0F14" />
-                <Text style={styles.editProfileBtnText}>מילוי שאלון העדפות</Text>
-              </TouchableOpacity>
-
-              <View style={styles.galleryActionsRow}>
-                <TouchableOpacity style={[styles.galleryAddBtn, isSaving && { opacity: 0.6 }]} onPress={pickAndUploadExtraPhotos} disabled={isSaving}>
-                  <Text style={styles.galleryAddBtnText}>הוסף תמונות נוספות (עד 6)</Text>
+              <View style={styles.actionButtonsRow}>
+                <TouchableOpacity
+                  style={styles.editProfileBtn}
+                  onPress={() => router.push('/profile/edit')}
+                  activeOpacity={0.9}
+                >
+                  <Edit size={18} color="#FFFFFF" />
+                  <Text style={styles.editProfileBtnText}>עריכת פרופיל</Text>
                 </TouchableOpacity>
-                {!!profile?.image_urls?.length && (
-                  <Text style={styles.galleryCountText}>{profile.image_urls.length}/6</Text>
-                )}
+
+                <TouchableOpacity
+                  style={styles.editProfileBtn}
+                  onPress={() => router.push('/(tabs)/requests')}
+                  activeOpacity={0.9}
+                >
+                  <Inbox size={18} color="#FFFFFF" />
+                  <Text style={styles.editProfileBtnText}>בקשות</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.editProfileBtn}
+                  onPress={() => router.push('/(tabs)/onboarding/survey')}
+                  activeOpacity={0.9}
+                >
+                  <MapPin size={18} color="#FFFFFF" />
+                  <Text style={styles.editProfileBtnText}>מילוי שאלון העדפות</Text>
+                </TouchableOpacity>
               </View>
+
+              {/* add-images button moved to edit profile screen */}
 
               {profile?.image_urls?.length ? (
                 <View style={styles.galleryGrid}>
@@ -680,26 +630,7 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
 
-  galleryActionsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginTop: 12,
-  },
-  galleryAddBtn: {
-    backgroundColor: '#7C5CFF',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 10,
-  },
-  galleryAddBtnText: {
-    color: '#0F0F14',
-    fontWeight: '800',
-  },
-  galleryCountText: {
-    color: '#9DA4AE',
-    fontWeight: '700',
-  },
+  // actions for gallery moved to edit screen
   galleryGrid: {
     marginTop: 12,
     flexDirection: 'row',
@@ -852,10 +783,17 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     fontSize: 13,
   },
-  editProfileBtn: {
+  actionButtonsRow: {
     marginTop: 10,
-    alignSelf: 'flex-end',
-    backgroundColor: '#7C5CFF',
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 8,
+  },
+  editProfileBtn: {
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
     paddingHorizontal: 14,
     paddingVertical: 10,
     borderRadius: 12,
@@ -864,7 +802,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   editProfileBtnText: {
-    color: '#0F0F14',
+    color: '#FFFFFF',
     fontWeight: '900',
     fontSize: 14,
   },
