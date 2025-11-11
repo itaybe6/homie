@@ -71,7 +71,6 @@ export interface UserSurveyResponse {
   id: number;
   user_id: string;
   is_completed?: boolean;
-
   occupation?: string;
   is_shomer_shabbat?: boolean;
   diet_type?: string;

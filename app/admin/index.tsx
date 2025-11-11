@@ -9,10 +9,12 @@ import {
   FlatList,
   Image,
   TextInput,
+  Modal,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { BarChart2, Users, Home as HomeIcon, CheckCircle2, XCircle, Gauge, Phone, MapPin } from 'lucide-react-native';
 import { supabase } from '@/lib/supabase';
+import { authService } from '@/lib/auth';
 import { useAuthStore } from '@/stores/authStore';
 
 type AdminTab = 'overview' | 'users' | 'owners' | 'apartments' | 'matches';
@@ -20,6 +22,7 @@ type AdminTab = 'overview' | 'users' | 'owners' | 'apartments' | 'matches';
 export default function AdminDashboard() {
   const router = useRouter();
   const authUser = useAuthStore((s) => s.user);
+  const setStoreUser = useAuthStore((s) => s.setUser);
   const [active, setActive] = useState<AdminTab>('overview');
   const [loading, setLoading] = useState(true);
 
@@ -34,6 +37,15 @@ export default function AdminDashboard() {
   const [userMap, setUserMap] = useState<Record<string, any>>({});
   const [genderFilter, setGenderFilter] = useState<'all' | 'male' | 'female'>('all');
   const [apartmentPartners, setApartmentPartners] = useState<Record<string, any[]>>({});
+  // Apartments filters
+  const [aptCityQuery, setAptCityQuery] = useState<string>('');
+  const [priceMin, setPriceMin] = useState<string>('');
+  const [priceMax, setPriceMax] = useState<string>('');
+  const [minBedrooms, setMinBedrooms] = useState<string>('');
+  const [minBathrooms, setMinBathrooms] = useState<string>('');
+  const [withImages, setWithImages] = useState<boolean>(false);
+  const [withPartners, setWithPartners] = useState<boolean>(false);
+  const [isFiltersOpen, setIsFiltersOpen] = useState<boolean>(false);
 
   // Guard: only admins
   useEffect(() => {
@@ -179,6 +191,33 @@ export default function AdminDashboard() {
       .filter((u) => (u.full_name || '').toLowerCase().includes(q));
   }, [users, userQuery]);
 
+  const filteredApartments = useMemo(() => {
+    const q = aptCityQuery.trim().toLowerCase();
+    const pmin = priceMin.trim() ? parseInt(priceMin.trim(), 10) : undefined;
+    const pmax = priceMax.trim() ? parseInt(priceMax.trim(), 10) : undefined;
+    const bmin = minBedrooms.trim() ? parseInt(minBedrooms.trim(), 10) : undefined;
+    const bathmin = minBathrooms.trim() ? parseInt(minBathrooms.trim(), 10) : undefined;
+
+    return apartments.filter((apt: any) => {
+      if (q && !(apt.city || '').toLowerCase().includes(q) && !(apt.neighborhood || '').toLowerCase().includes(q)) {
+        return false;
+      }
+      if (typeof pmin === 'number' && Number(apt.price) < pmin) return false;
+      if (typeof pmax === 'number' && Number(apt.price) > pmax) return false;
+      if (typeof bmin === 'number' && Number(apt.bedrooms || 0) < bmin) return false;
+      if (typeof bathmin === 'number' && Number(apt.bathrooms || 0) < bathmin) return false;
+      if (withImages) {
+        const imgs = Array.isArray(apt.image_urls) ? apt.image_urls : apt.image_url ? [apt.image_url] : [];
+        if (imgs.length === 0) return false;
+      }
+      if (withPartners) {
+        const partners = Array.isArray(apt.partner_ids) ? apt.partner_ids : [];
+        if (partners.length === 0) return false;
+      }
+      return true;
+    });
+  }, [apartments, aptCityQuery, priceMin, priceMax, minBedrooms, minBathrooms, withImages, withPartners]);
+
   const statCards = useMemo(
     () => [
       { key: 'users', title: 'משתמשים', value: totalUsers, icon: Users, color: '#7C5CFF' },
@@ -198,6 +237,20 @@ export default function AdminDashboard() {
       <View style={styles.header}>
         <Text style={styles.title}>ממשק מנהל</Text>
         <Text style={styles.subtitle}>סקירה וסטטיסטיקות מערכת</Text>
+        <TouchableOpacity
+          style={styles.logoutBtn}
+          activeOpacity={0.9}
+          onPress={async () => {
+            try {
+              await authService.signOut();
+              setStoreUser(null);
+              router.replace('/auth/login');
+            } catch {
+              // ignore
+            }
+          }}>
+          <Text style={styles.logoutText}>התנתק</Text>
+        </TouchableOpacity>
       </View>
 
       <View style={styles.tabs}>
@@ -316,13 +369,114 @@ export default function AdminDashboard() {
           />
         </View>
       ) : active === 'apartments' ? (
-        <FlatList
-          contentContainerStyle={styles.listContent}
-          data={apartments}
-          keyExtractor={(item) => item.id}
-          ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
-          renderItem={({ item }) => <ApartmentRow apt={item} partners={apartmentPartners[item.id]} />}
-        />
+        <View style={{ flex: 1 }}>
+          <View style={styles.filtersTopRow}>
+            <TouchableOpacity style={styles.filterBtn} activeOpacity={0.9} onPress={() => setIsFiltersOpen(true)}>
+              <Text style={styles.filterBtnText}>סינון</Text>
+            </TouchableOpacity>
+          </View>
+
+          <FlatList
+            contentContainerStyle={styles.listContent}
+            data={filteredApartments}
+            keyExtractor={(item) => item.id}
+            ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
+            renderItem={({ item }) => <ApartmentRow apt={item} partners={apartmentPartners[item.id]} />}
+          />
+
+          <Modal visible={isFiltersOpen} animationType="fade" transparent onRequestClose={() => setIsFiltersOpen(false)}>
+            <View style={styles.modalOverlay}>
+              <View style={styles.modalCard}>
+                <View style={styles.modalHeader}>
+                  <Text style={styles.modalTitle}>סינון דירות</Text>
+                  <TouchableOpacity onPress={() => setIsFiltersOpen(false)}>
+                    <Text style={styles.modalClose}>סגור</Text>
+                  </TouchableOpacity>
+                </View>
+
+                <View style={styles.filtersWrap}>
+                  <TextInput
+                    style={[styles.searchInput, { flex: 1 }]}
+                    placeholder="חיפוש לפי עיר/שכונה..."
+                    placeholderTextColor="#9DA4AE"
+                    value={aptCityQuery}
+                    onChangeText={setAptCityQuery}
+                    textAlign="right"
+                  />
+                </View>
+                <View style={styles.filtersGrid}>
+                  <TextInput
+                    style={[styles.smallInput]}
+                    placeholder="מינ׳ מחיר"
+                    placeholderTextColor="#9DA4AE"
+                    keyboardType="number-pad"
+                    value={priceMin}
+                    onChangeText={setPriceMin}
+                    textAlign="right"
+                  />
+                  <TextInput
+                    style={[styles.smallInput]}
+                    placeholder="מקס׳ מחיר"
+                    placeholderTextColor="#9DA4AE"
+                    keyboardType="number-pad"
+                    value={priceMax}
+                    onChangeText={setPriceMax}
+                    textAlign="right"
+                  />
+                  <TextInput
+                    style={[styles.smallInput]}
+                    placeholder="מינ׳ חדרי שינה"
+                    placeholderTextColor="#9DA4AE"
+                    keyboardType="number-pad"
+                    value={minBedrooms}
+                    onChangeText={setMinBedrooms}
+                    textAlign="right"
+                  />
+                  <TextInput
+                    style={[styles.smallInput]}
+                    placeholder="מינ׳ מקלחות"
+                    placeholderTextColor="#9DA4AE"
+                    keyboardType="number-pad"
+                    value={minBathrooms}
+                    onChangeText={setMinBathrooms}
+                    textAlign="right"
+                  />
+                </View>
+                <View style={styles.toggleRow}>
+                  <TouchableOpacity
+                    onPress={() => setWithImages((v) => !v)}
+                    style={[styles.toggleBtn, withImages && styles.toggleBtnActive]}>
+                    <Text style={[styles.toggleText, withImages && styles.toggleTextActive]}>עם תמונות</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => setWithPartners((v) => !v)}
+                    style={[styles.toggleBtn, withPartners && styles.toggleBtnActive]}>
+                    <Text style={[styles.toggleText, withPartners && styles.toggleTextActive]}>עם שותפים</Text>
+                  </TouchableOpacity>
+                </View>
+
+                <View style={styles.modalActions}>
+                  <TouchableOpacity
+                    onPress={() => {
+                      setAptCityQuery('');
+                      setPriceMin('');
+                      setPriceMax('');
+                      setMinBedrooms('');
+                      setMinBathrooms('');
+                      setWithImages(false);
+                      setWithPartners(false);
+                    }}
+                    style={styles.clearBtn}>
+                    <Text style={styles.clearText}>נקה</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={() => setIsFiltersOpen(false)} style={styles.applyBtn}>
+                    <Text style={styles.applyText}>אישור</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
+          </Modal>
+        </View>
       ) : (
         <View style={{ flex: 1 }}>
           <View style={[styles.section, { paddingHorizontal: 16 }]}>
@@ -572,6 +726,21 @@ const styles = StyleSheet.create({
     textAlign: 'right',
     writingDirection: 'rtl',
   },
+  logoutBtn: {
+    marginTop: 10,
+    alignSelf: 'flex-end',
+    backgroundColor: '#1B1B29',
+    borderWidth: 1,
+    borderColor: '#2A2A37',
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+  },
+  logoutText: {
+    color: '#EF4444',
+    fontSize: 13,
+    fontWeight: '800',
+  },
   tabs: {
     flexDirection: 'row',
     gap: 8,
@@ -677,6 +846,12 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 15,
     fontWeight: '800',
+    textAlign: 'right',
+  },
+  rowSubtitle: {
+    color: '#9DA4AE',
+    fontSize: 12,
+    marginTop: 4,
     textAlign: 'right',
   },
   rowMeta: {
@@ -908,6 +1083,137 @@ const styles = StyleSheet.create({
     backgroundColor: '#1B1B29',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  filtersWrap: {
+    paddingHorizontal: 16,
+    paddingTop: 10,
+  },
+  filtersGrid: {
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  smallInput: {
+    flexGrow: 1,
+    minWidth: 120,
+    backgroundColor: '#141420',
+    borderWidth: 1,
+    borderColor: '#2A2A37',
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    color: '#FFFFFF',
+  },
+  toggleRow: {
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    flexDirection: 'row',
+    gap: 8,
+  },
+  toggleBtn: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: '#2A2A37',
+    backgroundColor: '#141420',
+    borderRadius: 12,
+    alignItems: 'center',
+    paddingVertical: 10,
+  },
+  toggleBtnActive: {
+    borderColor: '#7C5CFF',
+    backgroundColor: '#1B1B29',
+  },
+  toggleText: {
+    color: '#9DA4AE',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  toggleTextActive: {
+    color: '#FFFFFF',
+  },
+  clearBtn: {
+    borderWidth: 1,
+    borderColor: '#2A2A37',
+    backgroundColor: '#141420',
+    borderRadius: 12,
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+  },
+  clearText: {
+    color: '#F59E0B',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  filtersTopRow: {
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    paddingBottom: 0,
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+  },
+  filterBtn: {
+    backgroundColor: '#7C5CFF',
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+  },
+  filterBtnText: {
+    color: '#0F0F14',
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 16,
+  },
+  modalCard: {
+    width: '100%',
+    backgroundColor: '#0F0F14',
+    borderWidth: 1,
+    borderColor: '#2A2A37',
+    borderRadius: 16,
+    paddingVertical: 14,
+  },
+  modalHeader: {
+    paddingHorizontal: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  modalTitle: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  modalClose: {
+    color: '#9DA4AE',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  modalActions: {
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    flexDirection: 'row',
+    gap: 10,
+    justifyContent: 'space-between',
+  },
+  applyBtn: {
+    backgroundColor: '#22C55E',
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+  },
+  applyText: {
+    color: '#0F0F14',
+    fontSize: 14,
+    fontWeight: '800',
   },
 });
 
