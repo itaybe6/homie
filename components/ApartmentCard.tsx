@@ -1,5 +1,5 @@
 import { View, Text, StyleSheet, TouchableOpacity, Image } from 'react-native';
-import { MapPin, Bed, Bath, Filter } from 'lucide-react-native';
+import { MapPin, Bed, Bath } from 'lucide-react-native';
 import { Apartment } from '@/types/database';
 import { useState, useMemo } from 'react';
 
@@ -45,10 +45,7 @@ export default function ApartmentCard({
           resizeMode="cover"
           onError={() => setFailed(true)}
         />
-
-        <TouchableOpacity activeOpacity={0.85} style={styles.overlayButton}>
-          <Filter size={18} color="#FFFFFF" />
-        </TouchableOpacity>
+        
       </View>
       <View style={styles.content}>
         <View style={styles.titleRow}>
