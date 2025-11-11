@@ -9,6 +9,7 @@ import {
   Animated,
   Dimensions,
   Easing,
+  Alert,
 } from 'react-native';
 import { Home, SlidersHorizontal, ChevronLeft, ChevronRight } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
@@ -38,6 +39,7 @@ export default function PartnersScreen() {
       const { data, error } = await supabase
         .from('users')
         .select('*')
+        .eq('role', 'user')
         .order('created_at', { ascending: false });
       if (error) throw error;
       const list = (data || []) as User[];
@@ -77,19 +79,28 @@ export default function PartnersScreen() {
   const goNext = () => slideTo(currentIndex + 1, 'next');
   const goPrev = () => slideTo(currentIndex - 1, 'prev');
 
-  const handleLike = (user: User) => {
-    // Placeholder handler; backend connections table can be wired later
-    console.log('like', user.id);
+  const handleLike = async (likedUser: User) => {
+    try {
+      if (!currentUser?.id) {
+        Alert.alert('שגיאה', 'יש להתחבר כדי לבצע פעולה זו');
+        return;
+      }
+      await supabase.from('notifications').insert({
+        sender_id: currentUser.id,
+        recipient_id: likedUser.id,
+        title: 'בקשת שותפות חדשה',
+        description: 'המשתמש מעוניין להיות שותף שלך.',
+      });
+      Alert.alert('נשלח', 'הודעה נשלחה למשתמש');
+    } catch (e: any) {
+      console.error('like failed', e);
+      Alert.alert('שגיאה', e?.message || 'לא ניתן לשלוח בקשה');
+    }
   };
   const handlePass = (user: User) => {
     console.log('pass', user.id);
   };
-  const handleFavorite = (user: User) => {
-    console.log('favorite', user.id);
-  };
-  const handleMessage = (user: User) => {
-    console.log('message', user.id);
-  };
+  // Removed favorite action per request
 
   if (isLoading) {
     return (
@@ -114,10 +125,6 @@ export default function PartnersScreen() {
             <SlidersHorizontal size={20} color="#FFFFFF" />
           </TouchableOpacity>
         </View>
-      </View>
-
-      <View style={styles.headerArea}>
-        <Text style={styles.headerTitle}>מצא/י שותפים</Text>
       </View>
 
       <View style={styles.listContent}>
@@ -152,8 +159,6 @@ export default function PartnersScreen() {
                 user={users[currentIndex]}
                 onLike={handleLike}
                 onPass={handlePass}
-                onFavorite={handleFavorite}
-                onMessage={handleMessage}
                 onOpen={(u) => router.push({ pathname: '/user/[id]', params: { id: u.id } })}
               />
             </Animated.View>
@@ -203,7 +208,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingTop: 10,
+    paddingTop: 52,
     paddingBottom: 8,
   },
   brandRow: {

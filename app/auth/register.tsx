@@ -167,8 +167,15 @@ export default function RegisterScreen() {
           await uploadAvatar(user.id, avatarUrl);
         }
         if (mode === 'owner') {
+          // Ensure role is explicitly stored as 'owner' even if profile upsert skipped/partial
+          try {
+            await supabase.from('users').update({ role: 'owner' as any }).eq('id', user.id);
+          } catch (e) {
+            // Non-blocking; role column may be missing until migrations are applied
+            console.warn('Failed to set owner role, check DB migrations:', e);
+          }
           setUser({ id: user.id, email: user.email! });
-          router.replace('/(tabs)/add-apartment');
+          router.push({ pathname: '/(tabs)/add-apartment', params: { from: 'register-owner' } as any });
         } else {
           setUser({ id: user.id, email: user.email! });
           router.replace('/(tabs)/home');

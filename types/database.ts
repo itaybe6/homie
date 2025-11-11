@@ -53,3 +53,52 @@ export interface Notification {
   is_read?: boolean;
   created_at: string;
 }
+
+export interface UserSurveyResponse {
+  id: number;
+  user_id: string;
+  is_completed?: boolean;
+
+  occupation?: string;
+  is_shomer_shabbat?: boolean;
+  diet_type?: string;
+  is_smoker?: boolean;
+  relationship_status?: string;
+  has_pet?: boolean;
+  lifestyle?: string;
+  cleanliness_importance?: number; // 1–5
+  cleaning_frequency?: string;
+  hosting_preference?: string;
+  cooking_style?: string;
+  home_vibe?: string;
+  price_range?: number;
+  bills_included?: boolean;
+  preferred_location?: string;
+  floor_preference?: string;
+  has_balcony?: boolean;
+  has_elevator?: boolean;
+  wants_master_room?: boolean;
+  move_in_month?: string;
+  preferred_roommates?: number;
+  pets_allowed?: boolean;
+  with_broker?: boolean;
+  sublet_dates?: string;
+  sublet_pets_allowed?: boolean;
+  sublet_people_count?: number;
+  sublet_price?: number;
+  sublet_location?: string;
+  sublet_floor?: string;
+  sublet_balcony?: boolean;
+  sublet_elevator?: boolean;
+  sublet_master_room?: boolean;
+  preferred_age_range?: string;
+  preferred_gender?: string;
+  preferred_occupation?: string;
+  partner_shabbat_preference?: string;
+  partner_diet_preference?: string;
+  partner_smoking_preference?: string;
+  partner_pets_preference?: string;
+
+  created_at: string;
+  updated_at: string;
+}

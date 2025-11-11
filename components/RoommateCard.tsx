@@ -1,18 +1,16 @@
 import { View, Text, StyleSheet, TouchableOpacity, Image } from 'react-native';
-import { Heart, Star, X, MessageSquare, MapPin } from 'lucide-react-native';
+import { Heart, X, MapPin } from 'lucide-react-native';
 import { User } from '@/types/database';
 
 interface RoommateCardProps {
   user: User;
   onLike?: (user: User) => void;
   onPass?: (user: User) => void;
-  onFavorite?: (user: User) => void;
-  onMessage?: (user: User) => void;
   onOpen?: (user: User) => void;
 }
 
 const DEFAULT_AVATAR =
-  'https://images.pexels.com/photos/774909/pexels-photo-774909.jpeg';
+  'https://cdn-icons-png.flaticon.com/512/847/847969.png';
 
 function computeMatchPercent(id: string | undefined, seedText: string | undefined) {
   const base = `${id || ''}:${seedText || ''}`;
@@ -38,8 +36,6 @@ export default function RoommateCard({
   user,
   onLike,
   onPass,
-  onFavorite,
-  onMessage,
   onOpen,
 }: RoommateCardProps) {
   const match = computeMatchPercent(user.id, user.bio || user.full_name);
@@ -107,30 +103,12 @@ export default function RoommateCard({
 
           <TouchableOpacity
             activeOpacity={0.9}
-            style={[styles.circleBtn, styles.favoriteBtn]}
-            onPress={() => onFavorite?.(user)}
-          >
-            <Star size={22} color="#7C5CFF" />
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            activeOpacity={0.9}
             style={[styles.circleBtn, styles.likeBtn]}
             onPress={() => onLike?.(user)}
           >
             <Heart size={22} color="#22C55E" />
           </TouchableOpacity>
 
-          <View style={{ flex: 1 }} />
-
-          <TouchableOpacity
-            activeOpacity={0.9}
-            style={styles.messageBtn}
-            onPress={() => onMessage?.(user)}
-          >
-            <MessageSquare size={16} color="#0F0F14" />
-            <Text style={styles.messageText}>הודעה</Text>
-          </TouchableOpacity>
         </View>
       </View>
     </TouchableOpacity>
@@ -260,6 +238,7 @@ const styles = StyleSheet.create({
   actionsRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
   },
   circleBtn: {
     width: 58,
@@ -268,15 +247,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 2,
-    marginRight: 10,
+    // Buttons sit at opposite sides; no side margin needed
   },
   passBtn: {
     borderColor: 'rgba(244,63,94,0.6)',
     backgroundColor: 'rgba(244,63,94,0.08)',
-  },
-  favoriteBtn: {
-    borderColor: 'rgba(124,92,255,0.6)',
-    backgroundColor: 'rgba(124,92,255,0.08)',
   },
   likeBtn: {
     borderColor: 'rgba(34,197,94,0.6)',

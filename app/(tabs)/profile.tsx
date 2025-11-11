@@ -385,6 +385,15 @@ export default function ProfileScreen() {
                 <Text style={styles.editProfileBtnText}>עריכת פרופיל</Text>
               </TouchableOpacity>
 
+              <TouchableOpacity
+                style={[styles.editProfileBtn, { backgroundColor: '#34D399', alignSelf: 'flex-end', marginTop: 10 }]}
+                onPress={() => router.push('/(tabs)/onboarding/survey')}
+                activeOpacity={0.9}
+              >
+                <MapPin size={18} color="#0F0F14" />
+                <Text style={styles.editProfileBtnText}>מילוי שאלון העדפות</Text>
+              </TouchableOpacity>
+
               <View style={styles.galleryActionsRow}>
                 <TouchableOpacity style={[styles.galleryAddBtn, isSaving && { opacity: 0.6 }]} onPress={pickAndUploadExtraPhotos} disabled={isSaving}>
                   <Text style={styles.galleryAddBtnText}>הוסף תמונות נוספות (עד 6)</Text>

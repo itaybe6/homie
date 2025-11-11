@@ -21,6 +21,7 @@ import {
   Bath,
   Users,
   Trash2,
+  Pencil,
   ChevronLeft,
   ChevronRight,
   X,
@@ -51,6 +52,8 @@ export default function ApartmentDetailsScreen() {
   const [isAdding, setIsAdding] = useState(false);
   const [addSearch, setAddSearch] = useState('');
   const [removingId, setRemovingId] = useState<string | null>(null);
+  const [isRequestingJoin, setIsRequestingJoin] = useState(false);
+  const [hasRequestedJoin, setHasRequestedJoin] = useState(false);
   const [confirmState, setConfirmState] = useState<{
     visible: boolean;
     title: string;
@@ -180,6 +183,78 @@ export default function ApartmentDetailsScreen() {
     0,
     (apartment.bedrooms || 0) - (roommatesCount + 1)
   );
+  const currentPartnerIds: string[] = Array.isArray((apartment as any).partner_ids)
+    ? ((apartment as any).partner_ids as string[])
+    : [];
+  const isMember = !!(user?.id && currentPartnerIds.includes(user.id));
+
+  const handleRequestJoin = async () => {
+    try {
+      if (!user?.id) {
+        Alert.alert('שגיאה', 'יש להתחבר כדי לבצע פעולה זו');
+        return;
+      }
+      if (isOwner || isMember) return;
+
+      setIsRequestingJoin(true);
+
+      // Optional lightweight dedupe: check if a recent request was sent to the owner in the last day
+      const yesterdayIso = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      const { count: recentCount } = await supabase
+        .from('notifications')
+        .select('id', { count: 'exact', head: true })
+        .eq('sender_id', user.id)
+        .eq('recipient_id', apartment.owner_id)
+        .gte('created_at', yesterdayIso);
+      if ((recentCount || 0) > 0) {
+        setHasRequestedJoin(true);
+        Alert.alert('נשלח', 'כבר שלחת בקשה לאחרונה');
+        return;
+      }
+
+      const recipients = Array.from(
+        new Set<string>([apartment.owner_id, ...currentPartnerIds].filter((rid) => rid && rid !== user.id))
+      );
+
+      if (recipients.length === 0) {
+        Alert.alert('שגיאה', 'אין למי לשלוח בקשה כרגע');
+        return;
+      }
+
+      // Fetch sender name for nicer message
+      let senderName = 'משתמש';
+      try {
+        const { data: me } = await supabase
+          .from('users')
+          .select('full_name')
+          .eq('id', user.id)
+          .maybeSingle();
+        senderName = (me as any)?.full_name || senderName;
+      } catch {}
+
+      const title = 'בקשה להצטרף כדייר';
+      const description = `${senderName} מעוניין להצטרף לדירה: ${apartment.title} (${apartment.city})`;
+
+      const rows = recipients.map((rid) => ({
+        sender_id: user.id!,
+        recipient_id: rid,
+        title,
+        // Important: do NOT embed INVITE_APT metadata here to avoid showing an approve button for recipients
+        description,
+      }));
+
+      const { error: insertErr } = await supabase.from('notifications').insert(rows);
+      if (insertErr) throw insertErr;
+
+      setHasRequestedJoin(true);
+      Alert.alert('נשלח', 'בקשתך נשלחה לבעל הדירה והשותפים');
+    } catch (e: any) {
+      console.error('request join failed', e);
+      Alert.alert('שגיאה', e?.message || 'לא ניתן לשלוח בקשה כעת');
+    } finally {
+      setIsRequestingJoin(false);
+    }
+  };
 
   const filteredCandidates = (() => {
     const q = (addSearch || '').trim().toLowerCase();
@@ -195,6 +270,7 @@ export default function ApartmentDetailsScreen() {
       const { data, error } = await supabase
         .from('users')
         .select('*')
+        .eq('role', 'user')
         .order('created_at', { ascending: false });
       if (error) throw error;
       const all = (data || []) as User[];
@@ -351,7 +427,44 @@ export default function ApartmentDetailsScreen() {
 
   return (
     <View style={styles.container}>
-      <ScrollView contentContainerStyle={{ paddingBottom: 16 }}>
+      <ScrollView contentContainerStyle={{ paddingBottom: 16, paddingTop: 16 }}>
+        {/* Owner actions pinned to top of the page */}
+        {isOwner ? (
+          <View style={styles.topActionsRow}>
+            <TouchableOpacity
+              style={styles.actionBtn}
+              onPress={() => router.push({ pathname: '/apartment/edit/[id]', params: { id: apartment.id } })}
+              activeOpacity={0.9}
+            >
+              <Pencil size={16} color="#FFFFFF" />
+              <Text style={styles.actionBtnText}>עריכה</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.actionBtnDanger}
+              onPress={handleDeleteApartment}
+              activeOpacity={0.9}
+            >
+              <Trash2 size={16} color="#F87171" />
+              <Text style={styles.actionBtnDangerText}>מחק</Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
+
+        <View style={styles.topHeader}>
+          <Text style={styles.heroTitle} numberOfLines={2}>
+            {apartment.title}
+          </Text>
+          <View style={styles.heroLocation}>
+            <MapPin size={16} color="#C9CDD6" />
+            <Text style={styles.heroLocationText} numberOfLines={1}>
+              {apartment.neighborhood ? `${apartment.neighborhood}, ` : ''}
+              {apartment.city}
+            </Text>
+          </View>
+          <Text style={styles.subMeta}>
+            {apartment.bedrooms} חדרים · {roommatesNeeded} מחפשי שותף
+          </Text>
+        </View>
         <View style={styles.galleryContainer}>
           <ScrollView
             ref={galleryRef}
@@ -380,6 +493,15 @@ export default function ApartmentDetailsScreen() {
               </View>
             ))}
           </ScrollView>
+
+          {/* Price overlay at bottom-left of the image */}
+          <View style={styles.priceOverlay}>
+            <View style={styles.pricePill}>
+              <Text style={styles.currencyText}>₪</Text>
+              <Text style={styles.priceText}>{apartment.price}</Text>
+              <Text style={styles.priceUnitDark}>/חודש</Text>
+            </View>
+          </View>
 
           {images.length > 1 ? (
             <>
@@ -436,30 +558,11 @@ export default function ApartmentDetailsScreen() {
             ) : null}
           </View>
 
-          {/* moved textual info below the image */}
+          {/* owner actions above the roommates avatars */}
+          {null}
         </View>
 
         <View style={styles.content}>
-          <View style={styles.infoCard}>
-            <View style={styles.pricePill}>
-              <Text style={styles.currencyText}>₪</Text>
-              <Text style={styles.priceText}>{apartment.price}</Text>
-              <Text style={styles.priceUnitDark}>/חודש</Text>
-            </View>
-            <Text style={styles.heroTitle} numberOfLines={2}>
-              {apartment.title}
-            </Text>
-            <View style={styles.heroLocation}>
-              <MapPin size={16} color="#C9CDD6" />
-              <Text style={styles.heroLocationText} numberOfLines={1}>
-                {apartment.neighborhood ? `${apartment.neighborhood}, ` : ''}
-                {apartment.city}
-              </Text>
-            </View>
-            <Text style={styles.subMeta}>
-              {apartment.bedrooms} חדרים · {roommatesNeeded} מחפשי שותף
-            </Text>
-          </View>
           <View style={styles.detailsRow}>
             <View style={styles.detailBoxDark}>
               <Bed size={20} color="#7C5CFF" />
@@ -497,11 +600,21 @@ export default function ApartmentDetailsScreen() {
         </View>
       </ScrollView>
 
-      {isOwner ? (
-        <View style={[styles.footer, { marginBottom: 92 }]}>
-          <TouchableOpacity style={styles.deleteButton} onPress={handleDeleteApartment} activeOpacity={0.9}>
-            <Trash2 size={18} color="#FFFFFF" />
-            <Text style={styles.deleteButtonText}>מחק דירה</Text>
+      {/* Join as roommate button (for non-owner, non-member viewers) */}
+      {!isOwner && !isMember ? (
+        <View style={styles.footer}>
+          <TouchableOpacity
+            activeOpacity={0.9}
+            onPress={handleRequestJoin}
+            disabled={isRequestingJoin || hasRequestedJoin}
+            style={[
+              styles.joinBtn,
+              (isRequestingJoin || hasRequestedJoin) ? styles.joinBtnDisabled : null,
+            ]}
+          >
+            <Text style={styles.joinBtnText}>
+              {isRequestingJoin ? 'שולח...' : hasRequestedJoin ? 'נשלחה בקשה' : 'מעוניין להיכנס שותף בדירה'}
+            </Text>
           </TouchableOpacity>
         </View>
       ) : null}
@@ -673,9 +786,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#0F0F14',
   },
   addAvatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'rgba(255,255,255,0.10)',
@@ -725,10 +838,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row-reverse',
     alignItems: 'center',
   },
+  topHeader: {
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 8,
+    writingDirection: 'rtl',
+  },
   avatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     borderWidth: 2,
     borderColor: 'rgba(15,15,20,0.9)',
     backgroundColor: '#1F1F29',
@@ -799,6 +918,46 @@ const styles = StyleSheet.create({
     borderRadius: 4,
     backgroundColor: '#FFFFFF',
   },
+  topActionsRow: {
+    paddingHorizontal: 16,
+    marginTop: 12,
+    marginBottom: 8,
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 10,
+  },
+  actionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    backgroundColor: 'rgba(255,255,255,0.10)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
+    borderRadius: 12,
+  },
+  actionBtnText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  actionBtnDanger: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    backgroundColor: 'rgba(248,113,113,0.10)',
+    borderWidth: 1,
+    borderColor: 'rgba(248,113,113,0.28)',
+    borderRadius: 12,
+  },
+  actionBtnDangerText: {
+    color: '#F87171',
+    fontSize: 14,
+    fontWeight: '900',
+  },
   pricePill: {
     alignSelf: 'flex-start',
     flexDirection: 'row',
@@ -828,12 +987,19 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginLeft: 2,
   },
+  priceOverlay: {
+    position: 'absolute',
+    left: 16,
+    bottom: 12,
+    zIndex: 6,
+  },
   heroTitle: {
     color: '#FFFFFF',
     fontSize: 22,
     fontWeight: '800',
     lineHeight: 28,
     textAlign: 'right',
+    writingDirection: 'rtl',
   },
   heroLocation: {
     flexDirection: 'row-reverse',
@@ -912,6 +1078,25 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#9DA4AE',
   },
+  joinBtn: {
+    flex: 1,
+    backgroundColor: '#7C5CFF',
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(124,92,255,0.45)',
+  },
+  joinBtnDisabled: {
+    backgroundColor: 'rgba(124,92,255,0.45)',
+    borderColor: 'rgba(124,92,255,0.25)',
+  },
+  joinBtnText: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '900',
+  },
   footer: {
     padding: 16,
     borderTopWidth: 1,
@@ -920,7 +1105,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 12,
   },
-  addButton: {
+  // deprecated old bottom action buttons kept for potential reuse
+  editButton: {
     flex: 1,
     backgroundColor: '#A78BFA',
     paddingVertical: 14,
@@ -930,23 +1116,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 8,
   },
-  addButtonText: {
+  editButtonText: {
     color: '#0F0F14',
-    fontSize: 15,
-    fontWeight: '800',
-  },
-  deleteButton: {
-    flex: 1,
-    backgroundColor: '#DC2626',
-    paddingVertical: 14,
-    borderRadius: 12,
-    alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 8,
-  },
-  deleteButtonText: {
-    color: '#FFFFFF',
     fontSize: 15,
     fontWeight: '800',
   },
@@ -1185,6 +1356,7 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
 });
+
 
 
 

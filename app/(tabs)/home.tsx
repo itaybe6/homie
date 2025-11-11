@@ -169,18 +169,18 @@ export default function HomeScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <NotificationsButton style={{ left: 16 }} />
-      <View style={styles.topBar}>
+      <View style={[styles.topBar, { paddingTop: 52 }]}>
         <View style={styles.brandRow} />
         <View style={styles.actionsRow}>
+          <TouchableOpacity activeOpacity={0.8} style={styles.topActionBtn} onPress={() => setIsFilterOpen(true)}>
+            <SlidersHorizontal size={20} color="#FFFFFF" />
+          </TouchableOpacity>
           <TouchableOpacity
             activeOpacity={0.8}
             style={styles.topActionBtn}
             onPress={() => router.push('/(tabs)/add-apartment')}
           >
             <Plus size={20} color="#FFFFFF" />
-          </TouchableOpacity>
-          <TouchableOpacity activeOpacity={0.8} style={styles.topActionBtn} onPress={() => setIsFilterOpen(true)}>
-            <SlidersHorizontal size={20} color="#FFFFFF" />
           </TouchableOpacity>
         </View>
       </View>
@@ -424,7 +424,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   actionsRow: {
-    flexDirection: 'row',
+    flexDirection: 'row-reverse',
     alignItems: 'center',
     gap: 8,
   },

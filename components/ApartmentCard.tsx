@@ -55,11 +55,6 @@ export default function ApartmentCard({
           <Text style={styles.title} numberOfLines={1}>
             {apartment.title}
           </Text>
-          <View style={styles.priceContainer}>
-            <Text style={styles.currency}>₪</Text>
-            <Text style={styles.price}>{apartment.price}</Text>
-            <Text style={styles.priceUnit}>/חודש</Text>
-          </View>
         </View>
 
         <View style={styles.locationRow}>
@@ -95,6 +90,14 @@ export default function ApartmentCard({
           ) : (
             <View />
           )}
+        </View>
+
+        <View style={styles.bottomBar}>
+          <View style={styles.priceContainer}>
+            <Text style={styles.currency}>₪</Text>
+            <Text style={styles.price}>{apartment.price}</Text>
+            <Text style={styles.priceUnit}>/חודש</Text>
+          </View>
         </View>
       </View>
     </TouchableOpacity>
@@ -185,7 +188,6 @@ const styles = StyleSheet.create({
   priceContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginRight: 'auto',
   },
   price: {
     fontSize: 18,
@@ -233,6 +235,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     direction: 'rtl',
+  },
+  bottomBar: {
+    marginTop: 12,
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
   },
   description: {
     fontSize: 14,

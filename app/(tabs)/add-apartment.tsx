@@ -14,7 +14,7 @@ import {
   Image,
   Switch,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/authStore';
 import { useApartmentStore } from '@/stores/apartmentStore';
@@ -25,6 +25,7 @@ import NotificationsButton from '@/components/NotificationsButton';
 
 export default function AddApartmentScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams() as { from?: string };
   const { user } = useAuthStore();
   const addApartment = useApartmentStore((state) => state.addApartment);
 
@@ -104,6 +105,10 @@ export default function AddApartmentScreen() {
 
   const handleBack = () => {
     try {
+      if (params?.from === 'register-owner') {
+        router.replace('/auth/register');
+        return;
+      }
       // Go back if possible; otherwise fall back to home
       // @ts-ignore - canGoBack exists on Expo Router
       if (typeof (router as any).canGoBack === 'function' && (router as any).canGoBack()) {
@@ -565,6 +570,8 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     padding: 16,
+    // Give room for the floating notifications button so it won't overlap the title
+    paddingTop: 52,
   },
   header: {
     marginBottom: 24,
