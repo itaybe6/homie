@@ -57,3 +57,4 @@ for each row
 execute function public.trigger_send_expo_push();
 
 
+
