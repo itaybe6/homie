@@ -40,7 +40,7 @@ export default function NotificationsScreen() {
       const { data, error } = await supabase
         .from('notifications')
         .select('*')
-        .or(`recipient_id.eq.${user.id},sender_id.eq.${user.id}`)
+        .eq('recipient_id', user.id)
         .order('created_at', { ascending: false });
       if (error) throw error;
       const notifications = ((data || []) as Notification[]);
@@ -243,7 +243,6 @@ export default function NotificationsScreen() {
             const aptImage = apt
               ? (Array.isArray(apt.image_urls) && apt.image_urls.length ? apt.image_urls[0] : APT_PLACEHOLDER)
               : null;
-            const isOutgoing = item.sender_id === user.id;
             return (
               <View style={styles.rowRtl}>
                 <TouchableOpacity
@@ -275,11 +274,6 @@ export default function NotificationsScreen() {
                       {!!sender?.full_name && (
                         <Text style={styles.senderName} numberOfLines={1}>{sender.full_name}</Text>
                       )}
-                      {isOutgoing ? (
-                        <View style={styles.outgoingPill}>
-                          <Text style={styles.outgoingPillText}>נשלח</Text>
-                        </View>
-                      ) : null}
                       <Text style={styles.cardDesc} numberOfLines={2}>{displayDescription(item.description)}</Text>
                       <Text style={styles.cardMeta}>
                         {new Date(item.created_at).toLocaleString()}
@@ -500,21 +494,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 8 as any,
     marginTop: 10,
-  },
-  outgoingPill: {
-    alignSelf: 'flex-start',
-    backgroundColor: 'rgba(124,92,255,0.18)',
-    borderColor: 'rgba(124,92,255,0.35)',
-    borderWidth: 1,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 8,
-    marginBottom: 6,
-  },
-  outgoingPillText: {
-    color: '#C7B7FF',
-    fontSize: 11,
-    fontWeight: '800',
   },
   approveBtn: {
     backgroundColor: '#22C55E',

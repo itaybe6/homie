@@ -58,7 +58,7 @@ function NotificationsButtonBase({ style, badgeCount }: Props) {
         accessibilityRole="button"
         accessibilityLabel="Notifications"
         activeOpacity={0.85}
-        onPress={() => router.push('/notifications')}
+        onPress={() => router.push('/(tabs)/notifications')}
         style={styles.btn}
       >
         <Bell size={18} color="#FFFFFF" />

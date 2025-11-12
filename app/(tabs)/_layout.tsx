@@ -136,6 +136,7 @@ export default function TabLayout() {
       <Tabs.Screen name="user/[id]" options={{ href: null }} />
       <Tabs.Screen name="requests" options={{ href: null }} />
       <Tabs.Screen name="onboarding/survey" options={{ href: null }} />
+      <Tabs.Screen name="notifications" options={{ href: null }} />
     </Tabs>
   );
 }
