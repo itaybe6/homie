@@ -40,6 +40,8 @@ export interface PlacePrediction {
 
 let mapsJsPromise: Promise<void> | null = null;
 let webSessionToken: any = null;
+let warnedSuggestionUnavailable = false;
+let warnedLegacyFallback = false;
 
 function isWeb(): boolean {
   return typeof window !== 'undefined' && typeof document !== 'undefined';
@@ -65,7 +67,7 @@ function loadGoogleMapsJs(): Promise<void> {
     const script = document.createElement('script');
     script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(
       GOOGLE_KEY
-    )}&libraries=places&v=weekly&language=he&region=IL&callback=${cbName}`;
+    )}&libraries=places&v=beta&language=he&region=IL&callback=${cbName}&solution-channel=GMP_QB_autocomplete-new`;
     script.async = true;
     script.onerror = (e) => reject(e);
     document.head.appendChild(script);
@@ -95,11 +97,11 @@ export async function autocompleteCities(query: string, sessionToken?: string): 
     await loadGoogleMapsJs();
     // If maps failed to load (no key), return []
     const g = (window as any).google;
-    if (!g?.maps?.places) return [];
-    // Prefer new AutocompleteSuggestionService where available
-    if (g.maps.places.AutocompleteSuggestionService) {
-      const svc = new g.maps.places.AutocompleteSuggestionService();
-      if (!webSessionToken) webSessionToken = new g.maps.places.AutocompleteSessionToken();
+    const places = g?.maps?.places;
+    if (!places) return [];
+    if (places.AutocompleteSuggestionService) {
+      const svc = new places.AutocompleteSuggestionService();
+      if (!webSessionToken) webSessionToken = new places.AutocompleteSessionToken();
       return new Promise((resolve) => {
         svc.getSuggestions(
           {
@@ -121,9 +123,16 @@ export async function autocompleteCities(query: string, sessionToken?: string): 
           }
         );
       });
-    } else {
-      const service = new g.maps.places.AutocompleteService();
-      if (!webSessionToken) webSessionToken = new g.maps.places.AutocompleteSessionToken();
+    }
+    if (places.AutocompleteService) {
+      if (!warnedLegacyFallback) {
+        console.warn(
+          'Falling back to google.maps.places.AutocompleteService. Enable Places API (New) for AutocompleteSuggestionService support.'
+        );
+        warnedLegacyFallback = true;
+      }
+      const service = new places.AutocompleteService();
+      if (!webSessionToken) webSessionToken = new places.AutocompleteSessionToken();
       return new Promise((resolve) => {
         service.getPlacePredictions(
           {
@@ -143,6 +152,12 @@ export async function autocompleteCities(query: string, sessionToken?: string): 
           }
         );
       });
+    }
+    if (!warnedSuggestionUnavailable) {
+      console.warn(
+        'google.maps.places.AutocompleteSuggestionService is unavailable and no legacy AutocompleteService found. Falling back to HTTP autocomplete endpoint.'
+      );
+      warnedSuggestionUnavailable = true;
     }
   }
   if (!GOOGLE_KEY) return [];
@@ -188,10 +203,11 @@ export async function autocompleteNeighborhoods(
   if (isWeb()) {
     await loadGoogleMapsJs();
     const g = (window as any).google;
-    if (!g?.maps?.places) return [];
-    if (g.maps.places.AutocompleteSuggestionService) {
-      const svc = new g.maps.places.AutocompleteSuggestionService();
-      if (!webSessionToken) webSessionToken = new g.maps.places.AutocompleteSessionToken();
+    const places = g?.maps?.places;
+    if (!places) return [];
+    if (places.AutocompleteSuggestionService) {
+      const svc = new places.AutocompleteSuggestionService();
+      if (!webSessionToken) webSessionToken = new places.AutocompleteSessionToken();
       let origin: any = undefined;
       if (cityPlaceId) {
         const loc = await getPlaceLocation(cityPlaceId);
@@ -217,9 +233,16 @@ export async function autocompleteNeighborhoods(
           resolve(names);
         });
       });
-    } else {
-      const service = new g.maps.places.AutocompleteService();
-      if (!webSessionToken) webSessionToken = new g.maps.places.AutocompleteSessionToken();
+    }
+    if (places.AutocompleteService) {
+      if (!warnedLegacyFallback) {
+        console.warn(
+          'Falling back to google.maps.places.AutocompleteService. Enable Places API (New) for AutocompleteSuggestionService support.'
+        );
+        warnedLegacyFallback = true;
+      }
+      const service = new places.AutocompleteService();
+      if (!webSessionToken) webSessionToken = new places.AutocompleteSessionToken();
       return new Promise((resolve) => {
         service.getPlacePredictions(
           {
@@ -240,6 +263,12 @@ export async function autocompleteNeighborhoods(
           }
         );
       });
+    }
+    if (!warnedSuggestionUnavailable) {
+      console.warn(
+        'google.maps.places.AutocompleteSuggestionService is unavailable and no legacy AutocompleteService found. Falling back to HTTP autocomplete endpoint.'
+      );
+      warnedSuggestionUnavailable = true;
     }
   }
 

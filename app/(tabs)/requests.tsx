@@ -94,26 +94,32 @@ export default function RequestsScreen() {
       if (mSErr) throw mSErr;
       if (mRErr) throw mRErr;
 
-      const aptSent: UnifiedItem[] = (sData || []).map((row: any) => ({
-        id: row.id,
-        kind: 'APT',
-        sender_id: row.sender_id,
-        recipient_id: row.recipient_id,
-        apartment_id: row.apartment_id,
-        status: row.status || 'PENDING',
-        created_at: row.created_at,
-      }));
-      const aptRecv: UnifiedItem[] = (rData || []).map((row: any) => ({
-        id: row.id,
-        kind: 'APT',
-        sender_id: row.sender_id,
-        recipient_id: row.recipient_id,
-        apartment_id: row.apartment_id,
-        status: row.status || 'PENDING',
-        created_at: row.created_at,
-      }));
+      const aptSent: UnifiedItem[] = (sData || [])
+        .filter((row: any) => (row.status || 'PENDING') !== 'NOT_RELEVANT')
+        .map((row: any) => ({
+          id: row.id,
+          kind: 'APT',
+          sender_id: row.sender_id,
+          recipient_id: row.recipient_id,
+          apartment_id: row.apartment_id,
+          status: row.status || 'PENDING',
+          created_at: row.created_at,
+        }));
+      const aptRecv: UnifiedItem[] = (rData || [])
+        .filter((row: any) => (row.status || 'PENDING') !== 'NOT_RELEVANT')
+        .map((row: any) => ({
+          id: row.id,
+          kind: 'APT',
+          sender_id: row.sender_id,
+          recipient_id: row.recipient_id,
+          apartment_id: row.apartment_id,
+          status: row.status || 'PENDING',
+          created_at: row.created_at,
+        }));
 
-      const matchSent: UnifiedItem[] = (mSent || []).map((row: any) => ({
+      const matchSent: UnifiedItem[] = (mSent || [])
+        .filter((row: any) => mapMatchStatus(row.status) !== 'NOT_RELEVANT')
+        .map((row: any) => ({
         id: row.id,
         kind: 'MATCH',
         sender_id: row.sender_id,
@@ -122,7 +128,9 @@ export default function RequestsScreen() {
         status: mapMatchStatus(row.status),
         created_at: row.created_at,
       }));
-      const matchRecv: UnifiedItem[] = (mRecv || []).map((row: any) => ({
+      const matchRecv: UnifiedItem[] = (mRecv || [])
+        .filter((row: any) => mapMatchStatus(row.status) !== 'NOT_RELEVANT')
+        .map((row: any) => ({
         id: row.id,
         kind: 'MATCH',
         sender_id: row.sender_id,
@@ -502,7 +510,7 @@ export default function RequestsScreen() {
         </View>
 
         <View style={styles.statusChipsRow}>
-          {(['ALL','PENDING','APPROVED','REJECTED','NOT_RELEVANT'] as const).map((key) => (
+          {(['ALL','PENDING','APPROVED','REJECTED'] as const).map((key) => (
             <TouchableOpacity
               key={key}
               onPress={() => setStatusFilter(key)}
@@ -518,8 +526,6 @@ export default function RequestsScreen() {
                   ? 'אושר'
                   : key === 'REJECTED'
                   ? 'נדחה'
-                  : key === 'NOT_RELEVANT'
-                  ? 'לא רלוונטי'
                   : 'בוטל'}
               </Text>
             </TouchableOpacity>

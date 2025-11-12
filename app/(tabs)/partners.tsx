@@ -29,23 +29,46 @@ export default function PartnersScreen() {
   const screenWidth = Dimensions.get('window').width;
   const translateX = useRef(new Animated.Value(0)).current;
 
-  useEffect(() => {
-    fetchUsers();
-  }, []);
+useEffect(() => {
+  fetchUsers();
+}, [currentUser?.id]);
 
   const fetchUsers = async () => {
     setIsLoading(true);
     try {
-      const { data, error } = await supabase
+      const authId = useAuthStore.getState().user?.id || currentUser?.id;
+
+      const { data: usersData, error: usersError } = await supabase
         .from('users')
         .select('*')
         .eq('role', 'user')
         .order('created_at', { ascending: false });
-      if (error) throw error;
-      const list = (data || []) as User[];
-      const filtered = currentUser
-        ? list.filter((u) => u.id !== currentUser.id)
+      if (usersError) throw usersError;
+
+      let matchRows: { sender_id: string; receiver_id: string }[] = [];
+      if (authId) {
+        const { data: matchesData, error: matchesError } = await supabase
+          .from('matches')
+          .select('sender_id, receiver_id')
+          .or(`sender_id.eq.${authId},receiver_id.eq.${authId}`);
+        if (matchesError) throw matchesError;
+        matchRows = matchesData || [];
+      }
+
+      const list = (usersData || []) as User[];
+      const interacted = new Set<string>();
+      if (authId) {
+        matchRows.forEach((row) => {
+          const otherId =
+            row.sender_id === authId ? row.receiver_id : row.receiver_id === authId ? row.sender_id : null;
+          if (otherId) interacted.add(otherId);
+        });
+      }
+
+      const filtered = authId
+        ? list.filter((u) => u.id !== authId && !interacted.has(u.id))
         : list;
+
       setUsers(filtered);
       setCurrentIndex(0);
     } catch (e) {
@@ -80,6 +103,10 @@ export default function PartnersScreen() {
   const goPrev = () => slideTo(currentIndex - 1, 'prev');
 
   const handleLike = async (likedUser: User) => {
+    if (currentUser?.id && likedUser.id === currentUser.id) {
+      goNext();
+      return;
+    }
     try {
       if (!currentUser?.id) {
         Alert.alert('שגיאה', 'יש להתחבר כדי לבצע פעולה זו');
@@ -98,6 +125,7 @@ export default function PartnersScreen() {
       }
       if (existing) {
         Alert.alert('שמת לב', 'כבר שלחת בקשת שותפות למשתמש זה');
+        goNext();
         return;
       }
 
@@ -118,6 +146,7 @@ export default function PartnersScreen() {
       });
 
       Alert.alert('נשלח', 'נוצרה בקשת שותפות ונשלחה הודעה למשתמש');
+      goNext();
     } catch (e: any) {
       console.error('like failed', e);
       Alert.alert('שגיאה', e?.message || 'לא ניתן לשלוח בקשה');
@@ -128,13 +157,38 @@ export default function PartnersScreen() {
       Alert.alert('שגיאה', 'יש להתחבר כדי לבצע פעולה זו');
       return;
     }
+    if (currentUser?.id && user.id === currentUser.id) {
+      goNext();
+      return;
+    }
     try {
-      const { error } = await supabase.from('matches').insert({
-        sender_id: currentUser.id,
-        receiver_id: user.id,
-        status: 'NOT_RELEVANT',
-      } as any);
-      if (error) throw error;
+      const { data: existing, error: existingErr } = await supabase
+        .from('matches')
+        .select('id')
+        .eq('sender_id', currentUser.id)
+        .eq('receiver_id', user.id)
+        .maybeSingle();
+      if (existingErr && !String(existingErr?.message || '').includes('PGRST116')) {
+        throw existingErr;
+      }
+
+      if (existing?.id) {
+        const { error: updateErr } = await supabase
+          .from('matches')
+          .update({
+            status: 'NOT_RELEVANT',
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', existing.id);
+        if (updateErr) throw updateErr;
+      } else {
+        const { error: insertErr } = await supabase.from('matches').insert({
+          sender_id: currentUser.id,
+          receiver_id: user.id,
+          status: 'NOT_RELEVANT',
+        } as any);
+        if (insertErr) throw insertErr;
+      }
     } catch (e: any) {
       console.error('pass failed', e);
       Alert.alert('שגיאה', e?.message || 'לא ניתן לסמן כלא רלוונטי');

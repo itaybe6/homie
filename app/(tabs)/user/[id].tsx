@@ -4,10 +4,14 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { User } from '@/types/database';
 import { ArrowLeft, MapPin } from 'lucide-react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function UserProfileScreen() {
   const router = useRouter();
   const { id } = useLocalSearchParams();
+  const insets = useSafeAreaInsets();
+  const contentTopPadding = insets.top ;
+  const contentBottomPadding = Math.max(32, insets.bottom + 16);
 
   const [profile, setProfile] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -41,7 +45,12 @@ export default function UserProfileScreen() {
   }
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 16 }}>
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={{
+        paddingTop: contentTopPadding,
+        paddingBottom: contentBottomPadding,
+      }}>
       <View style={styles.header}>
         <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
           <ArrowLeft size={20} color="#FFFFFF" />

@@ -59,6 +59,12 @@ export default function HomeScreen() {
     setSessionToken(createSessionToken());
   }, [isFilterOpen]);
 
+  useEffect(() => {
+    if (!isFilterOpen) {
+      setIsNeighborhoodDropdownOpen(false);
+    }
+  }, [isFilterOpen]);
+
   // City autocomplete
   useEffect(() => {
     let active = true;
@@ -76,10 +82,15 @@ export default function HomeScreen() {
     let cancelled = false;
     const load = async () => {
       if (!cityPlaceId) { setNeighborhoodOptions([]); return; }
-      const loc = await getPlaceLocation(cityPlaceId);
-      if (!loc) { setNeighborhoodOptions([]); return; }
-      const list = await fetchNeighborhoodsForCity({ lat: loc.lat, lng: loc.lng, radiusMeters: 25000 });
-      if (!cancelled) setNeighborhoodOptions(list);
+      try {
+        const loc = await getPlaceLocation(cityPlaceId);
+        if (!loc) { if (!cancelled) setNeighborhoodOptions([]); return; }
+        const list = await fetchNeighborhoodsForCity({ lat: loc.lat, lng: loc.lng, radiusMeters: 25000 });
+        if (!cancelled) setNeighborhoodOptions(list);
+      } catch (error) {
+        console.warn('Failed to load neighborhoods list', error);
+        if (!cancelled) setNeighborhoodOptions([]);
+      }
     };
     load();
     return () => { cancelled = true; };
@@ -91,8 +102,13 @@ export default function HomeScreen() {
     const run = async () => {
       const q = filters.neighborhood.trim();
       if (!q || q.length < 1) { setNeighborhoodSuggestions([]); return; }
-      const list = await autocompleteNeighborhoods(q, cityPlaceId, sessionToken, filters.city);
-      if (active) setNeighborhoodSuggestions(list.slice(0, 10));
+      try {
+        const list = await autocompleteNeighborhoods(q, cityPlaceId, sessionToken, filters.city);
+        if (active) setNeighborhoodSuggestions(list.slice(0, 10));
+      } catch (error) {
+        console.warn('Failed to load neighborhood suggestions', error);
+        if (active) setNeighborhoodSuggestions([]);
+      }
     };
     run();
     return () => { active = false; };
@@ -167,6 +183,8 @@ export default function HomeScreen() {
     setFilters({ city: '', neighborhood: '', minPrice: '', maxPrice: '', minBedrooms: '', minBathrooms: '' });
     setCitySuggestions([]);
     setNeighborhoodSuggestions([]);
+    setNeighborhoodOptions([]);
+    setIsNeighborhoodDropdownOpen(false);
     setCityPlaceId(null);
   };
 
@@ -324,6 +342,7 @@ export default function HomeScreen() {
                           style={styles.suggestionItem}
                           onPress={() => {
                             setFilters((f) => ({ ...f, neighborhood: name }));
+                            setNeighborhoodSuggestions([]);
                             setIsNeighborhoodDropdownOpen(false);
                           }}
                         >
