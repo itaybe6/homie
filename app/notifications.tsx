@@ -12,7 +12,7 @@ import {
   Image,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { ArrowRight, Bell } from 'lucide-react-native';
+import { Bell } from 'lucide-react-native';
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/authStore';
 import { Notification } from '@/types/database';
@@ -207,19 +207,7 @@ export default function NotificationsScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity
-          onPress={() => {
-            if ((router as any).canGoBack?.()) {
-              router.back();
-            } else {
-              router.replace('/(tabs)/home');
-            }
-          }}
-          style={styles.iconBtn}
-          activeOpacity={0.85}
-        >
-          <ArrowRight size={18} color="#FFFFFF" />
-        </TouchableOpacity>
+        <View style={styles.iconBtnPlaceholder} />
         <Text style={styles.headerTitle}>התראות</Text>
         <View style={styles.iconBtnPlaceholder} />
       </View>
@@ -264,7 +252,14 @@ export default function NotificationsScreen() {
                     if (aptId) {
                       router.push({ pathname: '/apartment/[id]', params: { id: aptId } });
                     } else if (isPartnerRequestNotification(item)) {
-                      router.push('/requests');
+                      router.push({
+                        pathname: '/(tabs)/requests',
+                        params: {
+                          tab: 'incoming',
+                          kind: 'MATCH',
+                          status: 'PENDING',
+                        },
+                      });
                     }
                   }}
                 >

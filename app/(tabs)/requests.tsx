@@ -12,7 +12,7 @@ import {
   Alert,
   Linking,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { ArrowLeft, Inbox, Send, Filter, Home, Users } from 'lucide-react-native';
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/authStore';
@@ -20,7 +20,32 @@ import { Apartment, User } from '@/types/database';
 
 export default function RequestsScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ tab?: string | string[]; kind?: string | string[]; status?: string | string[] }>();
   const user = useAuthStore((s) => s.user);
+  const toSingle = (value: string | string[] | undefined): string | undefined =>
+    Array.isArray(value) ? value[0] : value;
+  type KindFilterValue = 'APT' | 'MATCH' | 'ALL';
+  type StatusFilterValue = 'ALL' | 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED' | 'NOT_RELEVANT';
+  const parseTabParam = (value?: string): 'incoming' | 'sent' =>
+    value === 'sent' ? 'sent' : 'incoming';
+  const parseKindParam = (value?: string): KindFilterValue => {
+    if (value === 'MATCH' || value === 'ALL') return value;
+    return 'APT';
+  };
+  const parseStatusParam = (value?: string): StatusFilterValue => {
+    switch (value) {
+      case 'PENDING':
+      case 'APPROVED':
+      case 'REJECTED':
+      case 'CANCELLED':
+      case 'NOT_RELEVANT':
+        return value;
+      case 'ALL':
+        return 'ALL';
+      default:
+        return 'ALL';
+    }
+  };
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   type UnifiedItem = {
@@ -35,9 +60,9 @@ export default function RequestsScreen() {
   const [sent, setSent] = useState<UnifiedItem[]>([]);
   const [received, setReceived] = useState<UnifiedItem[]>([]);
   const [actionId, setActionId] = useState<string | null>(null);
-  const [tab, setTab] = useState<'incoming' | 'sent'>('incoming');
-  const [statusFilter, setStatusFilter] = useState<'ALL' | UnifiedItem['status']>('ALL');
-  const [kindFilter, setKindFilter] = useState<'APT' | 'MATCH' | 'ALL'>('APT');
+  const [tab, setTab] = useState<'incoming' | 'sent'>(() => parseTabParam(toSingle(params.tab)));
+  const [statusFilter, setStatusFilter] = useState<StatusFilterValue>(() => parseStatusParam(toSingle(params.status)));
+  const [kindFilter, setKindFilter] = useState<KindFilterValue>(() => parseKindParam(toSingle(params.kind)));
 
   const [usersById, setUsersById] = useState<Record<string, Partial<User>>>({});
   const [aptsById, setAptsById] = useState<Record<string, Partial<Apartment>>>({});
@@ -73,6 +98,12 @@ export default function RequestsScreen() {
   useEffect(() => {
     fetchAll();
   }, [user?.id]);
+
+  useEffect(() => {
+    setTab(parseTabParam(toSingle(params.tab)));
+    setKindFilter(parseKindParam(toSingle(params.kind)));
+    setStatusFilter(parseStatusParam(toSingle(params.status)));
+  }, [params.tab, params.kind, params.status]);
 
   const fetchAll = async () => {
     if (!user?.id) { setLoading(false); return; }
@@ -301,6 +332,63 @@ export default function RequestsScreen() {
     }
   };
 
+  const approveIncomingMatch = async (match: UnifiedItem) => {
+    if (!user?.id) return;
+    try {
+      setActionId(match.id);
+      await supabase
+        .from('matches')
+        .update({ status: 'APPROVED', updated_at: new Date().toISOString() })
+        .eq('id', match.id);
+
+      await supabase.from('notifications').insert({
+        sender_id: user.id,
+        recipient_id: match.sender_id,
+        title: 'בקשת ההתאמה אושרה',
+        description: 'בקשת ההתאמה שלך אושרה. ניתן להמשיך לשיחה ולתאם היכרות.',
+        is_read: false,
+      });
+
+      await fetchAll();
+      setTab('incoming');
+      setKindFilter('MATCH');
+      setStatusFilter('APPROVED');
+      router.setParams({ tab: 'incoming', kind: 'MATCH', status: 'APPROVED' });
+      Alert.alert('הצלחה', 'בקשת ההתאמה אושרה');
+    } catch (e: any) {
+      console.error('approve match request failed', e);
+      Alert.alert('שגיאה', e?.message || 'לא ניתן לאשר את ההתאמה');
+    } finally {
+      setActionId(null);
+    }
+  };
+
+  const rejectIncomingMatch = async (match: UnifiedItem) => {
+    if (!user?.id) return;
+    try {
+      setActionId(match.id);
+      await supabase
+        .from('matches')
+        .update({ status: 'REJECTED', updated_at: new Date().toISOString() })
+        .eq('id', match.id);
+
+      await supabase.from('notifications').insert({
+        sender_id: user.id,
+        recipient_id: match.sender_id,
+        title: 'בקשת ההתאמה נדחתה',
+        description: 'הבקשה אליך נדחתה. אפשר להמשיך ולחפש התאמות נוספות.',
+        is_read: false,
+      });
+
+      await fetchAll();
+    } catch (e: any) {
+      console.error('reject match request failed', e);
+      Alert.alert('שגיאה', e?.message || 'לא ניתן לדחות את ההתאמה');
+    } finally {
+      setActionId(null);
+    }
+  };
+
   const StatusPill = ({ status }: { status: UnifiedItem['status'] }) => {
     const config: Record<UnifiedItem['status'], { bg: string; color: string; text: string }> = {
       PENDING: { bg: '#363649', color: '#E5E7EB', text: 'ממתין' },
@@ -417,6 +505,51 @@ export default function RequestsScreen() {
                               }
                             >
                               <Text style={styles.approveBtnText}>שליחת וואטסאפ לבעל הדירה</Text>
+                            </TouchableOpacity>
+                          ) : null}
+                        </View>
+                      )}
+                      {incoming && item.kind === 'MATCH' && item.status === 'PENDING' && (
+                        <View style={{ flexDirection: 'row-reverse', gap: 8 as any }}>
+                          <TouchableOpacity
+                            style={[styles.approveBtn, actionId === item.id && { opacity: 0.7 }]}
+                            onPress={() => approveIncomingMatch(item)}
+                            disabled={actionId === item.id}
+                            activeOpacity={0.85}
+                          >
+                            {actionId === item.id ? (
+                              <ActivityIndicator size="small" color="#0F0F14" />
+                            ) : (
+                              <Text style={styles.approveBtnText}>אישור</Text>
+                            )}
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={[styles.rejectBtn, actionId === item.id && { opacity: 0.7 }]}
+                            onPress={() => rejectIncomingMatch(item)}
+                            disabled={actionId === item.id}
+                            activeOpacity={0.85}
+                          >
+                            <Text style={styles.rejectBtnText}>דחייה</Text>
+                          </TouchableOpacity>
+                        </View>
+                      )}
+                      {incoming && item.kind === 'MATCH' && item.status === 'APPROVED' && (
+                        <View style={{ marginTop: 10, alignItems: 'flex-end', gap: 6 as any }}>
+                          <Text style={styles.cardMeta}>
+                            מספר המשתמש: {otherUser?.phone ? otherUser.phone : 'לא זמין'}
+                          </Text>
+                          {otherUser?.phone ? (
+                            <TouchableOpacity
+                              style={[styles.approveBtn]}
+                              activeOpacity={0.85}
+                              onPress={() =>
+                                openWhatsApp(
+                                  otherUser.phone as string,
+                                  `היי${otherUser?.full_name ? ` ${otherUser.full_name.split(' ')[0]}` : ''}, אישרתי את בקשת ההתאמה ב-Homie. בוא/י נדבר ונראה אם יש התאמה!`
+                                )
+                              }
+                            >
+                              <Text style={styles.approveBtnText}>פתיחת שיחה בוואטסאפ</Text>
                             </TouchableOpacity>
                           ) : null}
                         </View>

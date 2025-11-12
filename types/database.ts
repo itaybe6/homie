@@ -15,6 +15,47 @@ export interface User {
   updated_at: string;
 }
 
+// Merged profile (roommate group) types
+export type ProfileGroupStatus = 'PENDING' | 'ACTIVE' | 'CANCELLED' | 'ARCHIVED';
+
+export interface ProfileGroup {
+  id: string;
+  created_by: string;
+  status: ProfileGroupStatus;
+  name?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export type ProfileGroupMemberRole = 'owner' | 'member';
+export type ProfileGroupMemberStatus = 'ACTIVE' | 'LEFT' | 'REMOVED';
+
+export interface ProfileGroupMember {
+  group_id: string;
+  user_id: string;
+  role: ProfileGroupMemberRole;
+  status: ProfileGroupMemberStatus;
+  joined_at: string;
+}
+
+export type ProfileGroupInviteStatus =
+  | 'PENDING'
+  | 'ACCEPTED'
+  | 'DECLINED'
+  | 'CANCELLED'
+  | 'EXPIRED';
+
+export interface ProfileGroupInvite {
+  id: string;
+  group_id: string;
+  inviter_id: string;
+  invitee_id: string;
+  status: ProfileGroupInviteStatus;
+  created_at: string;
+  responded_at?: string;
+  expires_at?: string;
+}
+
 export interface Apartment {
   id: string;
   owner_id: string;

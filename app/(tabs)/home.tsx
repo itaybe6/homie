@@ -315,16 +315,22 @@ export default function HomeScreen() {
                 <Text style={styles.fieldLabel}>שכונה</Text>
                 <TextInput
                   style={[styles.fieldInput, !filters.city ? { opacity: 0.6 } : null]}
-                  placeholder={filters.city ? 'לדוגמה: פלורנטין' : 'בחר עיר קודם'}
+                  placeholder={
+                    neighborhoodOptions.length > 0
+                      ? 'בחר שכונה מהרשימה או הקלד לחיפוש'
+                      : filters.city
+                      ? 'טוען שכונות...'
+                      : 'בחר עיר קודם'
+                  }
                   editable={!!filters.city}
                   placeholderTextColor="#9DA4AE"
                   value={filters.neighborhood}
                   onChangeText={(t) => {
                     setFilters((f) => ({ ...f, neighborhood: t }));
-                    if (filters.city) setIsNeighborhoodDropdownOpen(true);
+                    if (filters.city && neighborhoodOptions.length > 0) setIsNeighborhoodDropdownOpen(true);
                   }}
                   onFocus={() => {
-                    if (filters.city) setIsNeighborhoodDropdownOpen(true);
+                    if (filters.city && neighborhoodOptions.length > 0) setIsNeighborhoodDropdownOpen(true);
                   }}
                 />
                 {isNeighborhoodDropdownOpen && neighborhoodOptions.length > 0 ? (
@@ -350,8 +356,7 @@ export default function HomeScreen() {
                         </TouchableOpacity>
                       ))}
                   </View>
-                ) : null}
-                {neighborhoodSuggestions.length > 0 ? (
+                ) : neighborhoodSuggestions.length > 0 && filters.neighborhood ? (
                   <View style={styles.suggestionsBox}>
                     {neighborhoodSuggestions.map((name) => (
                       <TouchableOpacity

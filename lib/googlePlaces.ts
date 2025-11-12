@@ -67,7 +67,7 @@ function loadGoogleMapsJs(): Promise<void> {
     const script = document.createElement('script');
     script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(
       GOOGLE_KEY
-    )}&libraries=places&v=beta&language=he&region=IL&callback=${cbName}&solution-channel=GMP_QB_autocomplete-new`;
+    )}&libraries=places&v=weekly&language=he&region=IL&callback=${cbName}`;
     script.async = true;
     script.onerror = (e) => reject(e);
     document.head.appendChild(script);
@@ -95,87 +95,103 @@ export async function autocompleteCities(query: string, sessionToken?: string): 
   if (!query?.trim()) return [];
   if (isWeb()) {
     await loadGoogleMapsJs();
-    // If maps failed to load (no key), return []
     const g = (window as any).google;
     const places = g?.maps?.places;
-    if (!places) return [];
-    if (places.AutocompleteSuggestionService) {
-      const svc = new places.AutocompleteSuggestionService();
-      if (!webSessionToken) webSessionToken = new places.AutocompleteSessionToken();
-      return new Promise((resolve) => {
-        svc.getSuggestions(
-          {
-            input: query,
-            includedPrimaryTypes: ['locality'],
-            language: 'he',
-            region: 'IL',
-            sessionToken: webSessionToken,
-          },
-          (resp: any) => {
-            const list: any[] = resp?.suggestions || [];
-            resolve(
-              list.map((s: any) => ({
-                description: buildDescriptionFromSuggestion(s),
-                placeId: s?.placePrediction?.placeId || s?.placePrediction?.place_id || s?.place_id || '',
-                types: s?.placePrediction?.types || s?.types,
-              }))
-            );
-          }
-        );
-      });
+    if (!places) {
+      console.warn('Google Maps Places library failed to load');
+      return [];
     }
+    
+    // Try new AutocompleteSuggestionService first
+    if (places.AutocompleteSuggestionService) {
+      try {
+        const svc = new places.AutocompleteSuggestionService();
+        if (!webSessionToken) webSessionToken = new places.AutocompleteSessionToken();
+        return new Promise((resolve) => {
+          svc.getSuggestions(
+            {
+              input: query,
+              includedPrimaryTypes: ['locality'],
+              language: 'he',
+              region: 'IL',
+              sessionToken: webSessionToken,
+            },
+            (resp: any) => {
+              const list: any[] = resp?.suggestions || [];
+              resolve(
+                list.map((s: any) => ({
+                  description: buildDescriptionFromSuggestion(s),
+                  placeId: s?.placePrediction?.placeId || s?.placePrediction?.place_id || s?.place_id || '',
+                  types: s?.placePrediction?.types || s?.types,
+                }))
+              );
+            }
+          );
+        });
+      } catch (err) {
+        console.warn('AutocompleteSuggestionService failed', err);
+      }
+    }
+    
+    // Fallback to legacy AutocompleteService
     if (places.AutocompleteService) {
       if (!warnedLegacyFallback) {
-        console.warn(
-          'Falling back to google.maps.places.AutocompleteService. Enable Places API (New) for AutocompleteSuggestionService support.'
-        );
+        console.warn('Using legacy AutocompleteService. Consider enabling Places API (New).');
         warnedLegacyFallback = true;
       }
-      const service = new places.AutocompleteService();
-      if (!webSessionToken) webSessionToken = new places.AutocompleteSessionToken();
-      return new Promise((resolve) => {
-        service.getPlacePredictions(
-          {
-            input: query,
-            types: ['(cities)'],
-            componentRestrictions: { country: 'il' },
-            sessionToken: webSessionToken,
-          },
-          (predictions: any[] | null) => {
-            resolve(
-              (predictions || []).map((p: any) => ({
-                description: p.description,
-                placeId: p.place_id,
-                types: p.types,
-              }))
-            );
-          }
-        );
-      });
+      try {
+        const service = new places.AutocompleteService();
+        if (!webSessionToken) webSessionToken = new places.AutocompleteSessionToken();
+        return new Promise((resolve) => {
+          service.getPlacePredictions(
+            {
+              input: query,
+              types: ['(cities)'],
+              componentRestrictions: { country: 'il' },
+              sessionToken: webSessionToken,
+            },
+            (predictions: any[] | null) => {
+              resolve(
+                (predictions || []).map((p: any) => ({
+                  description: p.description,
+                  placeId: p.place_id,
+                  types: p.types,
+                }))
+              );
+            }
+          );
+        });
+      } catch (err) {
+        console.warn('AutocompleteService failed', err);
+      }
     }
-    if (!warnedSuggestionUnavailable) {
-      console.warn(
-        'google.maps.places.AutocompleteSuggestionService is unavailable and no legacy AutocompleteService found. Falling back to HTTP autocomplete endpoint.'
-      );
-      warnedSuggestionUnavailable = true;
-    }
+    
+    console.warn('No Google Places autocomplete service available');
+    return [];
   }
+  
+  // Native/non-web fallback (HTTP API won't work from browser due to CORS)
   if (!GOOGLE_KEY) return [];
-  const url = new URL('https://maps.googleapis.com/maps/api/place/autocomplete/json');
-  url.searchParams.set('input', query);
-  url.searchParams.set('components', 'country:il');
-  url.searchParams.set('types', '(cities)');
-  url.searchParams.set('language', 'he');
-  if (sessionToken) url.searchParams.set('sessiontoken', sessionToken);
-  url.searchParams.set('key', GOOGLE_KEY);
-  const res = await fetch(url.toString());
-  const data = await res.json();
-  if (data.status !== 'OK' && data.status !== 'ZERO_RESULTS') return [];
-  return (data.predictions || []).map((p: any) => ({
-    description: p.description,
-    placeId: p.place_id,
-    types: p.types,
-  }));
+  try {
+    const url = new URL('https://maps.googleapis.com/maps/api/place/autocomplete/json');
+    url.searchParams.set('input', query);
+    url.searchParams.set('components', 'country:il');
+    url.searchParams.set('types', '(cities)');
+    url.searchParams.set('language', 'he');
+    if (sessionToken) url.searchParams.set('sessiontoken', sessionToken);
+    url.searchParams.set('key', GOOGLE_KEY);
+    const res = await fetch(url.toString());
+    const data = await res.json();
+    if (data.status !== 'OK' && data.status !== 'ZERO_RESULTS') return [];
+    return (data.predictions || []).map((p: any) => ({
+      description: p.description,
+      placeId: p.place_id,
+      types: p.types,
+    }));
+  } catch (err) {
+    console.warn('HTTP autocomplete failed (expected on web due to CORS)', err);
+    return [];
+  }
 }
 
 export async function getPlaceLocation(placeId: string): Promise<{ lat: number; lng: number } | null> {
@@ -204,103 +220,119 @@ export async function autocompleteNeighborhoods(
     await loadGoogleMapsJs();
     const g = (window as any).google;
     const places = g?.maps?.places;
-    if (!places) return [];
-    if (places.AutocompleteSuggestionService) {
-      const svc = new places.AutocompleteSuggestionService();
-      if (!webSessionToken) webSessionToken = new places.AutocompleteSessionToken();
-      let origin: any = undefined;
-      if (cityPlaceId) {
-        const loc = await getPlaceLocation(cityPlaceId);
-        if (loc) origin = new g.maps.LatLng(loc.lat, loc.lng);
-      }
-      return new Promise((resolve) => {
-        const req: any = {
-          input: query,
-          includedPrimaryTypes: ['neighborhood', 'sublocality'],
-          language: 'he',
-          region: 'IL',
-          sessionToken: webSessionToken,
-        };
-        if (origin) req.locationBias = { circle: { center: origin, radius: 30000 } };
-        svc.getSuggestions(req, (resp: any) => {
-          const arr: any[] = resp?.suggestions || [];
-          const names = arr
-            .filter((s: any) => {
-              if (cityNameForFilter) return buildDescriptionFromSuggestion(s).includes(cityNameForFilter);
-              return true;
-            })
-            .map((s: any) => s?.structuredFormat?.mainText?.text || s?.structuredFormat?.mainText || buildDescriptionFromSuggestion(s));
-          resolve(names);
-        });
-      });
+    if (!places) {
+      console.warn('Google Maps Places library failed to load');
+      return [];
     }
+    
+    // Try new AutocompleteSuggestionService first
+    if (places.AutocompleteSuggestionService) {
+      try {
+        const svc = new places.AutocompleteSuggestionService();
+        if (!webSessionToken) webSessionToken = new places.AutocompleteSessionToken();
+        let origin: any = undefined;
+        if (cityPlaceId) {
+          const loc = await getPlaceLocation(cityPlaceId);
+          if (loc) origin = new g.maps.LatLng(loc.lat, loc.lng);
+        }
+        return new Promise((resolve) => {
+          const req: any = {
+            input: query,
+            includedPrimaryTypes: ['neighborhood', 'sublocality'],
+            language: 'he',
+            region: 'IL',
+            sessionToken: webSessionToken,
+          };
+          if (origin) req.locationBias = { circle: { center: origin, radius: 30000 } };
+          svc.getSuggestions(req, (resp: any) => {
+            const arr: any[] = resp?.suggestions || [];
+            const names = arr
+              .filter((s: any) => {
+                if (cityNameForFilter) return buildDescriptionFromSuggestion(s).includes(cityNameForFilter);
+                return true;
+              })
+              .map((s: any) => s?.structuredFormat?.mainText?.text || s?.structuredFormat?.mainText || buildDescriptionFromSuggestion(s));
+            resolve(names);
+          });
+        });
+      } catch (err) {
+        console.warn('AutocompleteSuggestionService failed', err);
+      }
+    }
+    
+    // Fallback to legacy AutocompleteService
     if (places.AutocompleteService) {
       if (!warnedLegacyFallback) {
-        console.warn(
-          'Falling back to google.maps.places.AutocompleteService. Enable Places API (New) for AutocompleteSuggestionService support.'
-        );
+        console.warn('Using legacy AutocompleteService. Consider enabling Places API (New).');
         warnedLegacyFallback = true;
       }
-      const service = new places.AutocompleteService();
-      if (!webSessionToken) webSessionToken = new places.AutocompleteSessionToken();
-      return new Promise((resolve) => {
-        service.getPlacePredictions(
-          {
-            input: query,
-            types: ['geocode'],
-            componentRestrictions: { country: 'il' },
-            sessionToken: webSessionToken,
-          },
-          (preds: any[] | null) => {
-            const filtered = (preds || []).filter((p: any) => {
-              const types: string[] = p.types || [];
-              const isHood = types.includes('neighborhood') || types.some((t) => t.startsWith('sublocality'));
-              if (!isHood) return false;
-              if (cityNameForFilter) return String(p.description).includes(cityNameForFilter);
-              return true;
-            });
-            resolve(filtered.map((p: any) => p.structured_formatting?.main_text || p.description));
-          }
-        );
-      });
+      try {
+        const service = new places.AutocompleteService();
+        if (!webSessionToken) webSessionToken = new places.AutocompleteSessionToken();
+        return new Promise((resolve) => {
+          service.getPlacePredictions(
+            {
+              input: query,
+              types: ['geocode'],
+              componentRestrictions: { country: 'il' },
+              sessionToken: webSessionToken,
+            },
+            (preds: any[] | null) => {
+              const filtered = (preds || []).filter((p: any) => {
+                const types: string[] = p.types || [];
+                const isHood = types.includes('neighborhood') || types.some((t) => t.startsWith('sublocality'));
+                if (!isHood) return false;
+                if (cityNameForFilter) return String(p.description).includes(cityNameForFilter);
+                return true;
+              });
+              resolve(filtered.map((p: any) => p.structured_formatting?.main_text || p.description));
+            }
+          );
+        });
+      } catch (err) {
+        console.warn('AutocompleteService failed', err);
+      }
     }
-    if (!warnedSuggestionUnavailable) {
-      console.warn(
-        'google.maps.places.AutocompleteSuggestionService is unavailable and no legacy AutocompleteService found. Falling back to HTTP autocomplete endpoint.'
-      );
-      warnedSuggestionUnavailable = true;
-    }
+    
+    console.warn('No Google Places autocomplete service available');
+    return [];
   }
 
-  let locationParams = '';
-  if (cityPlaceId) {
-    const loc = await getPlaceLocation(cityPlaceId);
-    if (loc) {
-      // Bias around city center (30km radius)
-      locationParams = `&location=${loc.lat},${loc.lng}&radius=30000`;
+  // Native/non-web fallback (HTTP API won't work from browser due to CORS)
+  if (!GOOGLE_KEY) return [];
+  try {
+    let locationParams = '';
+    if (cityPlaceId) {
+      const loc = await getPlaceLocation(cityPlaceId);
+      if (loc) {
+        locationParams = `&location=${loc.lat},${loc.lng}&radius=30000`;
+      }
     }
+
+    const base = `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(
+      query,
+    )}&components=country:il&types=geocode&language=he${locationParams}`;
+    const tokenPart = sessionToken ? `&sessiontoken=${encodeURIComponent(sessionToken)}` : '';
+    const url = `${base}&key=${encodeURIComponent(GOOGLE_KEY)}${tokenPart}`;
+    const res = await fetch(url);
+    const data = await res.json();
+    if (data.status !== 'OK' && data.status !== 'ZERO_RESULTS') return [];
+
+    const preds: any[] = data.predictions || [];
+    const filtered = preds.filter((p) => {
+      const types: string[] = p.types || [];
+      const isHood = types.includes('neighborhood') || types.some((t) => t.startsWith('sublocality'));
+      if (!isHood) return false;
+      if (cityNameForFilter) {
+        return String(p.description).includes(cityNameForFilter);
+      }
+      return true;
+    });
+    return filtered.map((p) => p.structured_formatting?.main_text || p.description);
+  } catch (err) {
+    console.warn('HTTP autocomplete failed (expected on web due to CORS)', err);
+    return [];
   }
-
-  const base = `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(
-    query,
-  )}&components=country:il&types=geocode&language=he${locationParams}`;
-  const tokenPart = sessionToken ? `&sessiontoken=${encodeURIComponent(sessionToken)}` : '';
-  const url = `${base}&key=${encodeURIComponent(GOOGLE_KEY)}${tokenPart}`;
-  const res = await fetch(url);
-  const data = await res.json();
-  if (data.status !== 'OK' && data.status !== 'ZERO_RESULTS') return [];
-
-  const preds: any[] = data.predictions || [];
-  const filtered = preds.filter((p) => {
-    const types: string[] = p.types || [];
-    const isHood = types.includes('neighborhood') || types.some((t) => t.startsWith('sublocality'));
-    if (!isHood) return false;
-    if (cityNameForFilter) {
-      return String(p.description).includes(cityNameForFilter);
-    }
-    return true;
-  });
-  return filtered.map((p) => p.structured_formatting?.main_text || p.description);
 }
 
 export async function autocompleteAddresses(
@@ -314,10 +346,11 @@ export async function autocompleteAddresses(
   if (isWeb()) {
     await loadGoogleMapsJs();
     const g = (window as any).google;
-    if (!g?.maps?.places) return [];
-    if (g.maps.places.AutocompleteSuggestionService) {
-      const svc = new g.maps.places.AutocompleteSuggestionService();
-      if (!webSessionToken) webSessionToken = new g.maps.places.AutocompleteSessionToken();
+    const places = g?.maps?.places;
+    // If Places JS isn't available or SuggestionService is missing, fall through to HTTP API below
+    if (places?.AutocompleteSuggestionService) {
+      const svc = new places.AutocompleteSuggestionService();
+      if (!webSessionToken) webSessionToken = new places.AutocompleteSessionToken();
       let origin: any = undefined;
       if (cityPlaceId) {
         const loc = await getPlaceLocation(cityPlaceId);
@@ -337,30 +370,8 @@ export async function autocompleteAddresses(
           resolve(arr.map((s: any) => buildDescriptionFromSuggestion(s)));
         });
       });
-    } else {
-      const service = new g.maps.places.AutocompleteService();
-      if (!webSessionToken) webSessionToken = new g.maps.places.AutocompleteSessionToken();
-      return new Promise((resolve) => {
-        service.getPlacePredictions(
-          {
-            input: query,
-            types: ['geocode'],
-            componentRestrictions: { country: 'il' },
-            sessionToken: webSessionToken,
-          },
-          (preds: any[] | null) => {
-            const filtered = (preds || []).filter((p: any) => {
-              const types: string[] = p.types || [];
-              const isAddressLike = types.includes('street_address') || types.includes('premise') || types.includes('route') || types.includes('geocode');
-              if (!isAddressLike) return false;
-              if (cityNameForFilter) return String(p.description).includes(cityNameForFilter);
-              return true;
-            });
-            resolve(filtered.map((p: any) => p.description));
-          }
-        );
-      });
     }
+    // Fallthrough → use HTTP API below
   }
 
   let locationParams = '';

@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, Image, ActivityIndicator, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Image, ActivityIndicator, TouchableOpacity, Alert } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { User } from '@/types/database';
-import { ArrowLeft, MapPin } from 'lucide-react-native';
+import { ArrowLeft, MapPin, UserPlus2 } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useAuthStore } from '@/stores/authStore';
 
 export default function UserProfileScreen() {
   const router = useRouter();
@@ -15,6 +16,8 @@ export default function UserProfileScreen() {
 
   const [profile, setProfile] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [inviteLoading, setInviteLoading] = useState(false);
+  const me = useAuthStore((s) => s.user);
 
   useEffect(() => {
     (async () => {
@@ -27,6 +30,95 @@ export default function UserProfileScreen() {
       }
     })();
   }, [id]);
+
+  const ensureGroupAndInvite = async () => {
+    if (!me?.id) {
+      Alert.alert('חיבור נדרש', 'כדי לשלוח בקשה למיזוג פרופילים יש להתחבר לחשבון.');
+      return;
+    }
+    if (!profile?.id) return;
+    if (me.id === profile.id) {
+      Alert.alert('שגיאה', 'לא ניתן לשלוח בקשה לעצמך.');
+      return;
+    }
+    try {
+      setInviteLoading(true);
+      // Find existing group created by me (pending/active)
+      const { data: existingGroup, error: gErr } = await supabase
+        .from('profile_groups')
+        .select('*')
+        .eq('created_by', me.id)
+        .in('status', ['PENDING', 'ACTIVE'])
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (gErr) throw gErr;
+
+      let groupId = existingGroup?.id as string | undefined;
+
+      // Create group if none
+      if (!groupId) {
+        const { data: newGroup, error: cErr } = await supabase
+          .from('profile_groups')
+          .insert({
+            created_by: me.id,
+            name: 'קבוצת שותפים חדשה',
+          })
+          .select('*')
+          .single();
+        if (cErr) throw cErr;
+        groupId = (newGroup as any)?.id;
+      }
+
+      // Prevent duplicate pending invite for same user in same group
+      const { data: pendingInvite } = await supabase
+        .from('profile_group_invites')
+        .select('id,status')
+        .eq('group_id', groupId)
+        .eq('invitee_id', profile.id)
+        .eq('status', 'PENDING')
+        .maybeSingle();
+      if (pendingInvite?.id) {
+        Alert.alert('כבר שלחת', 'כבר קיימת בקשה בהמתנה עבור המשתמש הזה.');
+        return;
+      }
+
+      // Create invite
+      const { error: iErr } = await supabase.from('profile_group_invites').insert({
+        group_id: groupId,
+        inviter_id: me.id,
+        invitee_id: profile.id,
+      });
+      if (iErr) throw iErr;
+
+      // Create notification for recipient
+      let inviterName = 'משתמש';
+      try {
+        const { data: meRow } = await supabase
+          .from('users')
+          .select('full_name')
+          .eq('id', me.id)
+          .maybeSingle();
+        inviterName = ((meRow as any)?.full_name as string) || inviterName;
+      } catch {}
+
+      const title = 'בקשת מיזוג פרופילים חדשה';
+      const desc = `${inviterName} מזמין/ה אותך להצטרף לקבוצת שותפים ולהציג פרופיל ממוזג יחד`;
+      await supabase.from('notifications').insert({
+        sender_id: me.id,
+        recipient_id: profile.id,
+        title,
+        description: desc,
+      });
+
+      Alert.alert('נשלח', 'הבקשה נשלחה ונשלחה התראה למשתמש/ת.');
+    } catch (e: any) {
+      console.error('send merge invite failed', e);
+      Alert.alert('שגיאה', e?.message || 'לא ניתן לשלוח את הבקשה כעת');
+    } finally {
+      setInviteLoading(false);
+    }
+  };
 
   if (isLoading) {
     return (
@@ -69,6 +161,21 @@ export default function UserProfileScreen() {
           </View>
         )}
       </View>
+
+      {me?.id && me.id !== profile.id ? (
+        <View style={styles.section}>
+          <TouchableOpacity
+            activeOpacity={0.9}
+            onPress={inviteLoading ? undefined : ensureGroupAndInvite}
+            style={[styles.mergeBtn, inviteLoading ? styles.mergeBtnDisabled : null]}
+          >
+            <UserPlus2 size={18} color="#0F0F14" />
+            <Text style={styles.mergeBtnText}>
+              {inviteLoading ? 'שולח...' : 'בקש/י מיזוג פרופילים'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
 
       {profile.bio ? (
         <View style={styles.section}>
@@ -154,6 +261,30 @@ const styles = StyleSheet.create({
     color: '#C7CBD1',
     fontSize: 15,
     lineHeight: 22,
+  },
+  mergeBtn: {
+    marginTop: 4,
+    height: 48,
+    borderRadius: 14,
+    backgroundColor: '#7C5CFF',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 8,
+    shadowColor: '#7C5CFF',
+    shadowOpacity: 0.26,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+  },
+  mergeBtnDisabled: {
+    opacity: 0.75,
+  },
+  mergeBtnText: {
+    color: '#0F0F14',
+    fontSize: 15,
+    fontWeight: '900',
   },
   gallery: {
     marginTop: 8,
