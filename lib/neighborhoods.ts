@@ -19,6 +19,18 @@ async function overpassQuery(body: string): Promise<OverpassElement[]> {
   return json.elements || [];
 }
 
+// Helper function to check if a string contains Hebrew characters
+function hasHebrew(str: string): boolean {
+  // Hebrew Unicode range: \u0590-\u05FF
+  return /[\u0590-\u05FF]/.test(str);
+}
+
+// Helper function to check if a string contains Arabic characters
+function hasArabic(str: string): boolean {
+  // Arabic Unicode range: \u0600-\u06FF
+  return /[\u0600-\u06FF]/.test(str);
+}
+
 export async function fetchNeighborhoodsForCity(params: {
   lat: number;
   lng: number;
@@ -39,9 +51,16 @@ export async function fetchNeighborhoodsForCity(params: {
     const names: string[] = [];
     for (const e of elements) {
       const t = e.tags || {};
+      // Prefer Hebrew name
       const he = t['name:he'];
       const name = he || t['name'];
-      if (name) names.push(name);
+      
+      if (name) {
+        // Only include if it has Hebrew characters and doesn't have Arabic
+        if (hasHebrew(name) && !hasArabic(name)) {
+          names.push(name);
+        }
+      }
     }
     // uniq + sort
     const uniq = Array.from(new Set(names.map((n) => n.trim()))).filter(Boolean);

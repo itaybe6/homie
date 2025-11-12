@@ -195,17 +195,61 @@ export async function autocompleteCities(query: string, sessionToken?: string): 
 }
 
 export async function getPlaceLocation(placeId: string): Promise<{ lat: number; lng: number } | null> {
-  if (!GOOGLE_KEY || !placeId) return null;
-  const url = new URL('https://maps.googleapis.com/maps/api/place/details/json');
-  url.searchParams.set('place_id', placeId);
-  url.searchParams.set('fields', 'geometry');
-  url.searchParams.set('language', 'he');
-  url.searchParams.set('key', GOOGLE_KEY);
-  const res = await fetch(url.toString());
-  const data = await res.json();
-  const loc = data?.result?.geometry?.location;
-  if (loc?.lat && loc?.lng) return { lat: loc.lat, lng: loc.lng };
-  return null;
+  if (!placeId) return null;
+  
+  // On web, use the JS API PlacesService (no CORS issues)
+  if (isWeb()) {
+    await loadGoogleMapsJs();
+    const g = (window as any).google;
+    if (!g?.maps?.places) return null;
+    
+    try {
+      // Create a temporary div for PlacesService
+      const div = document.createElement('div');
+      const service = new g.maps.places.PlacesService(div);
+      
+      return new Promise((resolve) => {
+        service.getDetails(
+          {
+            placeId,
+            fields: ['geometry'],
+          },
+          (place: any, status: string) => {
+            if (status === 'OK' && place?.geometry?.location) {
+              resolve({
+                lat: place.geometry.location.lat(),
+                lng: place.geometry.location.lng(),
+              });
+            } else {
+              console.warn('PlacesService.getDetails failed', status);
+              resolve(null);
+            }
+          }
+        );
+      });
+    } catch (err) {
+      console.warn('Failed to get place location', err);
+      return null;
+    }
+  }
+  
+  // Native/non-web: use HTTP API
+  if (!GOOGLE_KEY) return null;
+  try {
+    const url = new URL('https://maps.googleapis.com/maps/api/place/details/json');
+    url.searchParams.set('place_id', placeId);
+    url.searchParams.set('fields', 'geometry');
+    url.searchParams.set('language', 'he');
+    url.searchParams.set('key', GOOGLE_KEY);
+    const res = await fetch(url.toString());
+    const data = await res.json();
+    const loc = data?.result?.geometry?.location;
+    if (loc?.lat && loc?.lng) return { lat: loc.lat, lng: loc.lng };
+    return null;
+  } catch (err) {
+    console.warn('HTTP place details failed', err);
+    return null;
+  }
 }
 
 export async function autocompleteNeighborhoods(

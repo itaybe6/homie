@@ -10,6 +10,7 @@ import {
   SafeAreaView,
   TouchableOpacity,
   Modal,
+  ScrollView,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Search, SlidersHorizontal, X, Plus } from 'lucide-react-native';
@@ -43,6 +44,8 @@ export default function HomeScreen() {
   const [neighborhoodSuggestions, setNeighborhoodSuggestions] = useState<string[]>([]);
   const [neighborhoodOptions, setNeighborhoodOptions] = useState<string[]>([]);
   const [isNeighborhoodDropdownOpen, setIsNeighborhoodDropdownOpen] = useState(false);
+  const [neighborhoodSearchQuery, setNeighborhoodSearchQuery] = useState('');
+  const [isLoadingNeighborhoods, setIsLoadingNeighborhoods] = useState(false);
   const [cityPlaceId, setCityPlaceId] = useState<string | null>(null);
   const [sessionToken, setSessionToken] = useState<string>('');
 
@@ -81,15 +84,32 @@ export default function HomeScreen() {
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
-      if (!cityPlaceId) { setNeighborhoodOptions([]); return; }
+      if (!cityPlaceId) { 
+        setNeighborhoodOptions([]);
+        setIsLoadingNeighborhoods(false);
+        return; 
+      }
+      setIsLoadingNeighborhoods(true);
       try {
         const loc = await getPlaceLocation(cityPlaceId);
-        if (!loc) { if (!cancelled) setNeighborhoodOptions([]); return; }
+        if (!loc) { 
+          if (!cancelled) {
+            setNeighborhoodOptions([]);
+            setIsLoadingNeighborhoods(false);
+          }
+          return; 
+        }
         const list = await fetchNeighborhoodsForCity({ lat: loc.lat, lng: loc.lng, radiusMeters: 25000 });
-        if (!cancelled) setNeighborhoodOptions(list);
+        if (!cancelled) {
+          setNeighborhoodOptions(list);
+          setIsLoadingNeighborhoods(false);
+        }
       } catch (error) {
         console.warn('Failed to load neighborhoods list', error);
-        if (!cancelled) setNeighborhoodOptions([]);
+        if (!cancelled) {
+          setNeighborhoodOptions([]);
+          setIsLoadingNeighborhoods(false);
+        }
       }
     };
     load();
@@ -313,64 +333,69 @@ export default function HomeScreen() {
 
               <View style={styles.fieldGroup}> 
                 <Text style={styles.fieldLabel}>שכונה</Text>
-                <TextInput
-                  style={[styles.fieldInput, !filters.city ? { opacity: 0.6 } : null]}
-                  placeholder={
-                    neighborhoodOptions.length > 0
-                      ? 'בחר שכונה מהרשימה או הקלד לחיפוש'
-                      : filters.city
-                      ? 'טוען שכונות...'
-                      : 'בחר עיר קודם'
-                  }
-                  editable={!!filters.city}
-                  placeholderTextColor="#9DA4AE"
-                  value={filters.neighborhood}
-                  onChangeText={(t) => {
-                    setFilters((f) => ({ ...f, neighborhood: t }));
-                    if (filters.city && neighborhoodOptions.length > 0) setIsNeighborhoodDropdownOpen(true);
+                <TouchableOpacity
+                  style={[
+                    styles.fieldInput,
+                    styles.selectButton,
+                    !filters.city ? { opacity: 0.6 } : null,
+                  ]}
+                  onPress={() => {
+                    if (filters.city && !isLoadingNeighborhoods) {
+                      setIsNeighborhoodDropdownOpen(!isNeighborhoodDropdownOpen);
+                    }
                   }}
-                  onFocus={() => {
-                    if (filters.city && neighborhoodOptions.length > 0) setIsNeighborhoodDropdownOpen(true);
-                  }}
-                />
+                  disabled={!filters.city}
+                >
+                  <Text
+                    style={[
+                      styles.selectButtonText,
+                      !filters.neighborhood && styles.selectButtonPlaceholder,
+                    ]}
+                  >
+                    {filters.neighborhood ||
+                      (isLoadingNeighborhoods
+                        ? 'טוען שכונות...'
+                        : neighborhoodOptions.length > 0
+                        ? 'בחר שכונה'
+                        : filters.city
+                        ? 'אין שכונות זמינות'
+                        : 'בחר עיר קודם')}
+                  </Text>
+                  <Text style={styles.selectButtonArrow}>▼</Text>
+                </TouchableOpacity>
                 {isNeighborhoodDropdownOpen && neighborhoodOptions.length > 0 ? (
                   <View style={styles.suggestionsBox}>
-                    {(filters.neighborhood
-                      ? neighborhoodOptions.filter((name) =>
-                          name.toLowerCase().includes(filters.neighborhood.trim().toLowerCase())
-                        )
-                      : neighborhoodOptions
-                    )
-                      .slice(0, 50)
-                      .map((name) => (
-                        <TouchableOpacity
-                          key={name}
-                          style={styles.suggestionItem}
-                          onPress={() => {
-                            setFilters((f) => ({ ...f, neighborhood: name }));
-                            setNeighborhoodSuggestions([]);
-                            setIsNeighborhoodDropdownOpen(false);
-                          }}
-                        >
-                          <Text style={styles.suggestionText}>{name}</Text>
-                        </TouchableOpacity>
-                      ))}
-                  </View>
-                ) : neighborhoodSuggestions.length > 0 && filters.neighborhood ? (
-                  <View style={styles.suggestionsBox}>
-                    {neighborhoodSuggestions.map((name) => (
-                      <TouchableOpacity
-                        key={name}
-                        style={styles.suggestionItem}
-                        onPress={() => {
-                          setFilters((f) => ({ ...f, neighborhood: name }));
-                          setNeighborhoodSuggestions([]);
-                          setIsNeighborhoodDropdownOpen(false);
-                        }}
-                      >
-                        <Text style={styles.suggestionText}>{name}</Text>
-                      </TouchableOpacity>
-                    ))}
+                    <TextInput
+                      style={styles.searchInput}
+                      placeholder="חפש שכונה..."
+                      placeholderTextColor="#9DA4AE"
+                      value={neighborhoodSearchQuery}
+                      onChangeText={setNeighborhoodSearchQuery}
+                      autoFocus
+                    />
+                    <ScrollView style={styles.dropdownScroll} nestedScrollEnabled>
+                      {(neighborhoodSearchQuery
+                        ? neighborhoodOptions.filter((name) =>
+                            name.toLowerCase().includes(neighborhoodSearchQuery.toLowerCase())
+                          )
+                        : neighborhoodOptions
+                      )
+                        .slice(0, 100)
+                        .map((name) => (
+                          <TouchableOpacity
+                            key={name}
+                            style={styles.suggestionItem}
+                            onPress={() => {
+                              setFilters((f) => ({ ...f, neighborhood: name }));
+                              setNeighborhoodSuggestions([]);
+                              setIsNeighborhoodDropdownOpen(false);
+                              setNeighborhoodSearchQuery('');
+                            }}
+                          >
+                            <Text style={styles.suggestionText}>{name}</Text>
+                          </TouchableOpacity>
+                        ))}
+                    </ScrollView>
                   </View>
                 ) : null}
               </View>
@@ -702,5 +727,40 @@ const styles = StyleSheet.create({
     color: '#E5E7EB',
     fontSize: 14,
     textAlign: 'right',
+  },
+  selectButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  selectButtonText: {
+    flex: 1,
+    color: '#FFFFFF',
+    fontSize: 14,
+  },
+  selectButtonPlaceholder: {
+    color: '#9DA4AE',
+  },
+  selectButtonArrow: {
+    color: '#9DA4AE',
+    fontSize: 12,
+    marginLeft: 8,
+  },
+  searchInput: {
+    backgroundColor: '#1B1B28',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 8,
+    fontSize: 14,
+    borderWidth: 1,
+    borderColor: '#2A2A37',
+    color: '#FFFFFF',
+    textAlign: 'right',
+    marginBottom: 8,
+    marginHorizontal: 8,
+    marginTop: 8,
+  },
+  dropdownScroll: {
+    maxHeight: 200,
   },
 });

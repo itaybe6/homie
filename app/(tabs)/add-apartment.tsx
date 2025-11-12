@@ -47,6 +47,8 @@ export default function AddApartmentScreen() {
   const [neighborhoodSuggestions, setNeighborhoodSuggestions] = useState<string[]>([]);
   const [neighborhoodOptions, setNeighborhoodOptions] = useState<string[]>([]);
   const [isNeighborhoodOpen, setIsNeighborhoodOpen] = useState(false);
+  const [neighborhoodSearchQuery, setNeighborhoodSearchQuery] = useState('');
+  const [isLoadingNeighborhoods, setIsLoadingNeighborhoods] = useState(false);
   const [includeAsPartner, setIncludeAsPartner] = useState(false);
 
   useEffect(() => {
@@ -69,11 +71,33 @@ export default function AddApartmentScreen() {
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
-      if (!cityPlaceId) { setNeighborhoodOptions([]); return; }
-      const loc = await getPlaceLocation(cityPlaceId);
-      if (!loc) { setNeighborhoodOptions([]); return; }
-      const list = await fetchNeighborhoodsForCity({ lat: loc.lat, lng: loc.lng, radiusMeters: 25000 });
-      if (!cancelled) setNeighborhoodOptions(list);
+      if (!cityPlaceId) { 
+        setNeighborhoodOptions([]);
+        setIsLoadingNeighborhoods(false);
+        return; 
+      }
+      setIsLoadingNeighborhoods(true);
+      try {
+        const loc = await getPlaceLocation(cityPlaceId);
+        if (!loc) { 
+          if (!cancelled) {
+            setNeighborhoodOptions([]);
+            setIsLoadingNeighborhoods(false);
+          }
+          return; 
+        }
+        const list = await fetchNeighborhoodsForCity({ lat: loc.lat, lng: loc.lng, radiusMeters: 25000 });
+        if (!cancelled) {
+          setNeighborhoodOptions(list);
+          setIsLoadingNeighborhoods(false);
+        }
+      } catch (err) {
+        console.warn('Failed to load neighborhoods', err);
+        if (!cancelled) {
+          setNeighborhoodOptions([]);
+          setIsLoadingNeighborhoods(false);
+        }
+      }
     };
     load();
     return () => { cancelled = true; };
@@ -384,41 +408,70 @@ export default function AddApartmentScreen() {
 
             
 
-            <View style={[styles.inputGroup, (isNeighborhoodOpen && neighborhoodOptions.length > 0) || neighborhoodSuggestions.length > 0 ? styles.inputGroupRaised : null]}>
+            <View style={[styles.inputGroup, isNeighborhoodOpen ? styles.inputGroupRaised : null]}>
               <Text style={styles.label}>שכונה</Text>
-              <TextInput
-                style={[styles.input, !city ? { opacity: 0.6 } : null]}
-                placeholder={city ? 'בחר שכונה' : 'בחר עיר קודם'}
-                value={neighborhood}
-                onChangeText={(t) => { setNeighborhood(t); setIsNeighborhoodOpen(true); }}
-                editable={!isLoading && !!city}
-                placeholderTextColor="#9AA0A6"
-                onFocus={() => setIsNeighborhoodOpen(true)}
-              />
+              <TouchableOpacity
+                style={[
+                  styles.input,
+                  styles.selectButton,
+                  !city ? { opacity: 0.6 } : null,
+                ]}
+                onPress={() => {
+                  if (city && !isLoadingNeighborhoods) {
+                    setIsNeighborhoodOpen(!isNeighborhoodOpen);
+                  }
+                }}
+                disabled={!city || isLoading}
+              >
+                <Text
+                  style={[
+                    styles.selectButtonText,
+                    !neighborhood && styles.selectButtonPlaceholder,
+                  ]}
+                >
+                  {neighborhood ||
+                    (isLoadingNeighborhoods
+                      ? 'טוען שכונות...'
+                      : neighborhoodOptions.length > 0
+                      ? 'בחר שכונה'
+                      : city
+                      ? 'אין שכונות זמינות'
+                      : 'בחר עיר קודם')}
+                </Text>
+                <Text style={styles.selectButtonArrow}>▼</Text>
+              </TouchableOpacity>
               {isNeighborhoodOpen && neighborhoodOptions.length > 0 ? (
                 <View style={styles.suggestionsBox}>
-                  {(neighborhood ? neighborhoodOptions.filter((n) => n.includes(neighborhood)) : neighborhoodOptions).slice(0, 50).map((name) => (
-                    <TouchableOpacity
-                      key={name}
-                      style={styles.suggestionItem}
-                      onPress={() => { setNeighborhood(name); setIsNeighborhoodOpen(false); }}
-                    >
-                      <Text style={styles.suggestionText}>{name}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              ) : null}
-              {neighborhoodSuggestions.length > 0 ? (
-                <View style={styles.suggestionsBox}>
-                  {neighborhoodSuggestions.map((name) => (
-                    <TouchableOpacity
-                      key={name}
-                      style={styles.suggestionItem}
-                      onPress={() => { setNeighborhood(name); setNeighborhoodSuggestions([]); setIsNeighborhoodOpen(false); }}
-                    >
-                      <Text style={styles.suggestionText}>{name}</Text>
-                    </TouchableOpacity>
-                  ))}
+                  <TextInput
+                    style={styles.searchInput}
+                    placeholder="חפש שכונה..."
+                    placeholderTextColor="#9AA0A6"
+                    value={neighborhoodSearchQuery}
+                    onChangeText={setNeighborhoodSearchQuery}
+                    autoFocus
+                  />
+                  <ScrollView style={styles.dropdownScroll} nestedScrollEnabled>
+                    {(neighborhoodSearchQuery
+                      ? neighborhoodOptions.filter((n) =>
+                          n.toLowerCase().includes(neighborhoodSearchQuery.toLowerCase())
+                        )
+                      : neighborhoodOptions
+                    )
+                      .slice(0, 100)
+                      .map((name) => (
+                        <TouchableOpacity
+                          key={name}
+                          style={styles.suggestionItem}
+                          onPress={() => {
+                            setNeighborhood(name);
+                            setIsNeighborhoodOpen(false);
+                            setNeighborhoodSearchQuery('');
+                          }}
+                        >
+                          <Text style={styles.suggestionText}>{name}</Text>
+                        </TouchableOpacity>
+                      ))}
+                  </ScrollView>
                 </View>
               ) : null}
             </View>
@@ -787,5 +840,40 @@ const styles = StyleSheet.create({
   galleryPlaceholderText: {
     color: '#9DA4AE',
     fontSize: 13,
+  },
+  selectButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  selectButtonText: {
+    flex: 1,
+    color: '#FFFFFF',
+    fontSize: 16,
+  },
+  selectButtonPlaceholder: {
+    color: '#9AA0A6',
+  },
+  selectButtonArrow: {
+    color: '#9AA0A6',
+    fontSize: 12,
+    marginLeft: 8,
+  },
+  searchInput: {
+    backgroundColor: '#1B1B28',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 8,
+    fontSize: 14,
+    borderWidth: 1,
+    borderColor: '#2A2A37',
+    color: '#FFFFFF',
+    textAlign: 'right',
+    marginBottom: 8,
+    marginHorizontal: 8,
+    marginTop: 8,
+  },
+  dropdownScroll: {
+    maxHeight: 200,
   },
 });
