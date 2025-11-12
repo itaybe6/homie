@@ -1,10 +1,46 @@
-import React from 'react';
-import { Platform, StyleSheet, Text, TextInput } from 'react-native';
+import * as React from 'react';
+import { Platform, StyleSheet, Text, TextInput, I18nManager } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // NOTE: Avoid using I18nManager.forceRTL which requires a native reload and may conflict
 // with Expo Go. Instead, on native we enforce RTL text defaults at the component level.
 
 type TextLikeComponent = typeof Text | typeof TextInput;
+
+// Ensure global RTL on native once (before app UI mounts)
+if (Platform.OS !== 'web') {
+  (async () => {
+    try {
+      const applied = await AsyncStorage.getItem('__rtl_applied__');
+      // If we've already applied RTL previously, just enable allowances and exit
+      if (applied === '1') {
+        I18nManager.allowRTL(true);
+        I18nManager.swapLeftAndRightInRTL(true);
+        return;
+      }
+
+      if (!I18nManager.isRTL) {
+        I18nManager.allowRTL(true);
+        I18nManager.swapLeftAndRightInRTL(true);
+        I18nManager.forceRTL(true);
+        await AsyncStorage.setItem('__rtl_applied__', '1');
+        // Reload once so the change takes effect
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-var-requires
+          const Updates: any = require('expo-updates');
+          await Updates?.reloadAsync?.();
+        } catch {
+          // If expo-updates isn't available (e.g., web), ignore
+        }
+      } else {
+        // Device is already RTL – mark as applied to avoid future reloads
+        await AsyncStorage.setItem('__rtl_applied__', '1');
+      }
+    } catch {
+      // ignore
+    }
+  })();
+}
 
 const appendDefaultStyle = (Component: TextLikeComponent, style: Record<string, unknown>) => {
   const defaults = (Component as any).defaultProps ?? {};

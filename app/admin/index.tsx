@@ -69,8 +69,8 @@ export default function AdminDashboard() {
         const { data: aptsData } = await supabase.from('apartments').select('*').order('created_at', { ascending: false });
         // Matches counts
         const [{ count: apprCount }, { count: pendCount }] = await Promise.all([
-          supabase.from('matches').select('*', { count: 'exact', head: true }).eq('approved', true),
-          supabase.from('matches').select('*', { count: 'exact', head: true }).eq('approved', false),
+          supabase.from('matches').select('*', { count: 'exact', head: true }).eq('status', 'APPROVED'),
+          supabase.from('matches').select('*', { count: 'exact', head: true }).eq('status', 'PENDING'),
         ]);
         // Full matches list for UI
         const { data: matchesData } = await supabase.from('matches').select('*').order('created_at', { ascending: false });
@@ -659,7 +659,15 @@ function ApartmentRow({ apt, partners }: { apt: any; partners?: any[] }) {
 }
 
 function MatchRow({ match, sender, receiver }: { match: any; sender: any; receiver: any }) {
-  const approved = !!match?.approved;
+  const status = (match?.status || 'PENDING').trim();
+  const badgeConfig: Record<string, { bg: string; color: string; label: string }> = {
+    APPROVED: { bg: '#16A34A22', color: '#22C55E', label: 'מאושר' },
+    PENDING: { bg: '#F59E0B22', color: '#F59E0B', label: 'ממתין' },
+    REJECTED: { bg: '#F8717122', color: '#F87171', label: 'נדחה' },
+    NOT_RELEVANT: { bg: '#94A3B822', color: '#94A3B8', label: 'לא רלוונטי' },
+    CANCELLED: { bg: '#94A3B822', color: '#94A3B8', label: 'בוטל' },
+  };
+  const { bg, color, label } = badgeConfig[status] || badgeConfig.PENDING;
   return (
     <View style={[styles.rowCard, { alignItems: 'center' }]}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1, justifyContent: 'flex-end' }}>
@@ -668,9 +676,9 @@ function MatchRow({ match, sender, receiver }: { match: any; sender: any; receiv
         <ProfilePreview user={sender} align="right" />
       </View>
       <View style={{ alignItems: 'flex-start', marginLeft: 8 }}>
-        <View style={[styles.badge, { backgroundColor: approved ? '#16A34A22' : '#F59E0B22' }]}>
-          <Text style={{ color: approved ? '#22C55E' : '#F59E0B', fontWeight: '700', fontSize: 12 }}>
-            {approved ? 'מאושר' : 'ממתין'}
+        <View style={[styles.badge, { backgroundColor: bg }]}>
+          <Text style={{ color, fontWeight: '700', fontSize: 12 }}>
+            {label}
           </Text>
         </View>
         <Text style={styles.rowMeta}>{new Date(match.created_at).toLocaleDateString('he-IL')}</Text>

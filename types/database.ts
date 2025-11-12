@@ -36,11 +36,13 @@ export interface Apartment {
 
 
 
+export type MatchStatus = 'PENDING' | 'APPROVED' | 'NOT_RELEVANT' | 'REJECTED';
+
 export interface Matches {
   id: string;
   sender_id: string;
   receiver_id: string;
-  approved: boolean;
+  status: MatchStatus;
   created_at: string;
   updated_at: string;
 }

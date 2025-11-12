@@ -13,7 +13,8 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Search, SlidersHorizontal, X, Plus } from 'lucide-react-native';
-import { autocompleteCities, autocompleteNeighborhoods, createSessionToken, PlacePrediction } from '@/lib/googlePlaces';
+import { autocompleteCities, autocompleteNeighborhoods, createSessionToken, PlacePrediction, getPlaceLocation } from '@/lib/googlePlaces';
+import { fetchNeighborhoodsForCity } from '@/lib/neighborhoods';
 import { supabase } from '@/lib/supabase';
 import { useApartmentStore } from '@/stores/apartmentStore';
 import { Apartment } from '@/types/database';
@@ -40,6 +41,8 @@ export default function HomeScreen() {
   });
   const [citySuggestions, setCitySuggestions] = useState<PlacePrediction[]>([]);
   const [neighborhoodSuggestions, setNeighborhoodSuggestions] = useState<string[]>([]);
+  const [neighborhoodOptions, setNeighborhoodOptions] = useState<string[]>([]);
+  const [isNeighborhoodDropdownOpen, setIsNeighborhoodDropdownOpen] = useState(false);
   const [cityPlaceId, setCityPlaceId] = useState<string | null>(null);
   const [sessionToken, setSessionToken] = useState<string>('');
 
@@ -69,12 +72,25 @@ export default function HomeScreen() {
     return () => { active = false; };
   }, [filters.city, sessionToken]);
 
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      if (!cityPlaceId) { setNeighborhoodOptions([]); return; }
+      const loc = await getPlaceLocation(cityPlaceId);
+      if (!loc) { setNeighborhoodOptions([]); return; }
+      const list = await fetchNeighborhoodsForCity({ lat: loc.lat, lng: loc.lng, radiusMeters: 25000 });
+      if (!cancelled) setNeighborhoodOptions(list);
+    };
+    load();
+    return () => { cancelled = true; };
+  }, [cityPlaceId]);
+
   // Neighborhood autocomplete
   useEffect(() => {
     let active = true;
     const run = async () => {
       const q = filters.neighborhood.trim();
-      if (!q || q.length < 2) { setNeighborhoodSuggestions([]); return; }
+      if (!q || q.length < 1) { setNeighborhoodSuggestions([]); return; }
       const list = await autocompleteNeighborhoods(q, cityPlaceId, sessionToken, filters.city);
       if (active) setNeighborhoodSuggestions(list.slice(0, 10));
     };
@@ -248,8 +264,11 @@ export default function HomeScreen() {
                   placeholderTextColor="#9DA4AE"
                   value={filters.city}
                   onChangeText={(t) => {
-                    setFilters((f) => ({ ...f, city: t }));
+                    setFilters((f) => ({ ...f, city: t, neighborhood: '' }));
                     setCityPlaceId(null);
+                    setNeighborhoodSuggestions([]);
+                    setNeighborhoodOptions([]);
+                    setIsNeighborhoodDropdownOpen(false);
                   }}
                 />
                 {citySuggestions.length > 0 ? (
@@ -259,9 +278,12 @@ export default function HomeScreen() {
                         key={p.placeId}
                         style={styles.suggestionItem}
                         onPress={() => {
-                          setFilters((f) => ({ ...f, city: p.description }));
+                          setFilters((f) => ({ ...f, city: p.description, neighborhood: '' }));
                           setCityPlaceId(p.placeId);
                           setCitySuggestions([]);
+                          setNeighborhoodSuggestions([]);
+                          setNeighborhoodOptions([]);
+                          setIsNeighborhoodDropdownOpen(false);
                         }}
                       >
                         <Text style={styles.suggestionText}>{p.description}</Text>
@@ -279,15 +301,48 @@ export default function HomeScreen() {
                   editable={!!filters.city}
                   placeholderTextColor="#9DA4AE"
                   value={filters.neighborhood}
-                  onChangeText={(t) => setFilters((f) => ({ ...f, neighborhood: t }))}
+                  onChangeText={(t) => {
+                    setFilters((f) => ({ ...f, neighborhood: t }));
+                    if (filters.city) setIsNeighborhoodDropdownOpen(true);
+                  }}
+                  onFocus={() => {
+                    if (filters.city) setIsNeighborhoodDropdownOpen(true);
+                  }}
                 />
+                {isNeighborhoodDropdownOpen && neighborhoodOptions.length > 0 ? (
+                  <View style={styles.suggestionsBox}>
+                    {(filters.neighborhood
+                      ? neighborhoodOptions.filter((name) =>
+                          name.toLowerCase().includes(filters.neighborhood.trim().toLowerCase())
+                        )
+                      : neighborhoodOptions
+                    )
+                      .slice(0, 50)
+                      .map((name) => (
+                        <TouchableOpacity
+                          key={name}
+                          style={styles.suggestionItem}
+                          onPress={() => {
+                            setFilters((f) => ({ ...f, neighborhood: name }));
+                            setIsNeighborhoodDropdownOpen(false);
+                          }}
+                        >
+                          <Text style={styles.suggestionText}>{name}</Text>
+                        </TouchableOpacity>
+                      ))}
+                  </View>
+                ) : null}
                 {neighborhoodSuggestions.length > 0 ? (
                   <View style={styles.suggestionsBox}>
                     {neighborhoodSuggestions.map((name) => (
                       <TouchableOpacity
                         key={name}
                         style={styles.suggestionItem}
-                        onPress={() => { setFilters((f) => ({ ...f, neighborhood: name })); setNeighborhoodSuggestions([]); }}
+                        onPress={() => {
+                          setFilters((f) => ({ ...f, neighborhood: name }));
+                          setNeighborhoodSuggestions([]);
+                          setIsNeighborhoodDropdownOpen(false);
+                        }}
                       >
                         <Text style={styles.suggestionText}>{name}</Text>
                       </TouchableOpacity>

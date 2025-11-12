@@ -103,8 +103,16 @@ export default function SurveyScreen() {
         if (!cancelled) setCitySuggestions([]);
         return;
       }
-      const preds = await autocompleteCities(query, sessionToken || undefined);
-      if (!cancelled) setCitySuggestions(preds.slice(0, 8));
+      try {
+        const preds = await autocompleteCities(query, sessionToken || undefined);
+        if (!cancelled) setCitySuggestions(preds.slice(0, 8));
+      } catch (err) {
+        if (!cancelled) {
+          setCitySuggestions([]);
+          // eslint-disable-next-line no-console
+          console.warn('Failed to fetch city suggestions', err);
+        }
+      }
     };
     run();
     return () => {
@@ -119,13 +127,21 @@ export default function SurveyScreen() {
         if (!cancelled) setNeighborhoodOptions([]);
         return;
       }
-      const loc = await getPlaceLocation(cityPlaceId);
-      if (!loc) {
-        if (!cancelled) setNeighborhoodOptions([]);
-        return;
+      try {
+        const loc = await getPlaceLocation(cityPlaceId);
+        if (!loc) {
+          if (!cancelled) setNeighborhoodOptions([]);
+          return;
+        }
+        const list = await fetchNeighborhoodsForCity({ lat: loc.lat, lng: loc.lng, radiusMeters: 25000 });
+        if (!cancelled) setNeighborhoodOptions(list);
+      } catch (err) {
+        if (!cancelled) {
+          setNeighborhoodOptions([]);
+          // eslint-disable-next-line no-console
+          console.warn('Failed to load neighborhoods for city', err);
+        }
       }
-      const list = await fetchNeighborhoodsForCity({ lat: loc.lat, lng: loc.lng, radiusMeters: 25000 });
-      if (!cancelled) setNeighborhoodOptions(list);
     };
     load();
     return () => {
@@ -137,11 +153,18 @@ export default function SurveyScreen() {
     let cancelled = false;
     const ensurePlaceId = async () => {
       if (cityPlaceId || !state.preferred_city || !sessionToken) return;
-      const preds = await autocompleteCities(state.preferred_city, sessionToken);
-      if (cancelled) return;
-      const exact = preds.find((p) => p.description === state.preferred_city);
-      if (exact) {
-        setCityPlaceId(exact.placeId);
+      try {
+        const preds = await autocompleteCities(state.preferred_city, sessionToken);
+        if (cancelled) return;
+        const exact = preds.find((p) => p.description === state.preferred_city);
+        if (exact) {
+          setCityPlaceId(exact.placeId);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          // eslint-disable-next-line no-console
+          console.warn('Failed to resolve city place id', err);
+        }
       }
     };
     ensurePlaceId();

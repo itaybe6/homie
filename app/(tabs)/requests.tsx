@@ -29,7 +29,7 @@ export default function RequestsScreen() {
     sender_id: string;
     recipient_id: string;
     created_at: string;
-    status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED';
+    status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED' | 'NOT_RELEVANT';
     apartment_id?: string | null;
   };
   const [sent, setSent] = useState<UnifiedItem[]>([]);
@@ -45,6 +45,30 @@ export default function RequestsScreen() {
 
   const DEFAULT_AVATAR = 'https://cdn-icons-png.flaticon.com/512/847/847969.png';
   const APT_PLACEHOLDER = 'https://images.pexels.com/photos/1457842/pexels-photo-1457842.jpeg';
+
+  const mapMatchStatus = (status: string | null | undefined): UnifiedItem['status'] => {
+    const normalized = (status || '').trim();
+    switch (normalized) {
+      case 'אושר':
+      case 'APPROVED':
+        return 'APPROVED';
+      case 'נדחה':
+      case 'REJECTED':
+        return 'REJECTED';
+      case 'לא רלוונטי':
+      case 'IRRELEVANT':
+      case 'NOT_RELEVANT':
+        return 'NOT_RELEVANT';
+      case 'ממתין':
+      case 'PENDING':
+        return 'PENDING';
+      case 'CANCELLED':
+      case 'בוטל':
+        return 'CANCELLED';
+      default:
+        return 'PENDING';
+    }
+  };
 
   useEffect(() => {
     fetchAll();
@@ -95,7 +119,7 @@ export default function RequestsScreen() {
         sender_id: row.sender_id,
         recipient_id: row.receiver_id,
         apartment_id: null,
-        status: row.approved ? 'APPROVED' : 'PENDING',
+        status: mapMatchStatus(row.status),
         created_at: row.created_at,
       }));
       const matchRecv: UnifiedItem[] = (mRecv || []).map((row: any) => ({
@@ -104,7 +128,7 @@ export default function RequestsScreen() {
         sender_id: row.sender_id,
         recipient_id: row.receiver_id,
         apartment_id: null,
-        status: row.approved ? 'APPROVED' : 'PENDING',
+        status: mapMatchStatus(row.status),
         created_at: row.created_at,
       }));
 
@@ -270,10 +294,14 @@ export default function RequestsScreen() {
   };
 
   const StatusPill = ({ status }: { status: UnifiedItem['status'] }) => {
-    let bg = '#363649', color = '#E5E7EB', text = 'ממתין';
-    if (status === 'APPROVED') { bg = 'rgba(34,197,94,0.18)'; color = '#22C55E'; text = 'אושר'; }
-    if (status === 'REJECTED') { bg = 'rgba(248,113,113,0.18)'; color = '#F87171'; text = 'נדחה'; }
-    if (status === 'CANCELLED') { bg = 'rgba(148,163,184,0.18)'; color = '#94A3B8'; text = 'בוטל'; }
+    const config: Record<UnifiedItem['status'], { bg: string; color: string; text: string }> = {
+      PENDING: { bg: '#363649', color: '#E5E7EB', text: 'ממתין' },
+      APPROVED: { bg: 'rgba(34,197,94,0.18)', color: '#22C55E', text: 'אושר' },
+      REJECTED: { bg: 'rgba(248,113,113,0.18)', color: '#F87171', text: 'נדחה' },
+      CANCELLED: { bg: 'rgba(148,163,184,0.18)', color: '#94A3B8', text: 'בוטל' },
+      NOT_RELEVANT: { bg: 'rgba(148,163,184,0.18)', color: '#94A3B8', text: 'לא רלוונטי' },
+    };
+    const { bg, color, text } = config[status] || config.PENDING;
     return (
       <View style={{ alignSelf: 'flex-start', backgroundColor: bg, borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999 }}>
         <Text style={{ color, fontWeight: '900', fontSize: 12 }}>{text}</Text>
@@ -474,7 +502,7 @@ export default function RequestsScreen() {
         </View>
 
         <View style={styles.statusChipsRow}>
-          {(['ALL','PENDING','APPROVED','REJECTED'] as const).map((key) => (
+          {(['ALL','PENDING','APPROVED','REJECTED','NOT_RELEVANT'] as const).map((key) => (
             <TouchableOpacity
               key={key}
               onPress={() => setStatusFilter(key)}
@@ -482,7 +510,17 @@ export default function RequestsScreen() {
               style={[styles.statusChip, statusFilter === key && styles.statusChipActive]}
             >
               <Text style={[styles.statusChipText, statusFilter === key && styles.statusChipTextActive]}>
-                {key === 'ALL' ? 'הכל' : key === 'PENDING' ? 'ממתין' : key === 'APPROVED' ? 'אושר' : key === 'REJECTED' ? 'נדחה' : 'בוטל'}
+                {key === 'ALL'
+                  ? 'הכל'
+                  : key === 'PENDING'
+                  ? 'ממתין'
+                  : key === 'APPROVED'
+                  ? 'אושר'
+                  : key === 'REJECTED'
+                  ? 'נדחה'
+                  : key === 'NOT_RELEVANT'
+                  ? 'לא רלוונטי'
+                  : 'בוטל'}
               </Text>
             </TouchableOpacity>
           ))}

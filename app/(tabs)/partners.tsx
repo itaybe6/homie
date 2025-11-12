@@ -101,11 +101,11 @@ export default function PartnersScreen() {
         return;
       }
 
-      // create a match request (approved=false means pending)
+      // create a match request in pending status
       const { error: insertErr } = await supabase.from('matches').insert({
         sender_id: currentUser.id,
         receiver_id: likedUser.id,
-        approved: false,
+        status: 'PENDING',
       } as any);
       if (insertErr) throw insertErr;
 
@@ -123,8 +123,24 @@ export default function PartnersScreen() {
       Alert.alert('שגיאה', e?.message || 'לא ניתן לשלוח בקשה');
     }
   };
-  const handlePass = (user: User) => {
-    console.log('pass', user.id);
+  const handlePass = async (user: User) => {
+    if (!currentUser?.id) {
+      Alert.alert('שגיאה', 'יש להתחבר כדי לבצע פעולה זו');
+      return;
+    }
+    try {
+      const { error } = await supabase.from('matches').insert({
+        sender_id: currentUser.id,
+        receiver_id: user.id,
+        status: 'NOT_RELEVANT',
+      } as any);
+      if (error) throw error;
+    } catch (e: any) {
+      console.error('pass failed', e);
+      Alert.alert('שגיאה', e?.message || 'לא ניתן לסמן כלא רלוונטי');
+    } finally {
+      goNext();
+    }
   };
   // Removed favorite action per request
 

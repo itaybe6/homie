@@ -35,7 +35,7 @@ function RequestsButtonBase({ style, badgeCount }: Props) {
           .from('matches')
           .select('id', { count: 'exact', head: true })
           .eq('receiver_id', user.id)
-          .eq('approved', false),
+          .eq('status', 'PENDING'),
       ]);
       if (isMounted) setCount((c1 || 0) + (c2 || 0));
     };
