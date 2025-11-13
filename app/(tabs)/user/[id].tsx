@@ -142,7 +142,7 @@ export default function UserProfileScreen() {
           .from('profile_groups')
           .insert({
             created_by: me.id,
-            name: 'קבוצת שותפים חדשה',
+            name: 'שותפים',
           })
           .select('*')
           .single();

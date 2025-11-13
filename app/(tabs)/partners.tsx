@@ -7,6 +7,7 @@ import {
   ActivityIndicator,
   TouchableOpacity,
   Modal,
+  TextInput,
   Animated,
   Dimensions,
   Easing,
@@ -20,6 +21,7 @@ import { useAuthStore } from '@/stores/authStore';
 import { User } from '@/types/database';
 import RoommateCard from '@/components/RoommateCard';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { cityNeighborhoods, canonicalizeCityName } from '@/assets/data/neighborhoods';
 
 type BrowseItem =
   | { type: 'user'; user: User }
@@ -37,6 +39,10 @@ export default function PartnersScreen() {
   const [ageMin, setAgeMin] = useState<number>(20);
   const [ageMax, setAgeMax] = useState<number>(40);
   const [ageActive, setAgeActive] = useState<boolean>(false);
+  const [profileType, setProfileType] = useState<'all' | 'singles' | 'groups'>('all');
+  const [groupGender, setGroupGender] = useState<'any' | 'male' | 'female'>('any');
+  const [groupSize, setGroupSize] = useState<'any' | 2 | 3>('any');
+  const [selectedCities, setSelectedCities] = useState<string[]>([]);
 
   const screenWidth = Dimensions.get('window').width;
   const translateX = useRef(new Animated.Value(0)).current;
@@ -50,10 +56,39 @@ useEffect(() => {
     if (gender !== 'any') {
       if (!u.gender || u.gender !== gender) return false;
     }
+    // City filter (multi-select)
+    if (selectedCities.length) {
+      const userCity = canonicalizeCityName(u.city || '');
+      if (!selectedCities.includes(userCity)) return false;
+    }
     // Age filter: only when activated by the user
     if (ageActive) {
       if (typeof u.age !== 'number') return false;
       if (u.age < ageMin || u.age > ageMax) return false;
+    }
+    return true;
+  };
+
+  const groupPassesFilters = (users: User[]) => {
+    // group size filter
+    if (groupSize !== 'any') {
+      if (users.length !== groupSize) return false;
+    }
+    // city filter: all members must be within selected cities (if any selected)
+    if (selectedCities.length) {
+      const allInCity = users.every((u) =>
+        selectedCities.includes(canonicalizeCityName(u.city || ''))
+      );
+      if (!allInCity) return false;
+    }
+    // group gender filter: all members must be the selected gender
+    if (groupGender !== 'any') {
+      if (!users.every((u) => u.gender === groupGender)) return false;
+    }
+    // age filter: when active, require all members to be within range
+    if (ageActive) {
+      const allInRange = users.every((u) => typeof u.age === 'number' && u.age >= ageMin && u.age <= ageMax);
+      if (!allInRange) return false;
     }
     return true;
   };
@@ -118,7 +153,7 @@ useEffect(() => {
           (g) =>
             g.users.length >= 1 &&
             !g.users.some((u) => u.id === authId) &&
-            g.users.every((u) => userPassesFilters(u))
+            groupPassesFilters(g.users)
         );
 
       // Only show merged profiles (groups)
@@ -152,10 +187,15 @@ useEffect(() => {
         .filter((u) => !memberIdsInActiveGroups.has(u.id))
         .filter((u) => userPassesFilters(u));
 
-      const combinedItems: BrowseItem[] = [
-        ...activeGroups.map((g) => ({ type: 'group', groupId: g.groupId, users: g.users }) as BrowseItem),
-        ...filteredSingles.map((u) => ({ type: 'user', user: u }) as BrowseItem),
-      ];
+      let combinedItems: BrowseItem[] = [];
+      if (profileType === 'groups' || profileType === 'all') {
+        combinedItems.push(
+          ...activeGroups.map((g) => ({ type: 'group', groupId: g.groupId, users: g.users }) as BrowseItem)
+        );
+      }
+      if (profileType === 'singles' || profileType === 'all') {
+        combinedItems.push(...filteredSingles.map((u) => ({ type: 'user', user: u }) as BrowseItem));
+      }
 
       setItems(combinedItems);
       setCurrentIndex(0);
@@ -347,12 +387,12 @@ useEffect(() => {
                   user={(items[currentIndex] as any).user}
                   onLike={handleLike}
                   onPass={handlePass}
-                  onOpen={(u) => router.push({ pathname: '/user/[id]', params: { id: u.id } })}
+                  onOpen={(u) => router.push({ pathname: '/(tabs)/user/[id]', params: { id: u.id } })}
                 />
               ) : (
                 <GroupCard
                   users={(items[currentIndex] as any).users}
-                  onOpen={(userId: string) => router.push({ pathname: '/user/[id]', params: { id: userId } })}
+                  onOpen={(userId: string) => router.push({ pathname: '/(tabs)/user/[id]', params: { id: userId } })}
                 />
               )}
             </Animated.View>
@@ -397,26 +437,21 @@ useEffect(() => {
             <Text style={styles.filterTitle}>סינון תוצאות</Text>
 
             <View style={styles.filterSection}>
-              <Text style={styles.filterLabel}>טווח גילאים</Text>
+              <Text style={styles.filterLabel}>סוג פרופיל</Text>
               <View style={styles.chipsRow}>
                 {[
-                  { min: 18, max: 24, label: '18–24' },
-                  { min: 25, max: 30, label: '25–30' },
-                  { min: 31, max: 40, label: '31–40' },
-                  { min: 41, max: 55, label: '41–55' },
-                ].map((r) => {
-                  const active = ageActive && ageMin === r.min && ageMax === r.max;
+                  { key: 'all', label: 'כולם' },
+                  { key: 'singles', label: 'בודדים' },
+                  { key: 'groups', label: 'קבוצות' },
+                ].map((opt: any) => {
+                  const active = profileType === opt.key;
                   return (
                     <TouchableOpacity
-                      key={r.label}
+                      key={opt.key}
                       style={[styles.chip, active && styles.chipActive]}
-                      onPress={() => {
-                        setAgeMin(r.min);
-                        setAgeMax(r.max);
-                        setAgeActive(true);
-                      }}
+                      onPress={() => setProfileType(opt.key)}
                     >
-                      <Text style={[styles.chipText, active && styles.chipTextActive]}>{r.label}</Text>
+                      <Text style={[styles.chipText, active && styles.chipTextActive]}>{opt.label}</Text>
                     </TouchableOpacity>
                   );
                 })}
@@ -424,26 +459,150 @@ useEffect(() => {
             </View>
 
             <View style={styles.filterSection}>
-              <Text style={styles.filterLabel}>מגדר</Text>
+              <Text style={styles.filterLabel}>טווח גילאים</Text>
+              <View style={styles.ageRow}>
+                <View style={styles.ageInputWrap}>
+                  <Text style={styles.ageLabel}>מגיל</Text>
+                  <TextInput
+                    style={styles.ageInput}
+                    keyboardType="numeric"
+                    placeholder="18"
+                    placeholderTextColor="#6B7280"
+                    value={ageActive ? String(ageMin) : ''}
+                    onChangeText={(t) => {
+                      const n = parseInt(t || '', 10);
+                      if (!isNaN(n)) {
+                        setAgeMin(n);
+                        setAgeActive(true);
+                      } else {
+                        setAgeActive(false);
+                      }
+                    }}
+                  />
+                </View>
+                <View style={styles.ageInputWrap}>
+                  <Text style={styles.ageLabel}>עד גיל</Text>
+                  <TextInput
+                    style={styles.ageInput}
+                    keyboardType="numeric"
+                    placeholder="40"
+                    placeholderTextColor="#6B7280"
+                    value={ageActive ? String(ageMax) : ''}
+                    onChangeText={(t) => {
+                      const n = parseInt(t || '', 10);
+                      if (!isNaN(n)) {
+                        setAgeMax(n);
+                        setAgeActive(true);
+                      } else {
+                        setAgeActive(false);
+                      }
+                    }}
+                  />
+                </View>
+              </View>
+            </View>
+
+            <View style={styles.filterSection}>
+              <Text style={styles.filterLabel}>עיר</Text>
               <View style={styles.chipsRow}>
-                {[
-                  { key: 'any', label: 'כולם' },
-                  { key: 'female', label: 'נשים' },
-                  { key: 'male', label: 'גברים' },
-                ].map((g: any) => {
-                  const active = gender === g.key;
+                <TouchableOpacity
+                  key="any"
+                  style={[styles.chip, selectedCities.length === 0 && styles.chipActive]}
+                  onPress={() => setSelectedCities([])}
+                >
+                  <Text style={[styles.chipText, selectedCities.length === 0 && styles.chipTextActive]}>
+                    הכל
+                  </Text>
+                </TouchableOpacity>
+                {Object.keys(cityNeighborhoods).map((c) => {
+                  const active = selectedCities.includes(c);
                   return (
                     <TouchableOpacity
-                      key={g.key}
+                      key={c}
                       style={[styles.chip, active && styles.chipActive]}
-                      onPress={() => setGender(g.key)}
+                      onPress={() => {
+                        if (active) {
+                          setSelectedCities(selectedCities.filter((x) => x !== c));
+                        } else {
+                          setSelectedCities([...selectedCities, c]);
+                        }
+                      }}
                     >
-                      <Text style={[styles.chipText, active && styles.chipTextActive]}>{g.label}</Text>
+                      <Text style={[styles.chipText, active && styles.chipTextActive]}>{c}</Text>
                     </TouchableOpacity>
                   );
                 })}
               </View>
             </View>
+
+            {profileType !== 'groups' ? (
+              <View style={styles.filterSection}>
+                <Text style={styles.filterLabel}>מגדר (משתמשים בודדים)</Text>
+                <View style={styles.chipsRow}>
+                  {[
+                    { key: 'any', label: 'כולם' },
+                    { key: 'female', label: 'נשים' },
+                    { key: 'male', label: 'גברים' },
+                  ].map((g: any) => {
+                    const active = gender === g.key;
+                    return (
+                      <TouchableOpacity
+                        key={g.key}
+                        style={[styles.chip, active && styles.chipActive]}
+                        onPress={() => setGender(g.key)}
+                      >
+                        <Text style={[styles.chipText, active && styles.chipTextActive]}>{g.label}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </View>
+            ) : null}
+
+            {profileType === 'groups' ? (
+              <>
+                <View style={styles.filterSection}>
+                  <Text style={styles.filterLabel}>מגדר (קבוצות)</Text>
+                  <View style={styles.chipsRow}>
+                    {[
+                      { key: 'any', label: 'כולם' },
+                      { key: 'male', label: 'רק בנים' },
+                      { key: 'female', label: 'רק בנות' },
+                    ].map((g: any) => {
+                      const active = groupGender === g.key;
+                      return (
+                        <TouchableOpacity
+                          key={g.key}
+                          style={[styles.chip, active && styles.chipActive]}
+                          onPress={() => setGroupGender(g.key)}
+                        >
+                          <Text style={[styles.chipText, active && styles.chipTextActive]}>{g.label}</Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                </View>
+                <View style={styles.filterSection}>
+                  <Text style={styles.filterLabel}>מספר שותפים בקבוצה</Text>
+                  <View style={styles.chipsRow}>
+                    {(['any', 2, 3] as any[]).map((sz) => {
+                      const active = groupSize === sz;
+                      return (
+                        <TouchableOpacity
+                          key={String(sz)}
+                          style={[styles.chip, active && styles.chipActive]}
+                          onPress={() => setGroupSize(sz as any)}
+                        >
+                          <Text style={[styles.chipText, active && styles.chipTextActive]}>
+                            {sz === 'any' ? 'הכל' : String(sz)}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                </View>
+              </>
+            ) : null}
 
             <View style={styles.filterActions}>
               <TouchableOpacity
@@ -454,6 +613,10 @@ useEffect(() => {
                   setAgeMin(20);
                   setAgeMax(40);
                   setAgeActive(false);
+                  setProfileType('all');
+                  setGroupGender('any');
+                  setGroupSize('any');
+                  setSelectedCities([]);
                 }}
               >
                 <Text style={styles.resetText}>איפוס</Text>
@@ -644,6 +807,29 @@ const styles = StyleSheet.create({
   chipTextActive: {
     color: '#0F0F14',
   },
+  ageRow: {
+    flexDirection: 'row-reverse',
+    gap: 12 as any,
+  },
+  ageInputWrap: {
+    flex: 1,
+  },
+  ageLabel: {
+    color: '#9DA4AE',
+    fontSize: 12,
+    marginBottom: 6,
+    textAlign: 'right',
+  },
+  ageInput: {
+    height: 44,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: '#1C1C26',
+    color: '#E6E9F0',
+    paddingHorizontal: 12,
+    textAlign: 'right',
+  },
   filterActions: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -679,49 +865,48 @@ const styles = StyleSheet.create({
 });
 
 function GroupCard({ users, onOpen }: { users: User[]; onOpen: (id: string) => void }) {
-  const firstTwo = users.slice(0, 2);
-  const extra = users.length - firstTwo.length;
+  const displayUsers = users.slice(0, 4);
+  const extra = users.length - displayUsers.length;
   const DEFAULT_AVATAR = 'https://cdn-icons-png.flaticon.com/512/847/847969.png';
-  const namesLine =
-    firstTwo.map((u) => `${u.full_name}${u.age ? `, ${u.age}` : ''}`).join(' + ') +
-    (extra > 0 ? ` ועוד ${extra}` : '');
-  const cities = Array.from(new Set(firstTwo.map((u) => u.city).filter(Boolean))).join(' • ');
+  const cities = Array.from(new Set(displayUsers.map((u) => u.city).filter(Boolean))).join(' • ');
 
   return (
-    <TouchableOpacity activeOpacity={0.92} onPress={() => onOpen(firstTwo[0]?.id)} style={groupStyles.card}>
-      <View style={groupStyles.circleWrap}>
-        {firstTwo.length === 2 ? (
-          <View style={groupStyles.splitCircle}>
-            <Image source={{ uri: firstTwo[0].avatar_url || DEFAULT_AVATAR }} style={[groupStyles.half, groupStyles.halfRight]} />
-            <Image source={{ uri: firstTwo[1].avatar_url || DEFAULT_AVATAR }} style={[groupStyles.half, groupStyles.halfLeft]} />
-          </View>
-        ) : (
-          <View style={groupStyles.singleCircle}>
-            <Image source={{ uri: firstTwo[0]?.avatar_url || DEFAULT_AVATAR }} style={groupStyles.singleImg} />
-          </View>
-        )}
-        {extra > 0 ? (
-          <View style={groupStyles.extraBadge}>
-            <Text style={groupStyles.extraText}>+{extra}</Text>
-          </View>
-        ) : null}
+    <View style={groupStyles.card}>
+      <View style={groupStyles.gridWrap}>
+        {displayUsers.map((u, idx) => {
+          const rows = Math.ceil(displayUsers.length / 2);
+          const cellHeight = rows === 1 ? 240 : 120;
+          const isLastWithExtra = idx === displayUsers.length - 1 && extra > 0;
+          return (
+            <TouchableOpacity
+              key={u.id}
+              activeOpacity={0.9}
+              onPress={() => onOpen(u.id)}
+              style={[groupStyles.cell, { height: cellHeight }]}
+            >
+              <Image source={{ uri: u.avatar_url || DEFAULT_AVATAR }} style={groupStyles.cellImage} />
+              {isLastWithExtra ? (
+                <View style={groupStyles.extraOverlay}>
+                  <Text style={groupStyles.extraOverlayText}>+{extra}</Text>
+                </View>
+              ) : null}
+            </TouchableOpacity>
+          );
+        })}
       </View>
 
       <View style={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 6, alignItems: 'flex-end' }}>
-        <Text style={groupStyles.title} numberOfLines={1}>{namesLine}</Text>
         {!!cities && <Text style={groupStyles.sub} numberOfLines={1}>{cities}</Text>}
         <View style={{ marginTop: 10, gap: 6 as any, width: '100%' }}>
-          {firstTwo.map((u) => (
-            <View key={u.id} style={groupStyles.personRow}>
+          {displayUsers.map((u) => (
+            <TouchableOpacity key={u.id} style={groupStyles.personRow} activeOpacity={0.8} onPress={() => onOpen(u.id)}>
               <View style={groupStyles.dot} />
-              <Text style={groupStyles.personText} numberOfLines={1}>
-                {u.full_name}{u.age ? `, ${u.age}` : ''}{u.city ? ` • ${u.city}` : ''}
-              </Text>
-            </View>
+              <Text style={groupStyles.personText} numberOfLines={1}>{u.full_name}{u.age ? `, ${u.age}` : ''}</Text>
+            </TouchableOpacity>
           ))}
         </View>
       </View>
-    </TouchableOpacity>
+    </View>
   );
 }
 
@@ -734,62 +919,37 @@ const groupStyles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.06)',
   },
-  circleWrap: {
-    alignItems: 'center',
-    paddingTop: 16,
-  },
-  splitCircle: {
-    width: 220,
-    height: 220,
-    borderRadius: 110,
-    overflow: 'hidden',
+  gridWrap: {
     flexDirection: 'row',
-    borderWidth: 2,
-    borderColor: 'rgba(124,92,255,0.35)',
+    flexWrap: 'wrap',
     backgroundColor: '#22232E',
+    borderBottomWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
   },
-  half: {
+  cell: {
     width: '50%',
-    height: '100%',
+    position: 'relative',
+    borderRightWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
   },
-  halfRight: {
-    transform: [{ scaleX: -1 }],
-  },
-  halfLeft: {},
-  singleCircle: {
-    width: 220,
-    height: 220,
-    borderRadius: 110,
-    overflow: 'hidden',
-    borderWidth: 2,
-    borderColor: 'rgba(124,92,255,0.35)',
-    backgroundColor: '#22232E',
-  },
-  singleImg: {
+  cellImage: {
     width: '100%',
     height: '100%',
   },
-  extraBadge: {
+  extraOverlay: {
     position: 'absolute',
-    bottom: 10,
-    left: 20,
-    backgroundColor: 'rgba(124,92,255,0.9)',
-    paddingHorizontal: 8,
-    height: 28,
-    borderRadius: 14,
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    backgroundColor: 'rgba(15,15,20,0.55)',
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.16)',
   },
-  extraText: {
-    color: '#0F0F14',
-    fontWeight: '900',
-    fontSize: 13,
-  },
-  title: {
+  extraOverlayText: {
     color: '#FFFFFF',
-    fontSize: 20,
+    fontSize: 26,
     fontWeight: '900',
   },
   sub: {

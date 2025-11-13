@@ -19,8 +19,8 @@ import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/authStore';
 import { useApartmentStore } from '@/stores/apartmentStore';
 import * as ImagePicker from 'expo-image-picker';
-import { autocompleteCities, autocompleteAddresses, createSessionToken, PlacePrediction } from '@/lib/googlePlaces';
-import { getNeighborhoodsForCityName } from '@/lib/neighborhoods';
+import { autocompleteAddresses, createSessionToken } from '@/lib/googlePlaces';
+import { getNeighborhoodsForCityName, searchCitiesWithNeighborhoods } from '@/lib/neighborhoods';
 
 
 export default function AddApartmentScreen() {
@@ -40,9 +40,8 @@ export default function AddApartmentScreen() {
   const [images, setImages] = useState<string[]>([]); // local URIs before upload
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
-  const [citySuggestions, setCitySuggestions] = useState<PlacePrediction[]>([]);
+  const [citySuggestions, setCitySuggestions] = useState<string[]>([]);
   const [sessionToken, setSessionToken] = useState<string>('');
-  const [cityPlaceId, setCityPlaceId] = useState<string | null>(null);
   const [addressSuggestions, setAddressSuggestions] = useState<string[]>([]);
   const [neighborhoodOptions, setNeighborhoodOptions] = useState<string[]>([]);
   const [isNeighborhoodOpen, setIsNeighborhoodOpen] = useState(false);
@@ -56,15 +55,15 @@ export default function AddApartmentScreen() {
 
   useEffect(() => {
     let active = true;
-    const run = async () => {
+    const run = () => {
       const q = city.trim();
-      if (!q || q.length < 2) { setCitySuggestions([]); return; }
-      const preds = await autocompleteCities(q, sessionToken);
-      if (active) setCitySuggestions(preds.slice(0, 8));
+      if (!q || q.length < 1) { setCitySuggestions([]); return; }
+      const names = searchCitiesWithNeighborhoods(q, 8);
+      if (active) setCitySuggestions(names);
     };
     run();
     return () => { active = false; };
-  }, [city, sessionToken]);
+  }, [city]);
 
   // Load neighborhoods list for selected city from static data (dropdown)
   useEffect(() => {
@@ -101,12 +100,12 @@ export default function AddApartmentScreen() {
     const run = async () => {
       const q = address.trim();
       if (!q || q.length < 2) { setAddressSuggestions([]); return; }
-      const preds = await autocompleteAddresses(q, cityPlaceId, sessionToken, city);
+      const preds = await autocompleteAddresses(q, null, sessionToken, city);
       if (active) setAddressSuggestions(preds.slice(0, 8));
     };
     run();
     return () => { active = false; };
-  }, [address, cityPlaceId, sessionToken, city]);
+  }, [address, sessionToken, city]);
 
   const handleBack = () => {
     try {
@@ -368,19 +367,19 @@ export default function AddApartmentScreen() {
                 style={styles.input}
                 placeholder="לדוגמה: תל אביב"
                 value={city}
-                onChangeText={(t) => { setCity(t); setCityPlaceId(null); }}
+                onChangeText={(t) => { setCity(t); }}
                 editable={!isLoading}
                 placeholderTextColor="#9AA0A6"
               />
               {citySuggestions.length > 0 ? (
                 <View style={styles.suggestionsBox}>
-                  {citySuggestions.map((p) => (
+                  {citySuggestions.map((name) => (
                     <TouchableOpacity
-                      key={p.placeId}
+                      key={name}
                       style={styles.suggestionItem}
-                      onPress={() => { setCity(p.description); setCityPlaceId(p.placeId); setCitySuggestions([]); }}
+                      onPress={() => { setCity(name); setCitySuggestions([]); }}
                     >
-                      <Text style={styles.suggestionText}>{p.description}</Text>
+                      <Text style={styles.suggestionText}>{name}</Text>
                     </TouchableOpacity>
                   ))}
                 </View>

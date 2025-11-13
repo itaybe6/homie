@@ -18,8 +18,7 @@ import { UserSurveyResponse } from '@/types/database';
 import { fetchUserSurvey, upsertUserSurvey } from '@/lib/survey';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
-import { createSessionToken, autocompleteCities, PlacePrediction } from '@/lib/googlePlaces';
-import { getNeighborhoodsForCityName } from '@/lib/neighborhoods';
+import { getNeighborhoodsForCityName, searchCitiesWithNeighborhoods } from '@/lib/neighborhoods';
 
 type SurveyState = Partial<UserSurveyResponse>;
 
@@ -57,9 +56,7 @@ export default function SurveyScreen() {
   const [saving, setSaving] = useState(false);
   const [state, setState] = useState<SurveyState>({});
   const [cityQuery, setCityQuery] = useState('');
-  const [citySuggestions, setCitySuggestions] = useState<PlacePrediction[]>([]);
-  const [cityPlaceId, setCityPlaceId] = useState<string | null>(null);
-  const [sessionToken, setSessionToken] = useState<string | null>(null);
+  const [citySuggestions, setCitySuggestions] = useState<string[]>([]);
   const [neighborhoodOptions, setNeighborhoodOptions] = useState<string[]>([]);
   const [neighborhoodSearch, setNeighborhoodSearch] = useState('');
 
@@ -88,37 +85,21 @@ export default function SurveyScreen() {
   }, [user]);
 
   useEffect(() => {
-    setSessionToken(createSessionToken());
-  }, []);
-
-  useEffect(() => {
     let cancelled = false;
-    const run = async () => {
+    const run = () => {
       const query = cityQuery.trim();
       if (!query || query.length < 2) {
         if (!cancelled) setCitySuggestions([]);
         return;
       }
-      if (state.preferred_city && cityPlaceId && query === state.preferred_city) {
-        if (!cancelled) setCitySuggestions([]);
-        return;
-      }
-      try {
-        const preds = await autocompleteCities(query, sessionToken || undefined);
-        if (!cancelled) setCitySuggestions(preds.slice(0, 8));
-      } catch (err) {
-        if (!cancelled) {
-          setCitySuggestions([]);
-          // eslint-disable-next-line no-console
-          console.warn('Failed to fetch city suggestions', err);
-        }
-      }
+      const names = searchCitiesWithNeighborhoods(query, 8);
+      if (!cancelled) setCitySuggestions(names);
     };
     run();
     return () => {
       cancelled = true;
     };
-  }, [cityQuery, sessionToken, state.preferred_city, cityPlaceId]);
+  }, [cityQuery, state.preferred_city]);
 
   useEffect(() => {
     let cancelled = false;
@@ -141,29 +122,7 @@ export default function SurveyScreen() {
     };
   }, [state.preferred_city]);
 
-  useEffect(() => {
-    let cancelled = false;
-    const ensurePlaceId = async () => {
-      if (cityPlaceId || !state.preferred_city || !sessionToken) return;
-      try {
-        const preds = await autocompleteCities(state.preferred_city, sessionToken);
-        if (cancelled) return;
-        const exact = preds.find((p) => p.description === state.preferred_city);
-        if (exact) {
-          setCityPlaceId(exact.placeId);
-        }
-      } catch (err) {
-        if (!cancelled) {
-          // eslint-disable-next-line no-console
-          console.warn('Failed to resolve city place id', err);
-        }
-      }
-    };
-    ensurePlaceId();
-    return () => {
-      cancelled = true;
-    };
-  }, [cityPlaceId, state.preferred_city, sessionToken]);
+  // Removed Google place id resolution (local-only cities)
 
   const progress = useMemo(() => (currentStep + 1) / steps.length, [currentStep]);
   const filteredNeighborhoods = useMemo(() => {
@@ -396,23 +355,22 @@ export default function SurveyScreen() {
                       />
                       {citySuggestions.length > 0 ? (
                         <View style={styles.suggestionsBox}>
-                          {citySuggestions.map((suggestion, idx) => (
+                          {citySuggestions.map((name, idx) => (
                             <TouchableOpacity
-                              key={suggestion.placeId}
+                              key={name}
                               style={[
                                 styles.suggestionItem,
                                 idx === citySuggestions.length - 1 ? styles.suggestionItemLast : null,
                               ]}
                               onPress={() => {
-                                setCityQuery(suggestion.description);
-                                setCityPlaceId(suggestion.placeId);
+                                setCityQuery(name);
                                 setCitySuggestions([]);
                                 setNeighborhoodSearch('');
-                                setField('preferred_city', suggestion.description);
+                                setField('preferred_city', name);
                                 setField('preferred_neighborhoods', []);
                               }}
                             >
-                              <Text style={styles.suggestionText}>{suggestion.description}</Text>
+                              <Text style={styles.suggestionText}>{name}</Text>
                             </TouchableOpacity>
                           ))}
                         </View>

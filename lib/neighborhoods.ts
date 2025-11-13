@@ -83,6 +83,27 @@ export function getNeighborhoodsForCityName(cityName: string): string[] {
   return uniq;
 }
 
+// Return list of all canonical cities that have at least one neighborhood
+export function getAllCitiesWithNeighborhoods(): string[] {
+  const cities = Object.keys(cityNeighborhoods);
+  cities.sort((a, b) => a.localeCompare(b, 'he'));
+  return cities;
+}
+
+// Lightweight local autocomplete for cities with neighborhoods
+export function searchCitiesWithNeighborhoods(query: string, limit = 12): string[] {
+  const q = (query || '').trim();
+  if (!q) return [];
+  const normQ = normalizeForSearch(q);
+  const all = getAllCitiesWithNeighborhoods();
+  const matched = all.filter((name) => normalizeForSearch(name).includes(normQ));
+  return matched.slice(0, limit);
+}
+
+function normalizeForSearch(s: string): string {
+  return (s || '').toLowerCase().replace(/[\s\-'"״׳]/g, '');
+}
+
 
 
 

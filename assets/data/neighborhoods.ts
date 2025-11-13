@@ -316,6 +316,7 @@ export const cityNeighborhoods: Record<string, string[]> = {
 export const cityAliases: Record<string, string> = {
   'תל אביב': 'תל אביב-יפו',
   'תל-אביב': 'תל אביב-יפו',
+  'תל אביב יפו': 'תל אביב-יפו',
   'ת״א': 'תל אביב-יפו',
   'ירושלם': 'ירושלים',
   'אשדוד ים': 'אשדוד'
@@ -323,5 +324,19 @@ export const cityAliases: Record<string, string> = {
 
 export function canonicalizeCityName(input: string): string {
   const raw = (input || '').trim();
-  return cityAliases[raw] || raw;
+  const alias = cityAliases[raw];
+  if (alias) return alias;
+  // Fallback: normalize punctuation/spacing and match against keys
+  const norm = normalizeCityName(raw);
+  for (const key of Object.keys(cityNeighborhoods)) {
+    if (normalizeCityName(key) === norm) return key;
+  }
+  return raw;
+}
+
+// Remove spaces, dashes and quotes for comparison, force lower-case (Hebrew unaffected)
+function normalizeCityName(s: string): string {
+  return (s || '')
+    .toLowerCase()
+    .replace(/[\s\-'"״׳]/g, '');
 }

@@ -14,8 +14,7 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Search, SlidersHorizontal, X, Plus } from 'lucide-react-native';
-import { autocompleteCities, createSessionToken, PlacePrediction } from '@/lib/googlePlaces';
-import { getNeighborhoodsForCityName } from '@/lib/neighborhoods';
+import { getNeighborhoodsForCityName, searchCitiesWithNeighborhoods } from '@/lib/neighborhoods';
 import { supabase } from '@/lib/supabase';
 import { useApartmentStore } from '@/stores/apartmentStore';
 import { Apartment } from '@/types/database';
@@ -40,13 +39,12 @@ export default function HomeScreen() {
     minBedrooms: '',
     minBathrooms: '',
   });
-  const [citySuggestions, setCitySuggestions] = useState<PlacePrediction[]>([]);
+  const [citySuggestions, setCitySuggestions] = useState<string[]>([]);
   const [neighborhoodOptions, setNeighborhoodOptions] = useState<string[]>([]);
   const [isNeighborhoodDropdownOpen, setIsNeighborhoodDropdownOpen] = useState(false);
   const [neighborhoodSearchQuery, setNeighborhoodSearchQuery] = useState('');
   const [isLoadingNeighborhoods, setIsLoadingNeighborhoods] = useState(false);
-  const [cityPlaceId, setCityPlaceId] = useState<string | null>(null);
-  const [sessionToken, setSessionToken] = useState<string>('');
+  // Removed cityPlaceId/sessionToken (no Google city autocomplete)
 
   useEffect(() => {
     fetchApartments();
@@ -56,10 +54,7 @@ export default function HomeScreen() {
     filterApartments();
   }, [searchQuery, apartments, filters]);
 
-  useEffect(() => {
-    if (!isFilterOpen) return;
-    setSessionToken(createSessionToken());
-  }, [isFilterOpen]);
+  // no-op
 
   useEffect(() => {
     if (!isFilterOpen) {
@@ -67,18 +62,18 @@ export default function HomeScreen() {
     }
   }, [isFilterOpen]);
 
-  // City autocomplete
+  // City suggestions (local)
   useEffect(() => {
     let active = true;
-    const run = async () => {
+    const run = () => {
       const q = filters.city.trim();
-      if (!q || q.length < 2) { setCitySuggestions([]); return; }
-      const preds = await autocompleteCities(q, sessionToken);
-      if (active) setCitySuggestions(preds.slice(0, 8));
+      if (!q || q.length < 1) { setCitySuggestions([]); return; }
+      const names = searchCitiesWithNeighborhoods(q, 8);
+      if (active) setCitySuggestions(names);
     };
     run();
     return () => { active = false; };
-  }, [filters.city, sessionToken]);
+  }, [filters.city]);
 
   useEffect(() => {
     let cancelled = false;
@@ -179,7 +174,6 @@ export default function HomeScreen() {
     setCitySuggestions([]);
     setNeighborhoodOptions([]);
     setIsNeighborhoodDropdownOpen(false);
-    setCityPlaceId(null);
   };
 
   const handleApartmentPress = (apartment: Apartment) => {
@@ -277,26 +271,24 @@ export default function HomeScreen() {
                   value={filters.city}
                   onChangeText={(t) => {
                     setFilters((f) => ({ ...f, city: t, neighborhood: '' }));
-                    setCityPlaceId(null);
                     setNeighborhoodOptions([]);
                     setIsNeighborhoodDropdownOpen(false);
                   }}
                 />
                 {citySuggestions.length > 0 ? (
                   <View style={styles.suggestionsBox}>
-                    {citySuggestions.map((p) => (
+                    {citySuggestions.map((name) => (
                       <TouchableOpacity
-                        key={p.placeId}
+                        key={name}
                         style={styles.suggestionItem}
                         onPress={() => {
-                          setFilters((f) => ({ ...f, city: p.description, neighborhood: '' }));
-                          setCityPlaceId(p.placeId);
+                          setFilters((f) => ({ ...f, city: name, neighborhood: '' }));
                           setCitySuggestions([]);
                           setNeighborhoodOptions([]);
                           setIsNeighborhoodDropdownOpen(false);
                         }}
                       >
-                        <Text style={styles.suggestionText}>{p.description}</Text>
+                        <Text style={styles.suggestionText}>{name}</Text>
                       </TouchableOpacity>
                     ))}
                   </View>

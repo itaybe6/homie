@@ -14,7 +14,7 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { LogOut, Edit, Save, X, Plus, MapPin, Inbox, Trash2 } from 'lucide-react-native';
+import { LogOut, Edit, Save, X, Plus, MapPin, Inbox, Trash2, Settings } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
 import { supabase } from '@/lib/supabase';
@@ -342,6 +342,14 @@ export default function ProfileScreen() {
                 style={styles.photoBottomGradient}
               />
 
+              <TouchableOpacity
+                style={styles.settingsBtn}
+                onPress={() => router.push('/profile/settings')}
+                activeOpacity={0.9}
+              >
+                <Settings size={18} color="#FFFFFF" />
+              </TouchableOpacity>
+
               <TouchableOpacity style={styles.addPhotoBtn} onPress={pickAndUploadAvatar} activeOpacity={0.9} disabled={isSaving}>
                 <Plus size={20} color="#0F0F14" />
               </TouchableOpacity>
@@ -483,23 +491,7 @@ export default function ProfileScreen() {
           </View>
         )}
 
-        <TouchableOpacity style={styles.signOutButtonDark} onPress={handleSignOut}>
-          <LogOut size={20} color="#FCA5A5" />
-          <Text style={styles.signOutTextDark}>התנתק</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.deleteButtonDark, isDeleting ? { opacity: 0.7 } : null]}
-          onPress={isDeleting ? undefined : handleDeleteProfile}
-          activeOpacity={0.9}
-        >
-          {isDeleting ? (
-            <ActivityIndicator size="small" color="#F87171" />
-          ) : (
-            <Trash2 size={20} color="#F87171" />
-          )}
-          <Text style={styles.deleteTextDark}>{isDeleting ? 'מוחק...' : 'מחיקת פרופיל'}</Text>
-        </TouchableOpacity>
+        {/* moved logout and delete actions to /profile/settings */}
       </ScrollView>
       {isSaving && (
         <View style={styles.fullScreenLoader}>
@@ -594,6 +586,19 @@ const styles = StyleSheet.create({
     backgroundColor: '#A78BFA',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  settingsBtn: {
+    position: 'absolute',
+    right: 16,
+    top: 16,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
   },
   matchBadgeWrap: {
     // removed (badge no longer displayed)
@@ -854,42 +859,7 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     fontSize: 14,
   },
-  signOutButtonDark: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    backgroundColor: '#15151C',
-    paddingVertical: 16,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: 'rgba(252,165,165,0.3)',
-    marginHorizontal: 16,
-    marginTop: 12,
-  },
-  signOutTextDark: {
-    color: '#FCA5A5',
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  deleteButtonDark: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    backgroundColor: '#15151C',
-    paddingVertical: 14,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: 'rgba(248,113,113,0.35)',
-    marginHorizontal: 16,
-    marginTop: 10,
-  },
-  deleteTextDark: {
-    color: '#F87171',
-    fontSize: 16,
-    fontWeight: '800',
-  },
+  // removed sign out & delete button styles (moved to settings)
 
   bottomActions: {
     position: 'absolute',
