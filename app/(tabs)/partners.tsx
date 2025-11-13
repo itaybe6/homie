@@ -387,12 +387,22 @@ useEffect(() => {
                   user={(items[currentIndex] as any).user}
                   onLike={handleLike}
                   onPass={handlePass}
-                  onOpen={(u) => router.push({ pathname: '/(tabs)/user/[id]', params: { id: u.id } })}
+                  onOpen={(u) =>
+                    router.push({
+                      pathname: '/(tabs)/user/[id]',
+                      params: { id: u.id, from: 'partners' } as any,
+                    })
+                  }
                 />
               ) : (
                 <GroupCard
                   users={(items[currentIndex] as any).users}
-                  onOpen={(userId: string) => router.push({ pathname: '/(tabs)/user/[id]', params: { id: userId } })}
+                  onOpen={(userId: string) =>
+                    router.push({
+                      pathname: '/(tabs)/user/[id]',
+                      params: { id: userId, from: 'partners' } as any,
+                    })
+                  }
                 />
               )}
             </Animated.View>

@@ -9,7 +9,7 @@ import { useAuthStore } from '@/stores/authStore';
 
 export default function UserProfileScreen() {
   const router = useRouter();
-  const { id } = useLocalSearchParams();
+  const { id, from } = useLocalSearchParams() as { id?: string; from?: string };
   const insets = useSafeAreaInsets();
   const contentTopPadding = insets.top ;
   const contentBottomPadding = Math.max(32, insets.bottom + 16);
@@ -224,7 +224,26 @@ export default function UserProfileScreen() {
         paddingBottom: contentBottomPadding,
       }}>
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
+        <TouchableOpacity
+          style={styles.backBtn}
+          onPress={() => {
+            try {
+              if (from === 'partners') {
+                router.replace('/(tabs)/partners');
+                return;
+              }
+              // Prefer real back when available to preserve position
+              // @ts-ignore - canGoBack exists on Expo Router
+              if (typeof (router as any).canGoBack === 'function' && (router as any).canGoBack()) {
+                router.back();
+              } else {
+                router.replace('/(tabs)/home');
+              }
+            } catch {
+              router.replace('/(tabs)/home');
+            }
+          }}
+        >
           <ArrowLeft size={20} color="#FFFFFF" />
         </TouchableOpacity>
         <Image

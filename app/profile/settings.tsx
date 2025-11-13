@@ -11,11 +11,13 @@ import {
   Image,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { ArrowLeft, Edit, FileText, LogOut, Trash2, ChevronLeft, Pencil } from 'lucide-react-native';
+import { ArrowLeft, Edit, FileText, LogOut, Trash2, ChevronLeft, Pencil, Inbox, MapPin } from 'lucide-react-native';
 import { useAuthStore } from '@/stores/authStore';
 import { authService } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
 import { User } from '@/types/database';
+import { fetchUserSurvey } from '@/lib/survey';
+import * as ImagePicker from 'expo-image-picker';
 
 export default function ProfileSettingsScreen() {
   const router = useRouter();
@@ -23,6 +25,8 @@ export default function ProfileSettingsScreen() {
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [profile, setProfile] = useState<User | null>(null);
+  const [surveyCompleted, setSurveyCompleted] = useState<boolean>(false);
+  const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -35,6 +39,68 @@ export default function ProfileSettingsScreen() {
       }
     })();
   }, [user?.id]);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        if (!user?.id) return;
+        const survey = await fetchUserSurvey(user.id);
+        const completed = !!(survey as any)?.is_completed || !!survey;
+        setSurveyCompleted(completed);
+      } catch {
+        setSurveyCompleted(false);
+      }
+    })();
+  }, [user?.id]);
+
+  const pickAndUploadAvatar = async () => {
+    try {
+      const perms = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perms.granted) {
+        Alert.alert('הרשאה נדרשת', 'יש לאפשר גישה לגלריה כדי להעלות תמונה');
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.9,
+      });
+
+      if (result.canceled || !result.assets?.length || !user) return;
+
+      setIsUploadingAvatar(true);
+      const asset = result.assets[0];
+      const response = await fetch(asset.uri);
+      const arrayBuffer = await response.arrayBuffer();
+      const fileExt = (asset.fileName || 'avatar.jpg').split('.').pop() || 'jpg';
+      const fileName = `${user.id}-${Date.now()}.${fileExt}`;
+      const filePath = `users/${user.id}/${fileName}`;
+      const filePayload: any = arrayBuffer as any;
+
+      const { error: uploadError } = await supabase.storage
+        .from('user-images')
+        .upload(filePath, filePayload, { contentType: 'image/jpeg', upsert: true });
+      if (uploadError) throw uploadError;
+
+      const { data } = supabase.storage.from('user-images').getPublicUrl(filePath);
+      const publicUrl = data.publicUrl;
+
+      const { error: updateError } = await supabase
+        .from('users')
+        .update({ avatar_url: publicUrl, updated_at: new Date().toISOString() })
+        .eq('id', user.id);
+      if (updateError) throw updateError;
+
+      setProfile((prev) => (prev ? { ...prev, avatar_url: publicUrl } : prev));
+      Alert.alert('הצלחה', 'תמונת הפרופיל עודכנה');
+    } catch (e: any) {
+      Alert.alert('שגיאה', e?.message || 'לא ניתן לעדכן את תמונת הפרופיל');
+    } finally {
+      setIsUploadingAvatar(false);
+    }
+  };
 
   const handleSignOut = async () => {
     try {
@@ -109,6 +175,7 @@ export default function ProfileSettingsScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
+      <View style={styles.topSpacer} />
       <View style={styles.header}>
         <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
           <ArrowLeft size={20} color="#FFFFFF" />
@@ -128,11 +195,15 @@ export default function ProfileSettingsScreen() {
               style={styles.avatar}
             />
             <TouchableOpacity
-              onPress={() => router.push('/profile/edit')}
+              onPress={isUploadingAvatar ? undefined : pickAndUploadAvatar}
               style={styles.avatarEditBtn}
               activeOpacity={0.9}
             >
-              <Pencil size={14} color="#0F0F14" />
+              {isUploadingAvatar ? (
+                <ActivityIndicator size="small" color="#0F0F14" />
+              ) : (
+                <Pencil size={14} color="#0F0F14" />
+              )}
             </TouchableOpacity>
           </View>
           <Text style={styles.profileName} numberOfLines={1}>
@@ -180,6 +251,44 @@ export default function ProfileSettingsScreen() {
             <View style={styles.itemTextWrap}>
               <Text style={styles.groupItemTitle}>תנאי שימוש</Text>
               <Text style={styles.groupItemSub}>קריאת התקנון והמדיניות</Text>
+            </View>
+            <ChevronLeft size={18} color="#9DA4AE" />
+          </TouchableOpacity>
+
+          <View style={styles.divider} />
+
+          <TouchableOpacity
+            style={styles.groupItem}
+            onPress={() => router.push('/(tabs)/onboarding/survey')}
+            activeOpacity={0.9}
+          >
+            <View style={styles.itemIcon}>
+              <MapPin size={18} color="#E5E7EB" />
+            </View>
+            <View style={styles.itemTextWrap}>
+              <Text style={styles.groupItemTitle}>
+                {surveyCompleted ? 'עריכת שאלון העדפות' : 'מילוי שאלון העדפות'}
+              </Text>
+              <Text style={styles.groupItemSub}>
+                {surveyCompleted ? 'עדכון העדפות התאמה' : 'כמה שאלות קצרות להיכרות'}
+              </Text>
+            </View>
+            <ChevronLeft size={18} color="#9DA4AE" />
+          </TouchableOpacity>
+
+          <View style={styles.divider} />
+
+          <TouchableOpacity
+            style={styles.groupItem}
+            onPress={() => router.push('/(tabs)/requests')}
+            activeOpacity={0.9}
+          >
+            <View style={styles.itemIcon}>
+              <Inbox size={18} color="#E5E7EB" />
+            </View>
+            <View style={styles.itemTextWrap}>
+              <Text style={styles.groupItemTitle}>בקשות</Text>
+              <Text style={styles.groupItemSub}>צפייה וניהול בקשות</Text>
             </View>
             <ChevronLeft size={18} color="#9DA4AE" />
           </TouchableOpacity>
@@ -263,6 +372,9 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 18,
     fontWeight: '800',
+  },
+  topSpacer: {
+    height: 60,
   },
   content: {
     paddingHorizontal: 16,

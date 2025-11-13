@@ -11,6 +11,7 @@ import {
   SafeAreaView,
   Image,
   Platform,
+  Modal,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -37,6 +38,8 @@ export default function ProfileScreen() {
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [aptMembers, setAptMembers] = useState<Record<string, User[]>>({});
+  const [viewerIndex, setViewerIndex] = useState<number | null>(null);
+  const [isDeletingImage, setIsDeletingImage] = useState(false);
 
   const [fullName, setFullName] = useState('');
   const [age, setAge] = useState('');
@@ -68,6 +71,52 @@ export default function ProfileScreen() {
     }
     if (apartment.image_url) return apartment.image_url;
     return PLACEHOLDER;
+  };
+
+  const getObjectPathFromPublicUrl = (publicUrl: string): string | null => {
+    if (!publicUrl) return null;
+    const marker = '/object/public/user-images/';
+    const idx = publicUrl.indexOf(marker);
+    if (idx === -1) return null;
+    return publicUrl.substring(idx + marker.length);
+  };
+
+  const removeImageAt = async (idx: number) => {
+    try {
+      if (!user?.id || !profile?.image_urls) return;
+      const url = profile.image_urls[idx];
+      if (!url) return;
+
+      const shouldProceed = await new Promise<boolean>((resolve) => {
+        Alert.alert('מחיקת תמונה', 'למחוק את התמונה הזו?', [
+          { text: 'ביטול', style: 'cancel', onPress: () => resolve(false) },
+          { text: 'מחק', style: 'destructive', onPress: () => resolve(true) },
+        ]);
+      });
+      if (!shouldProceed) return;
+
+      setIsDeletingImage(true);
+      const next = profile.image_urls.filter((_, i) => i !== idx);
+      const { error: updateErr } = await supabase
+        .from('users')
+        .update({ image_urls: next, updated_at: new Date().toISOString() })
+        .eq('id', user.id);
+      if (updateErr) throw updateErr;
+
+      setProfile((prev) => (prev ? { ...prev, image_urls: next } as any : prev));
+      setViewerIndex(null);
+
+      try {
+        const objectPath = getObjectPathFromPublicUrl(url);
+        if (objectPath) {
+          await supabase.storage.from('user-images').remove([objectPath]);
+        }
+      } catch {}
+    } catch (e: any) {
+      Alert.alert('שגיאה', e?.message || 'לא ניתן למחוק את התמונה');
+    } finally {
+      setIsDeletingImage(false);
+    }
   };
 
   const fetchProfile = async () => {
@@ -350,9 +399,11 @@ export default function ProfileScreen() {
                 <Settings size={18} color="#FFFFFF" />
               </TouchableOpacity>
 
-              <TouchableOpacity style={styles.addPhotoBtn} onPress={pickAndUploadAvatar} activeOpacity={0.9} disabled={isSaving}>
-                <Plus size={20} color="#0F0F14" />
-              </TouchableOpacity>
+              {!profile?.avatar_url ? (
+                <TouchableOpacity style={styles.addPhotoBtn} onPress={pickAndUploadAvatar} activeOpacity={0.9} disabled={isSaving}>
+                  <Plus size={20} color="#0F0F14" />
+                </TouchableOpacity>
+              ) : null}
             </View>
 
             <View style={styles.infoPanel}>
@@ -365,43 +416,21 @@ export default function ProfileScreen() {
                 <Text style={styles.bioText}>{profile.bio}</Text>
               ) : null}
 
-              <View style={styles.actionButtonsRow}>
-                <TouchableOpacity
-                  style={styles.editProfileBtn}
-                  onPress={() => router.push('/profile/edit')}
-                  activeOpacity={0.9}
-                >
-                  <Edit size={18} color="#FFFFFF" />
-                  <Text style={styles.editProfileBtnText}>עריכת פרופיל</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={styles.editProfileBtn}
-                  onPress={() => router.push('/(tabs)/requests')}
-                  activeOpacity={0.9}
-                >
-                  <Inbox size={18} color="#FFFFFF" />
-                  <Text style={styles.editProfileBtnText}>בקשות</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={styles.editProfileBtn}
-                  onPress={() => router.push('/(tabs)/onboarding/survey')}
-                  activeOpacity={0.9}
-                >
-                  <MapPin size={18} color="#FFFFFF" />
-                  <Text style={styles.editProfileBtnText}>מילוי שאלון העדפות</Text>
-                </TouchableOpacity>
-              </View>
+              {/* per design, action buttons moved to settings screen */}
 
               {/* add-images button moved to edit profile screen */}
 
               {profile?.image_urls?.length ? (
                 <View style={styles.galleryGrid}>
                   {profile.image_urls.map((url, idx) => (
-                    <View key={url + idx} style={[styles.galleryItem, (idx % 7 === 0) && styles.galleryItemTall]}>
+                    <TouchableOpacity
+                      key={url + idx}
+                      style={[styles.galleryItem, (idx % 7 === 0) && styles.galleryItemTall]}
+                      activeOpacity={0.9}
+                      onPress={() => setViewerIndex(idx)}
+                    >
                       <Image source={{ uri: url }} style={styles.galleryImg} />
-                    </View>
+                    </TouchableOpacity>
                   ))}
                 </View>
               ) : null}
@@ -493,6 +522,45 @@ export default function ProfileScreen() {
 
         {/* moved logout and delete actions to /profile/settings */}
       </ScrollView>
+      {viewerIndex !== null && (
+        <Modal
+          visible
+          transparent
+          animationType="fade"
+          onRequestClose={() => setViewerIndex(null)}
+        >
+          <View style={styles.viewerOverlay}>
+            <TouchableOpacity
+              style={[styles.viewerCloseBtn, { top: 36 + insets.top }]}
+              onPress={() => setViewerIndex(null)}
+              activeOpacity={0.9}
+            >
+              <X size={18} color="#E5E7EB" />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.viewerDeleteBtn, { top: 36 + insets.top }]}
+              onPress={() => {
+                if (viewerIndex !== null) removeImageAt(viewerIndex);
+              }}
+              disabled={isDeletingImage}
+              activeOpacity={0.9}
+            >
+              {isDeletingImage ? (
+                <ActivityIndicator size="small" color="#F87171" />
+              ) : (
+                <Trash2 size={18} color="#F87171" />
+              )}
+            </TouchableOpacity>
+            {viewerIndex !== null && (
+              <Image
+                source={{ uri: profile?.image_urls?.[viewerIndex] || '' }}
+                style={styles.viewerImage}
+                resizeMode="contain"
+              />
+            )}
+          </View>
+        </Modal>
+      )}
       {isSaving && (
         <View style={styles.fullScreenLoader}>
           <ActivityIndicator size="large" color="#FFFFFF" />
@@ -599,6 +667,46 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.18)',
+  },
+  viewerOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.95)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  viewerImage: {
+    width: '92%',
+    height: '70%',
+    borderRadius: 12,
+    backgroundColor: '#0F0F14',
+  },
+  viewerDeleteBtn: {
+    position: 'absolute',
+    right: 16,
+    top: 16,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(248,113,113,0.2)',
+    borderWidth: 1,
+    borderColor: 'rgba(248,113,113,0.35)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 2,
+  },
+  viewerCloseBtn: {
+    position: 'absolute',
+    left: 16,
+    top: 16,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 2,
   },
   matchBadgeWrap: {
     // removed (badge no longer displayed)

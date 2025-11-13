@@ -33,7 +33,7 @@ export default function HomeScreen() {
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [filters, setFilters] = useState({
     city: '',
-    neighborhood: '',
+    neighborhoods: [] as string[],
     minPrice: '',
     maxPrice: '',
     minBedrooms: '',
@@ -134,7 +134,7 @@ export default function HomeScreen() {
     const minBedrooms = filters.minBedrooms ? Number(filters.minBedrooms) : null;
     const minBathrooms = filters.minBathrooms ? Number(filters.minBathrooms) : null;
     const cityFilter = filters.city.trim().toLowerCase();
-    const hoodFilter = filters.neighborhood.trim().toLowerCase();
+    const selectedNeighborhoods = (filters.neighborhoods || []).map((n) => n.toLowerCase());
 
     const filtered = apartments.filter((apartment) => {
       // search query
@@ -157,10 +157,15 @@ export default function HomeScreen() {
       if (minBedrooms !== null && apartment.bedrooms < minBedrooms) return false;
       if (minBathrooms !== null && apartment.bathrooms < minBathrooms) return false;
 
-      // neighborhood filter (check in neighborhood field if exists, otherwise address)
-      if (hoodFilter) {
-        const hoodValue = (apartment as any).neighborhood?.toLowerCase?.() || apartment.address.toLowerCase();
-        if (!hoodValue.includes(hoodFilter)) return false;
+      // neighborhoods filter (any selected)
+      if (selectedNeighborhoods.length > 0) {
+        const hoodField = ((apartment as any).neighborhood || '').toLowerCase();
+        if (hoodField) {
+          if (!selectedNeighborhoods.some((sel) => hoodField === sel)) return false;
+        } else {
+          const addr = apartment.address.toLowerCase();
+          if (!selectedNeighborhoods.some((sel) => addr.includes(sel))) return false;
+        }
       }
 
       return true;
@@ -170,7 +175,7 @@ export default function HomeScreen() {
   };
 
   const clearFilters = () => {
-    setFilters({ city: '', neighborhood: '', minPrice: '', maxPrice: '', minBedrooms: '', minBathrooms: '' });
+    setFilters({ city: '', neighborhoods: [], minPrice: '', maxPrice: '', minBedrooms: '', minBathrooms: '' });
     setCitySuggestions([]);
     setNeighborhoodOptions([]);
     setIsNeighborhoodDropdownOpen(false);
@@ -270,7 +275,7 @@ export default function HomeScreen() {
                   placeholderTextColor="#9DA4AE"
                   value={filters.city}
                   onChangeText={(t) => {
-                    setFilters((f) => ({ ...f, city: t, neighborhood: '' }));
+                    setFilters((f) => ({ ...f, city: t, neighborhoods: [] }));
                     setNeighborhoodOptions([]);
                     setIsNeighborhoodDropdownOpen(false);
                   }}
@@ -282,7 +287,7 @@ export default function HomeScreen() {
                         key={name}
                         style={styles.suggestionItem}
                         onPress={() => {
-                          setFilters((f) => ({ ...f, city: name, neighborhood: '' }));
+                          setFilters((f) => ({ ...f, city: name, neighborhoods: [] }));
                           setCitySuggestions([]);
                           setNeighborhoodOptions([]);
                           setIsNeighborhoodDropdownOpen(false);
@@ -313,14 +318,16 @@ export default function HomeScreen() {
                   <Text
                     style={[
                       styles.selectButtonText,
-                      !filters.neighborhood && styles.selectButtonPlaceholder,
+                      (!filters.neighborhoods || filters.neighborhoods.length === 0) && styles.selectButtonPlaceholder,
                     ]}
                   >
-                    {filters.neighborhood ||
+                    {filters.neighborhoods && filters.neighborhoods.length > 0
+                      ? `נבחרו ${filters.neighborhoods.length}`
+                      :
                       (isLoadingNeighborhoods
                         ? 'טוען שכונות...'
                         : neighborhoodOptions.length > 0
-                        ? 'בחר שכונה'
+                        ? 'בחר שכונות'
                         : filters.city
                         ? 'אין שכונות זמינות'
                         : 'בחר עיר קודם')}
@@ -348,14 +355,22 @@ export default function HomeScreen() {
                         .map((name) => (
                           <TouchableOpacity
                             key={name}
-                            style={styles.suggestionItem}
+                            style={[
+                              styles.suggestionItem,
+                              (filters.neighborhoods || []).includes(name) ? { backgroundColor: '#1B1C27' } : null,
+                            ]}
                             onPress={() => {
-                              setFilters((f) => ({ ...f, neighborhood: name }));
-                              setIsNeighborhoodDropdownOpen(false);
-                              setNeighborhoodSearchQuery('');
+                              setFilters((f) => {
+                                const current = new Set(f.neighborhoods || []);
+                                if (current.has(name)) current.delete(name);
+                                else current.add(name);
+                                return { ...f, neighborhoods: Array.from(current) };
+                              });
                             }}
                           >
-                            <Text style={styles.suggestionText}>{name}</Text>
+                            <Text style={styles.suggestionText}>
+                              {(filters.neighborhoods || []).includes(name) ? '✓ ' : ''}{name}
+                            </Text>
                           </TouchableOpacity>
                         ))}
                     </ScrollView>
