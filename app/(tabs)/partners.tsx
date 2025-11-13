@@ -286,11 +286,26 @@ useEffect(() => {
       if (insertErr) throw insertErr;
 
       // optional: also notify the recipient
+      // If sender is part of a merged profile, reflect that in the content
+      let senderIsMerged = false;
+      try {
+        const { data: myGroup } = await supabase
+          .from('profile_group_members')
+          .select('group_id')
+          .eq('user_id', currentUser.id)
+          .eq('status', 'ACTIVE')
+          .maybeSingle();
+        senderIsMerged = !!myGroup?.group_id;
+      } catch {}
+      const notifTitle = senderIsMerged ? 'בקשת שותפות מפרופיל משותף' : 'בקשת שותפות חדשה';
+      const notifDesc = senderIsMerged
+        ? 'פרופיל משותף מעוניין להיות שותף שלך.'
+        : 'המשתמש מעוניין להיות שותף שלך.';
       await supabase.from('notifications').insert({
         sender_id: currentUser.id,
         recipient_id: likedUser.id,
-        title: 'בקשת שותפות חדשה',
-        description: 'המשתמש מעוניין להיות שותף שלך.',
+        title: notifTitle,
+        description: notifDesc,
       });
 
       Alert.alert('נשלח', 'נוצרה בקשת שותפות ונשלחה הודעה למשתמש');
@@ -379,15 +394,29 @@ useEffect(() => {
       // optional: notify all members (except sender if appears)
       const recipients = groupUsers.filter((u) => u.id !== currentUser.id);
       if (recipients.length) {
+        // If sender is part of a merged profile, reflect that in notification content
+        let senderIsMerged = false;
+        try {
+          const { data: myGroup } = await supabase
+            .from('profile_group_members')
+            .select('group_id')
+            .eq('user_id', currentUser.id)
+            .eq('status', 'ACTIVE')
+            .maybeSingle();
+          senderIsMerged = !!myGroup?.group_id;
+        } catch {}
+        const notifTitle = senderIsMerged ? 'בקשת שותפות מפרופיל משותף' : 'בקשת שותפות חדשה';
+        const notifDesc = senderIsMerged
+          ? 'פרופיל משותף מעוניין בקבוצה שלך.'
+          : 'המשתמש מעוניין בקבוצה שלך.';
         const notifications = recipients.map((u) => ({
           sender_id: currentUser.id,
           recipient_id: u.id,
-          title: 'בקשת שותפות חדשה',
-          description: 'המשתמש מעוניין בקבוצה שלך.',
+          title: notifTitle,
+          description: notifDesc,
         }));
         await supabase.from('notifications').insert(notifications as any);
       }
-      Alert.alert('נשלח', 'נוצרה בקשת שותפות לקבוצה');
       goNext();
     } catch (e: any) {
       console.error('group like failed', e);

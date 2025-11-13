@@ -25,6 +25,8 @@ export default function NotificationsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
   const [sendersById, setSendersById] = useState<Record<string, { id: string; full_name?: string; avatar_url?: string }>>({});
+  const [senderGroupIdByUserId, setSenderGroupIdByUserId] = useState<Record<string, string>>({});
+  const [groupMembersByGroupId, setGroupMembersByGroupId] = useState<Record<string, string[]>>({});
   const DEFAULT_AVATAR = 'https://cdn-icons-png.flaticon.com/512/847/847969.png';
   const [apartmentsById, setApartmentsById] = useState<Record<string, { id: string; title?: string; city?: string; image_url?: string; image_urls?: string[] }>>({});
   const APT_PLACEHOLDER = 'https://images.pexels.com/photos/1457842/pexels-photo-1457842.jpeg';
@@ -54,18 +56,60 @@ export default function NotificationsScreen() {
             .filter((id): id is string => typeof id === 'string' && id.length > 0)
         )
       );
+      let initialUsersMap: Record<string, { id: string; full_name?: string; avatar_url?: string }> = {};
       if (uniqueSenderIds.length > 0) {
         const { data: usersData, error: usersErr } = await supabase
           .from('users')
           .select('id, full_name, avatar_url')
           .in('id', uniqueSenderIds);
         if (usersErr) throw usersErr;
-        const map: Record<string, { id: string; full_name?: string; avatar_url?: string }> = {};
-        (usersData || []).forEach((u: any) => { map[u.id] = u; });
-        setSendersById(map);
-      } else {
-        setSendersById({});
+        (usersData || []).forEach((u: any) => { initialUsersMap[u.id] = u; });
       }
+
+      // Find if any sender belongs to an ACTIVE merged profile (group)
+      let senderToGroup: Record<string, string> = {};
+      let groupIdToMemberIds: Record<string, string[]> = {};
+      if (uniqueSenderIds.length > 0) {
+        const { data: memberships } = await supabase
+          .from('profile_group_members')
+          .select('user_id, group_id')
+          .eq('status', 'ACTIVE')
+          .in('user_id', uniqueSenderIds);
+        const sendersWithGroups = (memberships || []) as any[];
+        senderToGroup = {};
+        const groupIds = new Set<string>();
+        sendersWithGroups.forEach((m) => {
+          senderToGroup[m.user_id] = m.group_id;
+          groupIds.add(m.group_id);
+        });
+        if (groupIds.size > 0) {
+          const { data: groupMembers } = await supabase
+            .from('profile_group_members')
+            .select('group_id, user_id')
+            .eq('status', 'ACTIVE')
+            .in('group_id', Array.from(groupIds));
+          groupIdToMemberIds = {};
+          (groupMembers || []).forEach((m: any) => {
+            if (!groupIdToMemberIds[m.group_id]) groupIdToMemberIds[m.group_id] = [];
+            groupIdToMemberIds[m.group_id].push(m.user_id);
+          });
+        }
+      }
+
+      // Ensure user profiles are loaded for group members too (for grid and names)
+      const extraUserIds = Array.from(new Set(Object.values(groupIdToMemberIds).flat())).filter(
+        (id) => !initialUsersMap[id]
+      );
+      if (extraUserIds.length > 0) {
+        const { data: extraUsers } = await supabase
+          .from('users')
+          .select('id, full_name, avatar_url')
+          .in('id', extraUserIds);
+        (extraUsers || []).forEach((u: any) => { initialUsersMap[u.id] = u; });
+      }
+      setSendersById(initialUsersMap);
+      setSenderGroupIdByUserId(senderToGroup);
+      setGroupMembersByGroupId(groupIdToMemberIds);
 
       // Fetch apartments referenced by notifications (using embedded metadata)
       const aptIds = Array.from(
@@ -243,6 +287,10 @@ export default function NotificationsScreen() {
             const aptImage = apt
               ? (Array.isArray(apt.image_urls) && apt.image_urls.length ? apt.image_urls[0] : APT_PLACEHOLDER)
               : null;
+            const senderGroupId = senderGroupIdByUserId[item.sender_id];
+            const isPartnerRequest = isPartnerRequestNotification(item);
+            const groupMemberIds = senderGroupId ? (groupMembersByGroupId[senderGroupId] || []) : [];
+            const groupMembers = groupMemberIds.map((id) => sendersById[id]).filter(Boolean);
             return (
               <View style={styles.rowRtl}>
                 <TouchableOpacity
@@ -268,12 +316,26 @@ export default function NotificationsScreen() {
                       <View style={styles.thumbWrap}>
                         <Image source={{ uri: aptImage }} style={styles.thumbImg} />
                       </View>
+                    ) : isPartnerRequest && senderGroupId && groupMembers.length ? (
+                      <View style={styles.thumbWrap}>
+                        <View style={{ flex: 1, flexDirection: 'row', flexWrap: 'wrap' }}>
+                          {groupMembers.slice(0, 4).map((gm: any, idx: number) => (
+                            <View key={idx} style={{ width: '50%', height: '50%', padding: 1 }}>
+                              <Image source={{ uri: gm?.avatar_url || DEFAULT_AVATAR }} style={{ width: '100%', height: '100%' }} />
+                            </View>
+                          ))}
+                        </View>
+                      </View>
                     ) : null}
                     <View style={styles.bubbleTextArea}>
                       <Text style={styles.cardTitle} numberOfLines={1}>{item.title}</Text>
-                      {!!sender?.full_name && (
+                      {isPartnerRequest && senderGroupId && groupMembers.length ? (
+                        <Text style={styles.senderName} numberOfLines={1}>
+                          {groupMembers.map((gm: any) => gm?.full_name).filter(Boolean).join(' • ')}
+                        </Text>
+                      ) : !!sender?.full_name ? (
                         <Text style={styles.senderName} numberOfLines={1}>{sender.full_name}</Text>
-                      )}
+                      ) : null}
                       <Text style={styles.cardDesc} numberOfLines={2}>{displayDescription(item.description)}</Text>
                       <Text style={styles.cardMeta}>
                         {new Date(item.created_at).toLocaleString()}

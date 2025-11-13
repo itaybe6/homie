@@ -67,6 +67,7 @@ export default function RequestsScreen() {
   const [usersById, setUsersById] = useState<Record<string, Partial<User>>>({});
   const [aptsById, setAptsById] = useState<Record<string, Partial<Apartment>>>({});
   const [ownersById, setOwnersById] = useState<Record<string, Partial<User>>>({});
+  const [groupMembersByGroupId, setGroupMembersByGroupId] = useState<Record<string, string[]>>({});
 
   const DEFAULT_AVATAR = 'https://cdn-icons-png.flaticon.com/512/847/847969.png';
   const APT_PLACEHOLDER = 'https://images.pexels.com/photos/1457842/pexels-photo-1457842.jpeg';
@@ -109,6 +110,16 @@ export default function RequestsScreen() {
     if (!user?.id) { setLoading(false); return; }
     try {
       setLoading(true);
+      // 1) My active group memberships (to pull incoming group-targeted matches)
+      const { data: myMemberships, error: memErr } = await supabase
+        .from('profile_group_members')
+        .select('group_id')
+        .eq('user_id', user.id)
+        .eq('status', 'ACTIVE');
+      if (memErr) throw memErr;
+      const myGroupIds = (myMemberships || []).map((r: any) => r.group_id as string);
+
+      // 2) Core queries in parallel
       const [
         { data: sData, error: sErr },
         { data: rData, error: rErr },
@@ -116,6 +127,7 @@ export default function RequestsScreen() {
         { data: mRecv, error: mRErr },
         { data: gSent, error: gSErr },
         { data: gRecv, error: gRErr },
+        groupRecvResult,
       ] = await Promise.all([
         supabase.from('apartments_request').select('*').eq('sender_id', user.id).order('created_at', { ascending: false }),
         supabase.from('apartments_request').select('*').eq('recipient_id', user.id).order('created_at', { ascending: false }),
@@ -123,6 +135,9 @@ export default function RequestsScreen() {
         supabase.from('matches').select('*').eq('receiver_id', user.id).order('created_at', { ascending: false }),
         supabase.from('profile_group_invites').select('*').eq('inviter_id', user.id).order('created_at', { ascending: false }),
         supabase.from('profile_group_invites').select('*').eq('invitee_id', user.id).order('created_at', { ascending: false }),
+        myGroupIds.length
+          ? supabase.from('matches').select('*').in('receiver_group_id', myGroupIds).order('created_at', { ascending: false })
+          : Promise.resolve({ data: [], error: null } as any),
       ]);
       if (sErr) throw sErr;
       if (rErr) throw rErr;
@@ -130,6 +145,7 @@ export default function RequestsScreen() {
       if (mRErr) throw mRErr;
       if (gSErr) throw gSErr;
       if (gRErr) throw gRErr;
+      const mRecvGroup = (groupRecvResult as any)?.data || [];
 
       const aptSent: UnifiedItem[] = (sData || [])
         .filter((row: any) => (row.status || 'PENDING') !== 'NOT_RELEVANT')
@@ -157,25 +173,74 @@ export default function RequestsScreen() {
       const matchSent: UnifiedItem[] = (mSent || [])
         .filter((row: any) => mapMatchStatus(row.status) !== 'NOT_RELEVANT')
         .map((row: any) => ({
-        id: row.id,
-        kind: 'MATCH',
-        sender_id: row.sender_id,
-        recipient_id: row.receiver_id,
-        apartment_id: null,
-        status: mapMatchStatus(row.status),
-        created_at: row.created_at,
-      }));
-      const matchRecv: UnifiedItem[] = (mRecv || [])
+          id: row.id,
+          kind: 'MATCH',
+          sender_id: row.sender_id,
+          recipient_id: row.receiver_id, // may be null for group-targeted; we will normalize below
+          apartment_id: null,
+          status: mapMatchStatus(row.status),
+          created_at: row.created_at,
+          // carry through for later normalization
+          _receiver_group_id: row.receiver_group_id,
+        }));
+      let matchRecv: any[] = (mRecv || [])
         .filter((row: any) => mapMatchStatus(row.status) !== 'NOT_RELEVANT')
         .map((row: any) => ({
-        id: row.id,
-        kind: 'MATCH',
-        sender_id: row.sender_id,
-        recipient_id: row.receiver_id,
-        apartment_id: null,
-        status: mapMatchStatus(row.status),
-        created_at: row.created_at,
-      }));
+          id: row.id,
+          kind: 'MATCH',
+          sender_id: row.sender_id,
+          recipient_id: row.receiver_id,
+          apartment_id: null,
+          status: mapMatchStatus(row.status),
+          created_at: row.created_at,
+        }));
+      // Enrich incoming matches where sender belongs to a merged profile (show sender's group)
+      const incomingSenderIds = Array.from(new Set((mRecv || []).map((r: any) => r.sender_id).filter(Boolean)));
+      let senderToGroupId: Record<string, string> = {};
+      if (incomingSenderIds.length) {
+        const { data: sMemberships } = await supabase
+          .from('profile_group_members')
+          .select('user_id, group_id')
+          .eq('status', 'ACTIVE')
+          .in('user_id', incomingSenderIds);
+        senderToGroupId = {};
+        const senderGroupIds = new Set<string>();
+        (sMemberships || []).forEach((m: any) => {
+          senderToGroupId[m.user_id] = m.group_id;
+          senderGroupIds.add(m.group_id);
+        });
+        if (senderGroupIds.size) {
+          const { data: sGroupMembers } = await supabase
+            .from('profile_group_members')
+            .select('group_id, user_id')
+            .eq('status', 'ACTIVE')
+            .in('group_id', Array.from(senderGroupIds));
+          (sGroupMembers || []).forEach((m: any) => {
+            if (!groupMembersByGroupId[m.group_id]) groupMembersByGroupId[m.group_id] = [];
+            if (!groupMembersByGroupId[m.group_id].includes(m.user_id)) {
+              groupMembersByGroupId[m.group_id].push(m.user_id);
+            }
+          });
+        }
+        // attach sender group id to rows (for rendering)
+        matchRecv = matchRecv.map((row: any) => ({
+          ...row,
+          _sender_group_id: senderToGroupId[row.sender_id] || null,
+        }));
+      }
+      // Incoming matches that target any of my groups
+      const matchRecvFromGroups: UnifiedItem[] = (mRecvGroup || [])
+        .filter((row: any) => mapMatchStatus(row.status) !== 'NOT_RELEVANT')
+        .map((row: any) => ({
+          id: row.id,
+          kind: 'MATCH',
+          sender_id: row.sender_id,
+          recipient_id: row.receiver_id, // may be null; not used for incoming display
+          apartment_id: null,
+          status: mapMatchStatus(row.status),
+          created_at: row.created_at,
+          _receiver_group_id: row.receiver_group_id,
+        }));
 
       const mapGroupStatus = (status: string | null | undefined): UnifiedItem['status'] => {
         const s = (status || '').toUpperCase();
@@ -206,14 +271,67 @@ export default function RequestsScreen() {
       }));
 
       const sentUnified = [...aptSent, ...matchSent, ...groupSent].sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
-      const recvUnified = [...aptRecv, ...matchRecv, ...groupRecv].sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
+      const recvUnifiedRaw = [...aptRecv, ...matchRecv, ...matchRecvFromGroups, ...groupRecv].sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
 
-      setSent(sentUnified);
-      setReceived(recvUnified);
+      // Normalize display user for group-targeted matches:
+      // For any item with _receiver_group_id, choose a representative member so recipient_id is a real user id.
+      const groupIdsForDisplay = Array.from(
+        new Set<string>([
+          ...((matchSent as any[]) || []).map((r: any) => r._receiver_group_id).filter(Boolean),
+          ...((matchRecvFromGroups as any[]) || []).map((r: any) => r._receiver_group_id).filter(Boolean),
+        ])
+      );
+      let groupIdToMemberIds: Record<string, string[]> = {};
+      if (groupIdsForDisplay.length) {
+        const { data: dispMembers } = await supabase
+          .from('profile_group_members')
+          .select('group_id, user_id')
+          .eq('status', 'ACTIVE')
+          .in('group_id', groupIdsForDisplay);
+        groupIdToMemberIds = {};
+        (dispMembers || []).forEach((m: any) => {
+          if (!groupIdToMemberIds[m.group_id]) groupIdToMemberIds[m.group_id] = [];
+          groupIdToMemberIds[m.group_id].push(m.user_id);
+        });
+      }
+      // merge any sender-group members we collected earlier
+      Object.entries(groupMembersByGroupId).forEach(([gid, ids]) => {
+        if (!groupIdToMemberIds[gid]) groupIdToMemberIds[gid] = [];
+        ids.forEach((id) => {
+          if (!groupIdToMemberIds[gid].includes(id)) {
+            groupIdToMemberIds[gid].push(id);
+          }
+        });
+      });
+      setGroupMembersByGroupId(groupIdToMemberIds);
+      const pickGroupDisplayUser = (groupId?: string | null, excludeId?: string): string | undefined => {
+        if (!groupId) return undefined;
+        const ids = groupIdToMemberIds[groupId] || [];
+        const candidate = ids.find((id) => id && id !== excludeId);
+        return candidate || ids[0];
+      };
+      const normalizeSent = sentUnified.map((item: any) => {
+        if (item.kind === 'MATCH' && !item.recipient_id && item._receiver_group_id) {
+          const displayUser = pickGroupDisplayUser(item._receiver_group_id, user.id);
+          return { ...item, recipient_id: displayUser || item.sender_id };
+        }
+        return item;
+      });
+      const normalizeRecv = recvUnifiedRaw.map((item: any) => {
+        if (item.kind === 'MATCH' && !item.recipient_id && item._receiver_group_id) {
+          const displayUser = pickGroupDisplayUser(item._receiver_group_id, user.id);
+          return { ...item, recipient_id: displayUser || item.sender_id };
+        }
+        return item;
+      });
+
+      setSent(normalizeSent as any);
+      setReceived(normalizeRecv as any);
 
       const userIds = Array.from(new Set([
-        ...sentUnified.map((r) => r.recipient_id),
-        ...recvUnified.map((r) => r.sender_id),
+        ...(normalizeSent as UnifiedItem[]).map((r) => r.recipient_id),
+        ...(normalizeRecv as UnifiedItem[]).map((r) => r.sender_id),
+        ...Object.values(groupIdToMemberIds).flat(), // ensure we have details for group members to display
       ]));
       if (userIds.length) {
         const { data: usersData } = await supabase
@@ -228,8 +346,8 @@ export default function RequestsScreen() {
       }
 
       const aptIds = Array.from(new Set([
-        ...sentUnified.filter((r) => r.kind === 'APT').map((r) => r.apartment_id).filter(Boolean) as string[],
-        ...recvUnified.filter((r) => r.kind === 'APT').map((r) => r.apartment_id).filter(Boolean) as string[],
+        ...(normalizeSent as UnifiedItem[]).filter((r) => r.kind === 'APT').map((r) => r.apartment_id).filter(Boolean) as string[],
+        ...(normalizeRecv as UnifiedItem[]).filter((r) => r.kind === 'APT').map((r) => r.apartment_id).filter(Boolean) as string[],
       ]));
       if (aptIds.length) {
         const { data: apts } = await supabase
@@ -497,6 +615,13 @@ export default function RequestsScreen() {
           ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
           renderItem={({ item }) => {
             const otherUser = incoming ? usersById[item.sender_id] : usersById[item.recipient_id];
+            const receiverGroupId = (item as any)?._receiver_group_id as string | undefined;
+            const senderGroupId = (item as any)?._sender_group_id as string | undefined;
+            const isGroupMatch =
+              item.kind === 'MATCH' && (!!receiverGroupId || (incoming && !!senderGroupId));
+            const effectiveGroupId = receiverGroupId || (incoming ? senderGroupId : undefined);
+            const groupMemberIds = effectiveGroupId ? (groupMembersByGroupId[effectiveGroupId] || []) : [];
+            const groupMembers = groupMemberIds.map((id) => usersById[id]).filter(Boolean) as Partial<User>[];
             const apt = item.kind === 'APT' && item.apartment_id ? aptsById[item.apartment_id] : undefined;
             const aptImage = apt ? (Array.isArray(apt.image_urls) && (apt.image_urls as any[]).length ? (apt.image_urls as any[])[0] : APT_PLACEHOLDER) : null;
             const ownerUser = apt && (apt as any).owner_id ? ownersById[(apt as any).owner_id as string] : undefined;
@@ -504,11 +629,21 @@ export default function RequestsScreen() {
             return (
               <View style={styles.card}>
                 <View style={styles.cardInner}>
-                  {!!aptImage && (
+                  {!!aptImage ? (
                     <View style={styles.thumbWrap}>
                       <Image source={{ uri: aptImage }} style={styles.thumbImg} />
                     </View>
-                  )}
+                  ) : isGroupMatch && groupMembers.length ? (
+                    <View style={styles.thumbWrap}>
+                      <View style={{ flex: 1, flexDirection: 'row', flexWrap: 'wrap' }}>
+                        {groupMembers.slice(0, 4).map((gm, idx) => (
+                          <View key={idx} style={{ width: '50%', height: '50%', padding: 1 }}>
+                            <Image source={{ uri: gm.avatar_url || DEFAULT_AVATAR }} style={{ width: '100%', height: '100%' }} />
+                          </View>
+                        ))}
+                      </View>
+                    </View>
+                  ) : null}
                   <View style={{ flex: 1, alignItems: 'flex-end' }}>
                     <Text style={styles.cardTitle} numberOfLines={1}>
                       {item.kind === 'APT' ? 'בקשת הצטרפות לדירה' : item.kind === 'MATCH' ? 'בקשת התאמה' : 'בקשת מיזוג פרופילים'}
@@ -518,9 +653,13 @@ export default function RequestsScreen() {
                         {apt.title} • {apt.city}
                       </Text>
                     )}
-                    {!!otherUser?.full_name && (
+                    {isGroupMatch && groupMembers.length ? (
+                      <Text style={styles.cardSub} numberOfLines={1}>
+                        {groupMembers.map((m) => m.full_name).filter(Boolean).join(' • ')}
+                      </Text>
+                    ) : !!otherUser?.full_name ? (
                       <Text style={styles.cardMeta}>משתמש: {otherUser.full_name}</Text>
-                    )}
+                    ) : null}
                     <Text style={styles.cardMeta}>{new Date(item.created_at).toLocaleString()}</Text>
                     <View style={{ marginTop: 10, flexDirection: 'row-reverse', gap: 8 as any }}>
                       <StatusPill status={item.status} />
@@ -655,16 +794,18 @@ export default function RequestsScreen() {
                       )}
                     </View>
                   </View>
-                  <TouchableOpacity
-                    style={styles.avatarWrap}
-                    activeOpacity={0.85}
-                    onPress={() => {
-                      const id = incoming ? item.sender_id : item.recipient_id;
-                      if (id) router.push({ pathname: '/user/[id]', params: { id } });
-                    }}
-                  >
-                    <Image source={{ uri: otherUser?.avatar_url || DEFAULT_AVATAR }} style={styles.avatarImg} />
-                  </TouchableOpacity>
+                  {!isGroupMatch && (
+                    <TouchableOpacity
+                      style={styles.avatarWrap}
+                      activeOpacity={0.85}
+                      onPress={() => {
+                        const id = incoming ? item.sender_id : item.recipient_id;
+                        if (id) router.push({ pathname: '/user/[id]', params: { id } });
+                      }}
+                    >
+                      <Image source={{ uri: otherUser?.avatar_url || DEFAULT_AVATAR }} style={styles.avatarImg} />
+                    </TouchableOpacity>
+                  )}
                 </View>
               </View>
             );

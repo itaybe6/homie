@@ -196,7 +196,6 @@ export default function HomeScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={[styles.topBar, { paddingTop: 52 }]}>
-        <View style={styles.brandRow} />
         <View style={styles.actionsRow}>
           <TouchableOpacity activeOpacity={0.8} style={styles.topActionBtn} onPress={() => setIsFilterOpen(true)}>
             <SlidersHorizontal size={20} color="#FFFFFF" />
@@ -209,17 +208,16 @@ export default function HomeScreen() {
             <Plus size={20} color="#FFFFFF" />
           </TouchableOpacity>
         </View>
-      </View>
-
-      <View style={styles.searchContainer}>
-        <Search size={20} color="#9DA4AE" style={styles.searchIcon} />
-        <TextInput
-          style={styles.searchInput}
-          placeholder="חיפוש לפי עיר, שכונה או כתובת..."
-          placeholderTextColor="#9DA4AE"
-          value={searchQuery}
-          onChangeText={setSearchQuery}
-        />
+        <View style={[styles.searchContainer, { flex: 1, marginLeft: 8 }]}>
+          <Search size={20} color="#9DA4AE" style={styles.searchIcon} />
+          <TextInput
+            style={styles.topSearchInput}
+            placeholder="חיפוש לפי עיר, שכונה או כתובת..."
+            placeholderTextColor="#9DA4AE"
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+          />
+        </View>
       </View>
 
       {/* Removed hero banner */}
@@ -515,12 +513,17 @@ const styles = StyleSheet.create({
     backgroundColor: '#17171F',
     borderRadius: 22,
     paddingHorizontal: 14,
-    marginHorizontal: 16,
-    marginBottom: 16,
     height: 44,
   },
   searchIcon: {
     marginRight: 8,
+  },
+  topSearchInput: {
+    flex: 1,
+    paddingVertical: 10,
+    fontSize: 15,
+    color: '#FFFFFF',
+    textAlign: 'right',
   },
   searchInput: {
     flex: 1,
