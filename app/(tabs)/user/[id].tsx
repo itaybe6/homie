@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, Image, ActivityIndicator, TouchableOpacity, Alert } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Image, ActivityIndicator, TouchableOpacity, Alert, Dimensions } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { User } from '@/types/database';
@@ -12,7 +12,7 @@ export default function UserProfileScreen() {
   const { id, from } = useLocalSearchParams() as { id?: string; from?: string };
   const insets = useSafeAreaInsets();
   const contentTopPadding = insets.top ;
-  const contentBottomPadding = Math.max(32, insets.bottom + 16);
+  const contentBottomPadding = Math.max(180, insets.bottom + 120);
 
   const [profile, setProfile] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -21,6 +21,37 @@ export default function UserProfileScreen() {
   type GroupMember = Pick<User, 'id' | 'full_name' | 'avatar_url'>;
   const [groupContext, setGroupContext] = useState<{ name?: string | null; members: GroupMember[] } | null>(null);
   const [groupLoading, setGroupLoading] = useState(false);
+  const [galleryWidth, setGalleryWidth] = useState(0);
+
+  const normalizeImageUrls = (value: unknown): string[] => {
+    if (!value) return [];
+    if (Array.isArray(value)) {
+      return (value as unknown[])
+        .filter((u) => typeof u === 'string' && !!(u as string).trim()) as string[];
+    }
+    if (typeof value === 'string') {
+      // Try JSON first
+      try {
+        const parsed = JSON.parse(value);
+        if (Array.isArray(parsed)) {
+          return parsed.filter((u: any) => typeof u === 'string' && !!u.trim());
+        }
+      } catch {
+        // Not JSON – try Postgres array literal format: {"a","b"} or {a,b}
+        try {
+          const cleaned = value.replace(/^\s*\{|\}\s*$/g, '');
+          if (!cleaned) return [];
+          return cleaned
+            .split(',')
+            .map((s) => s.replace(/^"+|"+$/g, '').trim())
+            .filter(Boolean);
+        } catch {
+          return [];
+        }
+      }
+    }
+    return [];
+  };
 
   useEffect(() => {
     (async () => {
@@ -216,6 +247,13 @@ export default function UserProfileScreen() {
     );
   }
 
+  const galleryUrls = normalizeImageUrls((profile as any).image_urls);
+  const gap = 6;
+  const defaultItemSize = Math.floor((Dimensions.get('window').width - 16 * 2 - gap * 2) / 3);
+  const galleryItemSize = galleryWidth
+    ? Math.floor((galleryWidth - gap * 2) / 3)
+    : defaultItemSize;
+
   return (
     <ScrollView
       style={styles.container}
@@ -246,6 +284,25 @@ export default function UserProfileScreen() {
         >
           <ArrowLeft size={20} color="#FFFFFF" />
         </TouchableOpacity>
+        {groupLoading ? null : groupContext && groupContext.members.length >= 2 ? (
+          <TouchableOpacity style={styles.mergedChip} activeOpacity={0.9}>
+            <View style={styles.mergedAvatarsRow}>
+              {groupContext.members.slice(0, 3).map((m, idx) => (
+                <View
+                  key={m.id}
+                  style={[styles.mergedAvatarWrap, idx !== 0 && styles.mergedAvatarOverlap]}
+                >
+                  {m.avatar_url ? (
+                    <Image source={{ uri: m.avatar_url }} style={styles.mergedAvatarImg} />
+                  ) : (
+                    <View style={styles.mergedAvatarFallback} />
+                  )}
+                </View>
+              ))}
+            </View>
+            <Text style={styles.mergedChipText}>פרופיל משותף</Text>
+          </TouchableOpacity>
+        ) : null}
         <Image
           source={{ uri: profile.avatar_url || 'https://cdn-icons-png.flaticon.com/512/847/847969.png' }}
           style={styles.avatar}
@@ -261,50 +318,13 @@ export default function UserProfileScreen() {
         )}
       </View>
 
-      {groupLoading ? null : groupContext && groupContext.members.length >= 2 ? (
-        <View style={styles.groupSection}>
-          <View style={styles.groupBadge}>
-            <UserPlus2 size={16} color="#0F0F14" />
-            <Text style={styles.groupBadgeText}>פרופיל ממוזג</Text>
-          </View>
-          <Text style={styles.groupTitle} numberOfLines={1}>
-            {groupContext.name?.trim() || 'שותפים'}
-          </Text>
-          <View style={styles.groupAvatars}>
-            {groupContext.members.map((member, index) => {
-              const initials =
-                (member.full_name || '')
-                  .trim()
-                  .split(/\s+/)
-                  .map((part) => part[0])
-                  .join('')
-                  .slice(0, 2)
-                  .toUpperCase() || 'ח';
-              return (
-                <View
-                  key={member.id}
-                  style={[
-                    styles.groupAvatarWrap,
-                    index !== 0 && styles.groupAvatarOverlap,
-                    member.id === profile.id && styles.groupAvatarHighlighted,
-                  ]}
-                >
-                  {member.avatar_url ? (
-                    <Image source={{ uri: member.avatar_url }} style={styles.groupAvatarImg} />
-                  ) : (
-                    <View style={styles.groupAvatarFallback}>
-                      <Text style={styles.groupAvatarFallbackText}>{initials}</Text>
-                    </View>
-                  )}
-                </View>
-              );
-            })}
-          </View>
-          <Text style={styles.groupNames} numberOfLines={2}>
-            {groupContext.members.map((m) => m.full_name || 'חבר').join(' • ')}
-          </Text>
-        </View>
-      ) : null}
+      {!!profile.bio && (
+        <Text style={styles.headerBio} numberOfLines={6}>
+          {profile.bio}
+        </Text>
+      )}
+
+      {/* merged profile indicator moved to chip on header */}
 
       {me?.id && me.id !== profile.id ? (
         <View style={styles.section}>
@@ -321,23 +341,36 @@ export default function UserProfileScreen() {
         </View>
       ) : null}
 
-      {profile.bio ? (
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>אודות</Text>
-          <Text style={styles.sectionText}>{profile.bio}</Text>
-        </View>
-      ) : null}
+      {/* Bio moved under header */}
 
-      {!!profile.image_urls?.length && (
-        <View style={styles.section}>
+      {galleryUrls.length ? (
+        <View style={[styles.section, { paddingHorizontal: 12 }]}>
           <Text style={styles.sectionTitle}>גלריה</Text>
-          <View style={styles.gallery}>
-            {profile.image_urls.map((url, idx) => (
-              <Image key={url + idx} source={{ uri: url }} style={styles.galleryImg} />
+          <View
+            style={styles.gallery}
+            onLayout={(e) => {
+              const w = e.nativeEvent.layout.width;
+              if (w && Math.abs(w - galleryWidth) > 1) setGalleryWidth(w);
+            }}
+          >
+            {galleryUrls.map((url, idx) => (
+              <Image
+                key={url + idx}
+                source={{ uri: url }}
+                style={[
+                  styles.galleryImg,
+                  {
+                    width: galleryItemSize,
+                    height: galleryItemSize,
+                    marginRight: idx % 3 === 2 ? 0 : gap,
+                    marginBottom: gap,
+                  },
+                ]}
+              />
             ))}
           </View>
         </View>
-      )}
+      ) : null}
     </ScrollView>
   );
 }
@@ -358,6 +391,14 @@ const styles = StyleSheet.create({
     paddingTop: 52,
     paddingBottom: 12,
   },
+  headerBio: {
+    color: '#C7CBD1',
+    fontSize: 15,
+    lineHeight: 22,
+    marginTop: 8,
+    textAlign: 'center',
+    paddingHorizontal: 16,
+  },
   backBtn: {
     position: 'absolute',
     left: 16,
@@ -368,6 +409,49 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.1)',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  mergedChip: {
+    position: 'absolute',
+    left: 60,
+    top: 52,
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 10,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#7C5CFF',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.22)',
+  },
+  mergedChipText: {
+    color: '#0F0F14',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  mergedAvatarsRow: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+  },
+  mergedAvatarWrap: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    overflow: 'hidden',
+    borderWidth: 1.5,
+    borderColor: '#7C5CFF',
+    backgroundColor: '#1F1F29',
+  },
+  mergedAvatarOverlap: {
+    marginRight: -8,
+  },
+  mergedAvatarImg: {
+    width: '100%',
+    height: '100%',
+  },
+  mergedAvatarFallback: {
+    flex: 1,
+    backgroundColor: '#2B2141',
   },
   avatar: {
     width: 96,
@@ -515,7 +599,8 @@ const styles = StyleSheet.create({
     marginTop: 8,
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 10,
+    // gaps handled via per-item margins to ensure precise 3-per-row layout
+    justifyContent: 'flex-start',
   },
   galleryImg: {
     width: '30%',

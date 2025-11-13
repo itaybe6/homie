@@ -40,6 +40,7 @@ export default function RoommateCard({
 }: RoommateCardProps) {
   const match = computeMatchPercent(user.id, user.bio || user.full_name);
   const reasons = buildReasons(user);
+  const cityLabel = (user.city || '').trim() || 'מיקום לא זמין';
 
   return (
     <TouchableOpacity style={styles.card} activeOpacity={0.9} onPress={() => onOpen?.(user)}>
@@ -75,7 +76,7 @@ export default function RoommateCard({
 
         <View style={styles.locationRow}>
           <MapPin size={16} color="#9DA4AE" />
-          <Text style={styles.locationText}>מיקום לא זמין</Text>
+          <Text style={styles.locationText}>{cityLabel}</Text>
         </View>
 
         <View style={styles.badgesRow}>

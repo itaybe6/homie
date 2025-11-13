@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, SafeAreaView, TouchableOpacity, TextInput, ActivityIndicator, Alert, Platform, Image, ScrollView } from 'react-native';
 import { useRouter } from 'expo-router';
-import { ArrowLeft, Save, X, Trash2, Plus } from 'lucide-react-native';
+import { Save, X, Trash2, Plus } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/authStore';
@@ -201,13 +201,7 @@ export default function EditProfileScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity style={styles.iconBtn} onPress={() => router.back()}>
-          <ArrowLeft size={20} color="#FFFFFF" />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>עריכת פרופיל</Text>
-        <View style={{ width: 40 }} />
-      </View>
+      <View style={{ height: 30 }} />
 
       <ScrollView contentContainerStyle={[styles.form, { paddingBottom: 40 }]}>
         <View style={styles.inputGroup}>
@@ -327,7 +321,7 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    justifyContent: 'flex-start',
     paddingHorizontal: 16,
     paddingVertical: 12,
   },
@@ -338,11 +332,6 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.12)',
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  headerTitle: {
-    color: '#FFFFFF',
-    fontSize: 18,
-    fontWeight: '800',
   },
   form: {
     marginTop: 8,

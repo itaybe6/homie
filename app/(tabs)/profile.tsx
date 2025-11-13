@@ -40,6 +40,7 @@ export default function ProfileScreen() {
   const [aptMembers, setAptMembers] = useState<Record<string, User[]>>({});
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);
   const [isDeletingImage, setIsDeletingImage] = useState(false);
+  const [isAddingImage, setIsAddingImage] = useState(false);
 
   const [fullName, setFullName] = useState('');
   const [age, setAge] = useState('');
@@ -337,6 +338,54 @@ export default function ProfileScreen() {
   };
 
   // moved extra-photos upload to edit profile screen
+  const addGalleryImage = async () => {
+    try {
+      const perms = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perms.granted) {
+        Alert.alert('הרשאה נדרשת', 'יש לאפשר גישה לגלריה כדי להעלות תמונה');
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.9,
+      });
+
+      if (result.canceled || !result.assets?.length || !user || !profile) return;
+
+      setIsAddingImage(true);
+      const asset = result.assets[0];
+      const response = await fetch(asset.uri);
+      const arrayBuffer = await response.arrayBuffer();
+      const fileExt = (asset.fileName || 'photo.jpg').split('.').pop() || 'jpg';
+      const fileName = `${user.id}-${Date.now()}.${fileExt}`;
+      const filePath = `users/${user.id}/gallery/${fileName}`;
+      const filePayload: any = arrayBuffer as any;
+
+      const { error: uploadError } = await supabase.storage
+        .from('user-images')
+        .upload(filePath, filePayload, { contentType: 'image/jpeg', upsert: true });
+      if (uploadError) throw uploadError;
+
+      const { data } = supabase.storage.from('user-images').getPublicUrl(filePath);
+      const publicUrl = data.publicUrl;
+
+      const next = [...(profile.image_urls || []), publicUrl];
+      const { error: updateError } = await supabase
+        .from('users')
+        .update({ image_urls: next, updated_at: new Date().toISOString() })
+        .eq('id', user.id);
+      if (updateError) throw updateError;
+
+      setProfile((prev) => (prev ? { ...prev, image_urls: next } as any : prev));
+    } catch (e: any) {
+      Alert.alert('שגיאה', e?.message || 'לא ניתן להוסיף תמונה');
+    } finally {
+      setIsAddingImage(false);
+    }
+  };
 
   if (isLoading) {
     return (
@@ -418,22 +467,7 @@ export default function ProfileScreen() {
 
               {/* per design, action buttons moved to settings screen */}
 
-              {/* add-images button moved to edit profile screen */}
-
-              {profile?.image_urls?.length ? (
-                <View style={styles.galleryGrid}>
-                  {profile.image_urls.map((url, idx) => (
-                    <TouchableOpacity
-                      key={url + idx}
-                      style={[styles.galleryItem, (idx % 7 === 0) && styles.galleryItemTall]}
-                      activeOpacity={0.9}
-                      onPress={() => setViewerIndex(idx)}
-                    >
-                      <Image source={{ uri: url }} style={styles.galleryImg} />
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              ) : null}
+              {/* gallery grid moved to its own section below */}
             </View>
           </View>
         ) : (
@@ -483,6 +517,48 @@ export default function ProfileScreen() {
             </View>
           </View>
         )}
+
+        {/* Gallery section */}
+        <View style={styles.sectionDark}>
+          <View style={styles.galleryHeaderRow}>
+            <Text style={styles.galleryHeaderTitle}>הגלריה שלי</Text>
+            <TouchableOpacity
+              style={[styles.galleryAddBtn, isAddingImage ? styles.galleryAddBtnDisabled : null]}
+              onPress={isAddingImage ? undefined : addGalleryImage}
+              activeOpacity={0.9}
+            >
+              {isAddingImage ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <Plus size={16} color="#FFFFFF" />
+              )}
+            </TouchableOpacity>
+          </View>
+          <View style={styles.galleryCard}>
+            {profile?.image_urls?.length ? (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.galleryRow}
+              >
+                {profile.image_urls.map((url, idx) => {
+                  return (
+                    <TouchableOpacity
+                      key={url + idx}
+                      style={styles.galleryItem}
+                      activeOpacity={0.9}
+                      onPress={() => setViewerIndex(idx)}
+                    >
+                      <Image source={{ uri: url }} style={styles.galleryImg} />
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            ) : (
+              <Text style={styles.galleryEmptyText}>אין תמונות בגלריה</Text>
+            )}
+          </View>
+        </View>
 
         {userApartments.length > 0 && (
           <View style={styles.sectionDark}>
@@ -561,7 +637,7 @@ export default function ProfileScreen() {
           </View>
         </Modal>
       )}
-      {isSaving && (
+      {(isSaving || isAddingImage) && (
         <View style={styles.fullScreenLoader}>
           <ActivityIndicator size="large" color="#FFFFFF" />
         </View>
@@ -798,9 +874,58 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 10,
   },
+  galleryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 4,
+  },
+  galleryHeaderRow: {
+    marginTop: 8,
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  galleryCard: {
+    backgroundColor: '#15151C',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
+    borderRadius: 16,
+    padding: 12,
+    marginTop: 8,
+  },
+  galleryHeaderTitle: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  galleryAddBtn: {
+    backgroundColor: 'rgba(255,255,255,0.10)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.28)',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 44,
+    shadowColor: '#000000',
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+  },
+  galleryAddBtnDisabled: {
+    opacity: 0.75,
+  },
+  galleryEmptyText: {
+    color: '#9DA4AE',
+    fontSize: 14,
+    textAlign: 'center',
+    paddingVertical: 16,
+  },
   galleryItem: {
-    width: '31%',
-    aspectRatio: 1,
+    width: 130,
+    height: 160,
     borderRadius: 18,
     overflow: 'hidden',
     backgroundColor: '#1B1C27',

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -25,6 +25,17 @@ export default function LoginScreen() {
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
+
+  // Clear any broken/partial session so the login screen doesn't log refresh errors on mount
+  useEffect(() => {
+    (async () => {
+      try {
+        await authService.getCurrentUser();
+      } catch {
+        // ignore – getCurrentUser already clears invalid refresh tokens locally
+      }
+    })();
+  }, []);
 
   const handleLogin = async () => {
     if (!email || !password) {

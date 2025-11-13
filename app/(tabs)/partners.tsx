@@ -14,7 +14,7 @@ import {
   Alert,
   Image,
 } from 'react-native';
-import { Home, SlidersHorizontal, ChevronLeft, ChevronRight } from 'lucide-react-native';
+import { SlidersHorizontal, ChevronLeft, ChevronRight, Heart, X, MapPin } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/authStore';
@@ -180,11 +180,25 @@ useEffect(() => {
       }
 
       const memberIdsInActiveGroups = new Set(activeGroups.flatMap((g) => g.users.map((u) => u.id)));
+
+      // Exclude members who share a group with the current user (so you don't see your own group-mates as singles)
+      const groupIdsWithCurrentUser = new Set(
+        members.filter((m) => m.user_id === authId).map((m) => m.group_id)
+      );
+      const memberIdsInUsersOwnGroups = new Set(
+        members
+          .filter((m) => groupIdsWithCurrentUser.has(m.group_id))
+          .map((m) => m.user_id)
+      );
+      const memberIdsToExclude = new Set<string>([
+        ...Array.from(memberIdsInActiveGroups),
+        ...Array.from(memberIdsInUsersOwnGroups),
+      ]);
       const filteredSingles = (authId
         ? list.filter((u) => u.id !== authId && !interacted.has(u.id))
         : list
       )
-        .filter((u) => !memberIdsInActiveGroups.has(u.id))
+        .filter((u) => !memberIdsToExclude.has(u.id))
         .filter((u) => userPassesFilters(u));
 
       let combinedItems: BrowseItem[] = [];
@@ -326,6 +340,95 @@ useEffect(() => {
   };
   // Removed favorite action per request
 
+  const handleGroupLike = async (groupUsers: User[]) => {
+    try {
+      if (!currentUser?.id) {
+        Alert.alert('שגיאה', 'יש להתחבר כדי לבצע פעולה זו');
+        return;
+      }
+      const recipients = groupUsers.filter((u) => u.id !== currentUser.id);
+      if (!recipients.length) {
+        goNext();
+        return;
+      }
+      const recipientIds = recipients.map((u) => u.id);
+      const { data: existing } = await supabase
+        .from('matches')
+        .select('id, receiver_id')
+        .eq('sender_id', currentUser.id)
+        .in('receiver_id', recipientIds);
+      const existingByReceiver = new Set((existing || []).map((r: any) => r.receiver_id as string));
+      const rowsToInsert = recipients
+        .filter((u) => !existingByReceiver.has(u.id))
+        .map((u) => ({
+          sender_id: currentUser.id,
+          receiver_id: u.id,
+          status: 'PENDING',
+        })) as any[];
+      if (rowsToInsert.length) {
+        const { error: insertErr } = await supabase.from('matches').insert(rowsToInsert);
+        if (insertErr) throw insertErr;
+        const notifications = rowsToInsert.map((r) => ({
+          sender_id: currentUser.id,
+          recipient_id: r.receiver_id,
+          title: 'בקשת שותפות חדשה',
+          description: 'המשתמש מעוניין להיות שותף שלך.',
+        }));
+        await supabase.from('notifications').insert(notifications as any);
+      }
+      Alert.alert('נשלח', 'נוצרו בקשות שותפות לחברי הקבוצה');
+      goNext();
+    } catch (e: any) {
+      console.error('group like failed', e);
+      Alert.alert('שגיאה', e?.message || 'לא ניתן לשלוח בקשות לקבוצה');
+    }
+  };
+
+  const handleGroupPass = async (groupUsers: User[]) => {
+    try {
+      if (!currentUser?.id) {
+        Alert.alert('שגיאה', 'יש להתחבר כדי לבצע פעולה זו');
+        return;
+      }
+      const recipients = groupUsers.filter((u) => u.id !== currentUser.id);
+      if (!recipients.length) {
+        goNext();
+        return;
+      }
+      const recipientIds = recipients.map((u) => u.id);
+      const { data: existing } = await supabase
+        .from('matches')
+        .select('id, receiver_id')
+        .eq('sender_id', currentUser.id)
+        .in('receiver_id', recipientIds);
+      const existingByReceiver = new Map<string, string>();
+      (existing || []).forEach((r: any) => existingByReceiver.set(r.receiver_id as string, r.id as string));
+      const idsToUpdate = Array.from(existingByReceiver.values());
+      if (idsToUpdate.length) {
+        const { error: updateErr } = await supabase
+          .from('matches')
+          .update({ status: 'NOT_RELEVANT', updated_at: new Date().toISOString() } as any)
+          .in('id', idsToUpdate);
+        if (updateErr) throw updateErr;
+      }
+      const rowsToInsert = recipients
+        .filter((u) => !existingByReceiver.has(u.id))
+        .map((u) => ({
+          sender_id: currentUser.id,
+          receiver_id: u.id,
+          status: 'NOT_RELEVANT',
+        })) as any[];
+      if (rowsToInsert.length) {
+        const { error: insertErr } = await supabase.from('matches').insert(rowsToInsert);
+        if (insertErr) throw insertErr;
+      }
+    } catch (e: any) {
+      console.error('group pass failed', e);
+      Alert.alert('שגיאה', e?.message || 'לא ניתן לסמן קבוצה כלא רלוונטית');
+    } finally {
+      goNext();
+    }
+  };
   if (isLoading) {
     return (
       <View style={styles.centerContainer}>
@@ -337,12 +440,6 @@ useEffect(() => {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.topBar}>
-        <View style={styles.brandRow}>
-          <View style={styles.brandIconWrap}>
-            <Home size={18} color="#FFFFFF" />
-          </View>
-          <Text style={styles.brandText}>Homie</Text>
-        </View>
         <View style={styles.actionsRow}>
           <TouchableOpacity
             activeOpacity={0.8}
@@ -397,6 +494,8 @@ useEffect(() => {
               ) : (
                 <GroupCard
                   users={(items[currentIndex] as any).users}
+                  onLike={(users) => handleGroupLike(users)}
+                  onPass={(users) => handleGroupPass(users)}
                   onOpen={(userId: string) =>
                     router.push({
                       pathname: '/(tabs)/user/[id]',
@@ -664,7 +763,7 @@ const styles = StyleSheet.create({
   topBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    justifyContent: 'flex-end',
     paddingHorizontal: 16,
     paddingTop: 52,
     paddingBottom: 8,
@@ -874,7 +973,17 @@ const styles = StyleSheet.create({
   },
 });
 
-function GroupCard({ users, onOpen }: { users: User[]; onOpen: (id: string) => void }) {
+function GroupCard({
+  users,
+  onOpen,
+  onLike,
+  onPass,
+}: {
+  users: User[];
+  onOpen: (id: string) => void;
+  onLike: (users: User[]) => void;
+  onPass: (users: User[]) => void;
+}) {
   const displayUsers = users.slice(0, 4);
   const extra = users.length - displayUsers.length;
   const DEFAULT_AVATAR = 'https://cdn-icons-png.flaticon.com/512/847/847969.png';
@@ -905,15 +1014,48 @@ function GroupCard({ users, onOpen }: { users: User[]; onOpen: (id: string) => v
         })}
       </View>
 
-      <View style={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 6, alignItems: 'flex-end' }}>
-        {!!cities && <Text style={groupStyles.sub} numberOfLines={1}>{cities}</Text>}
-        <View style={{ marginTop: 10, gap: 6 as any, width: '100%' }}>
-          {displayUsers.map((u) => (
-            <TouchableOpacity key={u.id} style={groupStyles.personRow} activeOpacity={0.8} onPress={() => onOpen(u.id)}>
-              <View style={groupStyles.dot} />
-              <Text style={groupStyles.personText} numberOfLines={1}>{u.full_name}{u.age ? `, ${u.age}` : ''}</Text>
-            </TouchableOpacity>
-          ))}
+      {/* Removed top summary block to avoid duplication with per-member section */}
+
+      <View style={groupStyles.membersSection}>
+        {users.map((u) => (
+          <TouchableOpacity key={u.id} activeOpacity={0.9} onPress={() => onOpen(u.id)} style={groupStyles.memberRow}>
+            <Image source={{ uri: u.avatar_url || DEFAULT_AVATAR }} style={groupStyles.memberAvatar} />
+            <View style={groupStyles.memberInfo}>
+              <Text style={groupStyles.memberNameAge} numberOfLines={1}>
+                {u.full_name}{u.age ? `, ${u.age}` : ''}
+              </Text>
+              {!!u.city && (
+                <View style={groupStyles.memberCityRow}>
+                  <MapPin size={14} color="#C9CDD6" />
+                  <Text style={groupStyles.memberCityText}>{u.city}</Text>
+                </View>
+              )}
+              {u.bio ? (
+                <Text style={groupStyles.memberBio} numberOfLines={3}>
+                  {u.bio}
+                </Text>
+              ) : null}
+            </View>
+          </TouchableOpacity>
+        ))}
+      </View>
+
+      <View style={{ paddingHorizontal: 16, paddingBottom: 12 }}>
+        <View style={groupStyles.actionsRow}>
+          <TouchableOpacity
+            activeOpacity={0.9}
+            style={[groupStyles.circleBtn, groupStyles.passBtn]}
+            onPress={() => onPass(users)}
+          >
+            <X size={22} color="#F43F5E" />
+          </TouchableOpacity>
+          <TouchableOpacity
+            activeOpacity={0.9}
+            style={[groupStyles.circleBtn, groupStyles.likeBtn]}
+            onPress={() => onLike(users)}
+          >
+            <Heart size={22} color="#22C55E" />
+          </TouchableOpacity>
         </View>
       </View>
     </View>
@@ -984,5 +1126,72 @@ const groupStyles = StyleSheet.create({
     fontSize: 14,
     textAlign: 'right',
     flex: 1,
+  },
+  membersSection: {
+    paddingHorizontal: 16,
+    paddingTop: 6,
+  },
+  memberRow: {
+    flexDirection: 'row-reverse',
+    alignItems: 'flex-start',
+    gap: 12 as any,
+    paddingVertical: 10,
+    borderTopWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
+  },
+  memberAvatar: {
+    width: 60,
+    height: 60,
+    borderRadius: 12,
+    backgroundColor: '#1F1F29',
+  },
+  memberInfo: {
+    flex: 1,
+  },
+  memberNameAge: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '800',
+    marginBottom: 4,
+    textAlign: 'right',
+  },
+  memberCityRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6 as any,
+    justifyContent: 'flex-end',
+    marginBottom: 6,
+  },
+  memberCityText: {
+    color: '#C9CDD6',
+    fontSize: 13,
+  },
+  memberBio: {
+    color: '#C7CBD1',
+    fontSize: 13,
+    lineHeight: 18,
+    textAlign: 'right',
+  },
+  actionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 8,
+  },
+  circleBtn: {
+    width: 58,
+    height: 58,
+    borderRadius: 29,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+  },
+  passBtn: {
+    borderColor: 'rgba(244,63,94,0.6)',
+    backgroundColor: 'rgba(244,63,94,0.08)',
+  },
+  likeBtn: {
+    borderColor: 'rgba(34,197,94,0.6)',
+    backgroundColor: 'rgba(34,197,94,0.08)',
   },
 });
