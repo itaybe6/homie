@@ -1,4 +1,4 @@
-import { Tabs, useRouter } from 'expo-router';
+import { Tabs, useRouter, usePathname } from 'expo-router';
 import { Home, User, Users } from 'lucide-react-native';
 import { BlurView } from 'expo-blur';
 import { Platform, StyleSheet, Alert } from 'react-native';
@@ -8,6 +8,7 @@ import { fetchUserSurvey } from '@/lib/survey';
 
 export default function TabLayout() {
   const router = useRouter();
+  const pathname = usePathname();
   const { user } = useAuthStore();
   const hasPromptedRef = useRef(false);
   const prevUserIdRef = useRef<string | null>(null);
@@ -44,7 +45,10 @@ export default function TabLayout() {
         const survey = await fetchUserSurvey(user.id);
         const hasRow = !!survey;
         const completed = !!survey?.is_completed;
-        if (!hasRow || !completed) {
+        // Do not prompt if currently on the survey screen
+        const isOnSurveyScreen =
+          typeof pathname === 'string' && pathname.includes('/onboarding/survey');
+        if ((!hasRow || !completed) && !isOnSurveyScreen) {
           hasPromptedRef.current = true;
           Alert.alert(
             'שאלון העדפות',
@@ -68,7 +72,7 @@ export default function TabLayout() {
       }
     };
     maybePromptSurvey();
-  }, [user]);
+  }, [user, pathname]);
 
   return (
     <Tabs

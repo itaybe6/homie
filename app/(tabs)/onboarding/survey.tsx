@@ -25,7 +25,6 @@ type SurveyState = Partial<UserSurveyResponse>;
 const steps = [
   { key: 'about', title: 'עליך' },
   { key: 'apartment', title: 'על הדירה שאני מחפש' },
-  { key: 'sublet', title: 'אם מדובר בסאבלט' },
   { key: 'partner', title: 'השותפ/ה שאני מחפש' },
 ] as const;
 
@@ -42,8 +41,8 @@ const occupationPrefOptions = ['סטודנט', 'עובד', 'לא משנה'];
 const partnerShabbatPrefOptions = ['אין בעיה', 'מעדיפ/ה שלא'];
 const partnerDietPrefOptions = ['אין בעיה', 'מעדיפ/ה שלא טבעוני', 'כשר בלבד'];
 const partnerSmokingPrefOptions = ['אין בעיה', 'מעדיפ/ה שלא'];
-const yesNo = ['כן', 'לא'] as const;
 const studentYearOptions = ['שנה א׳', 'שנה ב׳', 'שנה ג׳', 'שנה ד׳', 'שנה ה׳', 'שנה ו׳', 'שנה ז׳'];
+const roommateCountOptions = ['1', '2', '3', '4'];
 
 export default function SurveyScreen() {
   const router = useRouter();
@@ -130,6 +129,14 @@ export default function SurveyScreen() {
     const query = neighborhoodSearch.trim();
     return neighborhoodOptions.filter((opt) => opt.includes(query));
   }, [neighborhoodOptions, neighborhoodSearch]);
+  const moveInMonthOptions = useMemo(() => generateUpcomingMonths(18), []);
+  const moveInMonthSelectOptions = useMemo(() => {
+    const arr = [...moveInMonthOptions];
+    if (state.move_in_month && !arr.includes(state.move_in_month)) {
+      arr.unshift(state.move_in_month);
+    }
+    return arr;
+  }, [moveInMonthOptions, state.move_in_month]);
 
   const setField = <K extends keyof SurveyState>(key: K, value: SurveyState[K]) => {
     setState((prev) => ({ ...prev, [key]: value }));
@@ -150,10 +157,27 @@ export default function SurveyScreen() {
     try {
       setSaving(true);
       const payload = normalizePayload(user.id, state);
+      // eslint-disable-next-line no-console
+      console.log('[survey] submit payload', {
+        userId: user.id,
+        is_sublet: payload.is_sublet ?? null,
+        sublet_month_from: (payload as any).sublet_month_from ?? null,
+        sublet_month_to: (payload as any).sublet_month_to ?? null,
+        hasNeighborhoods: Array.isArray((payload as any).preferred_neighborhoods)
+          ? (payload as any).preferred_neighborhoods?.length
+          : null,
+      });
       await upsertUserSurvey(payload);
       Alert.alert('נשמר', 'השאלון נשמר בהצלחה');
       router.back();
     } catch (e: any) {
+      // eslint-disable-next-line no-console
+      console.error('[survey] submit error', {
+        message: e?.message,
+        code: e?.code,
+        details: e?.details,
+        hint: e?.hint,
+      });
       Alert.alert('שגיאה', e?.message || 'לא ניתן לשמור כעת');
     } finally {
       setSaving(false);
@@ -347,7 +371,6 @@ export default function SurveyScreen() {
                         value={cityQuery}
                         onChangeText={(txt) => {
                           setCityQuery(txt);
-                          setCityPlaceId(null);
                           setNeighborhoodSearch('');
                           setField('preferred_city', txt ? txt : undefined);
                           setField('preferred_neighborhoods', undefined);
@@ -379,14 +402,6 @@ export default function SurveyScreen() {
                     {state.preferred_city ? (
                       <View style={{ gap: 8 }}>
                         <Text style={styles.label}>שכונות מועדפות</Text>
-                        <TextInput
-                          style={styles.input}
-                          placeholder={neighborhoodOptions.length ? 'חפש שכונה (לא חובה)' : 'בחר עיר מהרשימה כדי לטעון שכונות'}
-                          placeholderTextColor="#6B7280"
-                          value={neighborhoodSearch}
-                          onChangeText={setNeighborhoodSearch}
-                          editable={neighborhoodOptions.length > 0}
-                        />
                         {neighborhoodOptions.length ? (
                           <MultiChipSelect
                             options={filteredNeighborhoods}
@@ -416,18 +431,60 @@ export default function SurveyScreen() {
                   <ToggleRow label="מרפסת / גינה" value={!!state.has_balcony} onToggle={(v) => setField('has_balcony', v)} />
                   <ToggleRow label="מעלית" value={!!state.has_elevator} onToggle={(v) => setField('has_elevator', v)} />
                   <ToggleRow label="חדר מאסטר (שירותים צמודים)" value={!!state.wants_master_room} onToggle={(v) => setField('wants_master_room', v)} />
-                  <LabeledInput
-                    label="חודש כניסה"
-                    value={state.move_in_month || ''}
-                    placeholder="לדוגמה: ספטמבר"
-                    onChangeText={(txt) => setField('move_in_month', txt)}
+                  <ToggleRow
+                    label="האם מדובר בסאבלט?"
+                    value={!!state.is_sublet}
+                    onToggle={(v) =>
+                      setState((prev) => {
+                        const next: SurveyState = { ...prev, is_sublet: v };
+                        if (!v) {
+                          next.sublet_month_from = undefined;
+                          next.sublet_month_to = undefined;
+                        }
+                        return next;
+                      })
+                    }
                   />
-                  <LabeledInput
+                  {state.is_sublet ? (
+                    <View style={{ gap: 12 }}>
+                      <LabeledInput
+                        label="חודש התחלה (YYYY-MM)"
+                        value={state.sublet_month_from || ''}
+                        placeholder="לדוגמה: 2025-07"
+                        onChangeText={(txt) => setField('sublet_month_from', txt)}
+                      />
+                      <LabeledInput
+                        label="חודש סיום (YYYY-MM)"
+                        value={state.sublet_month_to || ''}
+                        placeholder="לדוגמה: 2025-09"
+                        onChangeText={(txt) => setField('sublet_month_to', txt)}
+                      />
+                    </View>
+                  ) : (
+                    <ChipSelect
+                      label="תאריך כניסה (חודש ושנה)"
+                      options={moveInMonthSelectOptions}
+                      value={state.move_in_month || null}
+                      onChange={(option) => {
+                        if (!option) {
+                          setField('move_in_month', undefined);
+                          return;
+                        }
+                        setField('move_in_month', option);
+                      }}
+                    />
+                  )}
+                  <ChipSelect
                     label="כמה שותפים נראה לי מתאים?"
-                    keyboardType="numeric"
-                    value={state.preferred_roommates?.toString() || ''}
-                    placeholder="לדוגמה: 2"
-                    onChangeText={(txt) => setField('preferred_roommates', toIntOrNull(txt))}
+                    options={roommateCountOptions}
+                    value={state.preferred_roommates ? String(state.preferred_roommates) : null}
+                    onChange={(v) => {
+                      if (!v) {
+                        setField('preferred_roommates', undefined);
+                        return;
+                      }
+                      setField('preferred_roommates', parseInt(v, 10));
+                    }}
                   />
                   <ToggleRow label="אפשר להביא בעלי חיים?" value={!!state.pets_allowed} onToggle={(v) => setField('pets_allowed', v)} />
                   <ChipSelect
@@ -443,54 +500,6 @@ export default function SurveyScreen() {
             )}
 
             {currentStep === 2 && (
-              <View style={styles.stepCard}>
-                <Section title="סאבלט (במידה ורלוונטי)">
-                  <LabeledInput
-                    label="תאריכים מדויקים"
-                    value={state.sublet_dates || ''}
-                    placeholder="לדוגמה: 01/07–30/09"
-                    onChangeText={(txt) => setField('sublet_dates', txt)}
-                  />
-                  <ChipSelect
-                    label="אפשר להביא בעלי חיים?"
-                    options={yesNo as unknown as string[]}
-                    value={state.sublet_pets_allowed === undefined ? null : state.sublet_pets_allowed ? 'כן' : 'לא'}
-                    onChange={(v) => setField('sublet_pets_allowed', v === 'כן')}
-                  />
-                  <LabeledInput
-                    label="לכמה אנשים זה מתאים"
-                    keyboardType="numeric"
-                    value={state.sublet_people_count?.toString() || ''}
-                    placeholder="לדוגמה: 2"
-                    onChangeText={(txt) => setField('sublet_people_count', toIntOrNull(txt))}
-                  />
-                  <LabeledInput
-                    label="מחיר (₪)"
-                    keyboardType="numeric"
-                    value={state.sublet_price?.toString() || ''}
-                    placeholder="לדוגמה: 6000"
-                    onChangeText={(txt) => setField('sublet_price', toNumberOrNull(txt))}
-                  />
-                  <LabeledInput
-                    label="מיקום (שכונה/עיר)"
-                    value={state.sublet_location || ''}
-                    placeholder="לדוגמה: מרכז העיר"
-                    onChangeText={(txt) => setField('sublet_location', txt)}
-                  />
-                  <LabeledInput
-                    label="קומה"
-                    value={state.sublet_floor || ''}
-                    placeholder="לדוגמה: ביניים"
-                    onChangeText={(txt) => setField('sublet_floor', txt)}
-                  />
-                  <ToggleRow label="מרפסת / גינה" value={!!state.sublet_balcony} onToggle={(v) => setField('sublet_balcony', v)} />
-                  <ToggleRow label="מעלית" value={!!state.sublet_elevator} onToggle={(v) => setField('sublet_elevator', v)} />
-                  <ToggleRow label="חדר מאסטר" value={!!state.sublet_master_room} onToggle={(v) => setField('sublet_master_room', v)} />
-                </Section>
-              </View>
-            )}
-
-            {currentStep === 3 && (
               <View style={styles.stepCard}>
                 <Section title="מאפייני השותפ/ה">
                   <LabeledInput
@@ -581,15 +590,16 @@ function normalizePayload(userId: string, s: SurveyState) {
   const payload: any = {
     user_id: userId,
     is_completed: true,
+    is_sublet: s.is_sublet ?? false,
     occupation: s.occupation ?? null,
     student_year: s.student_year ?? null,
-    works_from_home: s.works_from_home ?? null,
-    keeps_kosher: s.keeps_kosher ?? null,
-    is_shomer_shabbat: s.is_shomer_shabbat ?? null,
+    works_from_home: s.occupation === 'עובד' ? (s.works_from_home ?? false) : null,
+    keeps_kosher: s.keeps_kosher ?? false,
+    is_shomer_shabbat: s.is_shomer_shabbat ?? false,
     diet_type: s.diet_type ?? null,
-    is_smoker: s.is_smoker ?? null,
+    is_smoker: s.is_smoker ?? false,
     relationship_status: s.relationship_status ?? null,
-    has_pet: s.has_pet ?? null,
+    has_pet: s.has_pet ?? false,
     lifestyle: s.lifestyle ?? null,
     cleanliness_importance: s.cleanliness_importance ?? null,
     cleaning_frequency: s.cleaning_frequency ?? null,
@@ -602,22 +612,15 @@ function normalizePayload(userId: string, s: SurveyState) {
     preferred_neighborhoods:
       s.preferred_neighborhoods && s.preferred_neighborhoods.length > 0 ? s.preferred_neighborhoods : null,
     floor_preference: s.floor_preference ?? null,
-    has_balcony: s.has_balcony ?? null,
-    has_elevator: s.has_elevator ?? null,
-    wants_master_room: s.wants_master_room ?? null,
+    has_balcony: s.has_balcony ?? false,
+    has_elevator: s.has_elevator ?? false,
+    wants_master_room: s.wants_master_room ?? false,
     move_in_month: s.move_in_month ?? null,
     preferred_roommates: s.preferred_roommates ?? null,
-    pets_allowed: s.pets_allowed ?? null,
+    pets_allowed: s.pets_allowed ?? false,
     with_broker: s.with_broker ?? null,
-    sublet_dates: s.sublet_dates ?? null,
-    sublet_pets_allowed: s.sublet_pets_allowed ?? null,
-    sublet_people_count: s.sublet_people_count ?? null,
-    sublet_price: s.sublet_price ?? null,
-    sublet_location: s.sublet_location ?? null,
-    sublet_floor: s.sublet_floor ?? null,
-    sublet_balcony: s.sublet_balcony ?? null,
-    sublet_elevator: s.sublet_elevator ?? null,
-    sublet_master_room: s.sublet_master_room ?? null,
+    sublet_month_from: s.is_sublet ? (s.sublet_month_from ?? null) : null,
+    sublet_month_to: s.is_sublet ? (s.sublet_month_to ?? null) : null,
     preferred_age_range: s.preferred_age_range ?? null,
     preferred_gender: s.preferred_gender ?? null,
     preferred_occupation: s.preferred_occupation ?? null,
@@ -645,6 +648,31 @@ function extractDetailFromOccupation(value?: string | null): string | null {
   if (!value) return null;
   const parts = value.split('-').map((s) => s.trim());
   return parts.length > 1 ? parts.slice(1).join(' - ') : null;
+}
+
+function generateUpcomingMonths(count = 12): string[] {
+  const monthNames = [
+    'ינואר',
+    'פברואר',
+    'מרץ',
+    'אפריל',
+    'מאי',
+    'יוני',
+    'יולי',
+    'אוגוסט',
+    'ספטמבר',
+    'אוקטובר',
+    'נובמבר',
+    'דצמבר',
+  ];
+  const now = new Date();
+  const list: string[] = [];
+  for (let i = 0; i < count; i++) {
+    const current = new Date(now.getFullYear(), now.getMonth() + i, 1);
+    const label = `${monthNames[current.getMonth()]} ${current.getFullYear()}`;
+    list.push(label);
+  }
+  return list;
 }
 
 function hydrateSurvey(existing: UserSurveyResponse): SurveyState {

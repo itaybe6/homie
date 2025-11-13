@@ -71,6 +71,7 @@ export default function RequestsScreen() {
 
   const DEFAULT_AVATAR = 'https://cdn-icons-png.flaticon.com/512/847/847969.png';
   const APT_PLACEHOLDER = 'https://images.pexels.com/photos/1457842/pexels-photo-1457842.jpeg';
+  const WHATSAPP_ICON = 'https://upload.wikimedia.org/wikipedia/commons/5/5e/WhatsApp_Logo_1.png';
 
   const mapMatchStatus = (status: string | null | undefined): UnifiedItem['status'] => {
     const normalized = (status || '').trim();
@@ -634,15 +635,26 @@ export default function RequestsScreen() {
                       <Image source={{ uri: aptImage }} style={styles.thumbImg} />
                     </View>
                   ) : isGroupMatch && groupMembers.length ? (
-                    <View style={styles.thumbWrap}>
-                      <View style={{ flex: 1, flexDirection: 'row', flexWrap: 'wrap' }}>
-                        {groupMembers.slice(0, 4).map((gm, idx) => (
-                          <View key={idx} style={{ width: '50%', height: '50%', padding: 1 }}>
-                            <Image source={{ uri: gm.avatar_url || DEFAULT_AVATAR }} style={{ width: '100%', height: '100%' }} />
+                    (() => {
+                      const gridMembers = groupMembers.slice(0, 4);
+                      const rows = Math.ceil(gridMembers.length / 2);
+                      const cellHeightPct = `${100 / rows}%`;
+                      return (
+                        <View style={styles.thumbWrap}>
+                          <View style={{ flex: 1, flexDirection: 'row', flexWrap: 'wrap' }}>
+                            {gridMembers.map((gm, idx) => (
+                              <View key={idx} style={{ width: '50%', height: cellHeightPct, padding: 1 }}>
+                                <Image
+                                  source={{ uri: gm.avatar_url || DEFAULT_AVATAR }}
+                                  style={{ width: '100%', height: '100%' }}
+                                  resizeMode="cover"
+                                />
+                              </View>
+                            ))}
                           </View>
-                        ))}
-                      </View>
-                    </View>
+                        </View>
+                      );
+                    })()
                   ) : null}
                   <View style={{ flex: 1, alignItems: 'flex-end' }}>
                     <Text style={styles.cardTitle} numberOfLines={1}>
@@ -662,7 +674,7 @@ export default function RequestsScreen() {
                     ) : null}
                     <Text style={styles.cardMeta}>{new Date(item.created_at).toLocaleString()}</Text>
                     <View style={{ marginTop: 10, flexDirection: 'row-reverse', gap: 8 as any }}>
-                      <StatusPill status={item.status} />
+                      {item.kind === 'APT' ? <StatusPill status={item.status} /> : null}
                       {incoming && item.kind === 'APT' && item.status === 'PENDING' && (
                         <View style={{ flexDirection: 'row-reverse', gap: 8 as any }}>
                           <TouchableOpacity
@@ -772,25 +784,134 @@ export default function RequestsScreen() {
                         </View>
                       )}
                       {incoming && item.kind === 'MATCH' && item.status === 'APPROVED' && (
-                        <View style={{ marginTop: 10, alignItems: 'flex-end', gap: 6 as any }}>
-                          <Text style={styles.cardMeta}>
-                            מספר המשתמש: {otherUser?.phone ? otherUser.phone : 'לא זמין'}
-                          </Text>
-                          {otherUser?.phone ? (
-                            <TouchableOpacity
-                              style={[styles.approveBtn]}
-                              activeOpacity={0.85}
-                              onPress={() =>
-                                openWhatsApp(
-                                  otherUser.phone as string,
-                                  `היי${otherUser?.full_name ? ` ${otherUser.full_name.split(' ')[0]}` : ''}, אישרתי את בקשת ההתאמה ב-Homie. בוא/י נדבר ונראה אם יש התאמה!`
-                                )
-                              }
+                        isGroupMatch && groupMembers.length ? (
+                          <View style={{ marginTop: 12, alignItems: 'flex-end', gap: 6 as any }}>
+                            <View
+                              style={{
+                                width: '100%',
+                                flexDirection: 'row-reverse',
+                                flexWrap: 'wrap',
+                                gap: 12 as any,
+                                justifyContent: 'flex-end',
+                              }}
                             >
-                              <Text style={styles.approveBtnText}>פתיחת שיחה בוואטסאפ</Text>
-                            </TouchableOpacity>
-                          ) : null}
-                        </View>
+                              {groupMembers.map((m, idx) => {
+                                const firstName = (m.full_name || '').split(' ')[0] || '';
+                                return (
+                                  <View
+                                    key={idx}
+                                    style={{
+                                      flexBasis: '48%',
+                                      flexGrow: 0,
+                                      minWidth: 240,
+                                      maxWidth: 360,
+                                      backgroundColor: 'rgba(124,92,255,0.08)',
+                                      borderRadius: 12,
+                                      borderWidth: 1,
+                                      borderColor: 'rgba(124,92,255,0.2)',
+                                      padding: 12,
+                                      gap: 10 as any,
+                                    }}
+                                  >
+                                    <View style={{ flexDirection: 'row-reverse', alignItems: 'center', gap: 10 as any }}>
+                                      <Image
+                                        source={{ uri: m.avatar_url || DEFAULT_AVATAR }}
+                                        style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: '#1F1F29', borderWidth: 2, borderColor: 'rgba(124,92,255,0.3)' }}
+                                      />
+                                      <View style={{ flex: 1, alignItems: 'flex-end' }}>
+                                        <Text style={{ color: '#FFFFFF', fontSize: 15, fontWeight: '800' }}>
+                                          {m.full_name}
+                                        </Text>
+                                        <Text style={{ color: '#C9CDD6', fontSize: 13, marginTop: 2 }}>
+                                          {m.phone || 'מספר לא זמין'}
+                                        </Text>
+                                      </View>
+                                    </View>
+                                    {m.phone ? (
+                                      <TouchableOpacity
+                                        style={{
+                                          flexDirection: 'row-reverse',
+                                          alignItems: 'center',
+                                          justifyContent: 'center',
+                                          gap: 8 as any,
+                                          backgroundColor: '#25D366',
+                                          paddingVertical: 11,
+                                          paddingHorizontal: 16,
+                                          borderRadius: 10,
+                                        }}
+                                        activeOpacity={0.85}
+                                        onPress={() =>
+                                          openWhatsApp(
+                                            m.phone as string,
+                                            `היי${firstName ? ` ${firstName}` : ''}, אישרתי את בקשת ההתאמה ב-Homie. בוא/י נדבר ונראה אם יש התאמה!`
+                                          )
+                                        }
+                                      >
+                                        <Text style={{ color: '#FFFFFF', fontSize: 14, fontWeight: '800' }}>
+                                          שלח הודעה בוואטסאפ
+                                        </Text>
+                                      </TouchableOpacity>
+                                    ) : null}
+                                  </View>
+                                );
+                              })}
+                            </View>
+                          </View>
+                        ) : (
+                          <View style={{ marginTop: 10, alignItems: 'flex-end', gap: 10 as any }}>
+                            <View
+                              style={{
+                                width: '100%',
+                                backgroundColor: 'rgba(124,92,255,0.08)',
+                                borderRadius: 12,
+                                borderWidth: 1,
+                                borderColor: 'rgba(124,92,255,0.2)',
+                                padding: 12,
+                                gap: 10 as any,
+                              }}
+                            >
+                              <View style={{ flexDirection: 'row-reverse', alignItems: 'center', gap: 10 as any }}>
+                                <Image
+                                  source={{ uri: otherUser?.avatar_url || DEFAULT_AVATAR }}
+                                  style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: '#1F1F29', borderWidth: 2, borderColor: 'rgba(124,92,255,0.3)' }}
+                                />
+                                <View style={{ flex: 1, alignItems: 'flex-end' }}>
+                                  <Text style={{ color: '#FFFFFF', fontSize: 15, fontWeight: '800' }}>
+                                    {otherUser?.full_name || 'משתמש'}
+                                  </Text>
+                                  <Text style={{ color: '#C9CDD6', fontSize: 13, marginTop: 2 }}>
+                                    {otherUser?.phone || 'מספר לא זמין'}
+                                  </Text>
+                                </View>
+                              </View>
+                              {otherUser?.phone ? (
+                                <TouchableOpacity
+                                  style={{
+                                    flexDirection: 'row-reverse',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    gap: 8 as any,
+                                    backgroundColor: '#25D366',
+                                    paddingVertical: 11,
+                                    paddingHorizontal: 16,
+                                    borderRadius: 10,
+                                  }}
+                                  activeOpacity={0.85}
+                                  onPress={() =>
+                                    openWhatsApp(
+                                      otherUser.phone as string,
+                                      `היי${otherUser?.full_name ? ` ${otherUser.full_name.split(' ')[0]}` : ''}, אישרתי את בקשת ההתאמה ב-Homie. בוא/י נדבר ונראה אם יש התאמה!`
+                                    )
+                                  }
+                                >
+                                  <Text style={{ color: '#FFFFFF', fontSize: 14, fontWeight: '800' }}>
+                                    שלח הודעה בוואטסאפ
+                                  </Text>
+                                </TouchableOpacity>
+                              ) : null}
+                            </View>
+                          </View>
+                        )
                       )}
                     </View>
                   </View>
@@ -1095,8 +1216,8 @@ const styles = StyleSheet.create({
     height: '100%',
   },
   thumbWrap: {
-    width: 70,
-    height: 70,
+    width: 96,
+    height: 96,
     borderRadius: 14,
     overflow: 'hidden',
     backgroundColor: '#1F1F29',
@@ -1119,6 +1240,10 @@ const styles = StyleSheet.create({
     color: '#22C55E',
     fontSize: 14,
     fontWeight: '800',
+  },
+  whatsappIcon: {
+    width: 16,
+    height: 16,
   },
   rejectBtn: {
     backgroundColor: 'transparent',

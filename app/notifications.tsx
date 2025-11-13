@@ -317,15 +317,26 @@ export default function NotificationsScreen() {
                         <Image source={{ uri: aptImage }} style={styles.thumbImg} />
                       </View>
                     ) : isPartnerRequest && senderGroupId && groupMembers.length ? (
-                      <View style={styles.thumbWrap}>
-                        <View style={{ flex: 1, flexDirection: 'row', flexWrap: 'wrap' }}>
-                          {groupMembers.slice(0, 4).map((gm: any, idx: number) => (
-                            <View key={idx} style={{ width: '50%', height: '50%', padding: 1 }}>
-                              <Image source={{ uri: gm?.avatar_url || DEFAULT_AVATAR }} style={{ width: '100%', height: '100%' }} />
+                      (() => {
+                        const gridMembers = groupMembers.slice(0, 4);
+                        const rows = Math.ceil(gridMembers.length / 2);
+                        const cellHeightPct = `${100 / rows}%`;
+                        return (
+                          <View style={styles.thumbWrap}>
+                            <View style={{ flex: 1, flexDirection: 'row', flexWrap: 'wrap' }}>
+                              {gridMembers.map((gm: any, idx: number) => (
+                                <View key={idx} style={{ width: '50%', height: cellHeightPct, padding: 1 } as any}>
+                                  <Image
+                                    source={{ uri: gm?.avatar_url || DEFAULT_AVATAR }}
+                                    style={{ width: '100%', height: '100%' }}
+                                    resizeMode="cover"
+                                  />
+                                </View>
+                              ))}
                             </View>
-                          ))}
-                        </View>
-                      </View>
+                          </View>
+                        );
+                      })()
                     ) : null}
                     <View style={styles.bubbleTextArea}>
                       <Text style={styles.cardTitle} numberOfLines={1}>{item.title}</Text>
