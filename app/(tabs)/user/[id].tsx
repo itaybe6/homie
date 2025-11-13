@@ -388,7 +388,7 @@ const styles = StyleSheet.create({
   },
   header: {
     alignItems: 'center',
-    paddingTop: 52,
+    paddingTop: 64,
     paddingBottom: 12,
   },
   headerBio: {
@@ -420,12 +420,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     height: 36,
     borderRadius: 18,
-    backgroundColor: '#7C5CFF',
+    backgroundColor: 'rgba(124,92,255,0.18)',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.22)',
+    borderColor: 'rgba(124,92,255,0.45)',
   },
   mergedChipText: {
-    color: '#0F0F14',
+    color: '#FFFFFF',
     fontSize: 13,
     fontWeight: '800',
   },
@@ -434,9 +434,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   mergedAvatarWrap: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
     overflow: 'hidden',
     borderWidth: 1.5,
     borderColor: '#7C5CFF',
