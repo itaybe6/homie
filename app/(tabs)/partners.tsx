@@ -6,6 +6,7 @@ import {
   View,
   ActivityIndicator,
   TouchableOpacity,
+  Modal,
   Animated,
   Dimensions,
   Easing,
@@ -18,6 +19,7 @@ import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/authStore';
 import { User } from '@/types/database';
 import RoommateCard from '@/components/RoommateCard';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 type BrowseItem =
   | { type: 'user'; user: User }
@@ -26,9 +28,15 @@ type BrowseItem =
 export default function PartnersScreen() {
   const router = useRouter();
   const currentUser = useAuthStore((s) => s.user);
+  const insets = useSafeAreaInsets();
   const [items, setItems] = useState<BrowseItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [currentIndex, setCurrentIndex] = useState(0);
+  const [showFilters, setShowFilters] = useState(false);
+  const [gender, setGender] = useState<'any' | 'male' | 'female'>('any');
+  const [ageMin, setAgeMin] = useState<number>(20);
+  const [ageMax, setAgeMax] = useState<number>(40);
+  const [ageActive, setAgeActive] = useState<boolean>(false);
 
   const screenWidth = Dimensions.get('window').width;
   const translateX = useRef(new Animated.Value(0)).current;
@@ -37,11 +45,25 @@ useEffect(() => {
   fetchUsersAndGroups();
 }, [currentUser?.id]);
 
+  const userPassesFilters = (u: User) => {
+    // Gender filter
+    if (gender !== 'any') {
+      if (!u.gender || u.gender !== gender) return false;
+    }
+    // Age filter: only when activated by the user
+    if (ageActive) {
+      if (typeof u.age !== 'number') return false;
+      if (u.age < ageMin || u.age > ageMax) return false;
+    }
+    return true;
+  };
+
   const fetchUsersAndGroups = async () => {
     setIsLoading(true);
     try {
       const authId = useAuthStore.getState().user?.id || currentUser?.id;
 
+      // Fetch all users (singles)
       const { data: usersData, error: usersError } = await supabase
         .from('users')
         .select('*')
@@ -88,10 +110,19 @@ useEffect(() => {
         groupIdToUsers[m.group_id].push(u);
       });
 
-      // Filter to groups with at least 2 users and not including the current user
+      // Filter to groups with at least 2 users, not including the current user
+      // Apply UI filters: all members must pass filters (age, gender)
       const activeGroups: { groupId: string; users: User[] }[] = Object.entries(groupIdToUsers)
         .map(([gid, us]) => ({ groupId: gid, users: us }))
-        .filter((g) => g.users.length >= 2 && !g.users.some((u) => u.id === authId));
+        .filter(
+          (g) =>
+            g.users.length >= 1 &&
+            !g.users.some((u) => u.id === authId) &&
+            g.users.every((u) => userPassesFilters(u))
+        );
+
+      // Only show merged profiles (groups)
+      // Also include single users not in active groups, filtered, and not already interacted with
 
       let matchRows: { sender_id: string; receiver_id: string }[] = [];
       if (authId) {
@@ -113,12 +144,13 @@ useEffect(() => {
         });
       }
 
-      // Exclude users who belong to active groups (we will show their group card instead)
       const memberIdsInActiveGroups = new Set(activeGroups.flatMap((g) => g.users.map((u) => u.id)));
       const filteredSingles = (authId
         ? list.filter((u) => u.id !== authId && !interacted.has(u.id))
         : list
-      ).filter((u) => !memberIdsInActiveGroups.has(u.id));
+      )
+        .filter((u) => !memberIdsInActiveGroups.has(u.id))
+        .filter((u) => userPassesFilters(u));
 
       const combinedItems: BrowseItem[] = [
         ...activeGroups.map((g) => ({ type: 'group', groupId: g.groupId, users: g.users }) as BrowseItem),
@@ -272,7 +304,11 @@ useEffect(() => {
           <Text style={styles.brandText}>Homie</Text>
         </View>
         <View style={styles.actionsRow}>
-          <TouchableOpacity activeOpacity={0.8} style={styles.topActionBtn}>
+          <TouchableOpacity
+            activeOpacity={0.8}
+            style={styles.topActionBtn}
+            onPress={() => setShowFilters(true)}
+          >
             <SlidersHorizontal size={20} color="#FFFFFF" />
           </TouchableOpacity>
         </View>
@@ -308,14 +344,14 @@ useEffect(() => {
             >
               {items[currentIndex].type === 'user' ? (
                 <RoommateCard
-                  user={items[currentIndex].user}
+                  user={(items[currentIndex] as any).user}
                   onLike={handleLike}
                   onPass={handlePass}
                   onOpen={(u) => router.push({ pathname: '/user/[id]', params: { id: u.id } })}
                 />
               ) : (
                 <GroupCard
-                  users={items[currentIndex].users}
+                  users={(items[currentIndex] as any).users}
                   onOpen={(userId: string) => router.push({ pathname: '/user/[id]', params: { id: userId } })}
                 />
               )}
@@ -346,6 +382,97 @@ useEffect(() => {
           </View>
         )}
       </View>
+
+      {showFilters ? (
+        <Modal
+          visible
+          transparent
+          animationType="slide"
+          statusBarTranslucent
+          onRequestClose={() => setShowFilters(false)}
+        >
+          <View style={styles.filterOverlay}>
+            <TouchableOpacity style={styles.filterBackdrop} activeOpacity={1} onPress={() => setShowFilters(false)} />
+            <View style={[styles.filterSheet, { paddingBottom: Math.max(20, 20 + insets.bottom) }]}>
+            <Text style={styles.filterTitle}>סינון תוצאות</Text>
+
+            <View style={styles.filterSection}>
+              <Text style={styles.filterLabel}>טווח גילאים</Text>
+              <View style={styles.chipsRow}>
+                {[
+                  { min: 18, max: 24, label: '18–24' },
+                  { min: 25, max: 30, label: '25–30' },
+                  { min: 31, max: 40, label: '31–40' },
+                  { min: 41, max: 55, label: '41–55' },
+                ].map((r) => {
+                  const active = ageActive && ageMin === r.min && ageMax === r.max;
+                  return (
+                    <TouchableOpacity
+                      key={r.label}
+                      style={[styles.chip, active && styles.chipActive]}
+                      onPress={() => {
+                        setAgeMin(r.min);
+                        setAgeMax(r.max);
+                        setAgeActive(true);
+                      }}
+                    >
+                      <Text style={[styles.chipText, active && styles.chipTextActive]}>{r.label}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </View>
+
+            <View style={styles.filterSection}>
+              <Text style={styles.filterLabel}>מגדר</Text>
+              <View style={styles.chipsRow}>
+                {[
+                  { key: 'any', label: 'כולם' },
+                  { key: 'female', label: 'נשים' },
+                  { key: 'male', label: 'גברים' },
+                ].map((g: any) => {
+                  const active = gender === g.key;
+                  return (
+                    <TouchableOpacity
+                      key={g.key}
+                      style={[styles.chip, active && styles.chipActive]}
+                      onPress={() => setGender(g.key)}
+                    >
+                      <Text style={[styles.chipText, active && styles.chipTextActive]}>{g.label}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </View>
+
+            <View style={styles.filterActions}>
+              <TouchableOpacity
+                style={[styles.filterBtn, styles.resetBtn]}
+                activeOpacity={0.9}
+                onPress={() => {
+                  setGender('any');
+                  setAgeMin(20);
+                  setAgeMax(40);
+                  setAgeActive(false);
+                }}
+              >
+                <Text style={styles.resetText}>איפוס</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.filterBtn, styles.applyBtn]}
+                activeOpacity={0.9}
+                onPress={() => {
+                  setShowFilters(false);
+                  fetchUsersAndGroups();
+                }}
+              >
+                <Text style={styles.applyText}>הצג תוצאות</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+          </View>
+        </Modal>
+      ) : null}
     </SafeAreaView>
   );
 }
@@ -455,6 +582,99 @@ const styles = StyleSheet.create({
   },
   arrowBtnDisabled: {
     opacity: 0.4,
+  },
+  filterOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'flex-end',
+    zIndex: 999,
+    elevation: 10,
+  },
+  filterBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    zIndex: 999,
+  },
+  filterSheet: {
+    backgroundColor: '#14141C',
+    padding: 16,
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    paddingBottom: 28,
+    zIndex: 1000,
+  },
+  filterTitle: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '900',
+    textAlign: 'right',
+    marginBottom: 12,
+  },
+  filterSection: {
+    marginBottom: 12,
+  },
+  filterLabel: {
+    color: '#C7CBD1',
+    fontSize: 14,
+    marginBottom: 8,
+    textAlign: 'right',
+  },
+  chipsRow: {
+    flexDirection: 'row-reverse',
+    flexWrap: 'wrap',
+    gap: 8 as any,
+  },
+  chip: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 16,
+    backgroundColor: '#1C1C26',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
+  },
+  chipActive: {
+    backgroundColor: '#7C5CFF',
+    borderColor: 'rgba(255,255,255,0.15)',
+  },
+  chipText: {
+    color: '#E6E9F0',
+    fontWeight: '700',
+  },
+  chipTextActive: {
+    color: '#0F0F14',
+  },
+  filterActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 8,
+  },
+  filterBtn: {
+    height: 44,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+    flex: 1,
+  },
+  resetBtn: {
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    marginRight: 8,
+  },
+  applyBtn: {
+    backgroundColor: '#A78BFA',
+    marginLeft: 8,
+  },
+  resetText: {
+    color: '#E6E9F0',
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  applyText: {
+    color: '#0F0F14',
+    fontWeight: '900',
+    textAlign: 'center',
   },
 });
 

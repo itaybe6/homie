@@ -18,6 +18,9 @@ export default function UserProfileScreen() {
   const [isLoading, setIsLoading] = useState(true);
   const [inviteLoading, setInviteLoading] = useState(false);
   const me = useAuthStore((s) => s.user);
+  type GroupMember = Pick<User, 'id' | 'full_name' | 'avatar_url'>;
+  const [groupContext, setGroupContext] = useState<{ name?: string | null; members: GroupMember[] } | null>(null);
+  const [groupLoading, setGroupLoading] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -30,6 +33,83 @@ export default function UserProfileScreen() {
       }
     })();
   }, [id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const fetchGroupContext = async (userId: string) => {
+      setGroupLoading(true);
+      try {
+        const { data: membershipRows, error: membershipError } = await supabase
+          .from('profile_group_members')
+          .select('group_id')
+          .eq('user_id', userId)
+          .eq('status', 'ACTIVE');
+        if (membershipError) throw membershipError;
+        const membership = (membershipRows || [])[0];
+        if (!membership?.group_id) {
+          if (!cancelled) setGroupContext(null);
+          return;
+        }
+        const groupId = membership.group_id as string;
+
+        const { data: groupRow, error: groupError } = await supabase
+          .from('profile_groups')
+          .select('id, name')
+          .eq('id', groupId)
+          .eq('status', 'ACTIVE')
+          .maybeSingle();
+        if (groupError) throw groupError;
+        if (!groupRow) {
+          if (!cancelled) setGroupContext(null);
+          return;
+        }
+
+        const { data: memberRows, error: memberError } = await supabase
+          .from('profile_group_members')
+          .select('user_id')
+          .eq('group_id', groupId)
+          .eq('status', 'ACTIVE');
+        if (memberError) throw memberError;
+        const memberIds = (memberRows || []).map((row: any) => row.user_id).filter(Boolean);
+        if (memberIds.length < 2) {
+          if (!cancelled) setGroupContext(null);
+          return;
+        }
+
+        const { data: usersRows, error: usersError } = await supabase
+          .from('users')
+          .select('id, full_name, avatar_url')
+          .in('id', memberIds);
+        if (usersError) throw usersError;
+        const members = (usersRows || []) as GroupMember[];
+        if (members.length < 2) {
+          if (!cancelled) setGroupContext(null);
+          return;
+        }
+        const sortedMembers = [...members].sort((a, b) => {
+          if (a.id === userId) return -1;
+          if (b.id === userId) return 1;
+          return (a.full_name || '').localeCompare(b.full_name || '');
+        });
+        if (!cancelled) setGroupContext({ name: (groupRow as any)?.name, members: sortedMembers });
+      } catch (error) {
+        console.error('Failed to load group context', error);
+        if (!cancelled) setGroupContext(null);
+      } finally {
+        if (!cancelled) setGroupLoading(false);
+      }
+    };
+
+    if (profile?.id) {
+      fetchGroupContext(profile.id);
+    } else {
+      setGroupContext(null);
+    }
+
+    return () => {
+      cancelled = true;
+    };
+  }, [profile?.id]);
 
   const ensureGroupAndInvite = async () => {
     if (!me?.id) {
@@ -162,6 +242,51 @@ export default function UserProfileScreen() {
         )}
       </View>
 
+      {groupLoading ? null : groupContext && groupContext.members.length >= 2 ? (
+        <View style={styles.groupSection}>
+          <View style={styles.groupBadge}>
+            <UserPlus2 size={16} color="#0F0F14" />
+            <Text style={styles.groupBadgeText}>פרופיל ממוזג</Text>
+          </View>
+          <Text style={styles.groupTitle} numberOfLines={1}>
+            {groupContext.name?.trim() || 'שותפים'}
+          </Text>
+          <View style={styles.groupAvatars}>
+            {groupContext.members.map((member, index) => {
+              const initials =
+                (member.full_name || '')
+                  .trim()
+                  .split(/\s+/)
+                  .map((part) => part[0])
+                  .join('')
+                  .slice(0, 2)
+                  .toUpperCase() || 'ח';
+              return (
+                <View
+                  key={member.id}
+                  style={[
+                    styles.groupAvatarWrap,
+                    index !== 0 && styles.groupAvatarOverlap,
+                    member.id === profile.id && styles.groupAvatarHighlighted,
+                  ]}
+                >
+                  {member.avatar_url ? (
+                    <Image source={{ uri: member.avatar_url }} style={styles.groupAvatarImg} />
+                  ) : (
+                    <View style={styles.groupAvatarFallback}>
+                      <Text style={styles.groupAvatarFallbackText}>{initials}</Text>
+                    </View>
+                  )}
+                </View>
+              );
+            })}
+          </View>
+          <Text style={styles.groupNames} numberOfLines={2}>
+            {groupContext.members.map((m) => m.full_name || 'חבר').join(' • ')}
+          </Text>
+        </View>
+      ) : null}
+
       {me?.id && me.id !== profile.id ? (
         <View style={styles.section}>
           <TouchableOpacity
@@ -285,6 +410,87 @@ const styles = StyleSheet.create({
     color: '#0F0F14',
     fontSize: 15,
     fontWeight: '900',
+  },
+  groupSection: {
+    marginHorizontal: 16,
+    marginTop: 12,
+    padding: 16,
+    borderRadius: 18,
+    backgroundColor: '#17171F',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    shadowColor: '#000000',
+    shadowOpacity: 0.18,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 8 },
+    alignItems: 'center',
+  },
+  groupBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: '#7C5CFF',
+    marginBottom: 12,
+  },
+  groupBadgeText: {
+    color: '#0F0F14',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  groupTitle: {
+    color: '#FFFFFF',
+    fontSize: 17,
+    fontWeight: '800',
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  groupAvatars: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+  },
+  groupAvatarWrap: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    borderWidth: 2,
+    borderColor: '#0F0F14',
+    overflow: 'hidden',
+    backgroundColor: '#1F1F29',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  groupAvatarOverlap: {
+    marginRight: -14,
+  },
+  groupAvatarHighlighted: {
+    borderColor: '#7C5CFF',
+    borderWidth: 3,
+  },
+  groupAvatarImg: {
+    width: '100%',
+    height: '100%',
+  },
+  groupAvatarFallback: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#2B2141',
+  },
+  groupAvatarFallbackText: {
+    color: '#E5E7EB',
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  groupNames: {
+    color: '#C7CBD1',
+    fontSize: 13,
+    lineHeight: 18,
+    textAlign: 'center',
   },
   gallery: {
     marginTop: 8,

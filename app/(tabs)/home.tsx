@@ -14,8 +14,8 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Search, SlidersHorizontal, X, Plus } from 'lucide-react-native';
-import { autocompleteCities, autocompleteNeighborhoods, createSessionToken, PlacePrediction, getPlaceLocation } from '@/lib/googlePlaces';
-import { fetchNeighborhoodsForCity } from '@/lib/neighborhoods';
+import { autocompleteCities, createSessionToken, PlacePrediction } from '@/lib/googlePlaces';
+import { getNeighborhoodsForCityName } from '@/lib/neighborhoods';
 import { supabase } from '@/lib/supabase';
 import { useApartmentStore } from '@/stores/apartmentStore';
 import { Apartment } from '@/types/database';
@@ -41,7 +41,6 @@ export default function HomeScreen() {
     minBathrooms: '',
   });
   const [citySuggestions, setCitySuggestions] = useState<PlacePrediction[]>([]);
-  const [neighborhoodSuggestions, setNeighborhoodSuggestions] = useState<string[]>([]);
   const [neighborhoodOptions, setNeighborhoodOptions] = useState<string[]>([]);
   const [isNeighborhoodDropdownOpen, setIsNeighborhoodDropdownOpen] = useState(false);
   const [neighborhoodSearchQuery, setNeighborhoodSearchQuery] = useState('');
@@ -83,29 +82,21 @@ export default function HomeScreen() {
 
   useEffect(() => {
     let cancelled = false;
-    const load = async () => {
-      if (!cityPlaceId) { 
+    const load = () => {
+      const cityName = (filters.city || '').trim();
+      if (!cityName) {
         setNeighborhoodOptions([]);
         setIsLoadingNeighborhoods(false);
-        return; 
+        return;
       }
       setIsLoadingNeighborhoods(true);
       try {
-        const loc = await getPlaceLocation(cityPlaceId);
-        if (!loc) { 
-          if (!cancelled) {
-            setNeighborhoodOptions([]);
-            setIsLoadingNeighborhoods(false);
-          }
-          return; 
-        }
-        const list = await fetchNeighborhoodsForCity({ lat: loc.lat, lng: loc.lng, radiusMeters: 25000 });
+        const list = getNeighborhoodsForCityName(cityName);
         if (!cancelled) {
           setNeighborhoodOptions(list);
           setIsLoadingNeighborhoods(false);
         }
-      } catch (error) {
-        console.warn('Failed to load neighborhoods list', error);
+      } catch {
         if (!cancelled) {
           setNeighborhoodOptions([]);
           setIsLoadingNeighborhoods(false);
@@ -114,25 +105,9 @@ export default function HomeScreen() {
     };
     load();
     return () => { cancelled = true; };
-  }, [cityPlaceId]);
+  }, [filters.city]);
 
-  // Neighborhood autocomplete
-  useEffect(() => {
-    let active = true;
-    const run = async () => {
-      const q = filters.neighborhood.trim();
-      if (!q || q.length < 1) { setNeighborhoodSuggestions([]); return; }
-      try {
-        const list = await autocompleteNeighborhoods(q, cityPlaceId, sessionToken, filters.city);
-        if (active) setNeighborhoodSuggestions(list.slice(0, 10));
-      } catch (error) {
-        console.warn('Failed to load neighborhood suggestions', error);
-        if (active) setNeighborhoodSuggestions([]);
-      }
-    };
-    run();
-    return () => { active = false; };
-  }, [filters.neighborhood, cityPlaceId, sessionToken, filters.city]);
+  // Removed Google neighborhood autocomplete in favor of static dropdown filtering
 
   const fetchApartments = async () => {
     setLoading(true);
@@ -202,7 +177,6 @@ export default function HomeScreen() {
   const clearFilters = () => {
     setFilters({ city: '', neighborhood: '', minPrice: '', maxPrice: '', minBedrooms: '', minBathrooms: '' });
     setCitySuggestions([]);
-    setNeighborhoodSuggestions([]);
     setNeighborhoodOptions([]);
     setIsNeighborhoodDropdownOpen(false);
     setCityPlaceId(null);
@@ -304,7 +278,6 @@ export default function HomeScreen() {
                   onChangeText={(t) => {
                     setFilters((f) => ({ ...f, city: t, neighborhood: '' }));
                     setCityPlaceId(null);
-                    setNeighborhoodSuggestions([]);
                     setNeighborhoodOptions([]);
                     setIsNeighborhoodDropdownOpen(false);
                   }}
@@ -319,7 +292,6 @@ export default function HomeScreen() {
                           setFilters((f) => ({ ...f, city: p.description, neighborhood: '' }));
                           setCityPlaceId(p.placeId);
                           setCitySuggestions([]);
-                          setNeighborhoodSuggestions([]);
                           setNeighborhoodOptions([]);
                           setIsNeighborhoodDropdownOpen(false);
                         }}
@@ -387,7 +359,6 @@ export default function HomeScreen() {
                             style={styles.suggestionItem}
                             onPress={() => {
                               setFilters((f) => ({ ...f, neighborhood: name }));
-                              setNeighborhoodSuggestions([]);
                               setIsNeighborhoodDropdownOpen(false);
                               setNeighborhoodSearchQuery('');
                             }}

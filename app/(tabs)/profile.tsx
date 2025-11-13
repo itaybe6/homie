@@ -14,7 +14,7 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { LogOut, Edit, Save, X, Plus, MapPin, Inbox } from 'lucide-react-native';
+import { LogOut, Edit, Save, X, Plus, MapPin, Inbox, Trash2 } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
 import { supabase } from '@/lib/supabase';
@@ -35,6 +35,7 @@ export default function ProfileScreen() {
   const [isLoading, setIsLoading] = useState(true);
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [aptMembers, setAptMembers] = useState<Record<string, User[]>>({});
 
   const [fullName, setFullName] = useState('');
@@ -199,6 +200,40 @@ export default function ProfileScreen() {
       ]);
     } catch (error) {
       Alert.alert('שגיאה', 'לא ניתן להתנתק');
+    }
+  };
+
+  const handleDeleteProfile = async () => {
+    if (!user) return;
+    try {
+      if (Platform.OS === 'web') {
+        const confirmed = typeof confirm === 'function' ? confirm('האם אתה בטוח/ה שברצונך למחוק את הפרופיל? פעולה זו אינה ניתנת לשחזור.') : true;
+        if (!confirmed) return;
+      } else {
+        const shouldProceed = await new Promise<boolean>((resolve) => {
+          Alert.alert('מחיקת פרופיל', 'האם אתה בטוח/ה שברצונך למחוק את הפרופיל? פעולה זו אינה ניתנת לשחזור.', [
+            { text: 'ביטול', style: 'cancel', onPress: () => resolve(false) },
+            { text: 'מחק', style: 'destructive', onPress: () => resolve(true) },
+          ]);
+        });
+        if (!shouldProceed) return;
+      }
+
+      setIsDeleting(true);
+      const { error: deleteError } = await supabase.from('users').delete().eq('id', user.id);
+      if (deleteError) throw deleteError;
+
+      try {
+        await authService.signOut();
+      } catch {
+        // ignore sign out failure after deletion; we'll still clear local state
+      }
+      setUser(null);
+      router.replace('/auth/login');
+    } catch (e: any) {
+      Alert.alert('שגיאה', e?.message || 'לא ניתן למחוק את הפרופיל כעת');
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -451,6 +486,19 @@ export default function ProfileScreen() {
         <TouchableOpacity style={styles.signOutButtonDark} onPress={handleSignOut}>
           <LogOut size={20} color="#FCA5A5" />
           <Text style={styles.signOutTextDark}>התנתק</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.deleteButtonDark, isDeleting ? { opacity: 0.7 } : null]}
+          onPress={isDeleting ? undefined : handleDeleteProfile}
+          activeOpacity={0.9}
+        >
+          {isDeleting ? (
+            <ActivityIndicator size="small" color="#F87171" />
+          ) : (
+            <Trash2 size={20} color="#F87171" />
+          )}
+          <Text style={styles.deleteTextDark}>{isDeleting ? 'מוחק...' : 'מחיקת פרופיל'}</Text>
         </TouchableOpacity>
       </ScrollView>
       {isSaving && (
@@ -823,6 +871,24 @@ const styles = StyleSheet.create({
     color: '#FCA5A5',
     fontSize: 16,
     fontWeight: '700',
+  },
+  deleteButtonDark: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#15151C',
+    paddingVertical: 14,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(248,113,113,0.35)',
+    marginHorizontal: 16,
+    marginTop: 10,
+  },
+  deleteTextDark: {
+    color: '#F87171',
+    fontSize: 16,
+    fontWeight: '800',
   },
 
   bottomActions: {

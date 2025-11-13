@@ -1,5 +1,7 @@
-// Fetch neighborhoods for a city using OpenStreetMap Overpass API (read-only public data)
-// This is used as a fallback to provide a complete dropdown list per city
+// Static neighborhoods (preferred source)
+import { cityNeighborhoods, canonicalizeCityName } from '@/assets/data/neighborhoods';
+
+// Fetch neighborhoods for a city using OpenStreetMap Overpass API (fallback only)
 
 type OverpassElement = {
   id: number;
@@ -69,6 +71,16 @@ export async function fetchNeighborhoodsForCity(params: {
   } catch {
     return [];
   }
+}
+
+// Return static neighborhoods by city display name (Hebrew)
+export function getNeighborhoodsForCityName(cityName: string): string[] {
+  const key = canonicalizeCityName(cityName || '');
+  const list = cityNeighborhoods[key] || [];
+  // Ensure unique + sorted (Hebrew locale)
+  const uniq = Array.from(new Set(list.map((n) => (n || '').trim()))).filter(Boolean);
+  uniq.sort((a, b) => a.localeCompare(b, 'he'));
+  return uniq;
 }
 
 

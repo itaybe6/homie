@@ -18,8 +18,8 @@ import { UserSurveyResponse } from '@/types/database';
 import { fetchUserSurvey, upsertUserSurvey } from '@/lib/survey';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
-import { createSessionToken, autocompleteCities, PlacePrediction, getPlaceLocation } from '@/lib/googlePlaces';
-import { fetchNeighborhoodsForCity } from '@/lib/neighborhoods';
+import { createSessionToken, autocompleteCities, PlacePrediction } from '@/lib/googlePlaces';
+import { getNeighborhoodsForCityName } from '@/lib/neighborhoods';
 
 type SurveyState = Partial<UserSurveyResponse>;
 
@@ -122,32 +122,24 @@ export default function SurveyScreen() {
 
   useEffect(() => {
     let cancelled = false;
-    const load = async () => {
-      if (!cityPlaceId) {
+    const load = () => {
+      const name = (state.preferred_city || '').trim();
+      if (!name) {
         if (!cancelled) setNeighborhoodOptions([]);
         return;
       }
       try {
-        const loc = await getPlaceLocation(cityPlaceId);
-        if (!loc) {
-          if (!cancelled) setNeighborhoodOptions([]);
-          return;
-        }
-        const list = await fetchNeighborhoodsForCity({ lat: loc.lat, lng: loc.lng, radiusMeters: 25000 });
+        const list = getNeighborhoodsForCityName(name);
         if (!cancelled) setNeighborhoodOptions(list);
-      } catch (err) {
-        if (!cancelled) {
-          setNeighborhoodOptions([]);
-          // eslint-disable-next-line no-console
-          console.warn('Failed to load neighborhoods for city', err);
-        }
+      } catch {
+        if (!cancelled) setNeighborhoodOptions([]);
       }
     };
     load();
     return () => {
       cancelled = true;
     };
-  }, [cityPlaceId]);
+  }, [state.preferred_city]);
 
   useEffect(() => {
     let cancelled = false;

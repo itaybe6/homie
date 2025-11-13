@@ -19,8 +19,8 @@ import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/authStore';
 import { useApartmentStore } from '@/stores/apartmentStore';
 import * as ImagePicker from 'expo-image-picker';
-import { autocompleteCities, autocompleteAddresses, autocompleteNeighborhoods, createSessionToken, PlacePrediction, getPlaceLocation } from '@/lib/googlePlaces';
-import { fetchNeighborhoodsForCity } from '@/lib/neighborhoods';
+import { autocompleteCities, autocompleteAddresses, createSessionToken, PlacePrediction } from '@/lib/googlePlaces';
+import { getNeighborhoodsForCityName } from '@/lib/neighborhoods';
 
 
 export default function AddApartmentScreen() {
@@ -44,7 +44,6 @@ export default function AddApartmentScreen() {
   const [sessionToken, setSessionToken] = useState<string>('');
   const [cityPlaceId, setCityPlaceId] = useState<string | null>(null);
   const [addressSuggestions, setAddressSuggestions] = useState<string[]>([]);
-  const [neighborhoodSuggestions, setNeighborhoodSuggestions] = useState<string[]>([]);
   const [neighborhoodOptions, setNeighborhoodOptions] = useState<string[]>([]);
   const [isNeighborhoodOpen, setIsNeighborhoodOpen] = useState(false);
   const [neighborhoodSearchQuery, setNeighborhoodSearchQuery] = useState('');
@@ -67,32 +66,24 @@ export default function AddApartmentScreen() {
     return () => { active = false; };
   }, [city, sessionToken]);
 
-  // Load full neighborhoods list for selected city (dropdown)
+  // Load neighborhoods list for selected city from static data (dropdown)
   useEffect(() => {
     let cancelled = false;
-    const load = async () => {
-      if (!cityPlaceId) { 
+    const load = () => {
+      const key = (city || '').trim();
+      if (!key) {
         setNeighborhoodOptions([]);
         setIsLoadingNeighborhoods(false);
-        return; 
+        return;
       }
       setIsLoadingNeighborhoods(true);
       try {
-        const loc = await getPlaceLocation(cityPlaceId);
-        if (!loc) { 
-          if (!cancelled) {
-            setNeighborhoodOptions([]);
-            setIsLoadingNeighborhoods(false);
-          }
-          return; 
-        }
-        const list = await fetchNeighborhoodsForCity({ lat: loc.lat, lng: loc.lng, radiusMeters: 25000 });
+        const list = getNeighborhoodsForCityName(key);
         if (!cancelled) {
           setNeighborhoodOptions(list);
           setIsLoadingNeighborhoods(false);
         }
-      } catch (err) {
-        console.warn('Failed to load neighborhoods', err);
+      } catch {
         if (!cancelled) {
           setNeighborhoodOptions([]);
           setIsLoadingNeighborhoods(false);
@@ -101,19 +92,9 @@ export default function AddApartmentScreen() {
     };
     load();
     return () => { cancelled = true; };
-  }, [cityPlaceId]);
+  }, [city]);
 
-  useEffect(() => {
-    let active = true;
-    const run = async () => {
-      const q = neighborhood.trim();
-      if (!q || q.length < 1) { setNeighborhoodSuggestions([]); return; }
-      const list = await autocompleteNeighborhoods(q, cityPlaceId, sessionToken, city);
-      if (active) setNeighborhoodSuggestions(list.slice(0, 10));
-    };
-    run();
-    return () => { active = false; };
-  }, [neighborhood, cityPlaceId, sessionToken, city]);
+  // Removed Google neighborhood autocomplete in favor of static dropdown search
 
   useEffect(() => {
     let active = true;
