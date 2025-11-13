@@ -159,11 +159,11 @@ useEffect(() => {
       // Only show merged profiles (groups)
       // Also include single users not in active groups, filtered, and not already interacted with
 
-      let matchRows: { sender_id: string; receiver_id: string }[] = [];
+      let matchRows: { id: string; sender_id: string; receiver_id: string | null; receiver_group_id?: string | null }[] = [];
       if (authId) {
         const { data: matchesData, error: matchesError } = await supabase
           .from('matches')
-          .select('sender_id, receiver_id')
+          .select('id, sender_id, receiver_id, receiver_group_id')
           .or(`sender_id.eq.${authId},receiver_id.eq.${authId}`);
         if (matchesError) throw matchesError;
         matchRows = matchesData || [];
@@ -171,11 +171,15 @@ useEffect(() => {
 
       const list = (usersData || []) as User[];
       const interacted = new Set<string>();
+      const interactedGroupIds = new Set<string>();
       if (authId) {
         matchRows.forEach((row) => {
           const otherId =
             row.sender_id === authId ? row.receiver_id : row.receiver_id === authId ? row.sender_id : null;
           if (otherId) interacted.add(otherId);
+          if (row.sender_id === authId && row.receiver_group_id) {
+            interactedGroupIds.add(row.receiver_group_id);
+          }
         });
       }
 
@@ -204,7 +208,9 @@ useEffect(() => {
       let combinedItems: BrowseItem[] = [];
       if (profileType === 'groups' || profileType === 'all') {
         combinedItems.push(
-          ...activeGroups.map((g) => ({ type: 'group', groupId: g.groupId, users: g.users }) as BrowseItem)
+          ...activeGroups
+            .filter((g) => !interactedGroupIds.has(g.groupId))
+            .map((g) => ({ type: 'group', groupId: g.groupId, users: g.users }) as BrowseItem)
         );
       }
       if (profileType === 'singles' || profileType === 'all') {
@@ -340,43 +346,48 @@ useEffect(() => {
   };
   // Removed favorite action per request
 
-  const handleGroupLike = async (groupUsers: User[]) => {
+  const handleGroupLike = async (groupId: string, groupUsers: User[]) => {
     try {
       if (!currentUser?.id) {
         Alert.alert('שגיאה', 'יש להתחבר כדי לבצע פעולה זו');
         return;
       }
-      const recipients = groupUsers.filter((u) => u.id !== currentUser.id);
-      if (!recipients.length) {
+      // prevent duplicate request rows at group-level
+      const { data: existing, error: existingErr } = await supabase
+        .from('matches')
+        .select('id')
+        .eq('sender_id', currentUser.id)
+        .eq('receiver_group_id', groupId)
+        .maybeSingle();
+      if (existingErr && !String(existingErr?.message || '').includes('PGRST')) {
+        throw existingErr;
+      }
+      if (existing) {
+        Alert.alert('שמת לב', 'כבר שלחת בקשת שותפות לפרופיל המאוחד הזה');
         goNext();
         return;
       }
-      const recipientIds = recipients.map((u) => u.id);
-      const { data: existing } = await supabase
-        .from('matches')
-        .select('id, receiver_id')
-        .eq('sender_id', currentUser.id)
-        .in('receiver_id', recipientIds);
-      const existingByReceiver = new Set((existing || []).map((r: any) => r.receiver_id as string));
-      const rowsToInsert = recipients
-        .filter((u) => !existingByReceiver.has(u.id))
-        .map((u) => ({
+
+      // create a single group-level match
+      const { error: insertErr } = await supabase.from('matches').insert({
+        sender_id: currentUser.id,
+        receiver_group_id: groupId,
+        status: 'PENDING',
+      } as any);
+      if (insertErr) throw insertErr;
+
+      // optional: notify all members (except sender if appears)
+      const recipients = groupUsers.filter((u) => u.id !== currentUser.id);
+      if (recipients.length) {
+        const notifications = recipients.map((u) => ({
           sender_id: currentUser.id,
-          receiver_id: u.id,
-          status: 'PENDING',
-        })) as any[];
-      if (rowsToInsert.length) {
-        const { error: insertErr } = await supabase.from('matches').insert(rowsToInsert);
-        if (insertErr) throw insertErr;
-        const notifications = rowsToInsert.map((r) => ({
-          sender_id: currentUser.id,
-          recipient_id: r.receiver_id,
+          recipient_id: u.id,
           title: 'בקשת שותפות חדשה',
-          description: 'המשתמש מעוניין להיות שותף שלך.',
+          description: 'המשתמש מעוניין בקבוצה שלך.',
         }));
         await supabase.from('notifications').insert(notifications as any);
       }
-      Alert.alert('נשלח', 'נוצרו בקשות שותפות לחברי הקבוצה');
+      Alert.alert('נשלח', 'נוצרה בקשת שותפות לקבוצה');
       goNext();
     } catch (e: any) {
       console.error('group like failed', e);
@@ -384,42 +395,33 @@ useEffect(() => {
     }
   };
 
-  const handleGroupPass = async (groupUsers: User[]) => {
+  const handleGroupPass = async (groupId: string, groupUsers: User[]) => {
     try {
       if (!currentUser?.id) {
         Alert.alert('שגיאה', 'יש להתחבר כדי לבצע פעולה זו');
         return;
       }
-      const recipients = groupUsers.filter((u) => u.id !== currentUser.id);
-      if (!recipients.length) {
-        goNext();
-        return;
-      }
-      const recipientIds = recipients.map((u) => u.id);
-      const { data: existing } = await supabase
+      const { data: existing, error: existingErr } = await supabase
         .from('matches')
-        .select('id, receiver_id')
+        .select('id')
         .eq('sender_id', currentUser.id)
-        .in('receiver_id', recipientIds);
-      const existingByReceiver = new Map<string, string>();
-      (existing || []).forEach((r: any) => existingByReceiver.set(r.receiver_id as string, r.id as string));
-      const idsToUpdate = Array.from(existingByReceiver.values());
-      if (idsToUpdate.length) {
+        .eq('receiver_group_id', groupId)
+        .maybeSingle();
+      if (existingErr && !String(existingErr?.message || '').includes('PGRST')) {
+        throw existingErr;
+      }
+      if (existing?.id) {
         const { error: updateErr } = await supabase
           .from('matches')
           .update({ status: 'NOT_RELEVANT', updated_at: new Date().toISOString() } as any)
-          .in('id', idsToUpdate);
+          .eq('id', existing.id);
         if (updateErr) throw updateErr;
-      }
-      const rowsToInsert = recipients
-        .filter((u) => !existingByReceiver.has(u.id))
-        .map((u) => ({
+      } else {
+        const { error: insertErr } = await supabase.from('matches').insert({
           sender_id: currentUser.id,
-          receiver_id: u.id,
+          receiver_group_id: groupId,
           status: 'NOT_RELEVANT',
-        })) as any[];
-      if (rowsToInsert.length) {
-        const { error: insertErr } = await supabase.from('matches').insert(rowsToInsert);
+        } as any);
         if (insertErr) throw insertErr;
       }
     } catch (e: any) {
@@ -493,9 +495,10 @@ useEffect(() => {
                 />
               ) : (
                 <GroupCard
+                  groupId={(items[currentIndex] as any).groupId}
                   users={(items[currentIndex] as any).users}
-                  onLike={(users) => handleGroupLike(users)}
-                  onPass={(users) => handleGroupPass(users)}
+                  onLike={(groupId, users) => handleGroupLike(groupId, users)}
+                  onPass={(groupId, users) => handleGroupPass(groupId, users)}
                   onOpen={(userId: string) =>
                     router.push({
                       pathname: '/(tabs)/user/[id]',
@@ -974,15 +977,17 @@ const styles = StyleSheet.create({
 });
 
 function GroupCard({
+  groupId,
   users,
   onOpen,
   onLike,
   onPass,
 }: {
+  groupId: string;
   users: User[];
   onOpen: (id: string) => void;
-  onLike: (users: User[]) => void;
-  onPass: (users: User[]) => void;
+  onLike: (groupId: string, users: User[]) => void;
+  onPass: (groupId: string, users: User[]) => void;
 }) {
   const displayUsers = users.slice(0, 4);
   const extra = users.length - displayUsers.length;
@@ -1045,14 +1050,14 @@ function GroupCard({
           <TouchableOpacity
             activeOpacity={0.9}
             style={[groupStyles.circleBtn, groupStyles.passBtn]}
-            onPress={() => onPass(users)}
+            onPress={() => onPass(groupId, users)}
           >
             <X size={22} color="#F43F5E" />
           </TouchableOpacity>
           <TouchableOpacity
             activeOpacity={0.9}
             style={[groupStyles.circleBtn, groupStyles.likeBtn]}
-            onPress={() => onLike(users)}
+            onPress={() => onLike(groupId, users)}
           >
             <Heart size={22} color="#22C55E" />
           </TouchableOpacity>
