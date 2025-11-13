@@ -13,7 +13,7 @@ import {
   Linking,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { ArrowLeft, Inbox, Send, Filter, Home, Users } from 'lucide-react-native';
+import { ArrowLeft, Inbox, Send, Filter, Home, Users, UserPlus2 } from 'lucide-react-native';
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/authStore';
 import { Apartment, User } from '@/types/database';
@@ -24,12 +24,12 @@ export default function RequestsScreen() {
   const user = useAuthStore((s) => s.user);
   const toSingle = (value: string | string[] | undefined): string | undefined =>
     Array.isArray(value) ? value[0] : value;
-  type KindFilterValue = 'APT' | 'MATCH' | 'ALL';
+  type KindFilterValue = 'APT' | 'MATCH' | 'GROUP' | 'ALL';
   type StatusFilterValue = 'ALL' | 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED' | 'NOT_RELEVANT';
   const parseTabParam = (value?: string): 'incoming' | 'sent' =>
     value === 'sent' ? 'sent' : 'incoming';
   const parseKindParam = (value?: string): KindFilterValue => {
-    if (value === 'MATCH' || value === 'ALL') return value;
+    if (value === 'MATCH' || value === 'ALL' || value === 'GROUP') return value as KindFilterValue;
     return 'APT';
   };
   const parseStatusParam = (value?: string): StatusFilterValue => {
@@ -50,7 +50,7 @@ export default function RequestsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   type UnifiedItem = {
     id: string;
-    kind: 'APT' | 'MATCH';
+  kind: 'APT' | 'MATCH' | 'GROUP';
     sender_id: string;
     recipient_id: string;
     created_at: string;
@@ -114,16 +114,22 @@ export default function RequestsScreen() {
         { data: rData, error: rErr },
         { data: mSent, error: mSErr },
         { data: mRecv, error: mRErr },
+        { data: gSent, error: gSErr },
+        { data: gRecv, error: gRErr },
       ] = await Promise.all([
         supabase.from('apartments_request').select('*').eq('sender_id', user.id).order('created_at', { ascending: false }),
         supabase.from('apartments_request').select('*').eq('recipient_id', user.id).order('created_at', { ascending: false }),
         supabase.from('matches').select('*').eq('sender_id', user.id).order('created_at', { ascending: false }),
         supabase.from('matches').select('*').eq('receiver_id', user.id).order('created_at', { ascending: false }),
+        supabase.from('profile_group_invites').select('*').eq('inviter_id', user.id).order('created_at', { ascending: false }),
+        supabase.from('profile_group_invites').select('*').eq('invitee_id', user.id).order('created_at', { ascending: false }),
       ]);
       if (sErr) throw sErr;
       if (rErr) throw rErr;
       if (mSErr) throw mSErr;
       if (mRErr) throw mRErr;
+      if (gSErr) throw gSErr;
+      if (gRErr) throw gRErr;
 
       const aptSent: UnifiedItem[] = (sData || [])
         .filter((row: any) => (row.status || 'PENDING') !== 'NOT_RELEVANT')
@@ -171,8 +177,36 @@ export default function RequestsScreen() {
         created_at: row.created_at,
       }));
 
-      const sentUnified = [...aptSent, ...matchSent].sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
-      const recvUnified = [...aptRecv, ...matchRecv].sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
+      const mapGroupStatus = (status: string | null | undefined): UnifiedItem['status'] => {
+        const s = (status || '').toUpperCase();
+        if (s === 'PENDING') return 'PENDING';
+        if (s === 'ACCEPTED') return 'APPROVED';
+        if (s === 'DECLINED') return 'REJECTED';
+        if (s === 'CANCELLED') return 'CANCELLED';
+        if (s === 'EXPIRED') return 'NOT_RELEVANT';
+        return 'PENDING';
+      };
+      const groupSent: UnifiedItem[] = (gSent || []).map((row: any) => ({
+        id: row.id,
+        kind: 'GROUP',
+        sender_id: row.inviter_id,
+        recipient_id: row.invitee_id,
+        apartment_id: null,
+        status: mapGroupStatus(row.status),
+        created_at: row.created_at,
+      }));
+      const groupRecv: UnifiedItem[] = (gRecv || []).map((row: any) => ({
+        id: row.id,
+        kind: 'GROUP',
+        sender_id: row.inviter_id,
+        recipient_id: row.invitee_id,
+        apartment_id: null,
+        status: mapGroupStatus(row.status),
+        created_at: row.created_at,
+      }));
+
+      const sentUnified = [...aptSent, ...matchSent, ...groupSent].sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
+      const recvUnified = [...aptRecv, ...matchRecv, ...groupRecv].sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
 
       setSent(sentUnified);
       setReceived(recvUnified);
@@ -332,6 +366,51 @@ export default function RequestsScreen() {
     }
   };
 
+  const approveIncomingGroup = async (item: UnifiedItem) => {
+    if (!user?.id) return;
+    try {
+      setActionId(item.id);
+      // Accept via RPC
+      await supabase.rpc('accept_profile_group_invite', { p_invite_id: item.id });
+      // Notify inviter that invite was accepted
+      try {
+        const { data: me } = await supabase.from('users').select('full_name').eq('id', user.id).maybeSingle();
+        const approverName = (me as any)?.full_name || 'משתמש';
+        await supabase.from('notifications').insert({
+          sender_id: user.id,
+          recipient_id: item.sender_id,
+          title: 'אישרת מיזוג פרופילים',
+          description: `${approverName} אישר/ה את בקשת מיזוג הפרופילים.`,
+          is_read: false,
+        });
+      } catch {}
+      await fetchAll();
+      Alert.alert('הצלחה', 'אושרת להצטרף לקבוצה');
+    } catch (e: any) {
+      console.error('approve group invite failed', e);
+      Alert.alert('שגיאה', e?.message || 'לא ניתן לאשר את הבקשה');
+    } finally {
+      setActionId(null);
+    }
+  };
+
+  const rejectIncomingGroup = async (item: UnifiedItem) => {
+    if (!user?.id) return;
+    try {
+      setActionId(item.id);
+      await supabase
+        .from('profile_group_invites')
+        .update({ status: 'DECLINED', responded_at: new Date().toISOString() })
+        .eq('id', item.id);
+      await fetchAll();
+    } catch (e: any) {
+      console.error('reject group invite failed', e);
+      Alert.alert('שגיאה', e?.message || 'לא ניתן לדחות את הבקשה');
+    } finally {
+      setActionId(null);
+    }
+  };
+
   const approveIncomingMatch = async (match: UnifiedItem) => {
     if (!user?.id) return;
     try {
@@ -432,7 +511,7 @@ export default function RequestsScreen() {
                   )}
                   <View style={{ flex: 1, alignItems: 'flex-end' }}>
                     <Text style={styles.cardTitle} numberOfLines={1}>
-                      {item.kind === 'APT' ? 'בקשת הצטרפות לדירה' : 'בקשת התאמה'}
+                      {item.kind === 'APT' ? 'בקשת הצטרפות לדירה' : item.kind === 'MATCH' ? 'בקשת התאמה' : 'בקשת מיזוג פרופילים'}
                     </Text>
                     {!!apt && (
                       <Text style={styles.cardSub} numberOfLines={1}>
@@ -458,6 +537,26 @@ export default function RequestsScreen() {
                           <TouchableOpacity
                             style={[styles.rejectBtn, actionId === item.id && { opacity: 0.7 }]}
                             onPress={() => rejectIncoming(item)}
+                            disabled={actionId === item.id}
+                            activeOpacity={0.85}
+                          >
+                            <Text style={styles.rejectBtnText}>דחייה</Text>
+                          </TouchableOpacity>
+                        </View>
+                      )}
+                      {incoming && item.kind === 'GROUP' && item.status === 'PENDING' && (
+                        <View style={{ flexDirection: 'row-reverse', gap: 8 as any }}>
+                          <TouchableOpacity
+                            style={[styles.approveBtn, actionId === item.id && { opacity: 0.7 }]}
+                            onPress={() => approveIncomingGroup(item)}
+                            disabled={actionId === item.id}
+                            activeOpacity={0.85}
+                          >
+                            {actionId === item.id ? <ActivityIndicator size="small" color="#0F0F14" /> : <Text style={styles.approveBtnText}>אישור</Text>}
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={[styles.rejectBtn, actionId === item.id && { opacity: 0.7 }]}
+                            onPress={() => rejectIncomingGroup(item)}
                             disabled={actionId === item.id}
                             activeOpacity={0.85}
                           >
@@ -639,6 +738,14 @@ export default function RequestsScreen() {
           >
             <Users size={16} color={kindFilter === 'MATCH' ? '#FFFFFF' : '#C9CDD6'} />
             <Text style={[styles.segmentText, kindFilter === 'MATCH' && styles.segmentTextActive]}>שותפים</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.segmentBtn, kindFilter === 'GROUP' && styles.segmentBtnActive]}
+            onPress={() => setKindFilter('GROUP')}
+            activeOpacity={0.9}
+          >
+            <UserPlus2 size={16} color={kindFilter === 'GROUP' ? '#FFFFFF' : '#C9CDD6'} />
+            <Text style={[styles.segmentText, kindFilter === 'GROUP' && styles.segmentTextActive]}>מיזוג פרופילים</Text>
           </TouchableOpacity>
         </View>
 
