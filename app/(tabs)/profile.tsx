@@ -141,19 +141,31 @@ export default function ProfileScreen() {
         setBio(profileData.bio || '');
       }
 
-      const { data: aptData, error: aptError } = await supabase
-        .from('apartments')
-        .select('*')
-        .eq('owner_id', user.id);
+      const [{ data: ownedApts, error: ownedError }, { data: partnerApts, error: partnerError }] =
+        await Promise.all([
+          supabase.from('apartments').select('*').eq('owner_id', user.id),
+          supabase.from('apartments').select('*').contains('partner_ids', [user.id]),
+        ]);
 
-      if (aptError) throw aptError;
-      setUserApartments(aptData || []);
+      if (ownedError) throw ownedError;
+      if (partnerError) throw partnerError;
+
+      const mergedById: Record<string, Apartment> = {};
+      (ownedApts || []).forEach((apt: any) => {
+        mergedById[apt.id] = apt;
+      });
+      (partnerApts || []).forEach((apt: any) => {
+        mergedById[apt.id] = apt;
+      });
+
+      const mergedApts = Object.values(mergedById) as Apartment[];
+      setUserApartments(mergedApts);
 
       // Load roommates (partners) avatars per apartment
       const membersMap: Record<string, User[]> = {};
       await Promise.all(
-        (aptData || []).map(async (apt) => {
-          const ids = (apt as any).partner_ids as string[] | undefined;
+        mergedApts.map(async (apt: any) => {
+          const ids = apt.partner_ids as string[] | undefined;
           if (ids && ids.length > 0) {
             const { data: usersData, error: usersError } = await supabase
               .from('users')

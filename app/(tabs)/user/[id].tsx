@@ -253,6 +253,8 @@ export default function UserProfileScreen() {
   const galleryItemSize = galleryWidth
     ? Math.floor((galleryWidth - gap * 2) / 3)
     : defaultItemSize;
+  const isMeInViewedGroup =
+    !!me?.id && !!groupContext?.members?.some((m) => m.id === me.id);
 
   return (
     <ScrollView
@@ -300,7 +302,16 @@ export default function UserProfileScreen() {
                 </View>
               ))}
             </View>
-            <Text style={styles.mergedChipText}>פרופיל משותף</Text>
+          </TouchableOpacity>
+        ) : null}
+        {!groupLoading && me?.id && me.id !== profile.id && !isMeInViewedGroup ? (
+          <TouchableOpacity
+            style={styles.mergeHeaderBtn}
+            activeOpacity={0.9}
+            onPress={inviteLoading ? undefined : ensureGroupAndInvite}
+          >
+            <UserPlus2 size={16} color="#FFFFFF" />
+            <Text style={styles.mergeHeaderText}>{inviteLoading ? 'שולח...' : 'מיזוג'}</Text>
           </TouchableOpacity>
         ) : null}
         <Image
@@ -326,20 +337,7 @@ export default function UserProfileScreen() {
 
       {/* merged profile indicator moved to chip on header */}
 
-      {me?.id && me.id !== profile.id ? (
-        <View style={styles.section}>
-          <TouchableOpacity
-            activeOpacity={0.9}
-            onPress={inviteLoading ? undefined : ensureGroupAndInvite}
-            style={[styles.mergeBtn, inviteLoading ? styles.mergeBtnDisabled : null]}
-          >
-            <UserPlus2 size={18} color="#0F0F14" />
-            <Text style={styles.mergeBtnText}>
-              {inviteLoading ? 'שולח...' : 'בקש/י מיזוג פרופילים'}
-            </Text>
-          </TouchableOpacity>
-        </View>
-      ) : null}
+      {/* merge button moved to header */}
 
       {/* Bio moved under header */}
 
@@ -388,7 +386,7 @@ const styles = StyleSheet.create({
   },
   header: {
     alignItems: 'center',
-    paddingTop: 64,
+    paddingTop: 104,
     paddingBottom: 12,
   },
   headerBio: {
@@ -417,12 +415,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row-reverse',
     alignItems: 'center',
     gap: 8,
-    paddingHorizontal: 10,
-    height: 36,
+    paddingHorizontal: 6,
+    height: 60,
     borderRadius: 18,
-    backgroundColor: 'rgba(124,92,255,0.18)',
-    borderWidth: 1,
-    borderColor: 'rgba(124,92,255,0.45)',
+    backgroundColor: 'transparent',
+    borderWidth: 0,
   },
   mergedChipText: {
     color: '#FFFFFF',
@@ -434,16 +431,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   mergedAvatarWrap: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     overflow: 'hidden',
-    borderWidth: 1.5,
-    borderColor: '#7C5CFF',
+    borderWidth: 2,
+    borderColor: '#FFFFFF',
     backgroundColor: '#1F1F29',
   },
   mergedAvatarOverlap: {
-    marginRight: -8,
+    marginRight: -12,
   },
   mergedAvatarImg: {
     width: '100%',
@@ -513,6 +510,25 @@ const styles = StyleSheet.create({
     color: '#0F0F14',
     fontSize: 15,
     fontWeight: '900',
+  },
+  mergeHeaderBtn: {
+    position: 'absolute',
+    right: 16,
+    top: 52,
+    height: 40,
+    paddingHorizontal: 12,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.32)',
+    backgroundColor: 'transparent',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  mergeHeaderText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '800',
   },
   groupSection: {
     marginHorizontal: 16,
