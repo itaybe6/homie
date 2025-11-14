@@ -36,7 +36,7 @@ export async function upsertUserSurvey(payload: SurveyUpsert): Promise<UserSurve
   });
 
   if (existing) {
-    const result = await robustUpdate(payload.user_id, payload);
+    const result = await robustUpdate(payload.user_id, payload, existing as any);
     return result;
   }
 
@@ -49,26 +49,41 @@ function omitSubletNewFields<T extends Record<string, any>>(obj: T): T {
   return rest as T;
 }
 
-async function robustUpdate(userId: string, initialPayload: Record<string, any>) {
+async function robustUpdate(userId: string, initialPayload: Record<string, any>, previous?: UserSurveyResponse) {
   // Try update, and if we hit "column does not exist" errors or schema cache errors,
   // progressively remove the offending column and retry, up to 10 times.
   let payload: Record<string, any> = { ...initialPayload };
   let attempts = 0;
   while (attempts < 10) {
     attempts++;
-    const { data, error } = await supabase
+    // For updates, do not attempt to set user_id again to avoid strict WITH CHECK policies
+    const { user_id: _ignoreUserId, ...updateValues } = payload;
+    const beforeUpdatedAt = previous?.updated_at || null;
+    const { error } = await supabase
       .from('user_survey_responses')
       .update({
-        ...payload,
+        ...updateValues,
         updated_at: new Date().toISOString(),
       })
-      .eq('user_id', userId)
-      .select('*')
-      .maybeSingle();
+      .eq('user_id', userId);
     if (!error) {
       // eslint-disable-next-line no-console
       console.log('[survey] robustUpdate OK', { attempts });
-      return data as any;
+      // Avoid 406 by not using select on write; fetch the updated row instead
+      const fresh = await fetchUserSurvey(userId);
+      if (fresh) {
+        // If updated_at didn't change (or row count was 0 due to RLS), try a force replace
+        if (beforeUpdatedAt && fresh.updated_at === beforeUpdatedAt) {
+          // eslint-disable-next-line no-console
+          console.warn('[survey] robustUpdate detected no-op update, attempting force replace');
+          const replaced = await forceReplace(userId, payload);
+          if (replaced) return replaced as any;
+        }
+        return fresh as any;
+      }
+      // If the row suddenly disappeared, try to re-insert it
+      const inserted = await robustInsert({ ...payload, user_id: userId });
+      return inserted as any;
     }
     // eslint-disable-next-line no-console
     console.error('[survey] robustUpdate error', {
@@ -102,24 +117,41 @@ async function robustUpdate(userId: string, initialPayload: Record<string, any>)
   throw new Error('Failed to update survey after multiple attempts');
 }
 
+async function forceReplace(userId: string, payload: Record<string, any>) {
+  try {
+    await supabase.from('user_survey_responses').delete().eq('user_id', userId);
+  } catch (e) {
+    // noop, proceed to insert anyway
+  }
+  try {
+    const inserted = await robustInsert({ ...payload, user_id: userId });
+    return inserted;
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.error('[survey] forceReplace failed', { message: (e as any)?.message });
+    return null;
+  }
+}
+
 async function robustInsert(initialPayload: Record<string, any>) {
   let payload: Record<string, any> = { ...initialPayload };
   let attempts = 0;
   while (attempts < 10) {
     attempts++;
-    const { data, error } = await supabase
+    const { error } = await supabase
       .from('user_survey_responses')
       .insert({
         ...payload,
         updated_at: new Date().toISOString(),
         created_at: new Date().toISOString(),
-      })
-      .select('*')
-      .maybeSingle();
+      });
     if (!error) {
       // eslint-disable-next-line no-console
       console.log('[survey] robustInsert OK', { attempts });
-      return data as any;
+      // Avoid 406 by not using select on write; fetch the inserted row instead
+      const fresh = await fetchUserSurvey(payload.user_id);
+      if (fresh) return fresh as any;
+      throw new Error('Insert succeeded but the survey row was not found');
     }
     // eslint-disable-next-line no-console
     console.error('[survey] robustInsert error', {

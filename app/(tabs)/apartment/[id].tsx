@@ -312,6 +312,7 @@ export default function ApartmentDetailsScreen() {
     if (!apartment || !user?.id) return;
     setIsAdding(true);
     try {
+      // Prevent duplicate immediate add; we now send an invite + create a request instead.
       const currentPartnerIds = Array.isArray((apartment as any).partner_ids)
         ? ((apartment as any).partner_ids as string[])
         : [];
@@ -319,26 +320,22 @@ export default function ApartmentDetailsScreen() {
         Alert.alert('שים לב', 'המשתמש כבר שותף בדירה');
         return;
       }
-      const newPartnerIds = Array.from(new Set([...(currentPartnerIds || []), partnerId]));
 
-      const { error: updateErr } = await supabase
-        .from('apartments')
-        .update({ partner_ids: newPartnerIds })
-        .eq('id', apartment.id);
-      if (updateErr) throw updateErr;
+      // Create a notification to the invitee with inviter's name
+      let inviterName = owner?.full_name || 'בעל הדירה';
+      try {
+        if (!owner?.full_name) {
+          const { data: meRow } = await supabase
+            .from('users')
+            .select('full_name')
+            .eq('id', user.id)
+            .maybeSingle();
+          inviterName = (meRow as any)?.full_name || inviterName;
+        }
+      } catch {}
 
-      const { data: addedUser, error: addedErr } = await supabase
-        .from('users')
-        .select('*')
-        .eq('id', partnerId)
-        .maybeSingle();
-      if (addedErr) throw addedErr;
-      if (addedUser) {
-        setMembers((prev) => [...prev, addedUser as User]);
-      }
-
-      const title = 'התווספת כשותף לדירה';
-      const description = `${owner?.full_name || 'בעל הדירה'} הוסיף אותך כשותף לדירה: ${apartment.title} (${apartment.city})`;
+      const title = 'הזמנה להצטרף לדירה';
+      const description = `${inviterName} מזמין/ה אותך להיות שותף/ה בדירה${apartment.title ? `: ${apartment.title}` : ''}${apartment.city ? ` (${apartment.city})` : ''}`;
       const { error: notifErr } = await supabase.from('notifications').insert({
         sender_id: user.id,
         recipient_id: partnerId,
@@ -348,13 +345,22 @@ export default function ApartmentDetailsScreen() {
       });
       if (notifErr) throw notifErr;
 
-      setApartment((prev) => (prev ? { ...prev, partner_ids: newPartnerIds } as Apartment : prev));
+      // Create an apartment request row (INVITE_APT) to be approved by the invitee
+      const { error: reqErr } = await supabase.from('apartments_request').insert({
+        sender_id: user.id,
+        recipient_id: partnerId,
+        apartment_id: apartment.id,
+        type: 'INVITE_APT',
+        status: 'PENDING',
+        metadata: null,
+      } as any);
+      if (reqErr) throw reqErr;
 
-      Alert.alert('הצלחה', 'שותף נוסף וההתראה נשלחה');
+      Alert.alert('נשלח', 'הזמנה נשלחה ונוצרה בקשה בעמוד הבקשות');
       setIsAddOpen(false);
     } catch (e: any) {
       console.error('Failed to add partner', e);
-      Alert.alert('שגיאה', e?.message || 'לא ניתן להוסיף את השותף');
+      Alert.alert('שגיאה', e?.message || 'לא ניתן לשלוח הזמנה כעת');
     } finally {
       setIsAdding(false);
     }
@@ -365,18 +371,18 @@ export default function ApartmentDetailsScreen() {
       setConfirmState({
         visible: true,
         title: 'אישור הוספה',
-        message: `להוסיף את ${candidate.full_name} כשותף לדירה?`,
-        confirmLabel: 'הוסף',
+        message: `לשלוח הזמנה ל-${candidate.full_name} להצטרף כדייר?`,
+        confirmLabel: 'שלח הזמנה',
         cancelLabel: 'ביטול',
         onConfirm: () => handleAddPartner(candidate.id),
       });
     } else {
       Alert.alert(
         'אישור הוספה',
-        `להוסיף את ${candidate.full_name} כשותף לדירה?`,
+        `לשלוח הזמנה ל-${candidate.full_name} להצטרף כדייר?`,
         [
           { text: 'ביטול', style: 'cancel' },
-          { text: 'הוסף', onPress: () => handleAddPartner(candidate.id) },
+          { text: 'שלח הזמנה', onPress: () => handleAddPartner(candidate.id) },
         ]
       );
     }

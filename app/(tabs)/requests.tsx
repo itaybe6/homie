@@ -50,12 +50,13 @@ export default function RequestsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   type UnifiedItem = {
     id: string;
-  kind: 'APT' | 'MATCH' | 'GROUP';
+    kind: 'APT' | 'MATCH' | 'GROUP';
     sender_id: string;
     recipient_id: string;
     created_at: string;
     status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED' | 'NOT_RELEVANT';
     apartment_id?: string | null;
+    type?: string | null;
   };
   const [sent, setSent] = useState<UnifiedItem[]>([]);
   const [received, setReceived] = useState<UnifiedItem[]>([]);
@@ -158,6 +159,7 @@ export default function RequestsScreen() {
           apartment_id: row.apartment_id,
           status: row.status || 'PENDING',
           created_at: row.created_at,
+          type: row.type || null,
         }));
       const aptRecv: UnifiedItem[] = (rData || [])
         .filter((row: any) => (row.status || 'PENDING') !== 'NOT_RELEVANT')
@@ -169,6 +171,7 @@ export default function RequestsScreen() {
           apartment_id: row.apartment_id,
           status: row.status || 'PENDING',
           created_at: row.created_at,
+          type: row.type || null,
         }));
 
       const matchSent: UnifiedItem[] = (mSent || [])
@@ -400,30 +403,70 @@ export default function RequestsScreen() {
       // Load apartment details (for notification text)
       const { data: apt, error: aptErr } = await supabase
         .from('apartments')
-        .select('id, owner_id, title, city')
+        .select('id, owner_id, title, city, partner_ids')
         .eq('id', req.apartment_id)
         .maybeSingle();
       if (aptErr) throw aptErr;
       if (!apt) throw new Error('דירה לא נמצאה');
 
-      // 1) update request status (do NOT add user to apartment yet)
-      await supabase.from('apartments_request').update({ status: 'APPROVED', updated_at: new Date().toISOString() }).eq('id', req.id);
+      // Determine which user should be added as partner based on request type
+      const requestType = (req as any)?.type || 'JOIN_APT';
+      const userToAddId = requestType === 'INVITE_APT' ? req.recipient_id : req.sender_id;
 
-      // 2) notify original sender with guidance to contact the owner via WhatsApp
+      // 1) update request status
+      await supabase
+        .from('apartments_request')
+        .update({ status: 'APPROVED', updated_at: new Date().toISOString() })
+        .eq('id', req.id);
+
+      // 2) add the approved user to the apartment's partner_ids (idempotent)
+      const currentPartnerIds: string[] = Array.isArray((apt as any).partner_ids)
+        ? ((apt as any).partner_ids as string[])
+        : [];
+      if (userToAddId && !currentPartnerIds.includes(userToAddId)) {
+        const newPartnerIds = Array.from(new Set([...(currentPartnerIds || []), userToAddId]));
+        const { error: updateErr } = await supabase
+          .from('apartments')
+          .update({ partner_ids: newPartnerIds })
+          .eq('id', req.apartment_id);
+        if (updateErr) throw updateErr;
+      }
+
+      // 3) notify the other party about approval and addition
       const aptTitle = (apt as any)?.title || '';
       const aptCity = (apt as any)?.city || '';
-      const backTitle = 'בקשתך אושרה';
-      const backDesc = `בקשתך להצטרף לדירה${aptTitle ? `: ${aptTitle}` : ''}${aptCity ? ` (${aptCity})` : ''} אושרה.\nכעת ניתן ליצור קשר עם בעל הדירה בוואטסאפ לתיאום המשך.\n---\nAPPROVED_APT:${req.apartment_id}\nSTATUS:APPROVED`;
-      await supabase.from('notifications').insert({
-        sender_id: user.id,
-        recipient_id: req.sender_id,
-        title: backTitle,
-        description: backDesc,
-        is_read: false,
-      });
+      let approverName = 'משתמש';
+      try {
+        const { data: me } = await supabase
+          .from('users')
+          .select('full_name')
+          .eq('id', user.id)
+          .maybeSingle();
+        approverName = (me as any)?.full_name || approverName;
+      } catch {}
+
+      if (requestType === 'INVITE_APT') {
+        // Owner invited; recipient approved — notify owner (sender)
+        await supabase.from('notifications').insert({
+          sender_id: user.id,
+          recipient_id: req.sender_id,
+          title: 'הוזמנה אושרה',
+          description: `${approverName} אישר/ה והתווסף/ה כשותף/ה לדירה${aptTitle ? `: ${aptTitle}` : ''}${aptCity ? ` (${aptCity})` : ''}.`,
+          is_read: false,
+        });
+      } else {
+        // JOIN_APT: requester approved by recipient — notify requester (sender)
+        await supabase.from('notifications').insert({
+          sender_id: user.id,
+          recipient_id: req.sender_id,
+          title: 'בקשתך אושרה',
+          description: `בקשתך אושרה והתווספת כשותף/ה לדירה${aptTitle ? `: ${aptTitle}` : ''}${aptCity ? ` (${aptCity})` : ''}.`,
+          is_read: false,
+        });
+      }
 
       await fetchAll();
-      Alert.alert('הצלחה', 'הבקשה אושרה');
+      Alert.alert('הצלחה', 'הבקשה אושרה והמשתמש הוסף כשותף לדירה');
     } catch (e: any) {
       console.error('approve request failed', e);
       Alert.alert('שגיאה', e?.message || 'לא ניתן לאשר את הבקשה');

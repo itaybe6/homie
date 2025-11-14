@@ -3,9 +3,11 @@ import { View, Text, StyleSheet, ScrollView, Image, ActivityIndicator, Touchable
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { User } from '@/types/database';
-import { ArrowLeft, MapPin, UserPlus2 } from 'lucide-react-native';
+import { ArrowLeft, MapPin, UserPlus2, Cigarette, PawPrint, Utensils, Moon, Users, Home, Calendar, User as UserIcon, Building2, Bed, Heart, Briefcase } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuthStore } from '@/stores/authStore';
+import { fetchUserSurvey } from '@/lib/survey';
+import { UserSurveyResponse } from '@/types/database';
 
 export default function UserProfileScreen() {
   const router = useRouter();
@@ -22,6 +24,8 @@ export default function UserProfileScreen() {
   const [groupContext, setGroupContext] = useState<{ name?: string | null; members: GroupMember[] } | null>(null);
   const [groupLoading, setGroupLoading] = useState(false);
   const [galleryWidth, setGalleryWidth] = useState(0);
+  const [survey, setSurvey] = useState<UserSurveyResponse | null>(null);
+  const [surveyLoading, setSurveyLoading] = useState(false);
 
   const normalizeImageUrls = (value: unknown): string[] => {
     if (!value) return [];
@@ -142,6 +146,30 @@ export default function UserProfileScreen() {
     };
   }, [profile?.id]);
 
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!profile?.id) {
+        setSurvey(null);
+        return;
+      }
+      try {
+        setSurveyLoading(true);
+        const s = await fetchUserSurvey(profile.id);
+        if (!cancelled) setSurvey(s);
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.error('Failed to load survey', e);
+        if (!cancelled) setSurvey(null);
+      } finally {
+        if (!cancelled) setSurveyLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [profile?.id]);
+
   const ensureGroupAndInvite = async () => {
     if (!me?.id) {
       Alert.alert('חיבור נדרש', 'כדי לשלוח בקשה למיזוג פרופילים יש להתחבר לחשבון.');
@@ -256,6 +284,21 @@ export default function UserProfileScreen() {
   const isMeInViewedGroup =
     !!me?.id && !!groupContext?.members?.some((m) => m.id === me.id);
 
+  const SurveyPill = ({
+    children,
+    icon,
+    lines = 1,
+  }: {
+    children: React.ReactNode;
+    icon: React.ReactNode;
+    lines?: number;
+  }) => (
+    <View style={styles.pill}>
+      {icon}
+      <Text style={styles.pillText} numberOfLines={lines}>{children}</Text>
+    </View>
+  );
+
   return (
     <ScrollView
       style={styles.container}
@@ -335,11 +378,218 @@ export default function UserProfileScreen() {
         </Text>
       )}
 
-      {/* merged profile indicator moved to chip on header */}
+      {/* Survey Preview - Personal */}
+      {!surveyLoading && survey ? (
+        <View style={styles.section}>
+          <View style={styles.surveyCard}>
+            <View style={styles.surveyBadgeRow}>
+              <UserIcon size={14} color="#FFFFFF" />
+              <Text style={[styles.surveyBadgeText, { color: '#FFFFFF' }]}>עליו</Text>
+            </View>
+            <View style={styles.pillsRow}>
+              {'is_smoker' in survey && survey.is_smoker !== undefined && survey.is_smoker !== null ? (
+                <SurveyPill icon={<Cigarette size={14} color="#FFFFFF" />}>
+                  {survey.is_smoker ? 'מעשנ/ית' : 'לא מעשנ/ית'}
+                </SurveyPill>
+              ) : null}
+              {'has_pet' in survey && survey.has_pet !== undefined && survey.has_pet !== null ? (
+                <SurveyPill icon={<PawPrint size={14} color="#FFFFFF" />}>
+                  {survey.has_pet ? 'עם חיית מחמד' : 'בלי חיית מחמד'}
+                </SurveyPill>
+              ) : null}
+              {'is_shomer_shabbat' in survey && survey.is_shomer_shabbat !== undefined && survey.is_shomer_shabbat !== null ? (
+                <SurveyPill icon={<Moon size={14} color="#FFFFFF" />}>
+                  {survey.is_shomer_shabbat ? 'שומר/ת שבת' : 'לא שומר/ת שבת'}
+                </SurveyPill>
+              ) : null}
+              {'keeps_kosher' in survey && survey.keeps_kosher !== undefined && survey.keeps_kosher !== null ? (
+                <SurveyPill icon={<Utensils size={14} color="#FFFFFF" />}>
+                  {survey.keeps_kosher ? 'כשר/ה' : 'גמיש/ה בכשרות'}
+                </SurveyPill>
+              ) : null}
+              {survey.diet_type ? (
+                <SurveyPill icon={<Utensils size={14} color="#FFFFFF" />}>
+                  {survey.diet_type}
+                </SurveyPill>
+              ) : null}
+              {survey.lifestyle ? (
+                <SurveyPill icon={<Users size={14} color="#FFFFFF" />}>
+                  {survey.lifestyle}
+                </SurveyPill>
+              ) : null}
+              {Number.isFinite(survey.cleanliness_importance as number) ? (
+                <SurveyPill icon={<Home size={14} color="#FFFFFF" />}>
+                  נקיון: {String(survey.cleanliness_importance)}/5
+                </SurveyPill>
+              ) : null}
+              {survey.cleaning_frequency ? (
+                <SurveyPill icon={<Home size={14} color="#FFFFFF" />}>
+                  {survey.cleaning_frequency}
+                </SurveyPill>
+              ) : null}
+              {survey.hosting_preference ? (
+                <SurveyPill icon={<Users size={14} color="#FFFFFF" />}>
+                  אירוח: {survey.hosting_preference}
+                </SurveyPill>
+              ) : null}
+              {survey.cooking_style ? (
+                <SurveyPill icon={<Utensils size={14} color="#FFFFFF" />}>
+                  {survey.cooking_style}
+                </SurveyPill>
+              ) : null}
+              {survey.home_vibe ? (
+                <SurveyPill icon={<Home size={14} color="#FFFFFF" />}>
+                  {survey.home_vibe}
+                </SurveyPill>
+              ) : null}
+            </View>
 
-      {/* merge button moved to header */}
+            {survey.is_sublet ? (
+              <View style={styles.subletTag}>
+                <Calendar size={14} color="#FFFFFF" />
+                <Text style={[styles.subletTagText, { color: '#FFFFFF' }]}>
+                  סאבלט{survey.sublet_month_from || survey.sublet_month_to ? ': ' : ''}
+                  {survey.sublet_month_from ? survey.sublet_month_from : ''}
+                  {survey.sublet_month_from && survey.sublet_month_to ? ' – ' : ''}
+                  {survey.sublet_month_to ? survey.sublet_month_to : ''}
+                </Text>
+              </View>
+            ) : null}
+          </View>
+        </View>
+      ) : null}
 
-      {/* Bio moved under header */}
+      {/* Apartment preferences */}
+      {!surveyLoading && survey ? (
+        <View style={styles.section}>
+          <View style={styles.surveyCard}>
+            <View style={styles.surveyBadgeRow}>
+              <Home size={14} color="#FFFFFF" />
+              <Text style={[styles.surveyBadgeText, { color: '#FFFFFF' }]}>על הדירה</Text>
+            </View>
+            <View style={styles.pillsRow}>
+              {Number.isFinite(survey.price_range as number) ? (
+                <SurveyPill icon={<Text style={styles.currencyIcon}>₪</Text>}>
+                  תקציב: ₪{Number(survey.price_range).toLocaleString('he-IL')}
+                </SurveyPill>
+              ) : null}
+              {'bills_included' in survey && survey.bills_included !== undefined && survey.bills_included !== null ? (
+                <SurveyPill icon={<Text style={styles.currencyIcon}>₪</Text>}>
+                  {survey.bills_included ? 'כולל חשבונות' : 'בלי חשבונות'}
+                </SurveyPill>
+              ) : null}
+              {survey.preferred_city ? (
+                <SurveyPill icon={<MapPin size={14} color="#FFFFFF" />}>
+                  {survey.preferred_city}
+                </SurveyPill>
+              ) : null}
+              {Array.isArray(survey.preferred_neighborhoods) && survey.preferred_neighborhoods.length > 0 ? (
+                <>
+                  <SurveyPill icon={<MapPin size={14} color="#FFFFFF" />}>
+                    {survey.preferred_city ? `שכונות ב־${survey.preferred_city}` : 'שכונות'}
+                  </SurveyPill>
+                  {survey.preferred_neighborhoods.filter(Boolean).map((n, idx) => (
+                    <SurveyPill key={`neigh-${idx}-${n}`} icon={<MapPin size={14} color="#FFFFFF" />}>
+                      {n}
+                    </SurveyPill>
+                  ))}
+                </>
+              ) : null}
+              {survey.floor_preference ? (
+                <SurveyPill icon={<Building2 size={14} color="#FFFFFF" />}>
+                  קומה: {survey.floor_preference}
+                </SurveyPill>
+              ) : null}
+              {'has_balcony' in survey && survey.has_balcony !== undefined && survey.has_balcony !== null ? (
+                <SurveyPill icon={<Home size={14} color="#FFFFFF" />}>
+                  {survey.has_balcony ? 'עם מרפסת' : 'בלי מרפסת'}
+                </SurveyPill>
+              ) : null}
+              {'has_elevator' in survey && survey.has_elevator !== undefined && survey.has_elevator !== null ? (
+                <SurveyPill icon={<Building2 size={14} color="#FFFFFF" />}>
+                  {survey.has_elevator ? 'עם מעלית' : 'בלי מעלית'}
+                </SurveyPill>
+              ) : null}
+              {'wants_master_room' in survey && survey.wants_master_room !== undefined && survey.wants_master_room !== null ? (
+                <SurveyPill icon={<Bed size={14} color="#FFFFFF" />}>
+                  {survey.wants_master_room ? 'מחפש/ת מאסטר' : 'לא חובה מאסטר'}
+                </SurveyPill>
+              ) : null}
+              {survey.move_in_month ? (
+                <SurveyPill icon={<Calendar size={14} color="#FFFFFF" />}>
+                  כניסה: {survey.move_in_month}
+                </SurveyPill>
+              ) : null}
+              {Number.isFinite(survey.preferred_roommates as number) ? (
+                <SurveyPill icon={<Users size={14} color="#FFFFFF" />}>
+                  מספר שותפים: {survey.preferred_roommates}
+                </SurveyPill>
+              ) : null}
+              {'pets_allowed' in survey && survey.pets_allowed !== undefined && survey.pets_allowed !== null ? (
+                <SurveyPill icon={<PawPrint size={14} color="#FFFFFF" />}>
+                  חיות בדירה: {survey.pets_allowed ? 'מותר' : 'לא מותר'}
+                </SurveyPill>
+              ) : null}
+              {'with_broker' in survey && survey.with_broker !== undefined && survey.with_broker !== null ? (
+                <SurveyPill icon={<Briefcase size={14} color="#FFFFFF" />}>
+                  {survey.with_broker ? 'עם מתווך/ת' : 'ללא מתווך/ת'}
+                </SurveyPill>
+              ) : null}
+            </View>
+          </View>
+        </View>
+      ) : null}
+
+      {/* Partner preferences */}
+      {!surveyLoading && survey ? (
+        <View style={styles.section}>
+          <View style={styles.surveyCard}>
+            <View style={styles.surveyBadgeRow}>
+              <Heart size={14} color="#FFFFFF" />
+              <Text style={[styles.surveyBadgeText, { color: '#FFFFFF' }]}>על השותף</Text>
+            </View>
+            <View style={styles.pillsRow}>
+              {Number.isFinite((survey as any).preferred_age_min as number) || Number.isFinite((survey as any).preferred_age_max as number) ? (
+                <SurveyPill icon={<Users size={14} color="#FFFFFF" />}>
+                  גיל מועדף: {Number.isFinite((survey as any).preferred_age_min as number) ? (survey as any).preferred_age_min : '?'}
+                  {' – '}
+                  {Number.isFinite((survey as any).preferred_age_max as number) ? (survey as any).preferred_age_max : '?'}
+                </SurveyPill>
+              ) : null}
+              {survey.preferred_gender ? (
+                <SurveyPill icon={<Users size={14} color="#FFFFFF" />}>
+                  מגדר מועדף: {survey.preferred_gender}
+                </SurveyPill>
+              ) : null}
+              {survey.preferred_occupation ? (
+                <SurveyPill icon={<Briefcase size={14} color="#FFFFFF" />}>
+                  עיסוק מועדף: {survey.preferred_occupation}
+                </SurveyPill>
+              ) : null}
+              {survey.partner_shabbat_preference ? (
+                <SurveyPill icon={<Moon size={14} color="#FFFFFF" />}>
+                  שבת: {survey.partner_shabbat_preference}
+                </SurveyPill>
+              ) : null}
+              {survey.partner_diet_preference ? (
+                <SurveyPill icon={<Utensils size={14} color="#FFFFFF" />}>
+                  תזונה: {survey.partner_diet_preference}
+                </SurveyPill>
+              ) : null}
+              {survey.partner_smoking_preference ? (
+                <SurveyPill icon={<Cigarette size={14} color="#FFFFFF" />}>
+                  עישון: {survey.partner_smoking_preference}
+                </SurveyPill>
+              ) : null}
+              {survey.partner_pets_preference ? (
+                <SurveyPill icon={<PawPrint size={14} color="#FFFFFF" />}>
+                  חיות: {survey.partner_pets_preference}
+                </SurveyPill>
+              ) : null}
+            </View>
+          </View>
+        </View>
+      ) : null}
 
       {galleryUrls.length ? (
         <View style={[styles.section, { paddingHorizontal: 12 }]}>
@@ -481,6 +731,83 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '800',
     marginBottom: 8,
+  },
+  surveyCard: {
+    padding: 18,
+    borderRadius: 20,
+    backgroundColor: '#17171F',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    shadowColor: '#000000',
+    shadowOpacity: 0.2,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 8 },
+  },
+  surveyBadgeRow: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    marginBottom: 14,
+  },
+  surveyBadgeText: {
+    fontSize: 12,
+    fontWeight: '800',
+    letterSpacing: 0.3,
+  },
+  pillsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  pill: {
+    flexDirection: 'row-reverse',
+    alignItems: 'flex-start',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.16)',
+    backgroundColor: 'transparent',
+  },
+  pillText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#E5E7EB',
+    flexShrink: 1,
+    flexGrow: 1,
+    textAlign: 'right',
+  },
+  currencyIcon: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '900',
+    marginTop: 1,
+  },
+  subletTag: {
+    marginTop: 16,
+    alignSelf: 'flex-start',
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.16)',
+    backgroundColor: 'transparent',
+  },
+  subletTagText: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#FFFFFF',
   },
   sectionText: {
     color: '#C7CBD1',
@@ -625,6 +952,3 @@ const styles = StyleSheet.create({
     backgroundColor: '#1F1F29',
   },
 });
-
-
-
