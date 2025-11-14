@@ -10,6 +10,7 @@ import {
   ActivityIndicator,
   Alert,
   Platform,
+  Modal,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Check, ChevronRight, ArrowLeft } from 'lucide-react-native';
@@ -138,8 +139,8 @@ export default function SurveyScreen() {
     return arr;
   }, [moveInMonthOptions, state.move_in_month]);
 
-  const setField = <K extends keyof SurveyState>(key: K, value: SurveyState[K]) => {
-    setState((prev) => ({ ...prev, [key]: value }));
+  const setField = (key: keyof SurveyState, value: any) => {
+    setState((prev) => ({ ...prev, [key]: value } as any));
   };
 
   const handleNext = () => {
@@ -212,7 +213,7 @@ export default function SurveyScreen() {
                     value={normalizeToTextChoice(state.occupation, ['סטודנט', 'עובד'])}
                     onChange={(v) => {
                       setState((prev) => {
-                        const next: SurveyState = { ...prev, occupation: v || null };
+                        const next: SurveyState = { ...prev, occupation: v || undefined };
                         if (v !== 'סטודנט') next.student_year = undefined;
                         if (v !== 'עובד') next.works_from_home = undefined;
                         return next;
@@ -461,30 +462,20 @@ export default function SurveyScreen() {
                       />
                     </View>
                   ) : (
-                    <ChipSelect
+                    <SelectInput
                       label="תאריך כניסה (חודש ושנה)"
                       options={moveInMonthSelectOptions}
                       value={state.move_in_month || null}
-                      onChange={(option) => {
-                        if (!option) {
-                          setField('move_in_month', undefined);
-                          return;
-                        }
-                        setField('move_in_month', option);
-                      }}
+                      placeholder="בחר חודש ושנה"
+                      onChange={(option) => setField('move_in_month', option || undefined)}
                     />
                   )}
-                  <ChipSelect
+                  <SelectInput
                     label="כמה שותפים נראה לי מתאים?"
                     options={roommateCountOptions}
                     value={state.preferred_roommates ? String(state.preferred_roommates) : null}
-                    onChange={(v) => {
-                      if (!v) {
-                        setField('preferred_roommates', undefined);
-                        return;
-                      }
-                      setField('preferred_roommates', parseInt(v, 10));
-                    }}
+                    placeholder="בחר מספר שותפים"
+                    onChange={(v) => setField('preferred_roommates', v ? parseInt(v, 10) : undefined)}
                   />
                   <ToggleRow label="אפשר להביא בעלי חיים?" value={!!state.pets_allowed} onToggle={(v) => setField('pets_allowed', v)} />
                   <ChipSelect
@@ -502,12 +493,26 @@ export default function SurveyScreen() {
             {currentStep === 2 && (
               <View style={styles.stepCard}>
                 <Section title="מאפייני השותפ/ה">
-                  <LabeledInput
-                    label="טווח גילאים מועדף"
-                    value={state.preferred_age_range || ''}
-                    placeholder="לדוגמה: 22–30"
-                    onChangeText={(txt) => setField('preferred_age_range', txt)}
-                  />
+                  <View style={{ gap: 10 }}>
+                    <LabeledInput
+                      label="גיל מינימלי"
+                      value={(state as any).preferred_age_min?.toString() || ''}
+                      placeholder="לדוגמה: 22"
+                      keyboardType="numeric"
+                      onChangeText={(txt) =>
+                        setState((prev) => ({ ...(prev as any), preferred_age_min: toIntOrNull(txt) } as any))
+                      }
+                    />
+                    <LabeledInput
+                      label="גיל מקסימלי"
+                      value={(state as any).preferred_age_max?.toString() || ''}
+                      placeholder="לדוגמה: 30"
+                      keyboardType="numeric"
+                      onChangeText={(txt) =>
+                        setState((prev) => ({ ...(prev as any), preferred_age_max: toIntOrNull(txt) } as any))
+                      }
+                    />
+                  </View>
                   <ChipSelect
                     label="מין מועדף"
                     options={genderPrefOptions}
@@ -621,7 +626,14 @@ function normalizePayload(userId: string, s: SurveyState) {
     with_broker: s.with_broker ?? null,
     sublet_month_from: s.is_sublet ? (s.sublet_month_from ?? null) : null,
     sublet_month_to: s.is_sublet ? (s.sublet_month_to ?? null) : null,
-    preferred_age_range: s.preferred_age_range ?? null,
+    preferred_age_min:
+      (s as any).preferred_age_min !== undefined && (s as any).preferred_age_min !== null
+        ? (s as any).preferred_age_min
+        : null,
+    preferred_age_max:
+      (s as any).preferred_age_max !== undefined && (s as any).preferred_age_max !== null
+        ? (s as any).preferred_age_max
+        : null,
     preferred_gender: s.preferred_gender ?? null,
     preferred_occupation: s.preferred_occupation ?? null,
     partner_shabbat_preference: s.partner_shabbat_preference ?? null,
@@ -629,6 +641,16 @@ function normalizePayload(userId: string, s: SurveyState) {
     partner_smoking_preference: s.partner_smoking_preference ?? null,
     partner_pets_preference: s.partner_pets_preference ?? null,
   };
+  // Ensure sanity: if both ages exist and min > max, swap them
+  if (
+    payload.preferred_age_min !== null &&
+    payload.preferred_age_max !== null &&
+    payload.preferred_age_min > payload.preferred_age_max
+  ) {
+    const tmp = payload.preferred_age_min;
+    payload.preferred_age_min = payload.preferred_age_max;
+    payload.preferred_age_max = tmp;
+  }
   return payload;
 }
 
@@ -703,7 +725,7 @@ function hydrateSurvey(existing: UserSurveyResponse): SurveyState {
     next.keeps_kosher = existing.keeps_kosher;
   } else if (existing.diet_type === 'כשר') {
     next.keeps_kosher = true;
-    next.diet_type = null;
+    next.diet_type = undefined;
   }
   if (existing.preferred_neighborhoods) {
     next.preferred_neighborhoods = [...existing.preferred_neighborhoods];
@@ -749,6 +771,67 @@ function LabeledInput({
         keyboardType={keyboardType}
         style={styles.input}
       />
+    </View>
+  );
+}
+
+function SelectInput({
+  label,
+  value,
+  options,
+  placeholder,
+  onChange,
+}: {
+  label: string;
+  value: string | null;
+  options: string[];
+  placeholder?: string;
+  onChange: (v: string | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <View style={{ gap: 8 }}>
+      <Text style={styles.label}>{label}</Text>
+      <TouchableOpacity
+        style={styles.input}
+        activeOpacity={0.9}
+        onPress={() => setOpen(true)}
+        accessibilityLabel={label}
+      >
+        <Text style={value ? styles.selectText : styles.selectPlaceholder}>
+          {value || placeholder || 'בחר'}
+        </Text>
+      </TouchableOpacity>
+      <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
+        <View style={styles.pickerOverlay}>
+          <View style={styles.pickerSheet}>
+            <Text style={styles.pickerTitle}>{label}</Text>
+            <ScrollView contentContainerStyle={{ paddingVertical: 8 }}>
+              {options.map((opt) => {
+                const active = value === opt;
+                return (
+                  <TouchableOpacity
+                    key={opt}
+                    style={[styles.pickerOption, active ? styles.pickerOptionActive : null]}
+                    onPress={() => {
+                      onChange(opt);
+                      setOpen(false);
+                    }}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={[styles.pickerOptionText, active ? styles.pickerOptionTextActive : null]}>
+                      {opt}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+            <TouchableOpacity style={styles.pickerCancel} onPress={() => setOpen(false)}>
+              <Text style={styles.pickerCancelText}>סגור</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -875,7 +958,6 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#0F0F14',
     writingDirection: 'rtl',
-    // @ts-expect-error RN Web supports CSS direction
     direction: 'rtl',
   },
   header: {
@@ -984,7 +1066,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 8,
     writingDirection: 'rtl',
-    // @ts-expect-error RN Web supports CSS direction
     direction: 'rtl',
   },
   toggleBtn: {
@@ -1020,7 +1101,6 @@ const styles = StyleSheet.create({
     gap: 8,
     justifyContent: 'flex-start',
     writingDirection: 'rtl',
-    // @ts-expect-error RN Web supports CSS direction
     direction: 'rtl',
   },
   chip: {
@@ -1042,6 +1122,75 @@ const styles = StyleSheet.create({
   },
   chipTextActive: {
     color: '#0F0F14',
+  },
+  selectText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    textAlign: Platform.select({ ios: 'right', android: 'right', default: 'right' }) as any,
+  },
+  selectPlaceholder: {
+    color: '#6B7280',
+    fontSize: 16,
+    textAlign: Platform.select({ ios: 'right', android: 'right', default: 'right' }) as any,
+  },
+  pickerOverlay: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+  },
+  pickerSheet: {
+    width: '100%',
+    maxHeight: '80%',
+    backgroundColor: '#15151C',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 12,
+    padding: 12,
+  },
+  pickerTitle: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '800',
+    textAlign: 'center',
+    marginBottom: 6,
+  },
+  pickerOption: {
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.06)',
+  },
+  pickerOptionActive: {
+    backgroundColor: 'rgba(124,92,255,0.12)',
+  },
+  pickerOptionText: {
+    color: '#E5E7EB',
+    fontSize: 16,
+    textAlign: 'right',
+    fontWeight: '700',
+  },
+  pickerOptionTextActive: {
+    color: '#A78BFA',
+  },
+  pickerCancel: {
+    marginTop: 8,
+    alignSelf: 'center',
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
+  },
+  pickerCancelText: {
+    color: '#E5E7EB',
+    fontWeight: '800',
   },
   suggestionsBox: {
     marginTop: 4,
