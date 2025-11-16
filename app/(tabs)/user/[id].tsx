@@ -28,6 +28,8 @@ export default function UserProfileScreen() {
   const [survey, setSurvey] = useState<UserSurveyResponse | null>(null);
   const [surveyLoading, setSurveyLoading] = useState(false);
   const [hasPendingMergeInvite, setHasPendingMergeInvite] = useState(false);
+  const [meInApartment, setMeInApartment] = useState(false);
+  const [profileInApartment, setProfileInApartment] = useState(false);
 
   const normalizeImageUrls = (value: unknown): string[] => {
     if (!value) return [];
@@ -191,6 +193,47 @@ export default function UserProfileScreen() {
         if (!cancelled) setHasPendingMergeInvite(!!existing?.id);
       } catch {
         if (!cancelled) setHasPendingMergeInvite(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [me?.id, profile?.id]);
+
+  // Determine if both users are already associated with an apartment (owner or partner)
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        if (me?.id) {
+          const [owned, partner] = await Promise.all([
+            supabase.from('apartments').select('id').eq('owner_id', me.id).limit(1),
+            supabase.from('apartments').select('id').contains('partner_ids', [me.id] as any).limit(1),
+          ]);
+          if (!cancelled) {
+            const any = ((owned.data || []).length + (partner.data || []).length) > 0;
+            setMeInApartment(any);
+          }
+        } else if (!cancelled) {
+          setMeInApartment(false);
+        }
+        if (profile?.id) {
+          const [owned, partner] = await Promise.all([
+            supabase.from('apartments').select('id').eq('owner_id', profile.id).limit(1),
+            supabase.from('apartments').select('id').contains('partner_ids', [profile.id] as any).limit(1),
+          ]);
+          if (!cancelled) {
+            const any = ((owned.data || []).length + (partner.data || []).length) > 0;
+            setProfileInApartment(any);
+          }
+        } else if (!cancelled) {
+          setProfileInApartment(false);
+        }
+      } catch {
+        if (!cancelled) {
+          setMeInApartment(false);
+          setProfileInApartment(false);
+        }
       }
     })();
     return () => {
@@ -383,9 +426,12 @@ export default function UserProfileScreen() {
         ) : null}
         {!groupLoading && me?.id && me.id !== profile.id && !isMeInViewedGroup ? (
           <TouchableOpacity
-            style={[styles.mergeHeaderBtn, (inviteLoading || hasPendingMergeInvite) ? styles.mergeBtnDisabled : null]}
+            style={[
+              styles.mergeHeaderBtn,
+              (inviteLoading || hasPendingMergeInvite || (meInApartment && profileInApartment)) ? styles.mergeBtnDisabled : null,
+            ]}
             activeOpacity={0.9}
-            onPress={(inviteLoading || hasPendingMergeInvite) ? undefined : ensureGroupAndInvite}
+            onPress={(inviteLoading || hasPendingMergeInvite || (meInApartment && profileInApartment)) ? undefined : ensureGroupAndInvite}
           >
             <UserPlus2 size={16} color="#FFFFFF" />
             <Text style={styles.mergeHeaderText}>{inviteLoading ? 'שולח...' : hasPendingMergeInvite ? 'נשלחה בקשה' : 'מיזוג'}</Text>

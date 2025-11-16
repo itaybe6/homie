@@ -953,13 +953,15 @@ export default function RequestsScreen() {
                   ) : (isGroupMatch || isGroupInvite) && groupMembers.length ? (
                     (() => {
                       const gridMembers = groupMembers.slice(0, 4);
-                      const rows = Math.ceil(gridMembers.length / 2);
-                      const cellHeightPct = `${100 / rows}%`;
+                      const isThree = gridMembers.length === 3;
+                      const rows = isThree ? 1 : Math.ceil(gridMembers.length / 2);
+                      const cellHeightPct = rows === 1 ? '100%' : (`${100 / rows}%` as any);
+                      const cellWidthPct = isThree ? '33.3333%' : '50%';
                       return (
                         <View style={styles.thumbWrap}>
                           <View style={{ flex: 1, flexDirection: 'row', flexWrap: 'wrap' }}>
                             {gridMembers.map((gm, idx) => (
-                              <View key={idx} style={{ width: '50%', height: cellHeightPct as any, padding: 1 }}>
+                              <View key={idx} style={{ width: cellWidthPct, height: cellHeightPct, padding: 1 }}>
                                 <Image
                                   source={{ uri: gm.avatar_url || DEFAULT_AVATAR }}
                                   style={{ width: '100%', height: '100%' }}

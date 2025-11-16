@@ -13,11 +13,11 @@ import {
   ScrollView,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { ArrowLeft, Edit, FileText, LogOut, Trash2, ChevronLeft, Pencil, Inbox, MapPin, UserPlus2, X } from 'lucide-react-native';
+import { ArrowLeft, Edit, FileText, LogOut, Trash2, ChevronLeft, Pencil, Inbox, MapPin, UserPlus2, X, Home } from 'lucide-react-native';
 import { useAuthStore } from '@/stores/authStore';
 import { authService } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
-import { User } from '@/types/database';
+import { Apartment, User } from '@/types/database';
 import { fetchUserSurvey } from '@/lib/survey';
 import * as ImagePicker from 'expo-image-picker';
 
@@ -36,6 +36,13 @@ export default function ProfileSettingsScreen() {
   const [sharedGroups, setSharedGroups] = useState<
     { id: string; name?: string | null; members: Pick<User, 'id' | 'full_name' | 'avatar_url'>[] }[]
   >([]);
+  // My apartment modal state
+  const [showAptModal, setShowAptModal] = useState(false);
+  const [aptLoading, setAptLoading] = useState(false);
+  const [myApartment, setMyApartment] = useState<Apartment | null>(null);
+  const [aptOwner, setAptOwner] = useState<User | null>(null);
+  const [aptMembers, setAptMembers] = useState<User[]>([]);
+  const [isLeavingApartment, setIsLeavingApartment] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -61,6 +68,126 @@ export default function ProfileSettingsScreen() {
       }
     })();
   }, [user?.id]);
+
+  // Load user's apartment when opening the modal
+  useEffect(() => {
+    (async () => {
+      try {
+        if (!showAptModal || !user?.id) return;
+        console.log('[MyApartment] Opening modal for user:', user.id);
+        setAptLoading(true);
+        // Try to find an apartment the user is a partner of, otherwise one they own
+        const [{ data: partnerRows }, { data: ownerRows }] = await Promise.all([
+          supabase.from('apartments').select('*').contains('partner_ids', [user.id]).limit(1),
+          supabase.from('apartments').select('*').eq('owner_id', user.id).limit(1),
+        ]);
+        console.log('[MyApartment] Query results:', { partnerRows, ownerRows });
+        const apt = (partnerRows && partnerRows[0]) || (ownerRows && ownerRows[0]) || null;
+        setMyApartment((apt as any) || null);
+        if (!apt) {
+          console.log('[MyApartment] No apartment found for user:', user.id);
+          setAptOwner(null);
+          setAptMembers([]);
+          return;
+        }
+        console.log('[MyApartment] Found apartment:', (apt as any)?.id);
+        // Load owner
+        const [{ data: ownerRow }, partnersResp] = await Promise.all([
+          supabase.from('users').select('id, full_name, avatar_url').eq('id', (apt as any).owner_id).maybeSingle(),
+          (Array.isArray((apt as any).partner_ids) && (apt as any).partner_ids.length > 0)
+            ? supabase
+                .from('users')
+                .select('id, full_name, avatar_url')
+                .in('id', (apt as any).partner_ids as string[])
+            : Promise.resolve({ data: [] as any[] } as any),
+        ]);
+        console.log('[MyApartment] Loaded owner and partners:', {
+          ownerRow,
+          partnersCount: (partnersResp as any)?.data?.length || 0,
+        });
+        setAptOwner((ownerRow as any) || null);
+        const ownerId = (apt as any).owner_id as string;
+        const partnersRaw: any[] = ((partnersResp as any)?.data || []) as any[];
+        // de-duplicate by id and exclude the owner if mistakenly included
+        const seen = new Set<string>();
+        const partnersUnique = partnersRaw.filter((u: any) => {
+          const uid = u?.id;
+          if (!uid || uid === ownerId) return false;
+          if (seen.has(uid)) return false;
+          seen.add(uid);
+          return true;
+        });
+        console.log('[MyApartment] Partners after dedupe:', partnersUnique.map((p: any) => p.id));
+        setAptMembers(partnersUnique as any);
+      } catch (e: any) {
+        console.error('[MyApartment] Failed loading apartment modal:', e);
+        Alert.alert('שגיאה', e?.message || 'לא ניתן לטעון את הדירה שלך');
+      } finally {
+        setAptLoading(false);
+      }
+    })();
+  }, [showAptModal, user?.id]);
+
+  const leaveApartment = async () => {
+    if (!user?.id || !myApartment) return;
+    console.log('[LeaveApartment] Clicked. Apartment:', (myApartment as any)?.id, 'User:', user.id);
+    // Only partners (not owner) can leave
+    const currentPartners: string[] = Array.isArray((myApartment as any).partner_ids)
+      ? ((myApartment as any).partner_ids as string[])
+      : [];
+    const isOwner = user.id === (myApartment as any).owner_id;
+    const isPartner = currentPartners.includes(user.id);
+    console.log('[LeaveApartment] State:', { isOwner, isPartner, currentPartners });
+    if (!isPartner || isOwner) {
+      Alert.alert('שגיאה', isOwner ? 'בעל/ת הדירה לא יכול/ה לצאת מהדירה' : 'אינך משויך/ה כדייר/ת בדירה זו');
+      return;
+    }
+    try {
+      const shouldProceed =
+        Platform.OS === 'web'
+          ? (typeof confirm === 'function'
+              ? confirm('האם לצאת מהדירה? ניתן להצטרף שוב בהזמנה.')
+              : true)
+          : await new Promise<boolean>((resolve) => {
+              Alert.alert('יציאה מהדירה', 'האם לצאת מהדירה? ניתן להצטרף שוב בהזמנה.', [
+                { text: 'ביטול', style: 'cancel', onPress: () => resolve(false) },
+                { text: 'צא/י מהדירה', style: 'destructive', onPress: () => resolve(true) },
+              ]);
+            });
+      if (!shouldProceed) return;
+      setIsLeavingApartment(true);
+      const newPartnerIds = currentPartners.filter((pid) => pid !== user.id);
+      console.log('[LeaveApartment] Updating apartments.partner_ids ->', newPartnerIds);
+      const { error: updErr } = await supabase
+        .from('apartments')
+        .update({ partner_ids: newPartnerIds })
+        .eq('id', (myApartment as any).id);
+      if (updErr) {
+        console.error('[LeaveApartment] Supabase update error (apartments):', updErr);
+        throw updErr;
+      }
+      // Mark any active group memberships as LEFT
+      const { error: grpErr } = await supabase
+        .from('profile_group_members')
+        .update({ status: 'LEFT' })
+        .eq('user_id', user.id)
+        .eq('status', 'ACTIVE');
+      if (grpErr) {
+        console.error('[LeaveApartment] Supabase update error (profile_group_members):', grpErr);
+        // not throwing intentionally, leaving apt should succeed even if group update failed
+      }
+      // Update local state
+      setMyApartment((prev) => (prev ? ({ ...(prev as any), partner_ids: newPartnerIds } as Apartment) : prev));
+      setAptMembers((prev) => prev.filter((m) => m.id !== user.id));
+      Alert.alert('הצלחה', 'יצאת מהדירה בהצלחה');
+      setShowAptModal(false);
+    } catch (e: any) {
+      console.error('[LeaveApartment] Failed:', e);
+      Alert.alert('שגיאה', e?.message || 'לא ניתן לצאת מהדירה כעת');
+    } finally {
+      setIsLeavingApartment(false);
+    }
+  };
 
   useEffect(() => {
     (async () => {
@@ -347,6 +474,23 @@ export default function ProfileSettingsScreen() {
 
           <View style={styles.divider} />
 
+          <TouchableOpacity
+            style={styles.groupItem}
+            onPress={() => setShowAptModal(true)}
+            activeOpacity={0.9}
+          >
+            <View style={styles.itemIcon}>
+              <Home size={18} color="#E5E7EB" />
+            </View>
+            <View style={styles.itemTextWrap}>
+              <Text style={styles.groupItemTitle}>הדירה שלי</Text>
+              <Text style={styles.groupItemSub}>צפייה ויציאה מהדירה</Text>
+            </View>
+            <ChevronLeft size={18} color="#9DA4AE" />
+          </TouchableOpacity>
+
+          <View style={styles.divider} />
+
           {hasSharedProfiles ? (
             <>
               <TouchableOpacity
@@ -469,6 +613,79 @@ export default function ProfileSettingsScreen() {
           </TouchableOpacity>
         </View>
       </View>
+      {/* My apartment modal */}
+      {showAptModal && (
+        <Modal visible transparent animationType="fade" onRequestClose={() => setShowAptModal(false)}>
+          <View style={styles.overlay}>
+            <View style={styles.sheet}>
+              <View style={styles.sheetHeader}>
+                <Text style={styles.sheetTitle}>הדירה שלי</Text>
+                <TouchableOpacity style={styles.sheetClose} onPress={() => setShowAptModal(false)}>
+                  <X size={18} color="#E5E7EB" />
+                </TouchableOpacity>
+              </View>
+              {aptLoading ? (
+                <View style={{ paddingVertical: 24, alignItems: 'center' }}>
+                  <ActivityIndicator size="large" color="#7C5CFF" />
+                </View>
+              ) : !myApartment ? (
+                <Text style={styles.sharedEmptyText}>לא נמצאה דירה משויכת.</Text>
+              ) : (
+                <ScrollView contentContainerStyle={{ paddingBottom: 8 }}>
+                  <View style={styles.aptCard}>
+                    {!!(myApartment as any).image_url && (
+                      <Image source={{ uri: (myApartment as any).image_url as any }} style={styles.aptCover} />
+                    )}
+                    <Text style={styles.aptTitle} numberOfLines={1}>
+                      {(myApartment as any).title}
+                    </Text>
+                    <Text style={styles.aptSub} numberOfLines={1}>
+                      {(myApartment as any).city} • {(myApartment as any).price?.toLocaleString?.() || (myApartment as any).price}₪
+                    </Text>
+                    <View style={styles.sharedAvatarsRow}>
+                      {aptOwner ? (
+                        <View style={styles.sharedAvatarWrap}>
+                          <Image
+                            source={{ uri: aptOwner.avatar_url || 'https://cdn-icons-png.flaticon.com/512/847/847969.png' }}
+                            style={styles.sharedAvatar}
+                          />
+                        </View>
+                      ) : null}
+                      {aptMembers.map((m) => (
+                        <View key={m.id} style={styles.sharedAvatarWrap}>
+                          <Image
+                            source={{ uri: m.avatar_url || 'https://cdn-icons-png.flaticon.com/512/847/847969.png' }}
+                            style={styles.sharedAvatar}
+                          />
+                        </View>
+                      ))}
+                    </View>
+                    {user?.id &&
+                    Array.isArray((myApartment as any).partner_ids) &&
+                    (myApartment as any).partner_ids.includes(user.id) &&
+                    user.id !== (myApartment as any).owner_id ? (
+                      <TouchableOpacity
+                        style={[styles.sharedLeaveBtn, { alignSelf: 'center', marginTop: 6 }]}
+                        onPress={isLeavingApartment ? undefined : leaveApartment}
+                        activeOpacity={0.9}
+                      >
+                        {isLeavingApartment ? (
+                          <ActivityIndicator size="small" color="#F87171" />
+                        ) : (
+                          <>
+                            <LogOut size={16} color="#F87171" />
+                            <Text style={styles.sharedLeaveBtnText}>צא/י מהדירה</Text>
+                          </>
+                        )}
+                      </TouchableOpacity>
+                    ) : null}
+                  </View>
+                </ScrollView>
+              )}
+            </View>
+          </View>
+        </Modal>
+      )}
       {/* Shared profiles modal */}
       {showSharedModal && (
         <Modal visible transparent animationType="fade" onRequestClose={() => setShowSharedModal(false)}>
@@ -733,6 +950,35 @@ const styles = StyleSheet.create({
     color: '#F87171',
     fontWeight: '800',
     fontSize: 12,
+  },
+  aptCard: {
+    marginTop: 8,
+    padding: 14,
+    borderRadius: 16,
+    backgroundColor: '#17171F',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    alignItems: 'center',
+  },
+  aptCover: {
+    width: '100%',
+    height: 140,
+    borderRadius: 12,
+    backgroundColor: '#1F1F29',
+    marginBottom: 10,
+  },
+  aptTitle: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '900',
+    textAlign: 'center',
+  },
+  aptSub: {
+    color: '#C7CBD1',
+    fontSize: 13,
+    textAlign: 'center',
+    marginTop: 4,
+    marginBottom: 6,
   },
   groupCard: {
     backgroundColor: '#15151C',
