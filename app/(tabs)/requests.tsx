@@ -453,6 +453,15 @@ export default function RequestsScreen() {
     if (!user?.id || !req.apartment_id) return;
     try {
       setActionId(req.id);
+      // eslint-disable-next-line no-console
+      console.log('[requests/approveIncoming] start', {
+        reqId: req.id,
+        kind: req.kind,
+        type: (req as any)?.type,
+        sender_id: req.sender_id,
+        recipient_id: req.recipient_id,
+        aptId: req.apartment_id,
+      });
       // Load apartment details (for notification text)
       const { data: apt, error: aptErr } = await supabase
         .from('apartments')
@@ -461,21 +470,35 @@ export default function RequestsScreen() {
         .maybeSingle();
       if (aptErr) throw aptErr;
       if (!apt) throw new Error('דירה לא נמצאה');
+      // eslint-disable-next-line no-console
+      console.log('[requests/approveIncoming] loaded apartment', {
+        aptId: (apt as any)?.id,
+        owner_id: (apt as any)?.owner_id,
+        partner_ids: (apt as any)?.partner_ids,
+      });
 
       // Determine which user should be added as partner based on request type
       const requestType = (req as any)?.type || 'JOIN_APT';
       const userToAddId = requestType === 'INVITE_APT' ? req.recipient_id : req.sender_id;
+      // eslint-disable-next-line no-console
+      console.log('[requests/approveIncoming] request type & userToAdd', {
+        requestType,
+        userToAddId,
+      });
 
       // 1) update request status
       await supabase
         .from('apartments_request')
         .update({ status: 'APPROVED', updated_at: new Date().toISOString() })
         .eq('id', req.id);
+      // eslint-disable-next-line no-console
+      console.log('[requests/approveIncoming] apartments_request updated -> APPROVED', { reqId: req.id });
 
       // 2) add the approved user to the apartment's partner_ids (idempotent)
       const currentPartnerIds: string[] = Array.isArray((apt as any).partner_ids)
         ? ((apt as any).partner_ids as string[])
         : [];
+      let finalPartnerIds: string[] = currentPartnerIds;
       if (userToAddId && !currentPartnerIds.includes(userToAddId)) {
         const newPartnerIds = Array.from(new Set([...(currentPartnerIds || []), userToAddId]));
         const { error: updateErr } = await supabase
@@ -483,7 +506,12 @@ export default function RequestsScreen() {
           .update({ partner_ids: newPartnerIds })
           .eq('id', req.apartment_id);
         if (updateErr) throw updateErr;
+        finalPartnerIds = newPartnerIds;
       }
+      // eslint-disable-next-line no-console
+      console.log('[requests/approveIncoming] partner_ids after approval', {
+        finalPartnerIds,
+      });
 
       // 3) notify the other party about approval and addition
       const aptTitle = (apt as any)?.title || '';
@@ -520,84 +548,147 @@ export default function RequestsScreen() {
         });
       }
 
-      // 4) Ensure both approver and added user share a merged profile group
+      // 4) Ensure EVERYONE tied to this apartment shares a merged profile group
+      //    Rule: all apartment users (owner + partners) must be in the same profile group.
       try {
-        const approverId = user.id;
-        const otherUserId = userToAddId;
-        const inviterId = req.sender_id; // prefer inviter's group if exists
-        if (approverId && otherUserId && approverId !== otherUserId) {
-          // Fetch active memberships for both users
-          const [{ data: approverMem }, { data: otherMem }, { data: inviterMem }] = await Promise.all([
-            supabase
-              .from('profile_group_members')
-              .select('group_id')
-              .eq('user_id', approverId)
-              .eq('status', 'ACTIVE')
-              .maybeSingle(),
-            supabase
-              .from('profile_group_members')
-              .select('group_id')
-              .eq('user_id', otherUserId)
-              .eq('status', 'ACTIVE')
-              .maybeSingle(),
-            supabase
-              .from('profile_group_members')
-              .select('group_id')
-              .eq('user_id', inviterId)
-              .eq('status', 'ACTIVE')
-              .maybeSingle(),
-          ]);
-          let targetGroupId: string | null = null;
-          const approverGroupId = (approverMem as any)?.group_id as string | undefined;
-          const otherGroupId = (otherMem as any)?.group_id as string | undefined;
-          const inviterGroupId = (inviterMem as any)?.group_id as string | undefined;
-          // Preference: inviter's group (sender of the request) if exists, else approver's, else other user's
-          targetGroupId = inviterGroupId || approverGroupId || otherGroupId || null;
-          // Create group if neither has one
+        const inviterId = req.sender_id;
+        const ownerId = (apt as any)?.owner_id as string | undefined;
+        // Build the full set of apartment members after the approval
+        const apartmentUserIds = Array.from(
+          new Set<string>([...(finalPartnerIds || []), ownerId, userToAddId].filter(Boolean) as string[])
+        );
+        // eslint-disable-next-line no-console
+        console.log('[requests/approveIncoming] unify apartment group start', {
+          aptId: req.apartment_id,
+          inviterId,
+          ownerId,
+          finalPartnerIds,
+          apartmentUserIds,
+        });
+        if (apartmentUserIds.length) {
+          // Find existing ACTIVE groups for these users
+          const { data: activeMems } = await supabase
+            .from('profile_group_members')
+            .select('user_id, group_id')
+            .eq('status', 'ACTIVE')
+            .in('user_id', apartmentUserIds);
+          // eslint-disable-next-line no-console
+          console.log('[requests/approveIncoming] existing active memberships', activeMems);
+          // Prefer inviter's existing group, then any existing group among members
+          const inviterGroupId =
+            (activeMems || []).find((m: any) => m.user_id === inviterId)?.group_id as string | undefined;
+          const anyExistingGroupId = (activeMems || [])[0]?.group_id as string | undefined;
+          let targetGroupId = inviterGroupId || anyExistingGroupId || null;
           if (!targetGroupId) {
-            const { data: newGroup, error: groupErr } = await supabase
+            const { data: created, error: createErr } = await supabase
               .from('profile_groups')
-              .insert({ created_by: inviterId || approverId, name: 'שותפים' } as any)
+              .insert({ created_by: inviterId || user.id, name: 'שותפים' } as any)
               .select('id')
               .single();
-            if (groupErr) throw groupErr;
-            targetGroupId = (newGroup as any)?.id as string;
+            if (createErr) throw createErr;
+            targetGroupId = (created as any)?.id as string;
+            // eslint-disable-next-line no-console
+            console.log('[requests/approveIncoming] created new profile_group', { targetGroupId });
+          } else {
+            // eslint-disable-next-line no-console
+            console.log('[requests/approveIncoming] using existing profile_group', { targetGroupId });
           }
-          // Upsert ACTIVE membership for both users
-          // First, check existing membership statuses for both in the target group
-          const { data: existingMembers } = await supabase
-            .from('profile_group_members')
-            .select('user_id, status')
-            .eq('group_id', targetGroupId)
-            .in('user_id', [approverId, otherUserId] as any);
-          const hasApprover = !!(existingMembers || []).find((m: any) => m.user_id === approverId);
-          const hasOther = !!(existingMembers || []).find((m: any) => m.user_id === otherUserId);
-          const approverStatus = (existingMembers || []).find((m: any) => m.user_id === approverId)?.status;
-          const otherStatus = (existingMembers || []).find((m: any) => m.user_id === otherUserId)?.status;
-          const inserts: any[] = [];
-          if (!hasApprover) inserts.push({ group_id: targetGroupId, user_id: approverId, status: 'ACTIVE' });
-          if (!hasOther) inserts.push({ group_id: targetGroupId, user_id: otherUserId, status: 'ACTIVE' });
-          if (inserts.length) {
-            await supabase.from('profile_group_members').insert(inserts as any);
+          // RLS-safe: add myself via SECURITY DEFINER RPC (no direct table writes)
+          try {
+            const { error: addSelfErr } = await supabase.rpc('add_self_to_group', {
+              p_group_id: targetGroupId,
+            });
+            if (addSelfErr) {
+              // eslint-disable-next-line no-console
+              console.error('[requests/approveIncoming] RPC add_self_to_group failed', {
+                code: (addSelfErr as any)?.code,
+                message: (addSelfErr as any)?.message,
+                details: (addSelfErr as any)?.details,
+                hint: (addSelfErr as any)?.hint,
+                targetGroupId,
+              });
+            } else {
+              // eslint-disable-next-line no-console
+              console.log('[requests/approveIncoming] RPC add_self_to_group OK', { targetGroupId });
+            }
+          } catch (e) {
+            // eslint-disable-next-line no-console
+            console.error('[requests/approveIncoming] RPC add_self_to_group exception', e);
           }
-          const updates: any[] = [];
-          if (hasApprover && approverStatus !== 'ACTIVE') {
-            updates.push({ user_id: approverId });
-          }
-          if (hasOther && otherStatus !== 'ACTIVE') {
-            updates.push({ user_id: otherUserId });
-          }
-          for (const u of updates) {
-            await supabase
-              .from('profile_group_members')
-              .update({ status: 'ACTIVE' })
-              .eq('group_id', targetGroupId)
-              .eq('user_id', u.user_id);
+          // For other users we cannot insert memberships due to RLS; create invites from current user instead (best-effort)
+          const others = apartmentUserIds.filter((uid) => uid !== user.id);
+          if (others.length) {
+            // Filter out users who are already ACTIVE members of the target group
+            const existingMemberIds = new Set(((activeMems || []) as any[]).map((m: any) => m.user_id));
+            const candidateInviteeIds = others.filter((id) => !existingMemberIds.has(id));
+            // If some have already a pending invite, skip them too to avoid 409
+            let pendingInviteeIds: string[] = [];
+            if (candidateInviteeIds.length) {
+              const { data: pending } = await supabase
+                .from('profile_group_invites')
+                .select('invitee_id')
+                .eq('group_id', targetGroupId)
+                .eq('status', 'PENDING')
+                .in('invitee_id', candidateInviteeIds as any);
+              pendingInviteeIds = (pending || []).map((r: any) => r.invitee_id);
+            }
+            const finalInviteeIds = candidateInviteeIds.filter((id) => !pendingInviteeIds.includes(id));
+            // eslint-disable-next-line no-console
+            console.log('[requests/approveIncoming] invite candidates', {
+              others,
+              existingMemberIds: Array.from(existingMemberIds),
+              candidateInviteeIds,
+              pendingInviteeIds,
+              finalInviteeIds,
+              targetGroupId,
+            });
+            if (finalInviteeIds.length === 0) {
+              // eslint-disable-next-line no-console
+              console.log('[requests/approveIncoming] no invites needed (all are members or already pending)');
+            } else {
+              // Avoid spamming: insert only for finalInviteeIds
+              const invitesPayload = finalInviteeIds.map((inviteeId) => ({
+                inviter_id: user.id,
+                invitee_id: inviteeId,
+                group_id: targetGroupId,
+                status: 'PENDING',
+              }));
+              // eslint-disable-next-line no-console
+              console.log('[requests/approveIncoming] creating invites payload', { invitesPayload });
+              const inviteRes = await supabase
+                .from('profile_group_invites')
+                .insert(invitesPayload as any, { ignoreDuplicates: true } as any);
+            if ((inviteRes as any)?.error) {
+              // eslint-disable-next-line no-console
+              const code = (((inviteRes as any).error as any)?.code) || '';
+              const message = (inviteRes as any).error?.message || '';
+              const isDuplicate =
+                code === '23505' || message.toLowerCase().includes('duplicate key') || (inviteRes as any)?.status === 409;
+              if (!isDuplicate) {
+                console.error('[requests/approveIncoming] create invites for other apartment users failed', {
+                  code,
+                  message,
+                  details: ((inviteRes as any).error as any)?.details,
+                  hint: ((inviteRes as any).error as any)?.hint,
+                  targetGroupId,
+                  others,
+                });
+              } else {
+                // eslint-disable-next-line no-console
+                console.log('[requests/approveIncoming] invites already exist, continuing', { targetGroupId });
+              }
+            } else {
+              // eslint-disable-next-line no-console
+              console.log('[requests/approveIncoming] invites created/ignored', {
+                count: finalInviteeIds.length,
+                targetGroupId,
+              });
+            }
+            }
           }
         }
       } catch (e) {
-        // non-fatal: log and continue
-        console.warn('ensure merged group failed', e);
+        console.warn('ensure shared group for apartment failed', e);
       }
 
       await fetchAll();
@@ -618,11 +709,6 @@ export default function RequestsScreen() {
       return;
     }
 
-    // Normalize to international format without '+' for wa.me
-    // Examples:
-    // '050-1234567' -> '972501234567'
-    // '+972-50-1234567' -> '972501234567'
-    // '972501234567' -> '972501234567'
     let digits = raw.startsWith('+')
       ? raw.slice(1).replace(/\D/g, '')
       : raw.replace(/\D/g, '');

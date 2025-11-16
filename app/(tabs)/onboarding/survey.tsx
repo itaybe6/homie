@@ -139,6 +139,14 @@ export default function SurveyScreen() {
     return arr;
   }, [moveInMonthOptions, state.move_in_month]);
 
+  // Age select options (computed at top-level to keep hooks order stable)
+  const minAgeSelectOptions = useMemo(() => generateNumberRange(18, 40), []);
+  const maxAgeSelectOptions = useMemo(() => {
+    const min = (state as any).preferred_age_min;
+    const start = typeof min === 'number' ? min + 1 : 19;
+    return generateNumberRange(start, 60);
+  }, [(state as any).preferred_age_min]);
+
   useEffect(() => {
     const min = (state as any).preferred_age_min;
     const max = (state as any).preferred_age_max;
@@ -504,7 +512,7 @@ export default function SurveyScreen() {
                   <View style={{ gap: 10 }}>
                     <SelectInput
                       label="גיל מינימלי"
-                      options={useMemo(() => generateNumberRange(18, 40), [])}
+                      options={minAgeSelectOptions}
                       value={
                         (state as any).preferred_age_min !== undefined && (state as any).preferred_age_min !== null
                           ? String((state as any).preferred_age_min)
@@ -520,11 +528,7 @@ export default function SurveyScreen() {
                     />
                     <SelectInput
                       label="גיל מקסימלי"
-                      options={useMemo(() => {
-                        const min = (state as any).preferred_age_min;
-                        const start = typeof min === 'number' ? min + 1 : 19;
-                        return generateNumberRange(start, 60);
-                      }, [(state as any).preferred_age_min])}
+                      options={maxAgeSelectOptions}
                       value={
                         (state as any).preferred_age_max !== undefined && (state as any).preferred_age_max !== null
                           ? String((state as any).preferred_age_max)

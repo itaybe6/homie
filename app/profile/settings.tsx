@@ -295,6 +295,59 @@ export default function ProfileSettingsScreen() {
         throw error;
       }
       console.log('[LeaveGroup] Supabase update OK');
+
+      // Also remove the user from any apartments where they are a partner (not owner)
+      try {
+        console.log('[LeaveGroup] Querying apartments containing user as partner', { userId: user.id });
+        const { data: aptRows, error: aptQueryErr } = await supabase
+          .from('apartments')
+          .select('id, owner_id, partner_ids')
+          .contains('partner_ids', [user.id]);
+        if (aptQueryErr) {
+          // eslint-disable-next-line no-console
+          console.error('[LeaveGroup] Apartments query error', {
+            code: (aptQueryErr as any)?.code,
+            message: (aptQueryErr as any)?.message,
+          });
+        } else {
+          const apartments: any[] = (aptRows as any[]) || [];
+          for (const apt of apartments) {
+            const isOwner = String(apt.owner_id) === String(user.id);
+            const currentPartners: string[] = Array.isArray(apt.partner_ids) ? (apt.partner_ids as string[]) : [];
+            const nextPartners = currentPartners.filter((pid) => pid !== user.id);
+            if (isOwner) {
+              console.log('[LeaveGroup] Skipping apartment update because user is owner', { apartmentId: apt.id });
+              continue;
+            }
+            if (nextPartners.length === currentPartners.length) {
+              continue;
+            }
+            console.log('[LeaveGroup] Updating apartment to remove user from partners', {
+              apartmentId: apt.id,
+              before: currentPartners,
+              after: nextPartners,
+            });
+            const { error: aptUpdErr } = await supabase
+              .from('apartments')
+              .update({ partner_ids: nextPartners })
+              .eq('id', apt.id);
+            if (aptUpdErr) {
+              // eslint-disable-next-line no-console
+              console.error('[LeaveGroup] Apartment update error', {
+                apartmentId: apt.id,
+                code: (aptUpdErr as any)?.code,
+                message: (aptUpdErr as any)?.message,
+              });
+            }
+          }
+        }
+      } catch (aptSideErr: any) {
+        // eslint-disable-next-line no-console
+        console.error('[LeaveGroup] Failed removing user from apartments after leaving group', {
+          message: aptSideErr?.message,
+        });
+      }
+
       // Optimistically update UI
       setSharedGroups((prev) => prev.filter((g) => g.id !== groupId));
       Alert.alert('הצלחה', 'עזבת את הקבוצה בהצלחה');
