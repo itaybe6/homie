@@ -11,31 +11,9 @@ type TextLikeComponent = typeof Text | typeof TextInput;
 if (Platform.OS !== 'web') {
   (async () => {
     try {
-      const applied = await AsyncStorage.getItem('__rtl_applied__');
-      // If we've already applied RTL previously, just enable allowances and exit
-      if (applied === '1') {
-        I18nManager.allowRTL(true);
-        I18nManager.swapLeftAndRightInRTL(true);
-        return;
-      }
-
-      if (!I18nManager.isRTL) {
-        I18nManager.allowRTL(true);
-        I18nManager.swapLeftAndRightInRTL(true);
-        I18nManager.forceRTL(true);
-        await AsyncStorage.setItem('__rtl_applied__', '1');
-        // Reload once so the change takes effect
-        try {
-          // eslint-disable-next-line @typescript-eslint/no-var-requires
-          const Updates: any = require('expo-updates');
-          await Updates?.reloadAsync?.();
-        } catch {
-          // If expo-updates isn't available (e.g., web), ignore
-        }
-      } else {
-        // Device is already RTL – mark as applied to avoid future reloads
-        await AsyncStorage.setItem('__rtl_applied__', '1');
-      }
+      // Always allow RTL and swap logical left/right on native
+      I18nManager.allowRTL(true);
+      I18nManager.swapLeftAndRightInRTL(true);
     } catch {
       // ignore
     }
@@ -102,4 +80,9 @@ if (Platform.OS !== 'web') {
 }
 
 import 'expo-router/entry';
+
+// Add a no-op default export to avoid expo-router warning about missing default export
+export default function EntryNoop() {
+  return null;
+}
 

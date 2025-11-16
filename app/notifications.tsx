@@ -16,6 +16,7 @@ import { Bell } from 'lucide-react-native';
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/authStore';
 import { Notification } from '@/types/database';
+import { computeGroupAwareLabel } from '@/lib/group';
 
 export default function NotificationsScreen() {
   const router = useRouter();
@@ -222,14 +223,9 @@ export default function NotificationsScreen() {
 
       // Notify original sender that the invite was approved
       try {
-        const { data: me } = await supabase
-          .from('users')
-          .select('full_name')
-          .eq('id', user.id)
-          .maybeSingle();
-        const approverName = (me as any)?.full_name || 'משתמש';
+        const approverName = await computeGroupAwareLabel(user.id);
         const backTitle = 'שותף אישר להצטרף';
-        const backDesc = `${approverName} אישר להצטרף לדירה${(apt as any)?.title ? `: ${(apt as any).title}` : ''}${(apt as any)?.city ? ` (${(apt as any).city})` : ''}\n---\nAPPROVED_APT:${apartmentId}\nSTATUS:APPROVED`;
+        const backDesc = `${approverName} אישר/ה להצטרף לדירה${(apt as any)?.title ? `: ${(apt as any).title}` : ''}${(apt as any)?.city ? ` (${(apt as any).city})` : ''}\n---\nAPPROVED_APT:${apartmentId}\nSTATUS:APPROVED`;
         await supabase.from('notifications').insert({
           sender_id: user.id,
           recipient_id: notification.sender_id,

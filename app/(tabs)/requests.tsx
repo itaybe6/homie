@@ -17,6 +17,7 @@ import { ArrowLeft, Inbox, Send, Filter, Home, Users, UserPlus2, UserPlus } from
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/authStore';
 import { Apartment, User } from '@/types/database';
+import { computeGroupAwareLabel } from '@/lib/group';
 
 export default function RequestsScreen() {
   const router = useRouter();
@@ -59,6 +60,9 @@ export default function RequestsScreen() {
     status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED' | 'NOT_RELEVANT';
     apartment_id?: string | null;
     type?: string | null;
+    // Internal enrichment fields (not persisted)
+    _receiver_group_id?: string | null;
+    _sender_group_id?: string | null;
   };
   const [sent, setSent] = useState<UnifiedItem[]>([]);
   const [received, setReceived] = useState<UnifiedItem[]>([]);
@@ -300,6 +304,7 @@ export default function RequestsScreen() {
         apartment_id: null,
         status: mapGroupStatus(row.status),
         created_at: row.created_at,
+        _sender_group_id: row.group_id, // inviter's group
       }));
       const groupRecv: UnifiedItem[] = (gRecv || []).map((row: any) => ({
         id: row.id,
@@ -309,6 +314,7 @@ export default function RequestsScreen() {
         apartment_id: null,
         status: mapGroupStatus(row.status),
         created_at: row.created_at,
+        _sender_group_id: row.group_id, // inviter's group
       }));
 
       const sentUnified = [...aptSent, ...matchSent, ...groupSent].sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
@@ -320,6 +326,9 @@ export default function RequestsScreen() {
         new Set<string>([
           ...((matchSent as any[]) || []).map((r: any) => r._receiver_group_id).filter(Boolean),
           ...((matchRecvFromGroups as any[]) || []).map((r: any) => r._receiver_group_id).filter(Boolean),
+          // Also ensure we fetch members for inviter's group in GROUP invites
+          ...((groupSent as any[]) || []).map((r: any) => r._sender_group_id).filter(Boolean),
+          ...((groupRecv as any[]) || []).map((r: any) => r._sender_group_id).filter(Boolean),
         ])
       );
       let groupIdToMemberIds: Record<string, string[]> = {};
@@ -490,6 +499,7 @@ export default function RequestsScreen() {
 
       if (requestType === 'INVITE_APT') {
         // Owner invited; recipient approved — notify owner (sender)
+        const approverName = await computeGroupAwareLabel(user.id);
         await supabase.from('notifications').insert({
           sender_id: user.id,
           recipient_id: req.sender_id,
@@ -499,11 +509,12 @@ export default function RequestsScreen() {
         });
       } else {
         // JOIN_APT: requester approved by recipient — notify requester (sender)
+        const approverName = await computeGroupAwareLabel(user.id);
         await supabase.from('notifications').insert({
           sender_id: user.id,
           recipient_id: req.sender_id,
           title: 'בקשתך אושרה',
-          description: `בקשתך אושרה והתווספת כשותף/ה לדירה${aptTitle ? `: ${aptTitle}` : ''}${aptCity ? ` (${aptCity})` : ''}.`,
+          description: `${approverName} אישר/ה את בקשתך והתווספת כשותף/ה לדירה${aptTitle ? `: ${aptTitle}` : ''}${aptCity ? ` (${aptCity})` : ''}.`,
           is_read: false,
         });
       }
@@ -659,8 +670,7 @@ export default function RequestsScreen() {
       await supabase.rpc('accept_profile_group_invite', { p_invite_id: item.id });
       // Notify inviter that invite was accepted
       try {
-        const { data: me } = await supabase.from('users').select('full_name').eq('id', user.id).maybeSingle();
-        const approverName = (me as any)?.full_name || 'משתמש';
+        const approverName = await computeGroupAwareLabel(user.id);
         await supabase.from('notifications').insert({
           sender_id: user.id,
           recipient_id: item.sender_id,
@@ -705,11 +715,12 @@ export default function RequestsScreen() {
         .update({ status: 'APPROVED', updated_at: new Date().toISOString() })
         .eq('id', match.id);
 
+      const approverLabel = await computeGroupAwareLabel(user.id);
       await supabase.from('notifications').insert({
         sender_id: user.id,
         recipient_id: match.sender_id,
         title: 'בקשת ההתאמה אושרה',
-        description: 'בקשת ההתאמה שלך אושרה. ניתן להמשיך לשיחה ולתאם היכרות.',
+        description: `${approverLabel} אישר/ה את בקשת ההתאמה שלך. ניתן להמשיך לשיחה ולתאם היכרות.`,
         is_read: false,
       });
 
@@ -736,11 +747,12 @@ export default function RequestsScreen() {
         .update({ status: 'REJECTED', updated_at: new Date().toISOString() })
         .eq('id', match.id);
 
+      const rejecterLabel = await computeGroupAwareLabel(user.id);
       await supabase.from('notifications').insert({
         sender_id: user.id,
         recipient_id: match.sender_id,
         title: 'בקשת ההתאמה נדחתה',
-        description: 'הבקשה אליך נדחתה. אפשר להמשיך ולחפש התאמות נוספות.',
+        description: `${rejecterLabel} דחה/תה את בקשת ההתאמה שלך. אפשר להמשיך ולחפש התאמות נוספות.`,
         is_read: false,
       });
 
@@ -786,7 +798,9 @@ export default function RequestsScreen() {
             const senderGroupId = (item as any)?._sender_group_id as string | undefined;
             const isGroupMatch =
               item.kind === 'MATCH' && (!!receiverGroupId || (incoming && !!senderGroupId));
-            const effectiveGroupId = receiverGroupId || (incoming ? senderGroupId : undefined);
+            const isGroupInvite = item.kind === 'GROUP' && incoming && !!(item as any)?._sender_group_id;
+            const effectiveGroupId =
+              receiverGroupId || (incoming ? senderGroupId : undefined) || (isGroupInvite ? (item as any)?._sender_group_id : undefined);
             const groupMemberIds = effectiveGroupId ? (groupMembersByGroupId[effectiveGroupId] || []) : [];
             const groupMembers = groupMemberIds.map((id) => usersById[id]).filter(Boolean) as Partial<User>[];
             const apt = (item.kind === 'APT' || item.kind === 'APT_INVITE') && item.apartment_id ? aptsById[item.apartment_id] : undefined;
@@ -800,7 +814,7 @@ export default function RequestsScreen() {
                     <View style={styles.thumbWrap}>
                       <Image source={{ uri: aptImage }} style={styles.thumbImg} />
                     </View>
-                  ) : isGroupMatch && groupMembers.length ? (
+                  ) : (isGroupMatch || isGroupInvite) && groupMembers.length ? (
                     (() => {
                       const gridMembers = groupMembers.slice(0, 4);
                       const rows = Math.ceil(gridMembers.length / 2);
@@ -837,7 +851,7 @@ export default function RequestsScreen() {
                         {apt.title} • {apt.city}
                       </Text>
                     )}
-                    {isGroupMatch && groupMembers.length ? (
+                    {(isGroupMatch || isGroupInvite) && groupMembers.length ? (
                       <Text style={styles.cardSub} numberOfLines={1}>
                         {groupMembers.map((m) => m.full_name).filter(Boolean).join(' • ')}
                       </Text>

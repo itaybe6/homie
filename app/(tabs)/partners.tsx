@@ -19,6 +19,7 @@ import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/authStore';
 import { User } from '@/types/database';
+import { computeGroupAwareLabel } from '@/lib/group';
 import RoommateCard from '@/components/RoommateCard';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { cityNeighborhoods, canonicalizeCityName } from '@/assets/data/neighborhoods';
@@ -298,9 +299,8 @@ useEffect(() => {
         senderIsMerged = !!myGroup?.group_id;
       } catch {}
       const notifTitle = senderIsMerged ? 'בקשת שותפות מפרופיל משותף' : 'בקשת שותפות חדשה';
-      const notifDesc = senderIsMerged
-        ? 'פרופיל משותף מעוניין להיות שותף שלך.'
-        : 'המשתמש מעוניין להיות שותף שלך.';
+      const senderLabel = await computeGroupAwareLabel(currentUser.id);
+      const notifDesc = `${senderLabel} מעוניין/ת להיות שותף/ה שלך.`;
       await supabase.from('notifications').insert({
         sender_id: currentUser.id,
         recipient_id: likedUser.id,
@@ -406,9 +406,8 @@ useEffect(() => {
           senderIsMerged = !!myGroup?.group_id;
         } catch {}
         const notifTitle = senderIsMerged ? 'בקשת שותפות מפרופיל משותף' : 'בקשת שותפות חדשה';
-        const notifDesc = senderIsMerged
-          ? 'פרופיל משותף מעוניין בקבוצה שלך.'
-          : 'המשתמש מעוניין בקבוצה שלך.';
+        const senderLabel = await computeGroupAwareLabel(currentUser.id);
+        const notifDesc = `${senderLabel} מעוניין/ת בקבוצה שלך.`;
         const notifications = recipients.map((u) => ({
           sender_id: currentUser.id,
           recipient_id: u.id,

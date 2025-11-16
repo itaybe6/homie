@@ -50,6 +50,7 @@ export default function ApartmentDetailsScreen() {
   const [isMembersOpen, setIsMembersOpen] = useState(false);
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [addCandidates, setAddCandidates] = useState<User[]>([]);
+  const [sharedGroupMembers, setSharedGroupMembers] = useState<User[]>([]);
   const [isAdding, setIsAdding] = useState(false);
   const [addSearch, setAddSearch] = useState('');
   const [removingId, setRemovingId] = useState<string | null>(null);
@@ -337,6 +338,38 @@ export default function ApartmentDetailsScreen() {
       const all = (data || []) as User[];
       const candidates = all.filter((u) => !currentIds.has(u.id));
       setAddCandidates(candidates);
+      // Load shared profile members (ACTIVE) for the owner
+      try {
+        const { data: membership } = await supabase
+          .from('profile_group_members')
+          .select('group_id')
+          .eq('user_id', apartment.owner_id)
+          .eq('status', 'ACTIVE')
+          .maybeSingle();
+        const groupId = (membership as any)?.group_id as string | undefined;
+        if (groupId) {
+          const { data: memberRows } = await supabase
+            .from('profile_group_members')
+            .select('user_id')
+            .eq('group_id', groupId)
+            .eq('status', 'ACTIVE');
+          const ids: string[] = (memberRows || []).map((r: any) => r.user_id).filter(Boolean);
+          const filteredIds = ids.filter((id) => !currentIds.has(id));
+          if (filteredIds.length) {
+            const { data: usersRows } = await supabase
+              .from('users')
+              .select('id, full_name, avatar_url')
+              .in('id', filteredIds);
+            setSharedGroupMembers(((usersRows || []) as User[]).filter((u) => u && u.id));
+          } else {
+            setSharedGroupMembers([]);
+          }
+        } else {
+          setSharedGroupMembers([]);
+        }
+      } catch {
+        setSharedGroupMembers([]);
+      }
       setIsAddOpen(true);
     } catch (e) {
       console.error('Failed to load candidates', e);
@@ -761,34 +794,66 @@ export default function ApartmentDetailsScreen() {
                 <View style={{ paddingVertical: 20, alignItems: 'center' }}>
                   <ActivityIndicator size="small" color="#7C5CFF" />
                 </View>
-              ) : filteredCandidates.length > 0 ? (
-                filteredCandidates.map((u) => (
-                  <TouchableOpacity
-                    key={u.id}
-                    style={styles.candidateRow}
-                    activeOpacity={0.9}
-                    onPress={() => confirmAddPartner(u)}
-                  >
-                    <View style={styles.candidateLeft}>
-                      <Image
-                        source={{ uri: (u as any).avatar_url || 'https://cdn-icons-png.flaticon.com/512/847/847969.png' }}
-                        style={styles.candidateAvatar}
-                      />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.candidateName} numberOfLines={1}>{u.full_name}</Text>
-                      <View style={styles.candidateBadges}>
-                        <View style={styles.candidateBadge}><Text style={styles.candidateBadgeText}>זמין</Text></View>
-                        <View style={styles.candidateBadge}><Text style={styles.candidateBadgeText}>מתאים</Text></View>
+              ) : (
+                <>
+                  {sharedGroupMembers.length > 0 ? (
+                    <View style={{ marginBottom: 12 }}>
+                      <Text style={styles.sectionHeading}>פרופיל משותף</Text>
+                      <View style={{ gap: 8, marginTop: 8 }}>
+                        {sharedGroupMembers.map((m) => (
+                          <TouchableOpacity
+                            key={`shared-${m.id}`}
+                            style={styles.candidateRow}
+                            activeOpacity={0.9}
+                            onPress={() => confirmAddPartner(m)}
+                          >
+                            <View style={styles.candidateLeft}>
+                              <Image
+                                source={{ uri: (m as any).avatar_url || 'https://cdn-icons-png.flaticon.com/512/847/847969.png' }}
+                                style={styles.candidateAvatar}
+                              />
+                            </View>
+                            <View style={{ flex: 1 }}>
+                              <Text style={styles.candidateName} numberOfLines={1}>{m.full_name}</Text>
+                            </View>
+                            <View style={styles.candidateRight}>
+                              <UserPlus size={16} color="#A78BFA" />
+                            </View>
+                          </TouchableOpacity>
+                        ))}
                       </View>
                     </View>
-                    <View style={styles.candidateRight}>
-                      <UserPlus size={16} color="#A78BFA" />
-                    </View>
-                  </TouchableOpacity>
-                ))
-              ) : (
-                <Text style={styles.emptyMembers}>לא נמצאו תוצאות</Text>
+                  ) : null}
+                  {filteredCandidates.length > 0 ? (
+                    filteredCandidates.map((u) => (
+                      <TouchableOpacity
+                        key={u.id}
+                        style={styles.candidateRow}
+                        activeOpacity={0.9}
+                        onPress={() => confirmAddPartner(u)}
+                      >
+                        <View style={styles.candidateLeft}>
+                          <Image
+                            source={{ uri: (u as any).avatar_url || 'https://cdn-icons-png.flaticon.com/512/847/847969.png' }}
+                            style={styles.candidateAvatar}
+                          />
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.candidateName} numberOfLines={1}>{u.full_name}</Text>
+                          <View style={styles.candidateBadges}>
+                            <View style={styles.candidateBadge}><Text style={styles.candidateBadgeText}>זמין</Text></View>
+                            <View style={styles.candidateBadge}><Text style={styles.candidateBadgeText}>מתאים</Text></View>
+                          </View>
+                        </View>
+                        <View style={styles.candidateRight}>
+                          <UserPlus size={16} color="#A78BFA" />
+                        </View>
+                      </TouchableOpacity>
+                    ))
+                  ) : (
+                    <Text style={styles.emptyMembers}>לא נמצאו תוצאות</Text>
+                  )}
+                </>
               )}
             </ScrollView>
           </View>
@@ -1217,6 +1282,12 @@ const styles = StyleSheet.create({
     color: '#C9CDD6',
     fontSize: 13,
     fontWeight: '700',
+  },
+  sectionHeading: {
+    color: '#C9CDD6',
+    fontSize: 13,
+    fontWeight: '700',
+    textAlign: 'right',
   },
   closeBtn: {
     width: 32,

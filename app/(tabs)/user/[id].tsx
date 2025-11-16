@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, Image, ActivityIndicator, TouchableOpacity, Alert, Dimensions } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { computeGroupAwareLabel } from '@/lib/group';
 import { supabase } from '@/lib/supabase';
 import { User } from '@/types/database';
 import { ArrowLeft, MapPin, UserPlus2, Cigarette, PawPrint, Utensils, Moon, Users, Home, Calendar, User as UserIcon, Building2, Bed, Heart, Briefcase } from 'lucide-react-native';
@@ -26,6 +27,7 @@ export default function UserProfileScreen() {
   const [galleryWidth, setGalleryWidth] = useState(0);
   const [survey, setSurvey] = useState<UserSurveyResponse | null>(null);
   const [surveyLoading, setSurveyLoading] = useState(false);
+  const [hasPendingMergeInvite, setHasPendingMergeInvite] = useState(false);
 
   const normalizeImageUrls = (value: unknown): string[] => {
     if (!value) return [];
@@ -170,6 +172,32 @@ export default function UserProfileScreen() {
     };
   }, [profile?.id]);
 
+  // Detect if I already sent a pending merge invite to this user
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        if (!me?.id || !profile?.id) {
+          if (!cancelled) setHasPendingMergeInvite(false);
+          return;
+        }
+        const { data: existing } = await supabase
+          .from('profile_group_invites')
+          .select('id')
+          .eq('inviter_id', me.id)
+          .eq('invitee_id', profile.id)
+          .eq('status', 'PENDING')
+          .maybeSingle();
+        if (!cancelled) setHasPendingMergeInvite(!!existing?.id);
+      } catch {
+        if (!cancelled) setHasPendingMergeInvite(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [me?.id, profile?.id]);
+
   const ensureGroupAndInvite = async () => {
     if (!me?.id) {
       Alert.alert('חיבור נדרש', 'כדי לשלוח בקשה למיזוג פרופילים יש להתחבר לחשבון.');
@@ -182,20 +210,30 @@ export default function UserProfileScreen() {
     }
     try {
       setInviteLoading(true);
-      // Find existing group created by me (pending/active)
-      const { data: existingGroup, error: gErr } = await supabase
-        .from('profile_groups')
-        .select('*')
-        .eq('created_by', me.id)
-        .in('status', ['PENDING', 'ACTIVE'])
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
+      // Prefer an existing ACTIVE group that I'm a member of; if none, fallback to a group I created; else create new
+      const [{ data: myActiveMembership }, { data: createdByMeGroup, error: gErr }] = await Promise.all([
+        supabase
+          .from('profile_group_members')
+          .select('group_id')
+          .eq('user_id', me.id)
+          .eq('status', 'ACTIVE')
+          .maybeSingle(),
+        supabase
+          .from('profile_groups')
+          .select('*')
+          .eq('created_by', me.id)
+          .in('status', ['PENDING', 'ACTIVE'])
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+      ]);
       if (gErr) throw gErr;
 
-      let groupId = existingGroup?.id as string | undefined;
-
-      // Create group if none
+      let groupId = (myActiveMembership as any)?.group_id as string | undefined;
+      if (!groupId) {
+        groupId = (createdByMeGroup as any)?.id as string | undefined;
+      }
+      // Create group if none found
       if (!groupId) {
         const { data: newGroup, error: cErr } = await supabase
           .from('profile_groups')
@@ -230,16 +268,8 @@ export default function UserProfileScreen() {
       });
       if (iErr) throw iErr;
 
-      // Create notification for recipient
-      let inviterName = 'משתמש';
-      try {
-        const { data: meRow } = await supabase
-          .from('users')
-          .select('full_name')
-          .eq('id', me.id)
-          .maybeSingle();
-        inviterName = ((meRow as any)?.full_name as string) || inviterName;
-      } catch {}
+      // Create notification for recipient (use group-aware label)
+      const inviterName = await computeGroupAwareLabel(me.id);
 
       const title = 'בקשת מיזוג פרופילים חדשה';
       const desc = `${inviterName} מזמין/ה אותך להצטרף לקבוצת שותפים ולהציג פרופיל ממוזג יחד`;
@@ -251,6 +281,7 @@ export default function UserProfileScreen() {
       });
 
       Alert.alert('נשלח', 'הבקשה נשלחה ונשלחה התראה למשתמש/ת.');
+      setHasPendingMergeInvite(true);
     } catch (e: any) {
       console.error('send merge invite failed', e);
       Alert.alert('שגיאה', e?.message || 'לא ניתן לשלוח את הבקשה כעת');
@@ -349,12 +380,12 @@ export default function UserProfileScreen() {
         ) : null}
         {!groupLoading && me?.id && me.id !== profile.id && !isMeInViewedGroup ? (
           <TouchableOpacity
-            style={styles.mergeHeaderBtn}
+            style={[styles.mergeHeaderBtn, (inviteLoading || hasPendingMergeInvite) ? styles.mergeBtnDisabled : null]}
             activeOpacity={0.9}
-            onPress={inviteLoading ? undefined : ensureGroupAndInvite}
+            onPress={(inviteLoading || hasPendingMergeInvite) ? undefined : ensureGroupAndInvite}
           >
             <UserPlus2 size={16} color="#FFFFFF" />
-            <Text style={styles.mergeHeaderText}>{inviteLoading ? 'שולח...' : 'מיזוג'}</Text>
+            <Text style={styles.mergeHeaderText}>{inviteLoading ? 'שולח...' : hasPendingMergeInvite ? 'נשלחה בקשה' : 'מיזוג'}</Text>
           </TouchableOpacity>
         ) : null}
         <Image
@@ -679,6 +710,7 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#0F0F14',
+    direction: 'rtl',
   },
   center: {
     flex: 1,
@@ -796,7 +828,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 8 },
   },
   surveyBadgeRow: {
-    flexDirection: 'row-reverse',
+    flexDirection: 'row',
     alignItems: 'center',
     alignSelf: 'flex-start',
     gap: 8,
@@ -830,7 +862,7 @@ const styles = StyleSheet.create({
     opacity: 0.9,
   },
   apGroupRow: {
-    flexDirection: 'row-reverse',
+    flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
   },
@@ -862,7 +894,7 @@ const styles = StyleSheet.create({
   subletTag: {
     marginTop: 16,
     alignSelf: 'flex-start',
-    flexDirection: 'row-reverse',
+    flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
     paddingVertical: 8,

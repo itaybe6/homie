@@ -11,12 +11,14 @@ import {
   TouchableOpacity,
   Modal,
   ScrollView,
+  Alert,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Search, SlidersHorizontal, X, Plus } from 'lucide-react-native';
 import { getNeighborhoodsForCityName, searchCitiesWithNeighborhoods } from '@/lib/neighborhoods';
 import { supabase } from '@/lib/supabase';
 import { useApartmentStore } from '@/stores/apartmentStore';
+import { useAuthStore } from '@/stores/authStore';
 import { Apartment } from '@/types/database';
 import ApartmentCard from '@/components/ApartmentCard';
 
@@ -25,6 +27,7 @@ export default function HomeScreen() {
   const router = useRouter();
   const { apartments, setApartments, isLoading, setLoading } =
     useApartmentStore();
+  const { user } = useAuthStore();
   const [searchQuery, setSearchQuery] = useState('');
   const [filteredApartments, setFilteredApartments] = useState<Apartment[]>(
     []
@@ -185,6 +188,33 @@ export default function HomeScreen() {
     router.push({ pathname: '/apartment/[id]', params: { id: apartment.id } });
   };
 
+  const handleAddApartmentPress = async () => {
+    // If regular user is already assigned as a partner to an apartment, block adding a new one
+    try {
+      const currentUserId = (user as any)?.id;
+      const currentRole = (user as any)?.role;
+      if (currentUserId && currentRole === 'user') {
+        const { data, error } = await supabase
+          .from('apartments')
+          .select('id')
+          .contains('partner_ids', [currentUserId])
+          .limit(1);
+        if (error) throw error;
+        if (data && data.length > 0) {
+          Alert.alert(
+            'לא ניתן להוסיף דירה',
+            'אתה כבר משויך לדירה קיימת ולא ניתן להוסיף דירה נוספת.'
+          );
+          return;
+        }
+      }
+    } catch {
+      Alert.alert('שגיאה', 'אירעה שגיאה בבדיקת השיוך לדירה. נסה שוב.');
+      return;
+    }
+    router.push('/(tabs)/add-apartment');
+  };
+
   if (isLoading && !refreshing) {
     return (
       <View style={styles.centerContainer}>
@@ -203,7 +233,7 @@ export default function HomeScreen() {
           <TouchableOpacity
             activeOpacity={0.8}
             style={styles.topActionBtn}
-            onPress={() => router.push('/(tabs)/add-apartment')}
+            onPress={handleAddApartmentPress}
           >
             <Plus size={20} color="#FFFFFF" />
           </TouchableOpacity>
@@ -460,6 +490,8 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#0F0F14',
+    writingDirection: 'rtl',
+    direction: 'rtl',
   },
   centerContainer: {
     flex: 1,
@@ -597,6 +629,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
     textAlign: 'right',
+    writingDirection: 'rtl',
   },
   fieldInput: {
     backgroundColor: '#17171F',
@@ -708,6 +741,7 @@ const styles = StyleSheet.create({
     color: '#E5E7EB',
     fontSize: 14,
     textAlign: 'right',
+    writingDirection: 'rtl',
   },
   selectButton: {
     flexDirection: 'row',
