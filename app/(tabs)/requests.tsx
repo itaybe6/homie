@@ -163,7 +163,7 @@ export default function RequestsScreen() {
           created_at: row.created_at,
           type: row.type || null,
         }));
-      const aptRecv: UnifiedItem[] = (rData || [])
+      let aptRecv: any[] = (rData || [])
         .filter((row: any) => (row.status || 'PENDING') !== 'NOT_RELEVANT')
         .map((row: any) => ({
           id: row.id,
@@ -175,6 +175,41 @@ export default function RequestsScreen() {
           created_at: row.created_at,
           type: row.type || null,
         }));
+
+      // Enrich incoming APT/APT_INVITE where sender belongs to a merged profile (show sender's group)
+      try {
+        const aptIncomingSenderIds = Array.from(new Set(((aptRecv || []) as any[]).map((r: any) => r.sender_id).filter(Boolean)));
+        if (aptIncomingSenderIds.length) {
+          const { data: aMemberships } = await supabase
+            .from('profile_group_members')
+            .select('user_id, group_id')
+            .eq('status', 'ACTIVE')
+            .in('user_id', aptIncomingSenderIds);
+          const senderToGroupIdApt: Record<string, string> = {};
+          const aptSenderGroupIds = new Set<string>();
+          (aMemberships || []).forEach((m: any) => {
+            senderToGroupIdApt[m.user_id] = m.group_id;
+            aptSenderGroupIds.add(m.group_id);
+          });
+          if (aptSenderGroupIds.size) {
+            const { data: aGroupMembers } = await supabase
+              .from('profile_group_members')
+              .select('group_id, user_id')
+              .eq('status', 'ACTIVE')
+              .in('group_id', Array.from(aptSenderGroupIds));
+            (aGroupMembers || []).forEach((m: any) => {
+              if (!groupMembersByGroupId[m.group_id]) groupMembersByGroupId[m.group_id] = [];
+              if (!groupMembersByGroupId[m.group_id].includes(m.user_id)) {
+                groupMembersByGroupId[m.group_id].push(m.user_id);
+              }
+            });
+          }
+          aptRecv = (aptRecv || []).map((row: any) => ({
+            ...row,
+            _sender_group_id: senderToGroupIdApt[row.sender_id] || null,
+          }));
+        }
+      } catch {}
 
       const matchSent: UnifiedItem[] = (mSent || [])
         .filter((row: any) => mapMatchStatus(row.status) !== 'NOT_RELEVANT')
@@ -806,6 +841,10 @@ export default function RequestsScreen() {
                       <Text style={styles.cardSub} numberOfLines={1}>
                         {groupMembers.map((m) => m.full_name).filter(Boolean).join(' • ')}
                       </Text>
+                    ) : (incoming && (item.kind === 'APT' || item.kind === 'APT_INVITE') && (item as any)?._sender_group_id && groupMembers.length) ? (
+                      <Text style={styles.cardSub} numberOfLines={1}>
+                        {groupMembers.map((m) => m.full_name).filter(Boolean).join(' • ')}
+                      </Text>
                     ) : !!otherUser?.full_name ? (
                       <Text style={styles.cardMeta}>משתמש: {otherUser.full_name}</Text>
                     ) : null}
@@ -1061,7 +1100,51 @@ export default function RequestsScreen() {
                         if (id) router.push({ pathname: '/user/[id]', params: { id } });
                       }}
                     >
-                      <Image source={{ uri: otherUser?.avatar_url || DEFAULT_AVATAR }} style={styles.avatarImg} />
+                      {(incoming && (item.kind === 'APT' || item.kind === 'APT_INVITE') && (item as any)?._sender_group_id && groupMembers.length) ? (
+                        (() => {
+                          const gm = groupMembers.slice(0, 4);
+                          if (gm.length === 1) {
+                            const m = gm[0];
+                            return (
+                              <Image
+                                source={{ uri: m?.avatar_url || DEFAULT_AVATAR }}
+                                style={{ width: '100%', height: '100%' }}
+                                resizeMode="cover"
+                              />
+                            );
+                          }
+                          if (gm.length === 2) {
+                            return (
+                              <View style={{ flex: 1, flexDirection: 'row' }}>
+                                {gm.map((m, idx) => (
+                                  <View key={idx} style={{ width: '50%', height: '100%' }}>
+                                    <Image
+                                      source={{ uri: m?.avatar_url || DEFAULT_AVATAR }}
+                                      style={{ width: '100%', height: '100%' }}
+                                      resizeMode="cover"
+                                    />
+                                  </View>
+                                ))}
+                              </View>
+                            );
+                          }
+                          return (
+                            <View style={{ flex: 1, flexDirection: 'row', flexWrap: 'wrap' }}>
+                              {gm.map((m, idx) => (
+                                <View key={idx} style={{ width: '50%', height: '50%' }}>
+                                  <Image
+                                    source={{ uri: m?.avatar_url || DEFAULT_AVATAR }}
+                                    style={{ width: '100%', height: '100%' }}
+                                    resizeMode="cover"
+                                  />
+                                </View>
+                              ))}
+                            </View>
+                          );
+                        })()
+                      ) : (
+                        <Image source={{ uri: otherUser?.avatar_url || DEFAULT_AVATAR }} style={styles.avatarImg} />
+                      )}
                     </TouchableOpacity>
                   )}
                 </View>

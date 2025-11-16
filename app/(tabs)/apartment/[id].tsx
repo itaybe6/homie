@@ -190,6 +190,52 @@ export default function ApartmentDetailsScreen() {
     : [];
   const isMember = !!(user?.id && currentPartnerIds.includes(user.id));
 
+  // Compute a human-friendly sender label: if user is part of an ACTIVE merged profile,
+  // show all member names joined by " • ", otherwise fallback to the user's full name.
+  const computeSenderLabel = async (userId: string): Promise<string> => {
+    try {
+      // Check active membership
+      const { data: membership } = await supabase
+        .from('profile_group_members')
+        .select('group_id')
+        .eq('user_id', userId)
+        .eq('status', 'ACTIVE')
+        .maybeSingle();
+      const groupId = (membership as any)?.group_id as string | undefined;
+      if (!groupId) {
+        const { data: me } = await supabase
+          .from('users')
+          .select('full_name')
+          .eq('id', userId)
+          .maybeSingle();
+        return ((me as any)?.full_name as string) || 'משתמש';
+      }
+      // Load members of the active group
+      const { data: memberRows } = await supabase
+        .from('profile_group_members')
+        .select('user_id')
+        .eq('group_id', groupId)
+        .eq('status', 'ACTIVE');
+      const ids = (memberRows || []).map((r: any) => r.user_id).filter(Boolean);
+      if (!ids.length) {
+        const { data: me } = await supabase
+          .from('users')
+          .select('full_name')
+          .eq('id', userId)
+          .maybeSingle();
+        return ((me as any)?.full_name as string) || 'משתמש';
+      }
+      const { data: usersRows } = await supabase
+        .from('users')
+        .select('full_name')
+        .in('id', ids);
+      const names = (usersRows || []).map((u: any) => u?.full_name).filter(Boolean);
+      return names.length ? names.join(' • ') : 'משתמש';
+    } catch {
+      return 'משתמש';
+    }
+  };
+
   const handleRequestJoin = async () => {
     try {
       if (!user?.id) {
@@ -219,16 +265,8 @@ export default function ApartmentDetailsScreen() {
         return;
       }
 
-      // Fetch sender name for nicer message
-      let senderName = 'משתמש';
-      try {
-        const { data: me } = await supabase
-          .from('users')
-          .select('full_name')
-          .eq('id', user.id)
-          .maybeSingle();
-        senderName = (me as any)?.full_name || senderName;
-      } catch {}
+      // Fetch sender label (merged profile if exists)
+      const senderName = await computeSenderLabel(user.id);
 
       const title = 'בקשה להצטרף כדייר';
       const description = `${senderName} מעוניין להצטרף לדירה: ${apartment.title} (${apartment.city})`;
@@ -321,18 +359,8 @@ export default function ApartmentDetailsScreen() {
         return;
       }
 
-      // Create a notification to the invitee with inviter's name
-      let inviterName = owner?.full_name || 'בעל הדירה';
-      try {
-        if (!owner?.full_name) {
-          const { data: meRow } = await supabase
-            .from('users')
-            .select('full_name')
-            .eq('id', user.id)
-            .maybeSingle();
-          inviterName = (meRow as any)?.full_name || inviterName;
-        }
-      } catch {}
+      // Create a notification to the invitee with inviter's merged profile label (if exists)
+      const inviterName = await computeSenderLabel(user.id);
 
       const title = 'הזמנה להצטרף לדירה';
       const description = `${inviterName} מזמין/ה אותך להיות שותף/ה בדירה${apartment.title ? `: ${apartment.title}` : ''}${apartment.city ? ` (${apartment.city})` : ''}`;

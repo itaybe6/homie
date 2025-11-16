@@ -316,7 +316,7 @@ export default function NotificationsScreen() {
                       <View style={styles.thumbWrap}>
                         <Image source={{ uri: aptImage }} style={styles.thumbImg} />
                       </View>
-                    ) : isPartnerRequest && senderGroupId && groupMembers.length ? (
+                    ) : senderGroupId && groupMembers.length ? (
                       (() => {
                         const gridMembers = groupMembers.slice(0, 4);
                         const rows = Math.ceil(gridMembers.length / 2);
@@ -325,7 +325,7 @@ export default function NotificationsScreen() {
                           <View style={styles.thumbWrap}>
                             <View style={{ flex: 1, flexDirection: 'row', flexWrap: 'wrap' }}>
                               {gridMembers.map((gm: any, idx: number) => (
-                                <View key={idx} style={{ width: '50%', height: cellHeightPct, padding: 1 } as any}>
+                                <View key={idx} style={{ width: '50%', height: cellHeightPct as any, padding: 1 }}>
                                   <Image
                                     source={{ uri: gm?.avatar_url || DEFAULT_AVATAR }}
                                     style={{ width: '100%', height: '100%' }}
@@ -338,15 +338,18 @@ export default function NotificationsScreen() {
                         );
                       })()
                     ) : null}
-                    <View style={styles.bubbleTextArea}>
+                  <View style={styles.bubbleTextArea}>
                       <Text style={styles.cardTitle} numberOfLines={1}>{item.title}</Text>
-                      {isPartnerRequest && senderGroupId && groupMembers.length ? (
+                    {senderGroupId && groupMembers.length
+                      ? (
                         <Text style={styles.senderName} numberOfLines={1}>
                           {groupMembers.map((gm: any) => gm?.full_name).filter(Boolean).join(' • ')}
                         </Text>
-                      ) : !!sender?.full_name ? (
+                      )
+                      : (!!sender?.full_name ? (
                         <Text style={styles.senderName} numberOfLines={1}>{sender.full_name}</Text>
-                      ) : null}
+                      ) : null)
+                    }
                       <Text style={styles.cardDesc} numberOfLines={2}>{displayDescription(item.description)}</Text>
                       <Text style={styles.cardMeta}>
                         {new Date(item.created_at).toLocaleString()}
@@ -382,10 +385,53 @@ export default function NotificationsScreen() {
                 >
                   <View style={styles.avatarShadow} />
                   <View style={styles.avatarWrap}>
-                    <Image
-                      source={{ uri: sender?.avatar_url || DEFAULT_AVATAR }}
-                      style={styles.avatarImg}
-                    />
+                    {senderGroupId && groupMembers.length ? (
+                      (() => {
+                        const gm = groupMembers.slice(0, 4);
+                        if (gm.length === 1) {
+                          return (
+                            <Image
+                              source={{ uri: gm[0]?.avatar_url || DEFAULT_AVATAR }}
+                              style={{ width: '100%', height: '100%' }}
+                              resizeMode="cover"
+                            />
+                          );
+                        }
+                        if (gm.length === 2) {
+                          return (
+                            <View style={{ flex: 1, flexDirection: 'row' }}>
+                              {gm.map((m: any, idx: number) => (
+                                <View key={idx} style={{ width: '50%', height: '100%' }}>
+                                  <Image
+                                    source={{ uri: m?.avatar_url || DEFAULT_AVATAR }}
+                                    style={{ width: '100%', height: '100%' }}
+                                    resizeMode="cover"
+                                  />
+                                </View>
+                              ))}
+                            </View>
+                          );
+                        }
+                        return (
+                          <View style={{ flex: 1, flexDirection: 'row', flexWrap: 'wrap' }}>
+                            {gm.map((m: any, idx: number) => (
+                              <View key={idx} style={{ width: '50%', height: '50%' }}>
+                                <Image
+                                  source={{ uri: m?.avatar_url || DEFAULT_AVATAR }}
+                                  style={{ width: '100%', height: '100%' }}
+                                  resizeMode="cover"
+                                />
+                              </View>
+                            ))}
+                          </View>
+                        );
+                      })()
+                    ) : (
+                      <Image
+                        source={{ uri: sender?.avatar_url || DEFAULT_AVATAR }}
+                        style={styles.avatarImg}
+                      />
+                    )}
                   </View>
                 </TouchableOpacity>
               </View>
