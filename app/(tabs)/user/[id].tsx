@@ -467,75 +467,127 @@ export default function UserProfileScreen() {
               <Home size={14} color="#FFFFFF" />
               <Text style={[styles.surveyBadgeText, { color: '#FFFFFF' }]}>על הדירה</Text>
             </View>
-            <View style={styles.pillsRow}>
-              {Number.isFinite(survey.price_range as number) ? (
-                <SurveyPill icon={<Text style={styles.currencyIcon}>₪</Text>}>
-                  תקציב: ₪{Number(survey.price_range).toLocaleString('he-IL')}
-                </SurveyPill>
-              ) : null}
-              {'bills_included' in survey && survey.bills_included !== undefined && survey.bills_included !== null ? (
-                <SurveyPill icon={<Text style={styles.currencyIcon}>₪</Text>}>
-                  {survey.bills_included ? 'כולל חשבונות' : 'בלי חשבונות'}
-                </SurveyPill>
-              ) : null}
-              {survey.preferred_city ? (
-                <SurveyPill icon={<MapPin size={14} color="#FFFFFF" />}>
-                  {survey.preferred_city}
-                </SurveyPill>
-              ) : null}
-              {Array.isArray(survey.preferred_neighborhoods) && survey.preferred_neighborhoods.length > 0 ? (
-                <>
+            {/* עיר */}
+            {survey.preferred_city ? (
+              <View style={styles.apGroupSection}>
+                <Text style={styles.apGroupLabel}>עיר</Text>
+                <View style={styles.apGroupRow}>
                   <SurveyPill icon={<MapPin size={14} color="#FFFFFF" />}>
-                    {survey.preferred_city ? `שכונות ב־${survey.preferred_city}` : 'שכונות'}
+                    {survey.preferred_city}
                   </SurveyPill>
+                </View>
+              </View>
+            ) : null}
+
+            {/* שכונות */}
+            {Array.isArray(survey.preferred_neighborhoods) && survey.preferred_neighborhoods.filter(Boolean).length > 0 ? (
+              <View style={styles.apGroupSection}>
+                <Text style={styles.apGroupLabel}>שכונות</Text>
+                <View style={styles.apGroupRow}>
+                  {!!survey.preferred_city ? (
+                    <SurveyPill icon={<MapPin size={14} color="#FFFFFF" />}>
+                      {`ב־${survey.preferred_city}`}
+                    </SurveyPill>
+                  ) : null}
                   {survey.preferred_neighborhoods.filter(Boolean).map((n, idx) => (
                     <SurveyPill key={`neigh-${idx}-${n}`} icon={<MapPin size={14} color="#FFFFFF" />}>
                       {n}
                     </SurveyPill>
                   ))}
-                </>
-              ) : null}
-              {survey.floor_preference ? (
-                <SurveyPill icon={<Building2 size={14} color="#FFFFFF" />}>
-                  קומה: {survey.floor_preference}
-                </SurveyPill>
-              ) : null}
-              {'has_balcony' in survey && survey.has_balcony !== undefined && survey.has_balcony !== null ? (
-                <SurveyPill icon={<Home size={14} color="#FFFFFF" />}>
-                  {survey.has_balcony ? 'עם מרפסת' : 'בלי מרפסת'}
-                </SurveyPill>
-              ) : null}
-              {'has_elevator' in survey && survey.has_elevator !== undefined && survey.has_elevator !== null ? (
-                <SurveyPill icon={<Building2 size={14} color="#FFFFFF" />}>
-                  {survey.has_elevator ? 'עם מעלית' : 'בלי מעלית'}
-                </SurveyPill>
-              ) : null}
-              {'wants_master_room' in survey && survey.wants_master_room !== undefined && survey.wants_master_room !== null ? (
-                <SurveyPill icon={<Bed size={14} color="#FFFFFF" />}>
-                  {survey.wants_master_room ? 'מחפש/ת מאסטר' : 'לא חובה מאסטר'}
-                </SurveyPill>
-              ) : null}
-              {survey.move_in_month ? (
-                <SurveyPill icon={<Calendar size={14} color="#FFFFFF" />}>
-                  כניסה: {survey.move_in_month}
-                </SurveyPill>
-              ) : null}
-              {Number.isFinite(survey.preferred_roommates as number) ? (
-                <SurveyPill icon={<Users size={14} color="#FFFFFF" />}>
-                  מספר שותפים: {survey.preferred_roommates}
-                </SurveyPill>
-              ) : null}
-              {'pets_allowed' in survey && survey.pets_allowed !== undefined && survey.pets_allowed !== null ? (
-                <SurveyPill icon={<PawPrint size={14} color="#FFFFFF" />}>
-                  חיות בדירה: {survey.pets_allowed ? 'מותר' : 'לא מותר'}
-                </SurveyPill>
-              ) : null}
-              {'with_broker' in survey && survey.with_broker !== undefined && survey.with_broker !== null ? (
-                <SurveyPill icon={<Briefcase size={14} color="#FFFFFF" />}>
-                  {survey.with_broker ? 'עם מתווך/ת' : 'ללא מתווך/ת'}
-                </SurveyPill>
-              ) : null}
-            </View>
+                </View>
+              </View>
+            ) : null}
+
+            {/* תקציב */}
+            {Number.isFinite(survey.price_range as number) || (survey.bills_included !== undefined && survey.bills_included !== null) ? (
+              <View style={styles.apGroupSection}>
+                <Text style={styles.apGroupLabel}>תקציב</Text>
+                <View style={styles.apGroupRow}>
+                  {Number.isFinite(survey.price_range as number) ? (
+                    <SurveyPill icon={<Text style={styles.currencyIcon}>₪</Text>}>
+                      {`₪${Number(survey.price_range).toLocaleString('he-IL')}`}
+                    </SurveyPill>
+                  ) : null}
+                  {survey.bills_included !== undefined && survey.bills_included !== null ? (
+                    <SurveyPill icon={<Text style={styles.currencyIcon}>₪</Text>}>
+                      {survey.bills_included ? 'כולל חשבונות' : 'בלי חשבונות'}
+                    </SurveyPill>
+                  ) : null}
+                </View>
+              </View>
+            ) : null}
+
+            {/* קומה / מעלית / מרפסת */}
+            {survey.floor_preference || (survey.has_elevator !== undefined && survey.has_elevator !== null) || (survey.has_balcony !== undefined && survey.has_balcony !== null) ? (
+              <View style={styles.apGroupSection}>
+                <Text style={styles.apGroupLabel}>קומה / מעלית / מרפסת</Text>
+                <View style={styles.apGroupRow}>
+                  {survey.floor_preference ? (
+                    <SurveyPill icon={<Building2 size={14} color="#FFFFFF" />}>
+                      קומה: {survey.floor_preference}
+                    </SurveyPill>
+                  ) : null}
+                  {survey.has_elevator !== undefined && survey.has_elevator !== null ? (
+                    <SurveyPill icon={<Building2 size={14} color="#FFFFFF" />}>
+                      {survey.has_elevator ? 'עם מעלית' : 'בלי מעלית'}
+                    </SurveyPill>
+                  ) : null}
+                  {survey.has_balcony !== undefined && survey.has_balcony !== null ? (
+                    <SurveyPill icon={<Home size={14} color="#FFFFFF" />}>
+                      {survey.has_balcony ? 'עם מרפסת' : 'בלי מרפסת'}
+                    </SurveyPill>
+                  ) : null}
+                </View>
+              </View>
+            ) : null}
+
+            {/* כניסה */}
+            {survey.move_in_month ? (
+              <View style={styles.apGroupSection}>
+                <Text style={styles.apGroupLabel}>כניסה</Text>
+                <View style={styles.apGroupRow}>
+                  <SurveyPill icon={<Calendar size={14} color="#FFFFFF" />}>
+                    {survey.move_in_month}
+                  </SurveyPill>
+                </View>
+              </View>
+            ) : null}
+
+            {/* מספר שותפים */}
+            {Number.isFinite(survey.preferred_roommates as number) ? (
+              <View style={styles.apGroupSection}>
+                <Text style={styles.apGroupLabel}>מספר שותפים</Text>
+                <View style={styles.apGroupRow}>
+                  <SurveyPill icon={<Users size={14} color="#FFFFFF" />}>
+                    {survey.preferred_roommates}
+                  </SurveyPill>
+                </View>
+              </View>
+            ) : null}
+
+            {/* כללי/נוסף */}
+            {(survey.pets_allowed !== undefined && survey.pets_allowed !== null) || (survey.with_broker !== undefined && survey.with_broker !== null) || (survey.wants_master_room !== undefined && survey.wants_master_room !== null) ? (
+              <View style={styles.apGroupSection}>
+                <Text style={styles.apGroupLabel}>תוספות</Text>
+                <View style={styles.apGroupRow}>
+                  {survey.pets_allowed !== undefined && survey.pets_allowed !== null ? (
+                    <SurveyPill icon={<PawPrint size={14} color="#FFFFFF" />}>
+                      חיות בדירה: {survey.pets_allowed ? 'מותר' : 'לא מותר'}
+                    </SurveyPill>
+                  ) : null}
+                  {survey.with_broker !== undefined && survey.with_broker !== null ? (
+                    <SurveyPill icon={<Briefcase size={14} color="#FFFFFF" />}>
+                      {survey.with_broker ? 'עם מתווך/ת' : 'ללא מתווך/ת'}
+                    </SurveyPill>
+                  ) : null}
+                  {survey.wants_master_room !== undefined && survey.wants_master_room !== null ? (
+                    <SurveyPill icon={<Bed size={14} color="#FFFFFF" />}>
+                      {survey.wants_master_room ? 'מחפש/ת מאסטר' : 'לא חובה מאסטר'}
+                    </SurveyPill>
+                  ) : null}
+                </View>
+              </View>
+            ) : null}
           </View>
         </View>
       ) : null}
@@ -763,6 +815,22 @@ const styles = StyleSheet.create({
   },
   pillsRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  apGroupSection: {
+    marginBottom: 10,
+  },
+  apGroupLabel: {
+    color: '#C7CBD1',
+    fontSize: 11,
+    fontWeight: '800',
+    marginBottom: 6,
+    textAlign: 'right',
+    opacity: 0.9,
+  },
+  apGroupRow: {
+    flexDirection: 'row-reverse',
     flexWrap: 'wrap',
     gap: 8,
   },

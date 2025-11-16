@@ -13,7 +13,7 @@ import {
   Linking,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { ArrowLeft, Inbox, Send, Filter, Home, Users, UserPlus2 } from 'lucide-react-native';
+import { ArrowLeft, Inbox, Send, Filter, Home, Users, UserPlus2, UserPlus } from 'lucide-react-native';
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/authStore';
 import { Apartment, User } from '@/types/database';
@@ -24,12 +24,14 @@ export default function RequestsScreen() {
   const user = useAuthStore((s) => s.user);
   const toSingle = (value: string | string[] | undefined): string | undefined =>
     Array.isArray(value) ? value[0] : value;
-  type KindFilterValue = 'APT' | 'MATCH' | 'GROUP' | 'ALL';
+  type KindFilterValue = 'APT' | 'APT_INVITE' | 'MATCH' | 'GROUP' | 'ALL';
   type StatusFilterValue = 'ALL' | 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED' | 'NOT_RELEVANT';
   const parseTabParam = (value?: string): 'incoming' | 'sent' =>
     value === 'sent' ? 'sent' : 'incoming';
   const parseKindParam = (value?: string): KindFilterValue => {
-    if (value === 'MATCH' || value === 'ALL' || value === 'GROUP') return value as KindFilterValue;
+    if (value === 'MATCH' || value === 'ALL' || value === 'GROUP' || value === 'APT' || value === 'APT_INVITE') {
+      return value as KindFilterValue;
+    }
     return 'APT';
   };
   const parseStatusParam = (value?: string): StatusFilterValue => {
@@ -50,7 +52,7 @@ export default function RequestsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   type UnifiedItem = {
     id: string;
-    kind: 'APT' | 'MATCH' | 'GROUP';
+    kind: 'APT' | 'APT_INVITE' | 'MATCH' | 'GROUP';
     sender_id: string;
     recipient_id: string;
     created_at: string;
@@ -153,7 +155,7 @@ export default function RequestsScreen() {
         .filter((row: any) => (row.status || 'PENDING') !== 'NOT_RELEVANT')
         .map((row: any) => ({
           id: row.id,
-          kind: 'APT',
+          kind: (row.type || '') === 'INVITE_APT' ? 'APT_INVITE' : 'APT',
           sender_id: row.sender_id,
           recipient_id: row.recipient_id,
           apartment_id: row.apartment_id,
@@ -165,7 +167,7 @@ export default function RequestsScreen() {
         .filter((row: any) => (row.status || 'PENDING') !== 'NOT_RELEVANT')
         .map((row: any) => ({
           id: row.id,
-          kind: 'APT',
+          kind: (row.type || '') === 'INVITE_APT' ? 'APT_INVITE' : 'APT',
           sender_id: row.sender_id,
           recipient_id: row.recipient_id,
           apartment_id: row.apartment_id,
@@ -350,8 +352,14 @@ export default function RequestsScreen() {
       }
 
       const aptIds = Array.from(new Set([
-        ...(normalizeSent as UnifiedItem[]).filter((r) => r.kind === 'APT').map((r) => r.apartment_id).filter(Boolean) as string[],
-        ...(normalizeRecv as UnifiedItem[]).filter((r) => r.kind === 'APT').map((r) => r.apartment_id).filter(Boolean) as string[],
+        ...(normalizeSent as UnifiedItem[])
+          .filter((r) => r.kind === 'APT' || r.kind === 'APT_INVITE')
+          .map((r) => r.apartment_id)
+          .filter(Boolean) as string[],
+        ...(normalizeRecv as UnifiedItem[])
+          .filter((r) => r.kind === 'APT' || r.kind === 'APT_INVITE')
+          .map((r) => r.apartment_id)
+          .filter(Boolean) as string[],
       ]));
       if (aptIds.length) {
         const { data: apts } = await supabase
@@ -463,6 +471,86 @@ export default function RequestsScreen() {
           description: `בקשתך אושרה והתווספת כשותף/ה לדירה${aptTitle ? `: ${aptTitle}` : ''}${aptCity ? ` (${aptCity})` : ''}.`,
           is_read: false,
         });
+      }
+
+      // 4) Ensure both approver and added user share a merged profile group
+      try {
+        const approverId = user.id;
+        const otherUserId = userToAddId;
+        const inviterId = req.sender_id; // prefer inviter's group if exists
+        if (approverId && otherUserId && approverId !== otherUserId) {
+          // Fetch active memberships for both users
+          const [{ data: approverMem }, { data: otherMem }, { data: inviterMem }] = await Promise.all([
+            supabase
+              .from('profile_group_members')
+              .select('group_id')
+              .eq('user_id', approverId)
+              .eq('status', 'ACTIVE')
+              .maybeSingle(),
+            supabase
+              .from('profile_group_members')
+              .select('group_id')
+              .eq('user_id', otherUserId)
+              .eq('status', 'ACTIVE')
+              .maybeSingle(),
+            supabase
+              .from('profile_group_members')
+              .select('group_id')
+              .eq('user_id', inviterId)
+              .eq('status', 'ACTIVE')
+              .maybeSingle(),
+          ]);
+          let targetGroupId: string | null = null;
+          const approverGroupId = (approverMem as any)?.group_id as string | undefined;
+          const otherGroupId = (otherMem as any)?.group_id as string | undefined;
+          const inviterGroupId = (inviterMem as any)?.group_id as string | undefined;
+          // Preference: inviter's group (sender of the request) if exists, else approver's, else other user's
+          targetGroupId = inviterGroupId || approverGroupId || otherGroupId || null;
+          // Create group if neither has one
+          if (!targetGroupId) {
+            const { data: newGroup, error: groupErr } = await supabase
+              .from('profile_groups')
+              .insert({ created_by: inviterId || approverId, name: 'שותפים' } as any)
+              .select('id')
+              .single();
+            if (groupErr) throw groupErr;
+            targetGroupId = (newGroup as any)?.id as string;
+          }
+          // Upsert ACTIVE membership for both users
+          // First, check existing membership statuses for both in the target group
+          const { data: existingMembers } = await supabase
+            .from('profile_group_members')
+            .select('user_id, status')
+            .eq('group_id', targetGroupId)
+            .in('user_id', [approverId, otherUserId] as any);
+          const hasApprover = !!(existingMembers || []).find((m: any) => m.user_id === approverId);
+          const hasOther = !!(existingMembers || []).find((m: any) => m.user_id === otherUserId);
+          const approverStatus = (existingMembers || []).find((m: any) => m.user_id === approverId)?.status;
+          const otherStatus = (existingMembers || []).find((m: any) => m.user_id === otherUserId)?.status;
+          const inserts: any[] = [];
+          if (!hasApprover) inserts.push({ group_id: targetGroupId, user_id: approverId, status: 'ACTIVE' });
+          if (!hasOther) inserts.push({ group_id: targetGroupId, user_id: otherUserId, status: 'ACTIVE' });
+          if (inserts.length) {
+            await supabase.from('profile_group_members').insert(inserts as any);
+          }
+          const updates: any[] = [];
+          if (hasApprover && approverStatus !== 'ACTIVE') {
+            updates.push({ user_id: approverId });
+          }
+          if (hasOther && otherStatus !== 'ACTIVE') {
+            updates.push({ user_id: otherUserId });
+          }
+          for (const u of updates) {
+            await supabase
+              .from('profile_group_members')
+              .update({ status: 'ACTIVE' })
+              .eq('group_id', targetGroupId)
+              .eq('user_id', u.user_id);
+          }
+        }
+      } catch (e) {
+        // non-fatal: log and continue
+        console.warn('ensure merged group failed', e);
       }
 
       await fetchAll();
@@ -666,7 +754,7 @@ export default function RequestsScreen() {
             const effectiveGroupId = receiverGroupId || (incoming ? senderGroupId : undefined);
             const groupMemberIds = effectiveGroupId ? (groupMembersByGroupId[effectiveGroupId] || []) : [];
             const groupMembers = groupMemberIds.map((id) => usersById[id]).filter(Boolean) as Partial<User>[];
-            const apt = item.kind === 'APT' && item.apartment_id ? aptsById[item.apartment_id] : undefined;
+            const apt = (item.kind === 'APT' || item.kind === 'APT_INVITE') && item.apartment_id ? aptsById[item.apartment_id] : undefined;
             const aptImage = apt ? (Array.isArray(apt.image_urls) && (apt.image_urls as any[]).length ? (apt.image_urls as any[])[0] : APT_PLACEHOLDER) : null;
             const ownerUser = apt && (apt as any).owner_id ? ownersById[(apt as any).owner_id as string] : undefined;
             const ownerPhone = ownerUser?.phone as string | undefined;
@@ -686,7 +774,7 @@ export default function RequestsScreen() {
                         <View style={styles.thumbWrap}>
                           <View style={{ flex: 1, flexDirection: 'row', flexWrap: 'wrap' }}>
                             {gridMembers.map((gm, idx) => (
-                              <View key={idx} style={{ width: '50%', height: cellHeightPct, padding: 1 }}>
+                              <View key={idx} style={{ width: '50%', height: cellHeightPct as any, padding: 1 }}>
                                 <Image
                                   source={{ uri: gm.avatar_url || DEFAULT_AVATAR }}
                                   style={{ width: '100%', height: '100%' }}
@@ -701,7 +789,13 @@ export default function RequestsScreen() {
                   ) : null}
                   <View style={{ flex: 1, alignItems: 'flex-end' }}>
                     <Text style={styles.cardTitle} numberOfLines={1}>
-                      {item.kind === 'APT' ? 'בקשת הצטרפות לדירה' : item.kind === 'MATCH' ? 'בקשת התאמה' : 'בקשת מיזוג פרופילים'}
+                      {item.kind === 'APT'
+                        ? 'בקשת הצטרפות לדירה'
+                        : item.kind === 'APT_INVITE'
+                        ? 'הזמנה להצטרף לדירה'
+                        : item.kind === 'MATCH'
+                        ? 'בקשת התאמה'
+                        : 'בקשת מיזוג פרופילים'}
                     </Text>
                     {!!apt && (
                       <Text style={styles.cardSub} numberOfLines={1}>
@@ -717,8 +811,8 @@ export default function RequestsScreen() {
                     ) : null}
                     <Text style={styles.cardMeta}>{new Date(item.created_at).toLocaleString()}</Text>
                     <View style={{ marginTop: 10, flexDirection: 'row-reverse', gap: 8 as any }}>
-                      {item.kind === 'APT' ? <StatusPill status={item.status} /> : null}
-                      {incoming && item.kind === 'APT' && item.status === 'PENDING' && (
+                      {(item.kind === 'APT' || item.kind === 'APT_INVITE') ? <StatusPill status={item.status} /> : null}
+                      {incoming && (item.kind === 'APT' || item.kind === 'APT_INVITE') && item.status === 'PENDING' && (
                         <View style={{ flexDirection: 'row-reverse', gap: 8 as any }}>
                           <TouchableOpacity
                             style={[styles.approveBtn, actionId === item.id && { opacity: 0.7 }]}
@@ -758,8 +852,8 @@ export default function RequestsScreen() {
                           </TouchableOpacity>
                         </View>
                       )}
-                      {/* Recipient view (incoming): after approval allow WhatsApp to requester */}
-                      {incoming && item.kind === 'APT' && item.status === 'APPROVED' && (
+                      {/* Recipient view (incoming): after approval allow WhatsApp to requester (only for JOIN_APT) */}
+                      {incoming && item.kind === 'APT' && item.status === 'APPROVED' && (item.type === 'JOIN_APT' || !item.type) && (
                         <View style={{ marginTop: 10, alignItems: 'flex-end', gap: 6 as any }}>
                           <Text style={styles.cardMeta}>
                             מספר הפונה: {otherUser?.phone ? otherUser.phone : 'לא זמין'}
@@ -780,8 +874,8 @@ export default function RequestsScreen() {
                           ) : null}
                         </View>
                       )}
-                      {/* Sender view: expose owner's phone and WhatsApp action once approved */}
-                      {!incoming && item.kind === 'APT' && item.status === 'APPROVED' && (
+                      {/* Sender view: expose owner's phone and WhatsApp action once approved (only for JOIN_APT) */}
+                      {!incoming && item.kind === 'APT' && item.status === 'APPROVED' && (item.type === 'JOIN_APT' || !item.type) && (
                         <View style={{ marginTop: 10, alignItems: 'flex-end', gap: 6 as any }}>
                           <Text style={styles.cardMeta}>
                             מספר בעל הדירה: {ownerPhone ? ownerPhone : 'לא זמין'}
@@ -1035,6 +1129,14 @@ export default function RequestsScreen() {
           >
             <Home size={16} color={kindFilter === 'APT' ? '#FFFFFF' : '#C9CDD6'} />
             <Text style={[styles.segmentText, kindFilter === 'APT' && styles.segmentTextActive]}>דירות</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.segmentBtn, kindFilter === 'APT_INVITE' && styles.segmentBtnActive]}
+            onPress={() => setKindFilter('APT_INVITE')}
+            activeOpacity={0.9}
+          >
+            <UserPlus size={16} color={kindFilter === 'APT_INVITE' ? '#FFFFFF' : '#C9CDD6'} />
+            <Text style={[styles.segmentText, kindFilter === 'APT_INVITE' && styles.segmentTextActive]}>הזמנות לדירה</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.segmentBtn, kindFilter === 'MATCH' && styles.segmentBtnActive]}
