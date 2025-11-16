@@ -320,13 +320,28 @@ export default function ApartmentDetailsScreen() {
 
   const filteredCandidates = (() => {
     const q = (addSearch || '').trim().toLowerCase();
-    if (!q) return addCandidates;
-    return addCandidates.filter((u) => (u.full_name || '').toLowerCase().includes(q));
+    const excludeIds = new Set<string>([
+      apartment.owner_id,
+      ...((apartment as any).partner_ids || []),
+    ]);
+    const base = addCandidates.filter((u) => !excludeIds.has(u.id));
+    if (!q) return base;
+    return base.filter((u) => (u.full_name || '').toLowerCase().includes(q));
   })();
   const filteredSharedGroups = (() => {
     const q = (addSearch || '').trim().toLowerCase();
-    if (!q) return sharedGroups;
-    return sharedGroups.filter((g) =>
+    const excludeIds = new Set<string>([
+      apartment.owner_id,
+      ...((apartment as any).partner_ids || []),
+    ]);
+    const base = sharedGroups
+      .map((g) => ({
+        ...g,
+        members: g.members.filter((m) => !excludeIds.has(m.id)),
+      }))
+      .filter((g) => g.members.length > 0);
+    if (!q) return base;
+    return base.filter((g) =>
       g.members.some((m) => (m.full_name || '').toLowerCase().includes(q))
     );
   })();
@@ -336,6 +351,7 @@ export default function ApartmentDetailsScreen() {
     try {
       setIsAdding(true);
       const currentIds = new Set<string>([apartment.owner_id, ...(apartment.partner_ids || [])]);
+      // Load all users
       const { data, error } = await supabase
         .from('users')
         .select('*')
@@ -343,7 +359,20 @@ export default function ApartmentDetailsScreen() {
         .order('created_at', { ascending: false });
       if (error) throw error;
       const all = (data || []) as User[];
-      const candidates = all.filter((u) => !currentIds.has(u.id));
+      // Exclude users who are already assigned to ANY apartment (owners or partners)
+      let assignedIds = new Set<string>();
+      try {
+        const { data: apts } = await supabase
+          .from('apartments')
+          .select('owner_id, partner_ids');
+        (apts || []).forEach((apt: any) => {
+          if (apt?.owner_id) assignedIds.add(apt.owner_id as string);
+          const pids: string[] = Array.isArray(apt?.partner_ids) ? (apt.partner_ids as string[]) : [];
+          pids.forEach((pid) => pid && assignedIds.add(pid));
+        });
+      } catch {}
+      // Build final candidates: not in current apartment and not assigned anywhere else
+      const candidates = all.filter((u) => !currentIds.has(u.id) && !assignedIds.has(u.id));
 
       // Group candidates by ACTIVE profile groups (shared profiles)
       let grouped: { id: string; members: Pick<User, 'id' | 'full_name' | 'avatar_url'>[] }[] = [];

@@ -139,6 +139,14 @@ export default function SurveyScreen() {
     return arr;
   }, [moveInMonthOptions, state.move_in_month]);
 
+  useEffect(() => {
+    const min = (state as any).preferred_age_min;
+    const max = (state as any).preferred_age_max;
+    if (typeof min === 'number' && typeof max === 'number' && max <= min) {
+      setState((prev) => ({ ...(prev as any), preferred_age_max: Math.min(min + 1, 60) } as any));
+    }
+  }, [(state as any).preferred_age_min]);
+
   const setField = (key: keyof SurveyState, value: any) => {
     setState((prev) => ({ ...prev, [key]: value } as any));
   };
@@ -494,22 +502,40 @@ export default function SurveyScreen() {
               <View style={styles.stepCard}>
                 <Section title="מאפייני השותפ/ה">
                   <View style={{ gap: 10 }}>
-                    <LabeledInput
+                    <SelectInput
                       label="גיל מינימלי"
-                      value={(state as any).preferred_age_min?.toString() || ''}
-                      placeholder="לדוגמה: 22"
-                      keyboardType="numeric"
-                      onChangeText={(txt) =>
-                        setState((prev) => ({ ...(prev as any), preferred_age_min: toIntOrNull(txt) } as any))
+                      options={useMemo(() => generateNumberRange(18, 40), [])}
+                      value={
+                        (state as any).preferred_age_min !== undefined && (state as any).preferred_age_min !== null
+                          ? String((state as any).preferred_age_min)
+                          : null
+                      }
+                      placeholder="בחר גיל"
+                      onChange={(v) =>
+                        setState((prev) => ({
+                          ...(prev as any),
+                          preferred_age_min: v ? parseInt(v, 10) : undefined,
+                        } as any))
                       }
                     />
-                    <LabeledInput
+                    <SelectInput
                       label="גיל מקסימלי"
-                      value={(state as any).preferred_age_max?.toString() || ''}
-                      placeholder="לדוגמה: 30"
-                      keyboardType="numeric"
-                      onChangeText={(txt) =>
-                        setState((prev) => ({ ...(prev as any), preferred_age_max: toIntOrNull(txt) } as any))
+                      options={useMemo(() => {
+                        const min = (state as any).preferred_age_min;
+                        const start = typeof min === 'number' ? min + 1 : 19;
+                        return generateNumberRange(start, 60);
+                      }, [(state as any).preferred_age_min])}
+                      value={
+                        (state as any).preferred_age_max !== undefined && (state as any).preferred_age_max !== null
+                          ? String((state as any).preferred_age_max)
+                          : null
+                      }
+                      placeholder="בחר גיל"
+                      onChange={(v) =>
+                        setState((prev) => ({
+                          ...(prev as any),
+                          preferred_age_max: v ? parseInt(v, 10) : undefined,
+                        } as any))
                       }
                     />
                   </View>
@@ -695,6 +721,14 @@ function generateUpcomingMonths(count = 12): string[] {
     list.push(label);
   }
   return list;
+}
+
+function generateNumberRange(start: number, end: number): string[] {
+  const arr: string[] = [];
+  for (let i = start; i <= end; i++) {
+    arr.push(String(i));
+  }
+  return arr;
 }
 
 function hydrateSurvey(existing: UserSurveyResponse): SurveyState {

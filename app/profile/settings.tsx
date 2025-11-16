@@ -248,23 +248,65 @@ export default function ProfileSettingsScreen() {
   const leaveGroup = async (groupId: string) => {
     if (!user?.id) return;
     try {
-      const shouldProceed = await new Promise<boolean>((resolve) => {
-        Alert.alert('עזיבת קבוצה', 'האם לעזוב את הקבוצה הזו? ניתן להצטרף שוב בהזמנה.', [
-          { text: 'ביטול', style: 'cancel', onPress: () => resolve(false) },
-          { text: 'עזוב/י', style: 'destructive', onPress: () => resolve(true) },
-        ]);
+      console.log('[LeaveGroup] Clicked', {
+        groupId,
+        userId: user.id,
+        platform: Platform.OS,
+        hasConfirm: typeof confirm === 'function',
       });
+      let shouldProceed = true;
+      if (Platform.OS === 'web') {
+        shouldProceed =
+          typeof confirm === 'function'
+            ? confirm('האם לעזוב את הקבוצה הזו? ניתן להצטרף שוב בהזמנה.')
+            : true;
+      } else {
+        shouldProceed = await new Promise<boolean>((resolve) => {
+          Alert.alert('עזיבת קבוצה', 'האם לעזוב את הקבוצה הזו? ניתן להצטרף שוב בהזמנה.', [
+            { text: 'ביטול', style: 'cancel', onPress: () => resolve(false) },
+            { text: 'עזוב/י', style: 'destructive', onPress: () => resolve(true) },
+          ]);
+        });
+      }
+      if (!shouldProceed) {
+        console.log('[LeaveGroup] User canceled confirmation');
+      }
       if (!shouldProceed) return;
       setLeavingGroupId(groupId);
+      console.log('[LeaveGroup] Sending Supabase update', {
+        table: 'profile_group_members',
+        update: { status: 'LEFT' },
+        filters: { group_id: groupId, user_id: user.id, status: 'ACTIVE' },
+      });
       const { error } = await supabase
         .from('profile_group_members')
-        .update({ status: 'LEFT', updated_at: new Date().toISOString() })
+        .update({ status: 'LEFT' })
         .eq('group_id', groupId)
-        .eq('user_id', user.id);
-      if (error) throw error;
-      // refresh modal data
-      setShowSharedModal(true);
+        .eq('user_id', user.id)
+        .eq('status', 'ACTIVE');
+      if (error) {
+        // eslint-disable-next-line no-console
+        console.error('[LeaveGroup] Supabase update error', {
+          code: (error as any)?.code,
+          message: (error as any)?.message,
+          details: (error as any)?.details,
+          hint: (error as any)?.hint,
+        });
+        throw error;
+      }
+      console.log('[LeaveGroup] Supabase update OK');
+      // Optimistically update UI
+      setSharedGroups((prev) => prev.filter((g) => g.id !== groupId));
+      Alert.alert('הצלחה', 'עזבת את הקבוצה בהצלחה');
     } catch (e: any) {
+      // eslint-disable-next-line no-console
+      console.error('[LeaveGroup] Failed with exception', {
+        name: e?.name,
+        code: e?.code,
+        message: e?.message,
+        details: e?.details,
+        hint: e?.hint,
+      });
       Alert.alert('שגיאה', e?.message || 'לא ניתן לעזוב את הקבוצה כעת');
     } finally {
       setLeavingGroupId(null);
