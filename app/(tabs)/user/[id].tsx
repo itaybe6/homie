@@ -30,6 +30,39 @@ export default function UserProfileScreen() {
   const [hasPendingMergeInvite, setHasPendingMergeInvite] = useState(false);
   const [meInApartment, setMeInApartment] = useState(false);
   const [profileInApartment, setProfileInApartment] = useState(false);
+  const [mergeNotice, setMergeNotice] = useState<string | null>(null);
+  type ProfileApartment = {
+    id: string;
+    title?: string | null;
+    city?: string | null;
+    image_urls?: any;
+    bedrooms?: number | null;
+    bathrooms?: number | null;
+    rooms?: number | null;
+  };
+  const [profileApartments, setProfileApartments] = useState<ProfileApartment[]>([]);
+  const [profileAptLoading, setProfileAptLoading] = useState(false);
+  const showMergeBlockedAlert = () => {
+    const title = 'לא ניתן למזג פרופילים';
+    const msg =
+      'אי אפשר למזג פרופילים כאשר לשני המשתמשים כבר יש דירה משויכת (כבעלים או כשותפים). כדי למזג, יש להסיר את השיוך לדירה מאחד הצדדים תחילה.';
+    try {
+      Alert.alert(title, msg);
+    } catch {
+      try {
+        // Fallback for web or environments where Alert fails
+        // eslint-disable-next-line no-alert
+        (globalThis as any)?.alert ? (globalThis as any).alert(`${title}\n\n${msg}`) : (window as any)?.alert?.(`${title}\n\n${msg}`);
+      } catch {}
+    }
+    // Always also surface an inline notice so the user gets feedback even if popups are blocked
+    setMergeNotice(msg);
+    // Auto dismiss after 5s
+    try {
+      setTimeout(() => setMergeNotice((curr) => (curr === msg ? null : curr)), 5000);
+    } catch {}
+  };
+
 
   const normalizeImageUrls = (value: unknown): string[] => {
     if (!value) return [];
@@ -200,6 +233,86 @@ export default function UserProfileScreen() {
     };
   }, [me?.id, profile?.id]);
 
+  // Load apartments associated with the viewed profile (owner or partner)
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!profile?.id) {
+        setProfileApartments([]);
+        return;
+      }
+      try {
+        setProfileAptLoading(true);
+        const [owned, partner] = await Promise.all([
+          supabase
+            .from('apartments')
+            .select('id, title, city, image_urls, bedrooms, bathrooms, rooms')
+            .eq('owner_id', profile.id),
+          supabase
+            .from('apartments')
+            .select('id, title, city, image_urls, bedrooms, bathrooms, rooms')
+            .contains('partner_ids', [profile.id] as any),
+        ]);
+        const merged = [...(owned.data || []), ...(partner.data || [])] as ProfileApartment[];
+        const unique: Record<string, ProfileApartment> = {};
+        merged.forEach((a) => {
+          if (a?.id) unique[a.id] = a;
+        });
+        if (!cancelled) setProfileApartments(Object.values(unique));
+      } catch {
+        if (!cancelled) setProfileApartments([]);
+      } finally {
+        if (!cancelled) setProfileAptLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [profile?.id]);
+
+  const handleMergeHeaderPress = () => {
+    if (inviteLoading) return;
+    if (!me?.id || !profile?.id) return;
+    if (me.id === profile.id) {
+      Alert.alert('שגיאה', 'לא ניתן לשלוח בקשה לעצמך.');
+      return;
+    }
+    if (hasPendingMergeInvite) {
+      Alert.alert('כבר שלחת', 'כבר קיימת בקשת מיזוג בהמתנה עבור משתמש זה.');
+      return;
+    }
+    // Prefer showing the message immediately: verify live from DB to avoid stale state
+    (async () => {
+      try {
+        const [
+          meOwned,
+          mePartner,
+          profOwned,
+          profPartner,
+        ] = await Promise.all([
+          supabase.from('apartments').select('id').eq('owner_id', me.id).limit(1),
+          supabase.from('apartments').select('id').contains('partner_ids', [me.id] as any).limit(1),
+          supabase.from('apartments').select('id').eq('owner_id', profile.id).limit(1),
+          supabase.from('apartments').select('id').contains('partner_ids', [profile.id] as any).limit(1),
+        ]);
+        const isMeLinkedNow = ((meOwned.data || []).length + (mePartner.data || []).length) > 0;
+        const isProfileLinkedNow = ((profOwned.data || []).length + (profPartner.data || []).length) > 0;
+        if (isMeLinkedNow && isProfileLinkedNow) {
+          showMergeBlockedAlert();
+          return;
+        }
+      } catch (e) {
+        // If the live check fails for any reason, fall back to state values
+        if (meInApartment && profileInApartment) {
+          showMergeBlockedAlert();
+          return;
+        }
+      }
+      // Otherwise proceed with invite flow
+      ensureGroupAndInvite();
+    })();
+  };
+
   // Determine if both users are already associated with an apartment (owner or partner)
   useEffect(() => {
     let cancelled = false;
@@ -253,6 +366,30 @@ export default function UserProfileScreen() {
     }
     try {
       setInviteLoading(true);
+      // Double-check on press (in addition to state) that both users are associated with an apartment.
+      // This prevents a race where the state hasn't updated yet.
+      try {
+        const [
+          meOwned,
+          mePartner,
+          profOwned,
+          profPartner,
+        ] = await Promise.all([
+          supabase.from('apartments').select('id').eq('owner_id', me.id).limit(1),
+          supabase.from('apartments').select('id').contains('partner_ids', [me.id] as any).limit(1),
+          supabase.from('apartments').select('id').eq('owner_id', profile.id).limit(1),
+          supabase.from('apartments').select('id').contains('partner_ids', [profile.id] as any).limit(1),
+        ]);
+        const isMeLinked = ((meOwned.data || []).length + (mePartner.data || []).length) > 0;
+        const isProfileLinked = ((profOwned.data || []).length + (profPartner.data || []).length) > 0;
+        if (isMeLinked && isProfileLinked) {
+          showMergeBlockedAlert();
+          setInviteLoading(false);
+          return;
+        }
+      } catch (e) {
+        // If verification failed, continue with local state fallback (handled by button handler too)
+      }
       // Prefer an existing ACTIVE group that I'm a member of; if none, fallback to a group I created; else create new
       const [{ data: myActiveMembership }, { data: createdByMeGroup, error: gErr }] = await Promise.all([
         supabase
@@ -380,6 +517,14 @@ export default function UserProfileScreen() {
         paddingTop: contentTopPadding,
         paddingBottom: contentBottomPadding,
       }}>
+      {!!mergeNotice ? (
+        <View style={styles.noticeWrap}>
+          <Text style={styles.noticeText} numberOfLines={3}>{mergeNotice}</Text>
+          <TouchableOpacity style={styles.noticeClose} onPress={() => setMergeNotice(null)} activeOpacity={0.85}>
+            <Text style={styles.noticeCloseText}>סגור</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
       <View style={styles.header}>
         <TouchableOpacity
           style={styles.backBtn}
@@ -431,7 +576,7 @@ export default function UserProfileScreen() {
               (inviteLoading || hasPendingMergeInvite || (meInApartment && profileInApartment)) ? styles.mergeBtnDisabled : null,
             ]}
             activeOpacity={0.9}
-            onPress={(inviteLoading || hasPendingMergeInvite || (meInApartment && profileInApartment)) ? undefined : ensureGroupAndInvite}
+            onPress={handleMergeHeaderPress}
           >
             <UserPlus2 size={16} color="#FFFFFF" />
             <Text style={styles.mergeHeaderText}>{inviteLoading ? 'שולח...' : hasPendingMergeInvite ? 'נשלחה בקשה' : 'מיזוג'}</Text>
@@ -457,6 +602,47 @@ export default function UserProfileScreen() {
           {profile.bio}
         </Text>
       )}
+
+      {/* Viewed user's apartment(s) */}
+      {!profileAptLoading && profileApartments.length ? (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>
+            הדירה של {profile.full_name?.split(' ')?.[0] || 'המשתמש/ת'}
+          </Text>
+          {profileApartments.map((apt) => {
+            const imgs = Array.isArray(apt.image_urls)
+              ? (apt.image_urls as any[])
+              : [];
+            const firstImg =
+              imgs?.length ? (imgs[0] as string) : 'https://images.pexels.com/photos/1457842/pexels-photo-1457842.jpeg';
+            return (
+              <TouchableOpacity
+                key={apt.id}
+                style={styles.aptCard}
+                activeOpacity={0.9}
+                onPress={() => router.push({ pathname: '/apartment/[id]', params: { id: apt.id } })}
+              >
+                <View style={styles.aptThumbWrap}>
+                  <Image source={{ uri: firstImg }} style={styles.aptThumbImg} />
+                </View>
+                <View style={styles.aptInfo}>
+                  <Text style={styles.aptTitle} numberOfLines={1}>
+                    {apt.title || 'דירה'}
+                  </Text>
+                  {!!apt.city ? (
+                    <Text style={styles.aptMeta} numberOfLines={1}>
+                      {apt.city}
+                    </Text>
+                  ) : null}
+                </View>
+                <View style={{ flex: 0 }}>
+                  <Text style={styles.aptCta}>לצפייה</Text>
+                </View>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      ) : null}
 
       {/* Survey Preview - Personal */}
       {!surveyLoading && survey ? (
@@ -1086,6 +1272,37 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '800',
   },
+  noticeWrap: {
+    marginHorizontal: 16,
+    marginTop: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    backgroundColor: 'rgba(248,113,113,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(248,113,113,0.35)',
+    alignItems: 'flex-end',
+    gap: 8,
+  },
+  noticeText: {
+    color: '#FCA5A5',
+    fontSize: 13,
+    fontWeight: '800',
+    textAlign: 'right',
+  },
+  noticeClose: {
+    alignSelf: 'flex-start',
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(248,113,113,0.35)',
+  },
+  noticeCloseText: {
+    color: '#FCA5A5',
+    fontSize: 12,
+    fontWeight: '800',
+  },
   groupNames: {
     color: '#C7CBD1',
     fontSize: 13,
@@ -1104,5 +1321,49 @@ const styles = StyleSheet.create({
     aspectRatio: 1,
     borderRadius: 10,
     backgroundColor: '#1F1F29',
+  },
+  aptCard: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 12,
+    padding: 12,
+    borderRadius: 16,
+    backgroundColor: '#15151C',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  aptThumbWrap: {
+    width: 84,
+    height: 84,
+    borderRadius: 12,
+    overflow: 'hidden',
+    backgroundColor: '#1F1F29',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  aptThumbImg: {
+    width: '100%',
+    height: '100%',
+  },
+  aptInfo: {
+    flex: 1,
+    alignItems: 'flex-end',
+  },
+  aptTitle: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '900',
+    textAlign: 'right',
+  },
+  aptMeta: {
+    marginTop: 4,
+    color: '#C9CDD6',
+    fontSize: 12,
+    textAlign: 'right',
+  },
+  aptCta: {
+    color: '#7C5CFF',
+    fontSize: 13,
+    fontWeight: '800',
   },
 });
