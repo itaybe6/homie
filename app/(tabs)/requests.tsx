@@ -289,11 +289,12 @@ export default function RequestsScreen() {
 
       const mapGroupStatus = (status: string | null | undefined): UnifiedItem['status'] => {
         const s = (status || '').toUpperCase();
-        if (s === 'PENDING') return 'PENDING';
-        if (s === 'ACCEPTED') return 'APPROVED';
-        if (s === 'DECLINED') return 'REJECTED';
-        if (s === 'CANCELLED') return 'CANCELLED';
-        if (s === 'EXPIRED') return 'NOT_RELEVANT';
+        // Normalize a variety of server-side spellings to our UI statuses
+        if (s === 'PENDING' || s === 'WAITING') return 'PENDING';
+        if (s === 'ACCEPTED' || s === 'ACCEPT' || s === 'APPROVED' || s === 'CONFIRMED') return 'APPROVED';
+        if (s === 'DECLINED' || s === 'REJECTED' || s === 'DENIED') return 'REJECTED';
+        if (s === 'CANCELLED' || s === 'CANCELED') return 'CANCELLED';
+        if (s === 'EXPIRED' || s === 'NOT_RELEVANT' || s === 'IRRELEVANT') return 'NOT_RELEVANT';
         return 'PENDING';
       };
       const groupSent: UnifiedItem[] = (gSent || []).map((row: any) => ({
@@ -666,8 +667,106 @@ export default function RequestsScreen() {
     if (!user?.id) return;
     try {
       setActionId(item.id);
-      // Accept via RPC
-      await supabase.rpc('accept_profile_group_invite', { p_invite_id: item.id });
+      // First try a server-side RPC that bypasses RLS (if installed)
+      let doneViaRpc = false;
+      try {
+        const { error: rpcV2Err } = await supabase.rpc('accept_profile_group_invite_v2', { p_invite_id: item.id });
+        if (!rpcV2Err) {
+          doneViaRpc = true;
+        } else {
+          // eslint-disable-next-line no-console
+          console.error('[group-approve] rpc v2 failed', {
+            code: (rpcV2Err as any)?.code,
+            message: rpcV2Err.message,
+            details: (rpcV2Err as any)?.details,
+            hint: (rpcV2Err as any)?.hint,
+          });
+        }
+      } catch (e: any) {
+        // eslint-disable-next-line no-console
+        console.error('[group-approve] rpc v2 exception', e?.message || e);
+      }
+      if (doneViaRpc) {
+        // Optimistic UI update so buttons disappear immediately
+        setReceived((prev) =>
+          prev.map((r) => (r.id === item.id ? { ...r, status: 'APPROVED' } as any : r))
+        );
+      } else {
+        // Manual acceptance (no RPC)
+      // 1) Load invite to get group_id and validate invitee
+      const { data: invite, error: inviteErr } = await supabase
+        .from('profile_group_invites')
+        .select('id, group_id, invitee_id, status')
+        .eq('id', item.id)
+        .maybeSingle();
+      if (inviteErr) {
+        // eslint-disable-next-line no-console
+        console.error('[group-approve] load invite error', {
+          code: (inviteErr as any)?.code,
+          message: inviteErr.message,
+          details: (inviteErr as any)?.details,
+          hint: (inviteErr as any)?.hint,
+        });
+        throw inviteErr;
+      }
+      if (!invite) throw new Error('הזמנה לא נמצאה');
+      if ((invite as any).invitee_id !== user.id) {
+        throw new Error('אין הרשאה לאשר הזמנה זו');
+      }
+      const groupId = (invite as any).group_id as string;
+      // 2) Mark invite as accepted
+      const updInviteRes = await supabase
+        .from('profile_group_invites')
+        .update({ status: 'ACCEPTED', responded_at: new Date().toISOString() })
+        .eq('id', item.id);
+      if ((updInviteRes as any)?.error) {
+        // eslint-disable-next-line no-console
+        console.error('[group-approve] update invite error', {
+          code: ((updInviteRes as any).error as any)?.code,
+          message: (updInviteRes as any).error?.message,
+          details: ((updInviteRes as any).error as any)?.details,
+          hint: ((updInviteRes as any).error as any)?.hint,
+        });
+        throw (updInviteRes as any).error;
+      }
+      // 3) Try insert membership (prefer INSERT to avoid RLS requirements for UPDATE)
+      const tryInsert = await supabase
+        .from('profile_group_members')
+        .insert([{ group_id: groupId, user_id: user.id, status: 'ACTIVE' } as any], {
+          onConflict: 'group_id,user_id',
+          ignoreDuplicates: true,
+        } as any);
+      if (tryInsert?.error) {
+        // eslint-disable-next-line no-console
+        console.error('[group-approve] insert member error', {
+          code: (tryInsert.error as any)?.code,
+          message: tryInsert.error.message,
+          details: (tryInsert.error as any)?.details,
+          hint: (tryInsert.error as any)?.hint,
+        });
+      }
+      // 3b) If row already exists or insert was ignored, ensure status is ACTIVE (best-effort)
+      if (tryInsert?.error || (tryInsert as any)?.status === 409) {
+        const updateRes = await supabase
+          .from('profile_group_members')
+          .update({ status: 'ACTIVE' })
+          .eq('group_id', groupId)
+          .eq('user_id', user.id);
+        if (updateRes?.error) {
+          // eslint-disable-next-line no-console
+          console.error('[group-approve] update member error', {
+            code: (updateRes.error as any)?.code,
+            message: updateRes.error.message,
+            details: (updateRes.error as any)?.details,
+            hint: (updateRes.error as any)?.hint,
+          });
+        }
+      }
+        // Optimistic UI update so buttons disappear immediately
+        setReceived((prev) =>
+          prev.map((r) => (r.id === item.id ? { ...r, status: 'APPROVED' } as any : r))
+        );
+      }
       // Notify inviter that invite was accepted
       try {
         const approverName = await computeGroupAwareLabel(user.id);
@@ -679,6 +778,39 @@ export default function RequestsScreen() {
           is_read: false,
         });
       } catch {}
+      // If the inviter is already a partner (or owner) in apartment(s), add the approver as a partner too
+      try {
+        const inviterId = item.sender_id;
+        const approverId = user.id;
+        if (inviterId && approverId && inviterId !== approverId) {
+          const [
+            { data: aptsByPartner },
+            { data: aptsByOwner },
+          ] = await Promise.all([
+            supabase.from('apartments').select('id, partner_ids').contains('partner_ids', [inviterId] as any),
+            supabase.from('apartments').select('id, partner_ids').eq('owner_id', inviterId),
+          ]);
+          const merged: any[] = [...(aptsByPartner || []), ...(aptsByOwner || [])];
+          const uniqueById: Record<string, any> = {};
+          merged.forEach((a: any) => {
+            uniqueById[a.id] = a;
+          });
+          const targets = Object.values(uniqueById);
+          if (targets.length) {
+            await Promise.all(
+              targets.map(async (apt: any) => {
+                const currentPartnerIds: string[] = Array.isArray(apt.partner_ids) ? (apt.partner_ids as string[]) : [];
+                if (!currentPartnerIds.includes(approverId)) {
+                  const newPartnerIds = Array.from(new Set([...(currentPartnerIds || []), approverId]));
+                  await supabase.from('apartments').update({ partner_ids: newPartnerIds }).eq('id', apt.id);
+                }
+              })
+            );
+          }
+        }
+      } catch (e) {
+        console.warn('auto-add approver to inviter apartments failed', e);
+      }
       await fetchAll();
       Alert.alert('הצלחה', 'אושרת להצטרף לקבוצה');
     } catch (e: any) {
@@ -697,6 +829,10 @@ export default function RequestsScreen() {
         .from('profile_group_invites')
         .update({ status: 'DECLINED', responded_at: new Date().toISOString() })
         .eq('id', item.id);
+      // Optimistic UI update so buttons disappear immediately
+      setReceived((prev) =>
+        prev.map((r) => (r.id === item.id ? { ...r, status: 'REJECTED' } as any : r))
+      );
       await fetchAll();
     } catch (e: any) {
       console.error('reject group invite failed', e);

@@ -5,6 +5,7 @@ import {
   Text,
   View,
   ActivityIndicator,
+  ScrollView,
   TouchableOpacity,
   Modal,
   TextInput,
@@ -481,7 +482,10 @@ useEffect(() => {
         </View>
       </View>
 
-      <View style={styles.listContent}>
+      <ScrollView
+        contentContainerStyle={[styles.listContent, { paddingBottom: 32 + insets.bottom }]}
+        showsVerticalScrollIndicator={false}
+      >
         {items.length === 0 ? (
           <View style={styles.emptyContainer}>
             <Text style={styles.emptyText}>לא נמצאו שותפים</Text>
@@ -561,7 +565,7 @@ useEffect(() => {
             </View>
           </View>
         )}
-      </View>
+      </ScrollView>
 
       {showFilters ? (
         <Modal
@@ -1021,12 +1025,14 @@ function GroupCard({
   const extra = users.length - displayUsers.length;
   const DEFAULT_AVATAR = 'https://cdn-icons-png.flaticon.com/512/847/847969.png';
   const cities = Array.from(new Set(displayUsers.map((u) => u.city).filter(Boolean))).join(' • ');
+  const isOneRowLayout = displayUsers.length === 3 || displayUsers.length === 4;
 
   return (
     <View style={groupStyles.card}>
       <View style={groupStyles.gridWrap}>
         {displayUsers.map((u, idx) => {
-          const rows = Math.ceil(displayUsers.length / 2);
+          // For 3 or 4 members, show equal vertical stripes (single row)
+          const rows = isOneRowLayout ? 1 : Math.ceil(displayUsers.length / 2);
           const cellHeight = rows === 1 ? 240 : 120;
           const isLastWithExtra = idx === displayUsers.length - 1 && extra > 0;
           return (
@@ -1034,7 +1040,15 @@ function GroupCard({
               key={u.id}
               activeOpacity={0.9}
               onPress={() => onOpen(u.id)}
-              style={[groupStyles.cell, { height: cellHeight }]}
+              style={[
+                groupStyles.cell,
+                {
+                  height: cellHeight,
+                  width: isOneRowLayout ? `${(100 / displayUsers.length).toFixed(4)}%` : '50%',
+                },
+                // In single-row layout, remove right border from the last column
+                isOneRowLayout && idx === displayUsers.length - 1 ? { borderRightWidth: 0 } : null,
+              ]}
             >
               <Image source={{ uri: u.avatar_url || DEFAULT_AVATAR }} style={groupStyles.cellImage} />
               {isLastWithExtra ? (

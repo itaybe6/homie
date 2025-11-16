@@ -363,7 +363,10 @@ export default function UserProfileScreen() {
         {groupLoading ? null : groupContext && groupContext.members.length >= 2 ? (
           <TouchableOpacity style={styles.mergedChip} activeOpacity={0.9}>
             <View style={styles.mergedAvatarsRow}>
-              {groupContext.members.slice(0, 3).map((m, idx) => (
+              {groupContext.members
+                .filter((m) => m.id !== profile.id)
+                .slice(0, 3)
+                .map((m, idx) => (
                 <View
                   key={m.id}
                   style={[styles.mergedAvatarWrap, idx !== 0 && styles.mergedAvatarOverlap]}
@@ -711,6 +714,7 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#0F0F14',
     direction: 'rtl',
+    writingDirection: 'rtl',
   },
   center: {
     flex: 1,
@@ -815,6 +819,8 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '800',
     marginBottom: 8,
+    textAlign: 'right',
+    alignSelf: 'flex-end',
   },
   surveyCard: {
     padding: 18,
@@ -860,6 +866,8 @@ const styles = StyleSheet.create({
     marginBottom: 6,
     textAlign: 'right',
     opacity: 0.9,
+    writingDirection: 'rtl',
+    alignSelf: 'flex-end',
   },
   apGroupRow: {
     flexDirection: 'row',

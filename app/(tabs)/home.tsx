@@ -490,8 +490,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#0F0F14',
-    writingDirection: 'rtl',
-    direction: 'rtl',
   },
   centerContainer: {
     flex: 1,
@@ -629,7 +627,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
     textAlign: 'right',
-    writingDirection: 'rtl',
   },
   fieldInput: {
     backgroundColor: '#17171F',
@@ -741,7 +738,6 @@ const styles = StyleSheet.create({
     color: '#E5E7EB',
     fontSize: 14,
     textAlign: 'right',
-    writingDirection: 'rtl',
   },
   selectButton: {
     flexDirection: 'row',

@@ -50,7 +50,7 @@ export default function ApartmentDetailsScreen() {
   const [isMembersOpen, setIsMembersOpen] = useState(false);
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [addCandidates, setAddCandidates] = useState<User[]>([]);
-  const [sharedGroupMembers, setSharedGroupMembers] = useState<User[]>([]);
+  const [sharedGroups, setSharedGroups] = useState<{ id: string; members: Pick<User, 'id' | 'full_name' | 'avatar_url'>[] }[]>([]);
   const [isAdding, setIsAdding] = useState(false);
   const [addSearch, setAddSearch] = useState('');
   const [removingId, setRemovingId] = useState<string | null>(null);
@@ -323,6 +323,13 @@ export default function ApartmentDetailsScreen() {
     if (!q) return addCandidates;
     return addCandidates.filter((u) => (u.full_name || '').toLowerCase().includes(q));
   })();
+  const filteredSharedGroups = (() => {
+    const q = (addSearch || '').trim().toLowerCase();
+    if (!q) return sharedGroups;
+    return sharedGroups.filter((g) =>
+      g.members.some((m) => (m.full_name || '').toLowerCase().includes(q))
+    );
+  })();
 
   const openAddPartnerModal = async () => {
     if (!apartment) return;
@@ -337,38 +344,61 @@ export default function ApartmentDetailsScreen() {
       if (error) throw error;
       const all = (data || []) as User[];
       const candidates = all.filter((u) => !currentIds.has(u.id));
-      setAddCandidates(candidates);
-      // Load shared profile members (ACTIVE) for the owner
+
+      // Group candidates by ACTIVE profile groups (shared profiles)
+      let grouped: { id: string; members: Pick<User, 'id' | 'full_name' | 'avatar_url'>[] }[] = [];
       try {
-        const { data: membership } = await supabase
-          .from('profile_group_members')
-          .select('group_id')
-          .eq('user_id', apartment.owner_id)
-          .eq('status', 'ACTIVE')
-          .maybeSingle();
-        const groupId = (membership as any)?.group_id as string | undefined;
-        if (groupId) {
-          const { data: memberRows } = await supabase
+        const candidateIds = candidates.map((u) => u.id);
+        if (candidateIds.length) {
+          const { data: memberships } = await supabase
             .from('profile_group_members')
-            .select('user_id')
-            .eq('group_id', groupId)
+            .select('group_id, user_id')
+            .in('user_id', candidateIds)
             .eq('status', 'ACTIVE');
-          const ids: string[] = (memberRows || []).map((r: any) => r.user_id).filter(Boolean);
-          const filteredIds = ids.filter((id) => !currentIds.has(id));
-          if (filteredIds.length) {
+          const groupToMemberIds: Record<string, string[]> = {};
+          (memberships || []).forEach((row: any) => {
+            if (!row.group_id || !row.user_id) return;
+            if (!groupToMemberIds[row.group_id]) groupToMemberIds[row.group_id] = [];
+            if (!groupToMemberIds[row.group_id].includes(row.user_id)) {
+              groupToMemberIds[row.group_id].push(row.user_id);
+            }
+          });
+          const groupedIds = Object.entries(groupToMemberIds)
+            .filter(([_, ids]) => (ids || []).length >= 2)
+            .map(([gid]) => gid);
+          if (groupedIds.length) {
+            const allMemberIds = groupedIds.flatMap((gid) => groupToMemberIds[gid]);
+            // Remove grouped members from individual candidates
+            const groupedMemberIdSet = new Set(allMemberIds);
+            const remainingCandidates = candidates.filter((u) => !groupedMemberIdSet.has(u.id));
+            setAddCandidates(remainingCandidates);
+            // Fetch minimal user data for grouped members
             const { data: usersRows } = await supabase
               .from('users')
               .select('id, full_name, avatar_url')
-              .in('id', filteredIds);
-            setSharedGroupMembers(((usersRows || []) as User[]).filter((u) => u && u.id));
+              .in('id', Array.from(groupedMemberIdSet));
+            const byId: Record<string, Pick<User, 'id' | 'full_name' | 'avatar_url'>> = {};
+            (usersRows || []).forEach((u: any) => {
+              if (u?.id) byId[u.id] = { id: u.id, full_name: u.full_name, avatar_url: u.avatar_url };
+            });
+            grouped = groupedIds.map((gid) => ({
+              id: gid,
+              members: (groupToMemberIds[gid] || [])
+                .map((uid) => byId[uid])
+                .filter(Boolean),
+            }));
+            setSharedGroups(grouped);
           } else {
-            setSharedGroupMembers([]);
+            setAddCandidates(candidates);
+            setSharedGroups([]);
           }
         } else {
-          setSharedGroupMembers([]);
+          setAddCandidates(candidates);
+          setSharedGroups([]);
         }
       } catch {
-        setSharedGroupMembers([]);
+        setAddCandidates(candidates);
+        setSharedGroups([]);
       }
       setIsAddOpen(true);
     } catch (e) {
@@ -796,31 +826,56 @@ export default function ApartmentDetailsScreen() {
                 </View>
               ) : (
                 <>
-                  {sharedGroupMembers.length > 0 ? (
+                  {filteredSharedGroups.length > 0 ? (
                     <View style={{ marginBottom: 12 }}>
                       <Text style={styles.sectionHeading}>פרופיל משותף</Text>
                       <View style={{ gap: 8, marginTop: 8 }}>
-                        {sharedGroupMembers.map((m) => (
-                          <TouchableOpacity
-                            key={`shared-${m.id}`}
-                            style={styles.candidateRow}
-                            activeOpacity={0.9}
-                            onPress={() => confirmAddPartner(m)}
-                          >
-                            <View style={styles.candidateLeft}>
-                              <Image
-                                source={{ uri: (m as any).avatar_url || 'https://cdn-icons-png.flaticon.com/512/847/847969.png' }}
-                                style={styles.candidateAvatar}
-                              />
-                            </View>
-                            <View style={{ flex: 1 }}>
-                              <Text style={styles.candidateName} numberOfLines={1}>{m.full_name}</Text>
-                            </View>
-                            <View style={styles.candidateRight}>
-                              <UserPlus size={16} color="#A78BFA" />
-                            </View>
-                          </TouchableOpacity>
-                        ))}
+                        {filteredSharedGroups.map((g) => {
+                          const names = g.members.map((m) => m.full_name || 'משתמש').join(' • ');
+                          const first = g.members[0];
+                          const second = g.members[1];
+                          const third = g.members[2];
+                          return (
+                            <TouchableOpacity
+                              key={`shared-group-${g.id}`}
+                              style={styles.candidateRow}
+                              activeOpacity={0.9}
+                              onPress={() => first && confirmAddPartner(first as any)}
+                            >
+                              <View style={styles.groupAvatarLeft}>
+                                <View style={styles.groupAvatarStack}>
+                                  {third ? (
+                                    <Image
+                                      source={{ uri: (third as any).avatar_url || 'https://cdn-icons-png.flaticon.com/512/847/847969.png' }}
+                                      style={styles.groupAvatarSm}
+                                    />
+                                  ) : null}
+                                  {second ? (
+                                    <Image
+                                      source={{ uri: (second as any).avatar_url || 'https://cdn-icons-png.flaticon.com/512/847/847969.png' }}
+                                      style={styles.groupAvatarMd}
+                                    />
+                                  ) : null}
+                                  {first ? (
+                                    <Image
+                                      source={{ uri: (first as any).avatar_url || 'https://cdn-icons-png.flaticon.com/512/847/847969.png' }}
+                                      style={styles.groupAvatarLg}
+                                    />
+                                  ) : null}
+                                </View>
+                              </View>
+                              <View style={{ flex: 1 }}>
+                                <Text style={styles.candidateName} numberOfLines={1}>{names}</Text>
+                                <View style={styles.candidateBadges}>
+                                  <View style={styles.candidateBadge}><Text style={styles.candidateBadgeText}>פרופיל משותף</Text></View>
+                                </View>
+                              </View>
+                              <View style={styles.candidateRight}>
+                                <UserPlus size={16} color="#A78BFA" />
+                              </View>
+                            </TouchableOpacity>
+                          );
+                        })}
                       </View>
                     </View>
                   ) : null}
@@ -1385,6 +1440,41 @@ const styles = StyleSheet.create({
     color: '#C9CDD6',
     fontSize: 11,
     fontWeight: '700',
+  },
+  groupAvatarLeft: {
+    width: 76,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  groupAvatarStack: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+  },
+  groupAvatarLg: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    borderWidth: 2,
+    borderColor: 'rgba(15,15,20,0.9)',
+    backgroundColor: '#1F1F29',
+  },
+  groupAvatarMd: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    marginLeft: -8,
+    borderWidth: 2,
+    borderColor: 'rgba(15,15,20,0.9)',
+    backgroundColor: '#1F1F29',
+  },
+  groupAvatarSm: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    marginLeft: -8,
+    borderWidth: 2,
+    borderColor: 'rgba(15,15,20,0.9)',
+    backgroundColor: '#1F1F29',
   },
   avatarLarge: {
     width: 48,
