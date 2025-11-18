@@ -996,7 +996,6 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#0F0F14',
     writingDirection: 'rtl',
-    direction: 'rtl',
   },
   header: {
     paddingHorizontal: 16,
@@ -1104,7 +1103,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 8,
     writingDirection: 'rtl',
-    direction: 'rtl',
   },
   toggleBtn: {
     flexDirection: 'row-reverse',
@@ -1139,7 +1137,6 @@ const styles = StyleSheet.create({
     gap: 8,
     justifyContent: 'flex-start',
     writingDirection: 'rtl',
-    direction: 'rtl',
   },
   chip: {
     backgroundColor: '#1E1F2A',

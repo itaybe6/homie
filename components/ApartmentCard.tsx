@@ -136,7 +136,6 @@ const styles = StyleSheet.create({
   },
   content: {
     padding: 16,
-    direction: 'rtl',
   },
   titleRow: {
     flexDirection: 'row',
@@ -155,7 +154,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 4,
     marginBottom: 12,
-    direction: 'rtl',
   },
   location: {
     fontSize: 14,
@@ -168,7 +166,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 16,
     marginBottom: 12,
-    direction: 'rtl',
   },
   detail: {
     flexDirection: 'row',
@@ -211,7 +208,6 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 8,
     marginBottom: 12,
-    direction: 'rtl',
   },
   chip: {
     paddingHorizontal: 10,
@@ -231,7 +227,6 @@ const styles = StyleSheet.create({
   footerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    direction: 'rtl',
   },
   bottomBar: {
     marginTop: 12,

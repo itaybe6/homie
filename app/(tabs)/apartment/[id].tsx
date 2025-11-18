@@ -228,10 +228,10 @@ export default function ApartmentDetailsScreen() {
     return [];
   };
 
-  const roommatesCount = members.length;
+  const roommatesCount = members.length; // number of partners (not including owner)
   const roommatesNeeded = Math.max(
     0,
-    (apartment.bedrooms || 0) - (roommatesCount + 1)
+    (apartment.bedrooms || 0) - (roommatesCount + 1) // +1 for owner when calculating needed
   );
   const currentPartnerIds: string[] = normalizeIds((apartment as any).partner_ids);
   const isMember = !!(

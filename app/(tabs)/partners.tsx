@@ -24,10 +24,12 @@ import { computeGroupAwareLabel } from '@/lib/group';
 import RoommateCard from '@/components/RoommateCard';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { cityNeighborhoods, canonicalizeCityName } from '@/assets/data/neighborhoods';
+import { Apartment } from '@/types/database';
+import ApartmentCard from '@/components/ApartmentCard';
 
 type BrowseItem =
   | { type: 'user'; user: User }
-  | { type: 'group'; groupId: string; users: User[] };
+  | { type: 'group'; groupId: string; users: User[]; apartment?: Apartment };
 
 export default function PartnersScreen() {
   const router = useRouter();
@@ -151,7 +153,7 @@ useEffect(() => {
 
       // Filter to groups with at least 2 users, not including the current user
       // Apply UI filters: all members must pass filters (age, gender)
-      const activeGroups: { groupId: string; users: User[] }[] = Object.entries(groupIdToUsers)
+      const activeGroups: { groupId: string; users: User[]; apartment?: Apartment }[] = Object.entries(groupIdToUsers)
         .map(([gid, us]) => ({ groupId: gid, users: us }))
         .filter(
           (g) =>
@@ -159,6 +161,58 @@ useEffect(() => {
             !g.users.some((u) => u.id === authId) &&
             groupPassesFilters(g.users)
         );
+
+      // Fetch all apartments
+      const { data: apartmentsData, error: aptErr } = await supabase
+        .from('apartments')
+        .select('*');
+      
+      const apartmentsForGroups: Record<string, Apartment> = {};
+      
+      if (!aptErr && apartmentsData) {
+        // For each group, find if any member is in an apartment
+        for (const group of activeGroups) {
+          const groupUserIds = group.users.map(u => u.id);
+          
+          // Check each apartment
+          for (const apt of apartmentsData as Apartment[]) {
+            let partnerIds: string[] = [];
+            
+            // Handle partner_ids - could be array, JSON string, or PostgreSQL array string
+            if (apt.partner_ids) {
+              if (Array.isArray(apt.partner_ids)) {
+                partnerIds = apt.partner_ids;
+              } else if (typeof apt.partner_ids === 'string') {
+                try {
+                  // Try parsing as JSON
+                  const parsed = JSON.parse(apt.partner_ids);
+                  partnerIds = Array.isArray(parsed) ? parsed : [];
+                } catch {
+                  // Try parsing as PostgreSQL array format: {id1,id2,id3}
+                  const cleaned = (apt.partner_ids as string).replace(/[{}]/g, '');
+                  partnerIds = cleaned.split(',').map(s => s.trim()).filter(Boolean);
+                }
+              }
+            }
+            
+            // Check if any group member is in this apartment's partner_ids
+            const hasMatch = groupUserIds.some(userId => partnerIds.includes(userId));
+            
+            if (hasMatch) {
+              apartmentsForGroups[group.groupId] = apt;
+              console.log(`Found apartment ${apt.id} for group ${group.groupId}`);
+              break; // Found apartment for this group
+            }
+          }
+        }
+      }
+      
+      // Attach apartments to groups
+      activeGroups.forEach(group => {
+        if (apartmentsForGroups[group.groupId]) {
+          group.apartment = apartmentsForGroups[group.groupId];
+        }
+      });
 
       // Only show merged profiles (groups)
       // Also include single users not in active groups, filtered, and not already interacted with
@@ -216,7 +270,7 @@ useEffect(() => {
       if (profileType === 'groups' || profileType === 'all') {
         const groupItems = activeGroups
           .filter((g) => !interactedGroupIds.has(g.groupId))
-          .map((g) => ({ type: 'group', groupId: g.groupId, users: g.users }) as BrowseItem);
+          .map((g) => ({ type: 'group', groupId: g.groupId, users: g.users, apartment: g.apartment }) as BrowseItem);
         combinedItems.push(...groupItems);
       }
       if (profileType === 'singles' || profileType === 'all') {
@@ -534,12 +588,19 @@ useEffect(() => {
                 <GroupCard
                   groupId={(items[currentIndex] as any).groupId}
                   users={(items[currentIndex] as any).users}
+                  apartment={(items[currentIndex] as any).apartment}
                   onLike={(groupId, users) => handleGroupLike(groupId, users)}
                   onPass={(groupId, users) => handleGroupPass(groupId, users)}
                   onOpen={(userId: string) =>
                     router.push({
                       pathname: '/(tabs)/user/[id]',
                       params: { id: userId, from: 'partners' } as any,
+                    })
+                  }
+                  onOpenApartment={(apartmentId: string) =>
+                    router.push({
+                      pathname: '/(tabs)/apartment/[id]',
+                      params: { id: apartmentId } as any,
                     })
                   }
                 />
@@ -1016,15 +1077,19 @@ const styles = StyleSheet.create({
 function GroupCard({
   groupId,
   users,
+  apartment,
   onOpen,
   onLike,
   onPass,
+  onOpenApartment,
 }: {
   groupId: string;
   users: User[];
+  apartment?: Apartment;
   onOpen: (id: string) => void;
   onLike: (groupId: string, users: User[]) => void;
   onPass: (groupId: string, users: User[]) => void;
+  onOpenApartment: (apartmentId: string) => void;
 }) {
   const displayUsers = users.slice(0, 4);
   const extra = users.length - displayUsers.length;
@@ -1049,7 +1114,7 @@ function GroupCard({
                 groupStyles.cell,
                 {
                   height: cellHeight,
-                  width: isOneRowLayout ? `${(100 / displayUsers.length).toFixed(4)}%` : '50%',
+                  width: (isOneRowLayout ? `${(100 / displayUsers.length).toFixed(4)}%` : '50%') as any,
                 },
                 // In single-row layout, remove right border from the last column
                 isOneRowLayout && idx === displayUsers.length - 1 ? { borderRightWidth: 0 } : null,
@@ -1091,6 +1156,37 @@ function GroupCard({
           </TouchableOpacity>
         ))}
       </View>
+
+      {apartment && (
+        <View style={groupStyles.apartmentSection}>
+          <Text style={groupStyles.apartmentTitle}>הדירה שלהם</Text>
+          <TouchableOpacity 
+            activeOpacity={0.9}
+            onPress={() => onOpenApartment(apartment.id)}
+            style={groupStyles.apartmentCardContainer}
+          >
+            <View style={groupStyles.apartmentCardCompact}>
+              <Image 
+                source={{ uri: apartment.image_url || 'https://images.pexels.com/photos/1457842/pexels-photo-1457842.jpeg' }} 
+                style={groupStyles.apartmentImage} 
+              />
+              <View style={groupStyles.apartmentDetails}>
+                <Text style={groupStyles.apartmentCardTitle} numberOfLines={1}>
+                  {apartment.title}
+                </Text>
+                <View style={groupStyles.apartmentLocation}>
+                  <MapPin size={14} color="#9DA4AE" />
+                  <Text style={groupStyles.apartmentLocationText}>{apartment.city}</Text>
+                </View>
+                <View style={groupStyles.apartmentPrice}>
+                  <Text style={groupStyles.apartmentPriceAmount}>₪{apartment.price}</Text>
+                  <Text style={groupStyles.apartmentPriceUnit}>/חודש</Text>
+                </View>
+              </View>
+            </View>
+          </TouchableOpacity>
+        </View>
+      )}
 
       <View style={{ paddingHorizontal: 16, paddingBottom: 12 }}>
         <View style={groupStyles.actionsRow}>
@@ -1245,5 +1341,74 @@ const groupStyles = StyleSheet.create({
   likeBtn: {
     borderColor: 'rgba(34,197,94,0.6)',
     backgroundColor: 'rgba(34,197,94,0.08)',
+  },
+  apartmentSection: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderTopWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
+    backgroundColor: '#1A1A24',
+  },
+  apartmentTitle: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '800',
+    marginBottom: 12,
+    textAlign: 'right',
+  },
+  apartmentCardContainer: {
+    width: '100%',
+  },
+  apartmentCardCompact: {
+    flexDirection: 'row-reverse',
+    backgroundColor: '#22232E',
+    borderRadius: 12,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
+  },
+  apartmentImage: {
+    width: 120,
+    height: 100,
+    backgroundColor: '#2A2B36',
+  },
+  apartmentDetails: {
+    flex: 1,
+    padding: 12,
+    justifyContent: 'center',
+  },
+  apartmentCardTitle: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '700',
+    marginBottom: 6,
+    textAlign: 'right',
+  },
+  apartmentLocation: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 4,
+    marginBottom: 6,
+  },
+  apartmentLocationText: {
+    color: '#9DA4AE',
+    fontSize: 13,
+    textAlign: 'right',
+  },
+  apartmentPrice: {
+    flexDirection: 'row-reverse',
+    alignItems: 'baseline',
+  },
+  apartmentPriceAmount: {
+    color: '#22C55E',
+    fontSize: 16,
+    fontWeight: '800',
+    textAlign: 'right',
+  },
+  apartmentPriceUnit: {
+    color: '#9DA4AE',
+    fontSize: 12,
+    marginLeft: 4,
+    textAlign: 'right',
   },
 });

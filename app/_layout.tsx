@@ -77,7 +77,7 @@ export default function RootLayout() {
   }, [setUser, setLoading]);
 
   return (
-    <View style={{ flex: 1, writingDirection: 'rtl', direction: 'rtl' }}>
+    <View style={{ flex: 1, writingDirection: 'rtl' }}>
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="+not-found" />
       </Stack>

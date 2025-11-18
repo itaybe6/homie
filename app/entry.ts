@@ -20,6 +20,16 @@ if (Platform.OS !== 'web') {
   })();
 }
 
+// Silence noisy console output on web (keep errors)
+if (Platform.OS === 'web') {
+  const noop = () => {};
+  // Common noisy channels during dev
+  console.log = noop;
+  console.info = noop;
+  console.debug = noop;
+  console.warn = noop;
+}
+
 const appendDefaultStyle = (Component: TextLikeComponent, style: Record<string, unknown>) => {
   const defaults = (Component as any).defaultProps ?? {};
   const existingStyle = defaults.style;

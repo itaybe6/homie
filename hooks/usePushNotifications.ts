@@ -5,6 +5,10 @@ import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/authStore';
 
 async function ensurePermissions(): Promise<boolean> {
+  // Do not prompt for notifications permission on web to avoid Chrome console banner
+  if (Platform.OS === 'web') {
+    return false;
+  }
   const settings = await Notifications.getPermissionsAsync();
   if (settings.granted || settings.ios?.status === Notifications.IosAuthorizationStatus.PROVISIONAL) {
     return true;
@@ -14,6 +18,9 @@ async function ensurePermissions(): Promise<boolean> {
 }
 
 async function getExpoToken(): Promise<string | null> {
+  if (Platform.OS === 'web') {
+    return null;
+  }
   const ok = await ensurePermissions();
   if (!ok) return null;
 
@@ -40,6 +47,7 @@ export function usePushNotifications() {
 
   // Register device and upsert token for the signed-in user
   useEffect(() => {
+    if (Platform.OS === 'web') return;
     if (!user?.id) return;
     let cancelled = false;
     (async () => {
@@ -58,6 +66,7 @@ export function usePushNotifications() {
 
   // Foreground: show a local notification immediately on new DB notifications for this user
   useEffect(() => {
+    if (Platform.OS === 'web') return;
     if (!user?.id) return;
     const channel = supabase
       .channel(`notifications-push:${user.id}`)
