@@ -548,147 +548,70 @@ export default function RequestsScreen() {
         });
       }
 
-      // 4) Ensure EVERYONE tied to this apartment shares a merged profile group
-      //    Rule: all apartment users (owner + partners) must be in the same profile group.
-      try {
-        const inviterId = req.sender_id;
-        const ownerId = (apt as any)?.owner_id as string | undefined;
-        // Build the full set of apartment members after the approval
-        const apartmentUserIds = Array.from(
-          new Set<string>([...(finalPartnerIds || []), ownerId, userToAddId].filter(Boolean) as string[])
-        );
-        // eslint-disable-next-line no-console
-        console.log('[requests/approveIncoming] unify apartment group start', {
-          aptId: req.apartment_id,
-          inviterId,
-          ownerId,
-          finalPartnerIds,
-          apartmentUserIds,
-        });
-        if (apartmentUserIds.length) {
-          // Find existing ACTIVE groups for these users
-          const { data: activeMems } = await supabase
-            .from('profile_group_members')
-            .select('user_id, group_id')
-            .eq('status', 'ACTIVE')
-            .in('user_id', apartmentUserIds);
-          // eslint-disable-next-line no-console
-          console.log('[requests/approveIncoming] existing active memberships', activeMems);
-          // Prefer inviter's existing group, then any existing group among members
-          const inviterGroupId =
-            (activeMems || []).find((m: any) => m.user_id === inviterId)?.group_id as string | undefined;
-          const anyExistingGroupId = (activeMems || [])[0]?.group_id as string | undefined;
-          let targetGroupId = inviterGroupId || anyExistingGroupId || null;
-          if (!targetGroupId) {
-            const { data: created, error: createErr } = await supabase
-              .from('profile_groups')
-              .insert({ created_by: inviterId || user.id, name: 'שותפים' } as any)
-              .select('id')
-              .single();
-            if (createErr) throw createErr;
-            targetGroupId = (created as any)?.id as string;
-            // eslint-disable-next-line no-console
-            console.log('[requests/approveIncoming] created new profile_group', { targetGroupId });
-          } else {
-            // eslint-disable-next-line no-console
-            console.log('[requests/approveIncoming] using existing profile_group', { targetGroupId });
-          }
-          // RLS-safe: add myself via SECURITY DEFINER RPC (no direct table writes)
-          try {
-            const { error: addSelfErr } = await supabase.rpc('add_self_to_group', {
-              p_group_id: targetGroupId,
-            });
-            if (addSelfErr) {
-              // eslint-disable-next-line no-console
-              console.error('[requests/approveIncoming] RPC add_self_to_group failed', {
-                code: (addSelfErr as any)?.code,
-                message: (addSelfErr as any)?.message,
-                details: (addSelfErr as any)?.details,
-                hint: (addSelfErr as any)?.hint,
-                targetGroupId,
-              });
-            } else {
-              // eslint-disable-next-line no-console
-              console.log('[requests/approveIncoming] RPC add_self_to_group OK', { targetGroupId });
+      // 4) Merge profiles only for apartment invitations initiated by the owner (INVITE_APT).
+      // For JOIN_APT (owner receives a join request) we intentionally do NOT merge profiles.
+      if (requestType === 'INVITE_APT') {
+        try {
+          const inviterId = req.sender_id;
+          const ownerId = (apt as any)?.owner_id as string | undefined;
+          const apartmentUserIds = Array.from(
+            new Set<string>([...(finalPartnerIds || []), ownerId, userToAddId].filter(Boolean) as string[])
+          );
+          if (apartmentUserIds.length) {
+            const { data: activeMems } = await supabase
+              .from('profile_group_members')
+              .select('user_id, group_id')
+              .eq('status', 'ACTIVE')
+              .in('user_id', apartmentUserIds);
+            const inviterGroupId =
+              (activeMems || []).find((m: any) => m.user_id === inviterId)?.group_id as string | undefined;
+            const anyExistingGroupId = (activeMems || [])[0]?.group_id as string | undefined;
+            let targetGroupId = inviterGroupId || anyExistingGroupId || null;
+            if (!targetGroupId) {
+              const { data: created, error: createErr } = await supabase
+                .from('profile_groups')
+                .insert({ created_by: inviterId || user.id, name: 'שותפים' } as any)
+                .select('id')
+                .single();
+              if (createErr) throw createErr;
+              targetGroupId = (created as any)?.id as string;
             }
-          } catch (e) {
-            // eslint-disable-next-line no-console
-            console.error('[requests/approveIncoming] RPC add_self_to_group exception', e);
-          }
-          // For other users we cannot insert memberships due to RLS; create invites from current user instead (best-effort)
-          const others = apartmentUserIds.filter((uid) => uid !== user.id);
-          if (others.length) {
-            // Filter out users who are already ACTIVE members of the target group
-            const existingMemberIds = new Set(((activeMems || []) as any[]).map((m: any) => m.user_id));
-            const candidateInviteeIds = others.filter((id) => !existingMemberIds.has(id));
-            // If some have already a pending invite, skip them too to avoid 409
-            let pendingInviteeIds: string[] = [];
-            if (candidateInviteeIds.length) {
-              const { data: pending } = await supabase
-                .from('profile_group_invites')
-                .select('invitee_id')
-                .eq('group_id', targetGroupId)
-                .eq('status', 'PENDING')
-                .in('invitee_id', candidateInviteeIds as any);
-              pendingInviteeIds = (pending || []).map((r: any) => r.invitee_id);
-            }
-            const finalInviteeIds = candidateInviteeIds.filter((id) => !pendingInviteeIds.includes(id));
-            // eslint-disable-next-line no-console
-            console.log('[requests/approveIncoming] invite candidates', {
-              others,
-              existingMemberIds: Array.from(existingMemberIds),
-              candidateInviteeIds,
-              pendingInviteeIds,
-              finalInviteeIds,
-              targetGroupId,
-            });
-            if (finalInviteeIds.length === 0) {
-              // eslint-disable-next-line no-console
-              console.log('[requests/approveIncoming] no invites needed (all are members or already pending)');
-            } else {
-              // Avoid spamming: insert only for finalInviteeIds
-              const invitesPayload = finalInviteeIds.map((inviteeId) => ({
-                inviter_id: user.id,
-                invitee_id: inviteeId,
-                group_id: targetGroupId,
-                status: 'PENDING',
-              }));
-              // eslint-disable-next-line no-console
-              console.log('[requests/approveIncoming] creating invites payload', { invitesPayload });
-              const inviteRes = await supabase
-                .from('profile_group_invites')
-                .insert(invitesPayload as any, { ignoreDuplicates: true } as any);
-            if ((inviteRes as any)?.error) {
-              // eslint-disable-next-line no-console
-              const code = (((inviteRes as any).error as any)?.code) || '';
-              const message = (inviteRes as any).error?.message || '';
-              const isDuplicate =
-                code === '23505' || message.toLowerCase().includes('duplicate key') || (inviteRes as any)?.status === 409;
-              if (!isDuplicate) {
-                console.error('[requests/approveIncoming] create invites for other apartment users failed', {
-                  code,
-                  message,
-                  details: ((inviteRes as any).error as any)?.details,
-                  hint: ((inviteRes as any).error as any)?.hint,
-                  targetGroupId,
-                  others,
-                });
-              } else {
-                // eslint-disable-next-line no-console
-                console.log('[requests/approveIncoming] invites already exist, continuing', { targetGroupId });
+            try {
+              await supabase.rpc('add_self_to_group', { p_group_id: targetGroupId });
+            } catch {}
+            const others = apartmentUserIds.filter((uid) => uid !== user.id);
+            if (others.length) {
+              const existingMemberIds = new Set(((activeMems || []) as any[]).map((m: any) => m.user_id));
+              const candidateInviteeIds = others.filter((id) => !existingMemberIds.has(id));
+              let pendingInviteeIds: string[] = [];
+              if (candidateInviteeIds.length) {
+                const { data: pending } = await supabase
+                  .from('profile_group_invites')
+                  .select('invitee_id')
+                  .eq('group_id', targetGroupId)
+                  .eq('status', 'PENDING')
+                  .in('invitee_id', candidateInviteeIds as any);
+                pendingInviteeIds = (pending || []).map((r: any) => r.invitee_id);
               }
-            } else {
-              // eslint-disable-next-line no-console
-              console.log('[requests/approveIncoming] invites created/ignored', {
-                count: finalInviteeIds.length,
-                targetGroupId,
-              });
-            }
+              const finalInviteeIds = candidateInviteeIds.filter((id) => !pendingInviteeIds.includes(id));
+              if (finalInviteeIds.length) {
+                await supabase
+                  .from('profile_group_invites')
+                  .insert(
+                    finalInviteeIds.map((inviteeId) => ({
+                      inviter_id: user.id,
+                      invitee_id: inviteeId,
+                      group_id: targetGroupId,
+                      status: 'PENDING',
+                    })) as any,
+                    { ignoreDuplicates: true } as any
+                  );
+              }
             }
           }
+        } catch (e) {
+          console.warn('ensure shared group for apartment failed', e);
         }
-      } catch (e) {
-        console.warn('ensure shared group for apartment failed', e);
       }
 
       await fetchAll();
@@ -1092,6 +1015,17 @@ export default function RequestsScreen() {
                   ) : (isGroupMatch || isGroupInvite) && groupMembers.length ? (
                     (() => {
                       const gridMembers = groupMembers.slice(0, 4);
+                      if (gridMembers.length === 1) {
+                        return (
+                          <View style={styles.thumbWrap}>
+                            <Image
+                              source={{ uri: gridMembers[0]?.avatar_url || DEFAULT_AVATAR }}
+                              style={{ width: '100%', height: '100%' }}
+                              resizeMode="cover"
+                            />
+                          </View>
+                        );
+                      }
                       const isThree = gridMembers.length === 3;
                       const rows = isThree ? 1 : Math.ceil(gridMembers.length / 2);
                       const cellHeightPct = rows === 1 ? '100%' : (`${100 / rows}%` as any);

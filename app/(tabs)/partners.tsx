@@ -108,28 +108,26 @@ useEffect(() => {
         .order('created_at', { ascending: false });
       if (usersError) throw usersError;
 
-      // Groups considered merged/active (supporting multiple possible statuses)
-      const { data: groups, error: gErr } = await supabase
+      // Fetch ACTIVE groups first (public readable by RLS), then get their members
+      const { data: groupsData, error: groupsErr } = await supabase
         .from('profile_groups')
         .select('id, status')
-        .in('status', ['ACTIVE', 'MERGED'] as any);
-      if (gErr) throw gErr;
-      const groupIds = (groups || []).map((g: any) => g.id as string);
+        .eq('status', 'ACTIVE');
+      if (groupsErr) throw groupsErr;
+      const groupIds = (groupsData || []).map((g: any) => g.id as string);
 
       let members: { group_id: string; user_id: string }[] = [];
       if (groupIds.length) {
         const { data: mRows, error: mErr } = await supabase
           .from('profile_group_members')
           .select('group_id, user_id, status')
+          .eq('status', 'ACTIVE')
           .in('group_id', groupIds);
         if (mErr) throw mErr;
-        // Treat members as active unless explicitly removed/left
-        const filtered = (mRows || []).filter((r: any) => {
-          const s = String(r?.status || '').toUpperCase();
-          return s !== 'REMOVED' && s !== 'LEFT';
-        });
-        members = filtered.map((r: any) => ({ group_id: r.group_id, user_id: r.user_id }));
+        // Normalize members
+        members = (mRows || []).map((r: any) => ({ group_id: r.group_id, user_id: r.user_id }));
       }
+
 
       const groupUserIds = Array.from(new Set(members.map((m) => m.user_id)));
       let groupUsersById: Record<string, User> = {};
@@ -205,23 +203,25 @@ useEffect(() => {
         ...Array.from(memberIdsInActiveGroups),
         ...Array.from(memberIdsInUsersOwnGroups),
       ]);
-      const filteredSingles = (authId
-        ? list.filter((u) => u.id !== authId && !interacted.has(u.id))
-        : list
-      )
-        .filter((u) => !memberIdsToExclude.has(u.id))
-        .filter((u) => userPassesFilters(u));
+
+      let filteredSingles = list.filter((u) => u.id !== authId);
+
+      filteredSingles = filteredSingles.filter((u) => !interacted.has(u.id));
+
+      filteredSingles = filteredSingles.filter((u) => !memberIdsToExclude.has(u.id));
+
+      filteredSingles = filteredSingles.filter((u) => userPassesFilters(u));
 
       let combinedItems: BrowseItem[] = [];
       if (profileType === 'groups' || profileType === 'all') {
-        combinedItems.push(
-          ...activeGroups
-            .filter((g) => !interactedGroupIds.has(g.groupId))
-            .map((g) => ({ type: 'group', groupId: g.groupId, users: g.users }) as BrowseItem)
-        );
+        const groupItems = activeGroups
+          .filter((g) => !interactedGroupIds.has(g.groupId))
+          .map((g) => ({ type: 'group', groupId: g.groupId, users: g.users }) as BrowseItem);
+        combinedItems.push(...groupItems);
       }
       if (profileType === 'singles' || profileType === 'all') {
-        combinedItems.push(...filteredSingles.map((u) => ({ type: 'user', user: u }) as BrowseItem));
+        const singleItems = filteredSingles.map((u) => ({ type: 'user', user: u }) as BrowseItem);
+        combinedItems.push(...singleItems);
       }
 
       setItems(combinedItems);

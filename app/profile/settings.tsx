@@ -74,23 +74,19 @@ export default function ProfileSettingsScreen() {
     (async () => {
       try {
         if (!showAptModal || !user?.id) return;
-        console.log('[MyApartment] Opening modal for user:', user.id);
         setAptLoading(true);
         // Try to find an apartment the user is a partner of, otherwise one they own
         const [{ data: partnerRows }, { data: ownerRows }] = await Promise.all([
           supabase.from('apartments').select('*').contains('partner_ids', [user.id]).limit(1),
           supabase.from('apartments').select('*').eq('owner_id', user.id).limit(1),
         ]);
-        console.log('[MyApartment] Query results:', { partnerRows, ownerRows });
         const apt = (partnerRows && partnerRows[0]) || (ownerRows && ownerRows[0]) || null;
         setMyApartment((apt as any) || null);
         if (!apt) {
-          console.log('[MyApartment] No apartment found for user:', user.id);
           setAptOwner(null);
           setAptMembers([]);
           return;
         }
-        console.log('[MyApartment] Found apartment:', (apt as any)?.id);
         // Load owner
         const [{ data: ownerRow }, partnersResp] = await Promise.all([
           supabase.from('users').select('id, full_name, avatar_url').eq('id', (apt as any).owner_id).maybeSingle(),
@@ -101,10 +97,6 @@ export default function ProfileSettingsScreen() {
                 .in('id', (apt as any).partner_ids as string[])
             : Promise.resolve({ data: [] as any[] } as any),
         ]);
-        console.log('[MyApartment] Loaded owner and partners:', {
-          ownerRow,
-          partnersCount: (partnersResp as any)?.data?.length || 0,
-        });
         setAptOwner((ownerRow as any) || null);
         const ownerId = (apt as any).owner_id as string;
         const partnersRaw: any[] = ((partnersResp as any)?.data || []) as any[];
@@ -117,10 +109,8 @@ export default function ProfileSettingsScreen() {
           seen.add(uid);
           return true;
         });
-        console.log('[MyApartment] Partners after dedupe:', partnersUnique.map((p: any) => p.id));
         setAptMembers(partnersUnique as any);
       } catch (e: any) {
-        console.error('[MyApartment] Failed loading apartment modal:', e);
         Alert.alert('שגיאה', e?.message || 'לא ניתן לטעון את הדירה שלך');
       } finally {
         setAptLoading(false);
@@ -130,14 +120,12 @@ export default function ProfileSettingsScreen() {
 
   const leaveApartment = async () => {
     if (!user?.id || !myApartment) return;
-    console.log('[LeaveApartment] Clicked. Apartment:', (myApartment as any)?.id, 'User:', user.id);
     // Only partners (not owner) can leave
     const currentPartners: string[] = Array.isArray((myApartment as any).partner_ids)
       ? ((myApartment as any).partner_ids as string[])
       : [];
     const isOwner = user.id === (myApartment as any).owner_id;
     const isPartner = currentPartners.includes(user.id);
-    console.log('[LeaveApartment] State:', { isOwner, isPartner, currentPartners });
     if (!isPartner || isOwner) {
       Alert.alert('שגיאה', isOwner ? 'בעל/ת הדירה לא יכול/ה לצאת מהדירה' : 'אינך משויך/ה כדייר/ת בדירה זו');
       return;
@@ -157,13 +145,11 @@ export default function ProfileSettingsScreen() {
       if (!shouldProceed) return;
       setIsLeavingApartment(true);
       const newPartnerIds = currentPartners.filter((pid) => pid !== user.id);
-      console.log('[LeaveApartment] Updating apartments.partner_ids ->', newPartnerIds);
       const { error: updErr } = await supabase
         .from('apartments')
         .update({ partner_ids: newPartnerIds })
         .eq('id', (myApartment as any).id);
       if (updErr) {
-        console.error('[LeaveApartment] Supabase update error (apartments):', updErr);
         throw updErr;
       }
       // Mark any active group memberships as LEFT
@@ -173,7 +159,6 @@ export default function ProfileSettingsScreen() {
         .delete()
         .eq('user_id', user.id);
       if (grpErr) {
-        console.error('[LeaveApartment] Supabase update error (profile_group_members):', grpErr);
         // not throwing intentionally, leaving apt should succeed even if group update failed
       }
       // Update local state
@@ -182,7 +167,6 @@ export default function ProfileSettingsScreen() {
       Alert.alert('הצלחה', 'יצאת מהדירה בהצלחה');
       setShowAptModal(false);
     } catch (e: any) {
-      console.error('[LeaveApartment] Failed:', e);
       Alert.alert('שגיאה', e?.message || 'לא ניתן לצאת מהדירה כעת');
     } finally {
       setIsLeavingApartment(false);
@@ -248,12 +232,6 @@ export default function ProfileSettingsScreen() {
   const leaveGroup = async (groupId: string) => {
     if (!user?.id) return;
     try {
-      console.log('[LeaveGroup] Clicked', {
-        groupId,
-        userId: user.id,
-        platform: Platform.OS,
-        hasConfirm: typeof confirm === 'function',
-      });
       let shouldProceed = true;
       if (Platform.OS === 'web') {
         shouldProceed =
@@ -268,97 +246,94 @@ export default function ProfileSettingsScreen() {
           ]);
         });
       }
-      if (!shouldProceed) {
-        console.log('[LeaveGroup] User canceled confirmation');
-      }
       if (!shouldProceed) return;
       setLeavingGroupId(groupId);
-      console.log('[LeaveGroup] Sending Supabase update', {
-        table: 'profile_group_members',
-        action: 'DELETE',
-        filters: { group_id: groupId, user_id: user.id },
-      });
-      const { error } = await supabase
-        .from('profile_group_members')
-        .delete()
-        .eq('group_id', groupId)
-        .eq('user_id', user.id);
-      if (error) {
-        // eslint-disable-next-line no-console
-        console.error('[LeaveGroup] Supabase update error', {
-          code: (error as any)?.code,
-          message: (error as any)?.message,
-          details: (error as any)?.details,
-          hint: (error as any)?.hint,
-        });
-        throw error;
+      // Check how many active members are currently in the group.
+      // If there are only two, deleting the current user will leave a single member,
+      // so we should remove the whole group.
+      let shouldDeleteGroup = false;
+      let activeMemberIds: string[] = [];
+      try {
+        const membersResp: any = await supabase
+          .from('profile_group_members')
+          .select('user_id')
+          .eq('group_id', groupId)
+          .eq('status', 'ACTIVE');
+        activeMemberIds = Array.isArray(membersResp?.data) ? membersResp.data.map((r: any) => r.user_id) : [];
+        const memberCount = activeMemberIds.length;
+        shouldDeleteGroup = memberCount <= 2;
+      } catch {
+        // ignore counting errors; default is not to delete the group
       }
-      console.log('[LeaveGroup] Supabase update OK');
+      if (shouldDeleteGroup) {
+        try {
+          // Delete all memberships in the group, then remove the group itself.
+          // Requires RLS policies that let a current member remove other members
+          // when the group is about to be dissolved (<=2 active members).
+          const { error: deleteMembersErr } = await supabase
+            .from('profile_group_members')
+            .delete()
+            .eq('group_id', groupId);
+          if (deleteMembersErr) throw deleteMembersErr;
+          const { error: deleteGroupErr } = await supabase
+            .from('profile_groups')
+            .delete()
+            .eq('id', groupId);
+          if (deleteGroupErr) throw deleteGroupErr;
+        } catch {
+          // Best-effort fallback: at least remove current user
+          await supabase
+            .from('profile_group_members')
+            .delete()
+            .eq('group_id', groupId)
+            .eq('user_id', user.id);
+        }
+      } else {
+        const { error } = await supabase
+          .from('profile_group_members')
+          .delete()
+          .eq('group_id', groupId)
+          .eq('user_id', user.id);
+        if (error) {
+          throw error;
+        }
+      }
 
       // Also remove the user from any apartments where they are a partner (not owner)
       try {
-        console.log('[LeaveGroup] Querying apartments containing user as partner', { userId: user.id });
         const { data: aptRows, error: aptQueryErr } = await supabase
           .from('apartments')
           .select('id, owner_id, partner_ids')
           .contains('partner_ids', [user.id]);
-        if (aptQueryErr) {
-          // eslint-disable-next-line no-console
-          console.error('[LeaveGroup] Apartments query error', {
-            code: (aptQueryErr as any)?.code,
-            message: (aptQueryErr as any)?.message,
-          });
-        } else {
+        if (!aptQueryErr) {
           const apartments: any[] = (aptRows as any[]) || [];
           for (const apt of apartments) {
             const isOwner = String(apt.owner_id) === String(user.id);
             const currentPartners: string[] = Array.isArray(apt.partner_ids) ? (apt.partner_ids as string[]) : [];
             const nextPartners = currentPartners.filter((pid) => pid !== user.id);
             if (isOwner) {
-              console.log('[LeaveGroup] Skipping apartment update because user is owner', { apartmentId: apt.id });
               continue;
             }
             if (nextPartners.length === currentPartners.length) {
               continue;
             }
-            console.log('[LeaveGroup] Updating apartment to remove user from partners', {
-              apartmentId: apt.id,
-              before: currentPartners,
-              after: nextPartners,
-            });
             const { error: aptUpdErr } = await supabase
               .from('apartments')
               .update({ partner_ids: nextPartners })
               .eq('id', apt.id);
             if (aptUpdErr) {
-              // eslint-disable-next-line no-console
-              console.error('[LeaveGroup] Apartment update error', {
-                apartmentId: apt.id,
-                code: (aptUpdErr as any)?.code,
-                message: (aptUpdErr as any)?.message,
-              });
+              // ignore
             }
           }
         }
       } catch (aptSideErr: any) {
-        // eslint-disable-next-line no-console
-        console.error('[LeaveGroup] Failed removing user from apartments after leaving group', {
-          message: aptSideErr?.message,
-        });
+        // ignore
       }
 
       // Optimistically update UI
       setSharedGroups((prev) => prev.filter((g) => g.id !== groupId));
       Alert.alert('הצלחה', 'עזבת את הקבוצה בהצלחה');
     } catch (e: any) {
-      // eslint-disable-next-line no-console
-      console.error('[LeaveGroup] Failed with exception', {
-        name: e?.name,
-        code: e?.code,
-        message: e?.message,
-        details: e?.details,
-        hint: e?.hint,
-      });
       Alert.alert('שגיאה', e?.message || 'לא ניתן לעזוב את הקבוצה כעת');
     } finally {
       setLeavingGroupId(null);
