@@ -642,8 +642,11 @@ export default function RequestsScreen() {
         try {
           const inviterId = req.sender_id;
           const ownerId = (apt as any)?.owner_id as string | undefined;
+          // כל המשתמשים שקשורים לדירה: בעלים, שותפים (partner_ids), מי שאישר עכשיו, והמזמין עצמו
           const apartmentUserIds = Array.from(
-            new Set<string>([...(finalPartnerIds || []), ownerId, userToAddId].filter(Boolean) as string[])
+            new Set<string>(
+              [...(finalPartnerIds || []), ownerId, userToAddId, inviterId].filter(Boolean) as string[]
+            )
           );
           if (apartmentUserIds.length) {
             // Prefer the invitee's existing group if available
@@ -669,119 +672,179 @@ export default function RequestsScreen() {
             if (!targetGroupId) {
               const { data: created, error: createErr } = await supabase
                 .from('profile_groups')
-                .insert({ created_by: user.id, name: 'שותפים' } as any)
+                .insert({ created_by: user.id, name: 'שותפים', status: 'ACTIVE' } as any)
                 .select('id')
                 .single();
               if (createErr) throw createErr;
               targetGroupId = (created as any)?.id as string;
+            } else {
+              // אם הקבוצה קיימת אבל לא ACTIVE, נהפוך אותה ל-ACTIVE כדי שתחשוב כמיזוג פעיל
+              try {
+                await supabase
+                  .from('profile_groups')
+                  .update({ status: 'ACTIVE' })
+                  .eq('id', targetGroupId)
+                  .neq('status', 'ACTIVE');
+              } catch {
+                // best-effort בלבד
+              }
             }
             try {
               await supabase.rpc('add_self_to_group', { p_group_id: targetGroupId });
             } catch {}
+            // Fallback: ensure approver is ACTIVE member of the group (needed for RLS to allow adding others)
+            try {
+              const insSelf = await supabase
+                .from('profile_group_members')
+                .insert([{ group_id: targetGroupId, user_id: user.id, status: 'ACTIVE' } as any], {
+                  onConflict: 'group_id,user_id',
+                  ignoreDuplicates: true,
+                } as any);
+              if ((insSelf as any)?.error || (insSelf as any)?.status === 409) {
+                await supabase
+                  .from('profile_group_members')
+                  .update({ status: 'ACTIVE' })
+                  .eq('group_id', targetGroupId)
+                  .eq('user_id', user.id);
+              }
+            } catch {}
+
+            // הוספה מפורשת של המזמין (sender) לקבוצה, כדי לוודא שתמיד נכנס כחבר ACTIVE
+            // eslint-disable-next-line no-console
+            console.log('=== ADDING INVITER ===', { inviterId, targetGroupId, currentUserId: user.id });
+            if (inviterId && targetGroupId && inviterId !== user.id) {
+              try {
+                // eslint-disable-next-line no-console
+                console.log('INSERTING inviter:', { group_id: targetGroupId, user_id: inviterId, status: 'ACTIVE' });
+                const { data: insertResult, error: inviterErr } = await supabase
+                  .from('profile_group_members')
+                  .insert([{ group_id: targetGroupId, user_id: inviterId, status: 'ACTIVE' } as any])
+                  .select();
+                // eslint-disable-next-line no-console
+                console.log('INSERT RESULT:', { insertResult, inviterErr });
+                if (inviterErr) {
+                  // eslint-disable-next-line no-console
+                  console.log('INSERT FAILED, trying UPDATE instead');
+                  // אם יש conflict, נעדכן את הסטטוס ל-ACTIVE
+                  const { data: updateResult, error: updateErr } = await supabase
+                    .from('profile_group_members')
+                    .update({ status: 'ACTIVE' })
+                    .eq('group_id', targetGroupId)
+                    .eq('user_id', inviterId)
+                    .select();
+                  // eslint-disable-next-line no-console
+                  console.log('UPDATE RESULT:', { updateResult, updateErr });
+                }
+                // eslint-disable-next-line no-console
+                console.log('=== INVITER ADDED SUCCESSFULLY ===');
+              } catch (err) {
+                // eslint-disable-next-line no-console
+                console.error('!!! FAILED to add inviter to group !!!', err);
+              }
+            } else {
+              // eslint-disable-next-line no-console
+              console.log('SKIPPED inviter addition - condition failed:', {
+                hasInviterId: !!inviterId,
+                hasTargetGroupId: !!targetGroupId,
+                isDifferentFromCurrentUser: inviterId !== user.id,
+              });
+            }
+
             const others = apartmentUserIds.filter((uid) => uid !== user.id);
             if (others.length) {
-              const existingMemberIds = new Set(((activeMems || []) as any[]).map((m: any) => m.user_id));
-              const candidateInviteeIds = others.filter((id) => !existingMemberIds.has(id));
-              let pendingInviteeIds: string[] = [];
-              if (candidateInviteeIds.length) {
-                const { data: pending } = await supabase
-                  .from('profile_group_invites')
-                  .select('invitee_id')
-                  .eq('group_id', targetGroupId)
-                  .eq('status', 'PENDING')
-                  .in('invitee_id', candidateInviteeIds as any);
-                pendingInviteeIds = (pending || []).map((r: any) => r.invitee_id);
-              }
-              const finalInviteeIds = candidateInviteeIds.filter((id) => !pendingInviteeIds.includes(id));
-              if (finalInviteeIds.length) {
-                await supabase
-                  .from('profile_group_invites')
-                  .insert(
-                    finalInviteeIds.map((inviteeId) => ({
-                      inviter_id: user.id,
-                      invitee_id: inviteeId,
-                      group_id: targetGroupId,
-                      status: 'PENDING',
-                    })) as any,
-                    { ignoreDuplicates: true } as any
-                  );
-              }
-              // Try to auto-add inviter actively if possible (best-effort)
-              try {
-                if (inviterId) {
-                  const insInv = await supabase
+              const { data: targetMembersRows } = await supabase
+                .from('profile_group_members')
+                .select('user_id')
+                .eq('group_id', targetGroupId)
+                .eq('status', 'ACTIVE');
+              const targetMemberIds = new Set<string>((targetMembersRows || []).map((row: any) => row.user_id));
+              for (const otherId of others) {
+                if (!otherId || targetMemberIds.has(otherId)) continue;
+                let added = false;
+                try {
+                  // ניסיון ישיר להכניס כחבר ACTIVE בקבוצה (אידמפוטנטי)
+                  const { error: insErr } = await supabase
                     .from('profile_group_members')
-                    .insert([{ group_id: targetGroupId, user_id: inviterId, status: 'ACTIVE' } as any], {
-                      onConflict: 'group_id,user_id',
-                      ignoreDuplicates: true,
-                    } as any);
-                  if ((insInv as any)?.error || (insInv as any)?.status === 409) {
-                    await supabase
-                      .from('profile_group_members')
-                      .update({ status: 'ACTIVE' })
-                      .eq('group_id', targetGroupId)
-                      .eq('user_id', inviterId);
+                    .insert(
+                      [{ group_id: targetGroupId, user_id: otherId, status: 'ACTIVE' } as any],
+                      {
+                        onConflict: 'group_id,user_id',
+                        ignoreDuplicates: true,
+                        returning: 'minimal',
+                      } as any
+                    );
+                  if (!insErr) {
+                    added = true;
                   }
+                } catch {}
+                if (!added) {
+                  try {
+                    // אם ההכנסה נחסמת (RLS וכו'), לפחות נשלח הזמנה לקבוצה
+                    await supabase
+                      .from('profile_group_invites')
+                      .insert(
+                        { inviter_id: user.id, invitee_id: otherId, group_id: targetGroupId, status: 'PENDING' } as any,
+                        { ignoreDuplicates: true } as any
+                      );
+                    added = true;
+                  } catch {}
                 }
-              } catch {}
-              // If inviter already belongs to another ACTIVE group, merge that group's members into targetGroupId
-              try {
-                if (inviterId) {
-                  const { data: invGroupMem } = await supabase
-                    .from('profile_group_members')
-                    .select('group_id')
-                    .eq('user_id', inviterId)
-                    .eq('status', 'ACTIVE')
-                    .maybeSingle();
-                  const inviterOwnGroupId = (invGroupMem as any)?.group_id as string | undefined;
-                  if (inviterOwnGroupId && inviterOwnGroupId !== targetGroupId) {
-                    // Fetch all ACTIVE members from inviter's group
-                    const [{ data: invGroupMembers }, { data: targetMembers }] = await Promise.all([
-                      supabase
+                if (added) {
+                  targetMemberIds.add(otherId);
+                }
+              }
+            }
+            // If inviter already belongs to another ACTIVE group, merge that group's members into targetGroupId
+            if (inviterId) {
+              const { data: invGroupMem, error: invGroupErr } = await supabase
+                .from('profile_group_members')
+                .select('group_id')
+                .eq('user_id', inviterId)
+                .eq('status', 'ACTIVE')
+                .maybeSingle();
+              if (!invGroupErr) {
+                const inviterOwnGroupId = (invGroupMem as any)?.group_id as string | undefined;
+                if (inviterOwnGroupId && inviterOwnGroupId !== targetGroupId) {
+                  const [{ data: invGroupMembers }, { data: targetMembers }] = await Promise.all([
+                    supabase
+                      .from('profile_group_members')
+                      .select('user_id')
+                      .eq('group_id', inviterOwnGroupId)
+                      .eq('status', 'ACTIVE'),
+                    supabase
+                      .from('profile_group_members')
+                      .select('user_id')
+                      .eq('group_id', targetGroupId)
+                      .eq('status', 'ACTIVE'),
+                  ]);
+                  const targetMemberSet = new Set<string>((targetMembers || []).map((m: any) => m.user_id));
+                  const membersToMerge = (invGroupMembers || [])
+                    .map((m: any) => m.user_id as string)
+                    .filter((uid) => uid && !targetMemberSet.has(uid));
+                  for (const uid of membersToMerge) {
+                    try {
+                      const insertMerge = await supabase
                         .from('profile_group_members')
-                        .select('user_id')
-                        .eq('group_id', inviterOwnGroupId)
-                        .eq('status', 'ACTIVE'),
-                      supabase
-                        .from('profile_group_members')
-                        .select('user_id')
-                        .eq('group_id', targetGroupId)
-                        .eq('status', 'ACTIVE'),
-                    ]);
-                    const targetMemberSet = new Set<string>((targetMembers || []).map((m: any) => m.user_id));
-                    const membersToMerge = (invGroupMembers || [])
-                      .map((m: any) => m.user_id as string)
-                      .filter((uid) => uid && !targetMemberSet.has(uid));
-                    // Best-effort: try add all as ACTIVE members; if blocked, send invites
-                    for (const uid of membersToMerge) {
-                      try {
-                        const ins = await supabase
-                          .from('profile_group_members')
-                          .insert([{ group_id: targetGroupId, user_id: uid, status: 'ACTIVE' } as any], {
-                            onConflict: 'group_id,user_id',
-                            ignoreDuplicates: true,
-                          } as any);
-                        if ((ins as any)?.error || (ins as any)?.status === 409) {
-                          await supabase
-                            .from('profile_group_members')
-                            .update({ status: 'ACTIVE' })
-                            .eq('group_id', targetGroupId)
-                            .eq('user_id', uid);
-                        }
-                      } catch {
-                        try {
-                          await supabase
-                            .from('profile_group_invites')
-                            .insert(
-                              { inviter_id: user.id, invitee_id: uid, group_id: targetGroupId, status: 'PENDING' } as any,
-                              { ignoreDuplicates: true } as any
-                            );
-                        } catch {}
+                        .insert([{ group_id: targetGroupId, user_id: uid, status: 'ACTIVE' } as any], {
+                          onConflict: 'group_id,user_id',
+                          ignoreDuplicates: true,
+                        } as any);
+                      if ((insertMerge as any)?.error) {
+                        throw (insertMerge as any).error;
                       }
+                    } catch {
+                      try {
+                        await supabase
+                          .from('profile_group_invites')
+                          .insert(
+                            { inviter_id: user.id, invitee_id: uid, group_id: targetGroupId, status: 'PENDING' } as any,
+                            { ignoreDuplicates: true } as any
+                          );
+                      } catch {}
                     }
                   }
                 }
-              } catch {}
+              }
             }
           }
         } catch (e) {

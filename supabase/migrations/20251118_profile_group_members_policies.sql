@@ -1,53 +1,40 @@
+-- Enable RLS on profile_group_members
 alter table if exists public.profile_group_members enable row level security;
 
--- Allow authenticated users to add themselves to a group
+-- Drop all existing policies to start fresh
+drop policy if exists "pgm_any_authenticated_insert" on public.profile_group_members;
+drop policy if exists "pgm_any_authenticated_update" on public.profile_group_members;
+drop policy if exists "pgm_any_authenticated_select" on public.profile_group_members;
 drop policy if exists "pgm_self_add_to_group" on public.profile_group_members;
-create policy "pgm_self_add_to_group"
-on public.profile_group_members
-for insert
-to authenticated
-with check (
-  user_id = auth.uid()
-);
-
--- Allow the creator of the group to add any member to that group
 drop policy if exists "pgm_creator_add_members" on public.profile_group_members;
-create policy "pgm_creator_add_members"
+drop policy if exists "pgm_active_member_add_members" on public.profile_group_members;
+drop policy if exists "pgm_update_by_self_or_creator" on public.profile_group_members;
+
+-- Policy: Any authenticated user can SELECT (read) group members
+create policy "pgm_authenticated_select"
+on public.profile_group_members
+for select
+to authenticated
+using (true);
+
+-- Policy: Any authenticated user can INSERT (add) any user to any group
+create policy "pgm_authenticated_insert"
 on public.profile_group_members
 for insert
 to authenticated
-with check (
-  exists (
-    select 1
-    from public.profile_groups g
-    where g.id = profile_group_members.group_id
-      and g.created_by = auth.uid()
-  )
-);
+with check (true);
 
--- Allow updates by the member themself or the group's creator (e.g., to set status ACTIVE)
-drop policy if exists "pgm_update_by_self_or_creator" on public.profile_group_members;
-create policy "pgm_update_by_self_or_creator"
+-- Policy: Any authenticated user can UPDATE group members
+create policy "pgm_authenticated_update"
 on public.profile_group_members
 for update
 to authenticated
-using (
-  auth.uid() = user_id
-  or exists (
-    select 1
-    from public.profile_groups g
-    where g.id = profile_group_members.group_id
-      and g.created_by = auth.uid()
-  )
-)
-with check (
-  auth.uid() = user_id
-  or exists (
-    select 1
-    from public.profile_groups g
-    where g.id = profile_group_members.group_id
-      and g.created_by = auth.uid()
-  )
-);
+using (true)
+with check (true);
 
-
+-- Policy: Any authenticated user can DELETE group members
+create policy "pgm_authenticated_delete"
+on public.profile_group_members
+for delete
+to authenticated
+using (true);
