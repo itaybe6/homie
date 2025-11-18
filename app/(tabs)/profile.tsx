@@ -41,6 +41,9 @@ export default function ProfileScreen() {
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);
   const [isDeletingImage, setIsDeletingImage] = useState(false);
   const [isAddingImage, setIsAddingImage] = useState(false);
+  const [sharedGroups, setSharedGroups] = useState<
+    { id: string; name?: string | null; members: Pick<User, 'id' | 'full_name' | 'avatar_url'>[] }[]
+  >([]);
 
   const [fullName, setFullName] = useState('');
   const [age, setAge] = useState('');
@@ -178,6 +181,50 @@ export default function ProfileScreen() {
         })
       );
       setAptMembers(membersMap);
+
+      // Load shared profile groups (compact view)
+      try {
+        const { data: membershipRows, error: membershipError } = await supabase
+          .from('profile_group_members')
+          .select('group_id')
+          .eq('user_id', user.id)
+          .eq('status', 'ACTIVE');
+        if (membershipError) throw membershipError;
+        const groupIds = (membershipRows || []).map((r: any) => r.group_id).filter(Boolean);
+        if (!groupIds.length) {
+          setSharedGroups([]);
+        } else {
+          const results: { id: string; name?: string | null; members: Pick<User, 'id' | 'full_name' | 'avatar_url'>[] }[] = [];
+          for (const gid of groupIds) {
+            const { data: groupRow } = await supabase
+              .from('profile_groups')
+              .select('id,name,status')
+              .eq('id', gid)
+              .eq('status', 'ACTIVE')
+              .maybeSingle();
+            if (!groupRow) continue;
+            const { data: memberRows } = await supabase
+              .from('profile_group_members')
+              .select('user_id')
+              .eq('group_id', gid)
+              .eq('status', 'ACTIVE');
+            const memberIds = (memberRows || []).map((m: any) => m.user_id).filter(Boolean);
+            if (!memberIds.length) continue;
+            const { data: usersRows } = await supabase
+              .from('users')
+              .select('id, full_name, avatar_url')
+              .in('id', memberIds);
+            results.push({
+              id: gid,
+              name: (groupRow as any)?.name,
+              members: ((usersRows || []) as any[]).filter(Boolean) as any,
+            });
+          }
+          setSharedGroups(results);
+        }
+      } catch {
+        setSharedGroups([]);
+      }
     } catch (error) {
       console.error('Error fetching profile:', error);
     } finally {
@@ -527,6 +574,32 @@ export default function ProfileScreen() {
                 />
               </View>
             </View>
+          </View>
+        )}
+
+        {/* Shared profile (if any) */}
+        {sharedGroups.length > 0 && (
+          <View style={styles.sectionDark}>
+            <Text style={styles.sectionTitleDark}>
+              {sharedGroups.length > 1 ? 'פרופילים משותפים' : 'פרופיל משותף'}
+            </Text>
+            {sharedGroups.map((g) => (
+              <View key={g.id} style={styles.sharedCard}>
+                <View style={styles.sharedAvatarsRow}>
+                  {g.members.map((m) => (
+                    <View key={m.id} style={styles.sharedAvatarWrap}>
+                      <Image
+                        source={{ uri: m.avatar_url || 'https://cdn-icons-png.flaticon.com/512/847/847969.png' }}
+                        style={styles.sharedAvatar}
+                      />
+                    </View>
+                  ))}
+                </View>
+                <Text style={styles.sharedMembersLine} numberOfLines={2}>
+                  {g.members.map((m) => m.full_name || 'חבר').join(' • ')}
+                </Text>
+              </View>
+            ))}
           </View>
         )}
 
@@ -1016,6 +1089,39 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '800',
     marginBottom: 10,
+  },
+  sharedCard: {
+    backgroundColor: '#15151C',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
+    borderRadius: 16,
+    padding: 12,
+    marginTop: 4,
+    alignItems: 'center',
+  },
+  sharedAvatarsRow: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 6,
+  },
+  sharedAvatarWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    borderWidth: 2,
+    borderColor: '#0F0F14',
+    overflow: 'hidden',
+    backgroundColor: '#1F1F29',
+  },
+  sharedAvatar: {
+    width: '100%',
+    height: '100%',
+  },
+  sharedMembersLine: {
+    color: '#C7CBD1',
+    fontSize: 13,
+    textAlign: 'center',
   },
   apartmentRow: {
     backgroundColor: '#15151C',

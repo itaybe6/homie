@@ -782,7 +782,7 @@ export default function RequestsScreen() {
       // 1) Load invite to get group_id and validate invitee
       const { data: invite, error: inviteErr } = await supabase
         .from('profile_group_invites')
-        .select('id, group_id, invitee_id, status')
+        .select('id, group_id, invitee_id, inviter_id, status')
         .eq('id', item.id)
         .maybeSingle();
       if (inviteErr) {
@@ -852,6 +852,35 @@ export default function RequestsScreen() {
         setReceived((prev) =>
           prev.map((r) => (r.id === item.id ? { ...r, status: 'APPROVED' } as any : r))
         );
+      }
+      // Best-effort: ensure inviter (sender) is ACTIVE in the same group too
+      try {
+        // Load invite (again if RPC path) to obtain group_id and inviter_id
+        const { data: invRow } = await supabase
+          .from('profile_group_invites')
+          .select('group_id, inviter_id')
+          .eq('id', item.id)
+          .maybeSingle();
+        const ensureGroupId = (invRow as any)?.group_id as string | undefined;
+        const inviterId = (invRow as any)?.inviter_id as string | undefined;
+        if (ensureGroupId && inviterId) {
+          const insInviter = await supabase
+            .from('profile_group_members')
+            .insert([{ group_id: ensureGroupId, user_id: inviterId, status: 'ACTIVE' } as any], {
+              onConflict: 'group_id,user_id',
+              ignoreDuplicates: true,
+            } as any);
+          if ((insInviter as any)?.error || (insInviter as any)?.status === 409) {
+            await supabase
+              .from('profile_group_members')
+              .update({ status: 'ACTIVE' })
+              .eq('group_id', ensureGroupId)
+              .eq('user_id', inviterId);
+          }
+        }
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.warn('[group-approve] best-effort activate inviter failed', e);
       }
       // Notify inviter that invite was accepted
       try {

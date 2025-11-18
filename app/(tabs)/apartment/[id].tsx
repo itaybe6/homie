@@ -56,6 +56,7 @@ export default function ApartmentDetailsScreen() {
   const [removingId, setRemovingId] = useState<string | null>(null);
   const [isRequestingJoin, setIsRequestingJoin] = useState(false);
   const [hasRequestedJoin, setHasRequestedJoin] = useState(false);
+  const [isAssignedAnywhere, setIsAssignedAnywhere] = useState<boolean | null>(null);
   const [confirmState, setConfirmState] = useState<{
     visible: boolean;
     title: string;
@@ -75,6 +76,31 @@ export default function ApartmentDetailsScreen() {
   useEffect(() => {
     fetchApartmentDetails();
   }, [id]);
+
+  useEffect(() => {
+    const checkAssigned = async () => {
+      try {
+        if (!user?.id) {
+          setIsAssignedAnywhere(false);
+          return;
+        }
+        const currentUserId = user.id;
+        const [{ data: own, error: ownErr }, { data: asPartner, error: partnerErr }] = await Promise.all([
+          supabase.from('apartments').select('id').eq('owner_id', currentUserId).limit(1),
+          supabase.from('apartments').select('id').contains('partner_ids', [currentUserId] as any).limit(1),
+        ]);
+        if (ownErr) throw ownErr;
+        if (partnerErr) throw partnerErr;
+        const assigned = !!((own && own.length > 0) || (asPartner && asPartner.length > 0));
+        setIsAssignedAnywhere(assigned);
+        
+      } catch (e) {
+        setIsAssignedAnywhere(false);
+        
+      }
+    };
+    checkAssigned();
+  }, [user?.id]);
 
   const fetchApartmentDetails = async () => {
     try {
@@ -102,8 +128,10 @@ export default function ApartmentDetailsScreen() {
       if (ownerError) throw ownerError;
       setOwner(ownerData);
 
-      const partnerIds = (aptData as any).partner_ids as string[] | undefined;
-      if (partnerIds && partnerIds.length > 0) {
+      
+
+      const partnerIds = normalizeIds((aptData as any).partner_ids);
+      if (partnerIds.length > 0) {
         const { data: usersData, error: usersError } = await supabase
           .from('users')
           .select('*')
@@ -156,7 +184,10 @@ export default function ApartmentDetailsScreen() {
     return null;
   }
 
-  const isOwner = user?.id === apartment.owner_id;
+  const isOwner = !!(
+    user?.id &&
+    String(user.id).toLowerCase() === String(apartment.owner_id || '').toLowerCase()
+  );
   const PLACEHOLDER =
     'https://images.pexels.com/photos/1457842/pexels-photo-1457842.jpeg';
 
@@ -181,15 +212,33 @@ export default function ApartmentDetailsScreen() {
     return arr.length ? arr : [PLACEHOLDER];
   })();
 
+  const normalizeIds = (value: any): string[] => {
+    if (Array.isArray(value)) return value.filter(Boolean);
+    if (typeof value === 'string') {
+      try {
+        const parsed = JSON.parse(value);
+        if (Array.isArray(parsed)) return parsed.filter(Boolean);
+      } catch {}
+      return value
+        .replace(/^{|}$/g, '')
+        .split(',')
+        .map((s: string) => s.replace(/^"+|"+$/g, '').trim())
+        .filter(Boolean);
+    }
+    return [];
+  };
+
   const roommatesCount = members.length;
   const roommatesNeeded = Math.max(
     0,
     (apartment.bedrooms || 0) - (roommatesCount + 1)
   );
-  const currentPartnerIds: string[] = Array.isArray((apartment as any).partner_ids)
-    ? ((apartment as any).partner_ids as string[])
-    : [];
-  const isMember = !!(user?.id && currentPartnerIds.includes(user.id));
+  const currentPartnerIds: string[] = normalizeIds((apartment as any).partner_ids);
+  const isMember = !!(
+    user?.id &&
+    currentPartnerIds.map((v) => String(v).toLowerCase()).includes(String(user.id).toLowerCase())
+  );
+  
 
   // Compute a human-friendly sender label: if user is part of an ACTIVE merged profile,
   // show all member names joined by " • ", otherwise fallback to the user's full name.
@@ -243,7 +292,13 @@ export default function ApartmentDetailsScreen() {
         Alert.alert('שגיאה', 'יש להתחבר כדי לבצע פעולה זו');
         return;
       }
-      if (isOwner || isMember) return;
+      if (isOwner || isMember) {
+        return;
+      }
+      if (isAssignedAnywhere) {
+        Alert.alert('שגיאה', 'את/ה כבר משויך/ת לדירה אחרת');
+        return;
+      }
 
       setIsRequestingJoin(true);
 
@@ -260,6 +315,7 @@ export default function ApartmentDetailsScreen() {
       const recipients = Array.from(
         new Set<string>([apartment.owner_id, ...currentPartnerIds].filter((rid) => rid && rid !== user.id))
       );
+      
 
       if (recipients.length === 0) {
         Alert.alert('שגיאה', 'אין למי לשלוח בקשה כרגע');
@@ -322,7 +378,7 @@ export default function ApartmentDetailsScreen() {
     const q = (addSearch || '').trim().toLowerCase();
     const excludeIds = new Set<string>([
       apartment.owner_id,
-      ...((apartment as any).partner_ids || []),
+      ...normalizeIds((apartment as any).partner_ids),
     ]);
     const base = addCandidates.filter((u) => !excludeIds.has(u.id));
     if (!q) return base;
@@ -332,7 +388,7 @@ export default function ApartmentDetailsScreen() {
     const q = (addSearch || '').trim().toLowerCase();
     const excludeIds = new Set<string>([
       apartment.owner_id,
-      ...((apartment as any).partner_ids || []),
+      ...normalizeIds((apartment as any).partner_ids),
     ]);
     const base = sharedGroups
       .map((g) => ({
@@ -350,7 +406,7 @@ export default function ApartmentDetailsScreen() {
     if (!apartment) return;
     try {
       setIsAdding(true);
-      const currentIds = new Set<string>([apartment.owner_id, ...(apartment.partner_ids || [])]);
+      const currentIds = new Set<string>([apartment.owner_id, ...normalizeIds((apartment as any).partner_ids)]);
       // Load all users
       const { data, error } = await supabase
         .from('users')
@@ -443,9 +499,7 @@ export default function ApartmentDetailsScreen() {
     setIsAdding(true);
     try {
       // Prevent duplicate immediate add; we now send an invite + create a request instead.
-      const currentPartnerIds = Array.isArray((apartment as any).partner_ids)
-        ? ((apartment as any).partner_ids as string[])
-        : [];
+      const currentPartnerIds = normalizeIds((apartment as any).partner_ids);
       if (currentPartnerIds.includes(partnerId)) {
         Alert.alert('שים לב', 'המשתמש כבר שותף בדירה');
         return;
@@ -516,9 +570,7 @@ export default function ApartmentDetailsScreen() {
     }
     setRemovingId(partnerId);
     try {
-      const currentPartnerIds = Array.isArray((apartment as any).partner_ids)
-        ? ((apartment as any).partner_ids as string[])
-        : [];
+      const currentPartnerIds = normalizeIds((apartment as any).partner_ids);
       const newPartnerIds = currentPartnerIds.filter((id) => id !== partnerId);
 
       const { error: updateErr } = await supabase
@@ -751,7 +803,7 @@ export default function ApartmentDetailsScreen() {
       </ScrollView>
 
       {/* Join as roommate button (for non-owner, non-member viewers) */}
-      {!isOwner && !isMember ? (
+      {!isOwner && !isMember && isAssignedAnywhere === false ? (
         <View style={[styles.footer, { bottom: (insets.bottom || 0) + 78 }]}>
           <TouchableOpacity
             activeOpacity={0.9}

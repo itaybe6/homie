@@ -427,6 +427,26 @@ export default function UserProfileScreen() {
         groupId = (newGroup as any)?.id;
       }
 
+      // Ensure I (the inviter) am ACTIVE in this group before inviting anyone
+      try {
+        const insertMe = await supabase
+          .from('profile_group_members')
+          .insert([{ group_id: groupId, user_id: me.id, status: 'ACTIVE' } as any], {
+            onConflict: 'group_id,user_id',
+            ignoreDuplicates: true,
+          } as any);
+        // If the row already exists (or insert ignored), force status to ACTIVE (best-effort)
+        if ((insertMe as any)?.error || (insertMe as any)?.status === 409) {
+          await supabase
+            .from('profile_group_members')
+            .update({ status: 'ACTIVE' })
+            .eq('group_id', groupId as string)
+            .eq('user_id', me.id);
+        }
+      } catch {
+        // ignore; worst case the invite still gets created and approver will join
+      }
+
       // Prevent duplicate pending invite for same user in same group
       const { data: pendingInvite } = await supabase
         .from('profile_group_invites')
