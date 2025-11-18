@@ -17,10 +17,12 @@ import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/authStore';
 import { Notification } from '@/types/database';
 import { computeGroupAwareLabel } from '@/lib/group';
+import { useNotificationsStore } from '@/stores/notificationsStore';
 
 export default function NotificationsScreen() {
   const router = useRouter();
   const user = useAuthStore((s) => s.user);
+  const setUnreadCount = useNotificationsStore((s) => s.setUnreadCount);
   const [items, setItems] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -138,6 +140,8 @@ export default function NotificationsScreen() {
         .from('notifications')
         .update({ is_read: true })
         .eq('recipient_id', user.id);
+      // Optimistically zero the global unread badge immediately
+      setUnreadCount(0);
     } catch (e) {
       console.error('Failed to load notifications', e);
       setItems([]);

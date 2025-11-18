@@ -540,6 +540,59 @@ export default function ApartmentDetailsScreen() {
     }
   };
 
+  // Invite an entire shared profile (group): fan-out a notification and request to each active member
+  const handleAddSharedGroup = async (groupId: string, memberIds: string[]) => {
+    if (!apartment || !user?.id) return;
+    setIsAdding(true);
+    try {
+      const currentPartnerIds = new Set<string>(normalizeIds((apartment as any).partner_ids));
+      const ownerId = String((apartment as any).owner_id || '');
+      const recipients = Array.from(
+        new Set<string>(
+          (memberIds || [])
+            .filter(Boolean)
+            .map((id) => String(id))
+            .filter((id) => id !== user.id && id !== ownerId && !currentPartnerIds.has(id))
+        )
+      );
+      if (recipients.length === 0) {
+        Alert.alert('שגיאה', 'אין למי לשלוח הזמנה בקבוצה זו');
+        return;
+      }
+      const inviterName = await computeSenderLabel(user.id);
+      const title = 'הזמנה להצטרף לדירה';
+      const description = `${inviterName} מזמין/ה אותך להיות שותף/ה בדירה${apartment.title ? `: ${apartment.title}` : ''}${apartment.city ? ` (${apartment.city})` : ''}`;
+      // Fan-out notifications
+      const notifRows = recipients.map((rid) => ({
+        sender_id: user.id!,
+        recipient_id: rid,
+        title,
+        description,
+        is_read: false,
+      }));
+      const { error: notifErr } = await supabase.from('notifications').insert(notifRows as any);
+      if (notifErr) throw notifErr;
+      // Fan-out requests (INVITE_APT)
+      const reqRows = recipients.map((rid) => ({
+        sender_id: user.id!,
+        recipient_id: rid,
+        apartment_id: apartment.id,
+        type: 'INVITE_APT',
+        status: 'PENDING',
+        metadata: { group_id: groupId } as any,
+      }));
+      const { error: reqErr } = await supabase.from('apartments_request').insert(reqRows as any);
+      if (reqErr) throw reqErr;
+      Alert.alert('נשלח', 'הזמנה נשלחה לכל חברי הפרופיל ונוצרו בקשות');
+      setIsAddOpen(false);
+    } catch (e: any) {
+      console.error('Failed to add shared group', e);
+      Alert.alert('שגיאה', e?.message || 'לא ניתן לשלוח הזמנה לקבוצה כעת');
+    } finally {
+      setIsAdding(false);
+    }
+  };
+
   const confirmAddPartner = (candidate: User) => {
     if (Platform.OS === 'web') {
       setConfirmState({
@@ -921,7 +974,20 @@ export default function ApartmentDetailsScreen() {
                               key={`shared-group-${g.id}`}
                               style={styles.candidateRow}
                               activeOpacity={0.9}
-                              onPress={() => first && confirmAddPartner(first as any)}
+                              onPress={() =>
+                                setConfirmState({
+                                  visible: true,
+                                  title: 'שליחת הזמנה לקבוצה',
+                                  message: `לשלוח הזמנה לפרופיל המשותף (${names}) להצטרף כדיירים?`,
+                                  confirmLabel: 'שלח הזמנה',
+                                  cancelLabel: 'ביטול',
+                                  onConfirm: () =>
+                                    handleAddSharedGroup(
+                                      g.id,
+                                      (g.members || []).map((m) => m.id).filter(Boolean) as string[]
+                                    ),
+                                })
+                              }
                             >
                               <View style={styles.groupAvatarLeft}>
                                 <View style={styles.groupAvatarStack}>

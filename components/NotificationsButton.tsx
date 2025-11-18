@@ -5,6 +5,7 @@ import { Bell } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/authStore';
+import { useNotificationsStore } from '@/stores/notificationsStore';
 
 type Props = {
   style?: ViewStyle;
@@ -15,13 +16,14 @@ function NotificationsButtonBase({ style, badgeCount }: Props) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const user = useAuthStore((s) => s.user);
-  const [count, setCount] = useState<number>(badgeCount || 0);
+  const unreadCount = useNotificationsStore((s) => s.unreadCount);
+  const setUnreadCount = useNotificationsStore((s) => s.setUnreadCount);
 
   useEffect(() => {
     let isMounted = true;
     const fetchCount = async () => {
       if (!user?.id) {
-        if (isMounted) setCount(0);
+        if (isMounted) setUnreadCount(0);
         return;
       }
       const { count: c } = await supabase
@@ -29,7 +31,7 @@ function NotificationsButtonBase({ style, badgeCount }: Props) {
         .select('id', { count: 'exact', head: true })
         .eq('recipient_id', user.id)
         .or('is_read.is.null,is_read.eq.false');
-      if (isMounted) setCount(c || 0);
+      if (isMounted) setUnreadCount(c || 0);
     };
 
     fetchCount();
@@ -50,7 +52,7 @@ function NotificationsButtonBase({ style, badgeCount }: Props) {
     };
   }, [user?.id]);
 
-  const shownCount = typeof badgeCount === 'number' ? badgeCount : count;
+  const shownCount = typeof badgeCount === 'number' ? badgeCount : unreadCount;
   const shownLabel = shownCount > 99 ? '99+' : String(shownCount);
   return (
     <View style={[styles.wrap, { marginTop: Math.max(6, insets.top + 2) }, style]}>

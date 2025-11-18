@@ -495,11 +495,12 @@ export default function RequestsScreen() {
       console.log('[requests/approveIncoming] apartments_request updated -> APPROVED', { reqId: req.id });
 
       // 2) add the approved user to the apartment's partner_ids (idempotent)
+      //    Only for INVITE_APT. For JOIN_APT (owner approves a requester) we do NOT add as partner automatically.
       const currentPartnerIds: string[] = Array.isArray((apt as any).partner_ids)
         ? ((apt as any).partner_ids as string[])
         : [];
       let finalPartnerIds: string[] = currentPartnerIds;
-      if (userToAddId && !currentPartnerIds.includes(userToAddId)) {
+      if (requestType === 'INVITE_APT' && userToAddId && !currentPartnerIds.includes(userToAddId)) {
         const newPartnerIds = Array.from(new Set([...(currentPartnerIds || []), userToAddId]));
         const { error: updateErr } = await supabase
           .from('apartments')
@@ -536,6 +537,93 @@ export default function RequestsScreen() {
           description: `${approverName} אישר/ה והתווסף/ה כשותף/ה לדירה${aptTitle ? `: ${aptTitle}` : ''}${aptCity ? ` (${aptCity})` : ''}.`,
           is_read: false,
         });
+        // If invite was sent to a merged profile, approve all parallel requests for group members
+        try {
+          const { data: mem } = await supabase
+            .from('profile_group_members')
+            .select('group_id')
+            .eq('user_id', user.id)
+            .eq('status', 'ACTIVE')
+            .maybeSingle();
+          const gId = (mem as any)?.group_id as string | undefined;
+          if (gId) {
+            const { data: groupMems } = await supabase
+              .from('profile_group_members')
+              .select('user_id')
+              .eq('group_id', gId)
+              .eq('status', 'ACTIVE');
+            let memberIds = (groupMems || []).map((r: any) => r.user_id).filter(Boolean);
+            // Also collect any request rows that were created for this same group to ensure full coverage
+            try {
+              const { data: related } = await supabase
+                .from('apartments_request')
+                .select('recipient_id')
+                .eq('sender_id', req.sender_id)
+                .eq('apartment_id', req.apartment_id as any)
+                .eq('type', 'INVITE_APT')
+                .contains('metadata', { group_id: gId } as any);
+              const viaReqIds = ((related || []) as any[]).map((r) => r.recipient_id).filter(Boolean);
+              memberIds = Array.from(new Set<string>([...memberIds, ...viaReqIds]));
+            } catch {}
+            if (memberIds.length) {
+              await supabase
+                .from('apartments_request')
+                .update({ status: 'APPROVED', updated_at: new Date().toISOString() })
+                .eq('sender_id', req.sender_id)
+                .eq('apartment_id', req.apartment_id as any)
+                .eq('type', 'INVITE_APT')
+                .in('recipient_id', memberIds as any);
+              // Add all group members as partners to the apartment (idempotent)
+              const existing: string[] = Array.isArray((apt as any).partner_ids)
+                ? ((apt as any).partner_ids as string[])
+                : [];
+              const ownerId = (apt as any)?.owner_id as string | undefined;
+              const toAdd = memberIds.filter(
+                (id) => id && id !== ownerId && !existing.includes(id)
+              );
+              if (toAdd.length) {
+                const newPartnerIds = Array.from(new Set([...(existing || []), ...toAdd]));
+                const { error: updPartnersErr } = await supabase
+                  .from('apartments')
+                  .update({ partner_ids: newPartnerIds })
+                  .eq('id', req.apartment_id as any);
+                if (!updPartnersErr) {
+                  finalPartnerIds = newPartnerIds; // reflect for downstream logic
+                }
+              }
+              // Ensure inviter joins the invitee's group (best-effort)
+              try {
+                const inviterId = req.sender_id;
+                if (inviterId) {
+                  // First try to insert inviter directly to approver's group
+                  const insRes = await supabase
+                    .from('profile_group_members')
+                    .insert([{ group_id: gId, user_id: inviterId, status: 'ACTIVE' } as any], {
+                      onConflict: 'group_id,user_id',
+                      ignoreDuplicates: true,
+                    } as any);
+                  if ((insRes as any)?.error || (insRes as any)?.status === 409) {
+                    await supabase
+                      .from('profile_group_members')
+                      .update({ status: 'ACTIVE' })
+                      .eq('group_id', gId)
+                      .eq('user_id', inviterId);
+                  }
+                }
+              } catch {
+                // If direct add fails due to RLS, fall back to sending an invite to inviter
+                try {
+                  await supabase.from('profile_group_invites').insert({
+                    inviter_id: user.id,
+                    invitee_id: req.sender_id,
+                    group_id: gId,
+                    status: 'PENDING',
+                  } as any, { ignoreDuplicates: true } as any);
+                } catch {}
+              }
+            }
+          }
+        } catch {}
       } else {
         // JOIN_APT: requester approved by recipient — notify requester (sender)
         const approverName = await computeGroupAwareLabel(user.id);
@@ -558,6 +646,17 @@ export default function RequestsScreen() {
             new Set<string>([...(finalPartnerIds || []), ownerId, userToAddId].filter(Boolean) as string[])
           );
           if (apartmentUserIds.length) {
+            // Prefer the invitee's existing group if available
+            let inviteeGroupId: string | undefined;
+            try {
+              const { data: mem2 } = await supabase
+                .from('profile_group_members')
+                .select('group_id')
+                .eq('user_id', user.id)
+                .eq('status', 'ACTIVE')
+                .maybeSingle();
+              inviteeGroupId = (mem2 as any)?.group_id as string | undefined;
+            } catch {}
             const { data: activeMems } = await supabase
               .from('profile_group_members')
               .select('user_id, group_id')
@@ -566,11 +665,11 @@ export default function RequestsScreen() {
             const inviterGroupId =
               (activeMems || []).find((m: any) => m.user_id === inviterId)?.group_id as string | undefined;
             const anyExistingGroupId = (activeMems || [])[0]?.group_id as string | undefined;
-            let targetGroupId = inviterGroupId || anyExistingGroupId || null;
+            let targetGroupId = inviteeGroupId || inviterGroupId || anyExistingGroupId || null;
             if (!targetGroupId) {
               const { data: created, error: createErr } = await supabase
                 .from('profile_groups')
-                .insert({ created_by: inviterId || user.id, name: 'שותפים' } as any)
+                .insert({ created_by: user.id, name: 'שותפים' } as any)
                 .select('id')
                 .single();
               if (createErr) throw createErr;
@@ -607,6 +706,82 @@ export default function RequestsScreen() {
                     { ignoreDuplicates: true } as any
                   );
               }
+              // Try to auto-add inviter actively if possible (best-effort)
+              try {
+                if (inviterId) {
+                  const insInv = await supabase
+                    .from('profile_group_members')
+                    .insert([{ group_id: targetGroupId, user_id: inviterId, status: 'ACTIVE' } as any], {
+                      onConflict: 'group_id,user_id',
+                      ignoreDuplicates: true,
+                    } as any);
+                  if ((insInv as any)?.error || (insInv as any)?.status === 409) {
+                    await supabase
+                      .from('profile_group_members')
+                      .update({ status: 'ACTIVE' })
+                      .eq('group_id', targetGroupId)
+                      .eq('user_id', inviterId);
+                  }
+                }
+              } catch {}
+              // If inviter already belongs to another ACTIVE group, merge that group's members into targetGroupId
+              try {
+                if (inviterId) {
+                  const { data: invGroupMem } = await supabase
+                    .from('profile_group_members')
+                    .select('group_id')
+                    .eq('user_id', inviterId)
+                    .eq('status', 'ACTIVE')
+                    .maybeSingle();
+                  const inviterOwnGroupId = (invGroupMem as any)?.group_id as string | undefined;
+                  if (inviterOwnGroupId && inviterOwnGroupId !== targetGroupId) {
+                    // Fetch all ACTIVE members from inviter's group
+                    const [{ data: invGroupMembers }, { data: targetMembers }] = await Promise.all([
+                      supabase
+                        .from('profile_group_members')
+                        .select('user_id')
+                        .eq('group_id', inviterOwnGroupId)
+                        .eq('status', 'ACTIVE'),
+                      supabase
+                        .from('profile_group_members')
+                        .select('user_id')
+                        .eq('group_id', targetGroupId)
+                        .eq('status', 'ACTIVE'),
+                    ]);
+                    const targetMemberSet = new Set<string>((targetMembers || []).map((m: any) => m.user_id));
+                    const membersToMerge = (invGroupMembers || [])
+                      .map((m: any) => m.user_id as string)
+                      .filter((uid) => uid && !targetMemberSet.has(uid));
+                    // Best-effort: try add all as ACTIVE members; if blocked, send invites
+                    for (const uid of membersToMerge) {
+                      try {
+                        const ins = await supabase
+                          .from('profile_group_members')
+                          .insert([{ group_id: targetGroupId, user_id: uid, status: 'ACTIVE' } as any], {
+                            onConflict: 'group_id,user_id',
+                            ignoreDuplicates: true,
+                          } as any);
+                        if ((ins as any)?.error || (ins as any)?.status === 409) {
+                          await supabase
+                            .from('profile_group_members')
+                            .update({ status: 'ACTIVE' })
+                            .eq('group_id', targetGroupId)
+                            .eq('user_id', uid);
+                        }
+                      } catch {
+                        try {
+                          await supabase
+                            .from('profile_group_invites')
+                            .insert(
+                              { inviter_id: user.id, invitee_id: uid, group_id: targetGroupId, status: 'PENDING' } as any,
+                              { ignoreDuplicates: true } as any
+                            );
+                        } catch {}
+                      }
+                    }
+                  }
+                }
+              } catch {}
             }
           }
         } catch (e) {
@@ -1116,27 +1291,103 @@ export default function RequestsScreen() {
                           </TouchableOpacity>
                         </View>
                       )}
-                      {/* Recipient view (incoming): after approval allow WhatsApp to requester (only for JOIN_APT) */}
+                      {/* Recipient view (incoming): after approval expose phones.
+                         If sender is a merged profile, show all members' phones; otherwise show a single phone. */}
                       {incoming && item.kind === 'APT' && item.status === 'APPROVED' && (item.type === 'JOIN_APT' || !item.type) && (
-                        <View style={{ marginTop: 10, alignItems: 'flex-end', gap: 6 as any }}>
-                          <Text style={styles.cardMeta}>
-                            מספר הפונה: {otherUser?.phone ? otherUser.phone : 'לא זמין'}
-                          </Text>
-                          {otherUser?.phone ? (
-                            <TouchableOpacity
-                              style={[styles.approveBtn]}
-                              activeOpacity={0.85}
-                              onPress={() =>
-                                openWhatsApp(
-                                  otherUser.phone as string,
-                                  `היי${otherUser?.full_name ? ` ${otherUser.full_name.split(' ')[0]}` : ''}, ראיתי שהתעניינת לאחרונה בדירה שלי${apt?.title ? `: ${apt.title}` : ''}${apt?.city ? ` (${apt.city})` : ''} ב-Homie. הבקשה אושרה, אשמח לתאם שיחה או צפייה.`
-                                )
-                              }
+                        groupMembers.length > 0 ? (
+                          <View style={{ marginTop: 12, alignItems: 'flex-end', gap: 6 as any }}>
+                            <View
+                              style={{
+                                width: '100%',
+                                flexDirection: 'row-reverse',
+                                flexWrap: 'wrap',
+                                gap: 12 as any,
+                                justifyContent: 'flex-end',
+                              }}
                             >
-                              <Text style={styles.approveBtnText}>שליחת וואטסאפ למתעניין/ת</Text>
-                            </TouchableOpacity>
-                          ) : null}
-                        </View>
+                              {groupMembers.map((m, idx) => {
+                                const firstName = (m.full_name || '').split(' ')[0] || '';
+                                return (
+                                  <View
+                                    key={idx}
+                                    style={{
+                                      flexBasis: '48%',
+                                      flexGrow: 0,
+                                      minWidth: 240,
+                                      maxWidth: 360,
+                                      backgroundColor: 'rgba(34,197,94,0.08)',
+                                      borderRadius: 12,
+                                      borderWidth: 1,
+                                      borderColor: 'rgba(34,197,94,0.25)',
+                                      padding: 12,
+                                      gap: 10 as any,
+                                    }}
+                                  >
+                                    <View style={{ flexDirection: 'row-reverse', alignItems: 'center', gap: 10 as any }}>
+                                      <Image
+                                        source={{ uri: m.avatar_url || DEFAULT_AVATAR }}
+                                        style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: '#1F1F29', borderWidth: 2, borderColor: 'rgba(34,197,94,0.3)' }}
+                                      />
+                                      <View style={{ flex: 1, alignItems: 'flex-end' }}>
+                                        <Text style={{ color: '#FFFFFF', fontSize: 15, fontWeight: '800' }}>
+                                          {m.full_name}
+                                        </Text>
+                                        <Text style={{ color: '#C9CDD6', fontSize: 13, marginTop: 2 }}>
+                                          {m.phone || 'מספר לא זמין'}
+                                        </Text>
+                                      </View>
+                                    </View>
+                                    {m.phone ? (
+                                      <TouchableOpacity
+                                        style={{
+                                          flexDirection: 'row-reverse',
+                                          alignItems: 'center',
+                                          justifyContent: 'center',
+                                          gap: 8 as any,
+                                          backgroundColor: '#25D366',
+                                          paddingVertical: 11,
+                                          paddingHorizontal: 16,
+                                          borderRadius: 10,
+                                        }}
+                                        activeOpacity={0.85}
+                                        onPress={() =>
+                                          openWhatsApp(
+                                            m.phone as string,
+                                            `היי${firstName ? ` ${firstName}` : ''}, בקשתך להצטרף לדירה${apt?.title ? `: ${apt.title}` : ''}${apt?.city ? ` (${apt.city})` : ''} אושרה ב-Homie. אשמח לתאם שיחה/צפייה.`
+                                          )
+                                        }
+                                      >
+                                        <Text style={{ color: '#FFFFFF', fontSize: 14, fontWeight: '800' }}>
+                                          שלח הודעה בוואטסאפ
+                                        </Text>
+                                      </TouchableOpacity>
+                                    ) : null}
+                                  </View>
+                                );
+                              })}
+                            </View>
+                          </View>
+                        ) : (
+                          <View style={{ marginTop: 10, alignItems: 'flex-end', gap: 6 as any }}>
+                            <Text style={styles.cardMeta}>
+                              מספר הפונה: {otherUser?.phone ? otherUser.phone : 'לא זמין'}
+                            </Text>
+                            {otherUser?.phone ? (
+                              <TouchableOpacity
+                                style={[styles.approveBtn]}
+                                activeOpacity={0.85}
+                                onPress={() =>
+                                  openWhatsApp(
+                                    otherUser.phone as string,
+                                    `היי${otherUser?.full_name ? ` ${otherUser.full_name.split(' ')[0]}` : ''}, ראיתי שהתעניינת לאחרונה בדירה שלי${apt?.title ? `: ${apt.title}` : ''}${apt?.city ? ` (${apt.city})` : ''} ב-Homie. הבקשה אושרה, אשמח לתאם שיחה או צפייה.`
+                                  )
+                                }
+                              >
+                                <Text style={styles.approveBtnText}>שליחת וואטסאפ למתעניין/ת</Text>
+                              </TouchableOpacity>
+                            ) : null}
+                          </View>
+                        )
                       )}
                       {/* Sender view: expose owner's phone and WhatsApp action once approved (only for JOIN_APT) */}
                       {!incoming && item.kind === 'APT' && item.status === 'APPROVED' && (item.type === 'JOIN_APT' || !item.type) && (

@@ -152,14 +152,53 @@ export default function ProfileSettingsScreen() {
       if (updErr) {
         throw updErr;
       }
-      // Mark any active group memberships as LEFT
-      // Change: delete membership rows entirely instead of marking LEFT
-      const { error: grpErr } = await supabase
-        .from('profile_group_members')
-        .delete()
-        .eq('user_id', user.id);
-      if (grpErr) {
-        // not throwing intentionally, leaving apt should succeed even if group update failed
+      // Handle shared profile memberships:
+      // 1) Remove the current user's ACTIVE memberships.
+      // 2) For any affected group that now has <= 1 ACTIVE member, remove that last member (if any) and delete the group.
+      try {
+        // Collect groups the user is actively a member of before deletion
+        const groupsBeforeResp: any = await supabase
+          .from('profile_group_members')
+          .select('group_id')
+          .eq('user_id', user.id)
+          .eq('status', 'ACTIVE');
+        const affectedGroupIds: string[] = Array.isArray(groupsBeforeResp?.data)
+          ? groupsBeforeResp.data.map((r: any) => r.group_id).filter(Boolean)
+          : [];
+        if (affectedGroupIds.length > 0) {
+          // Remove the user's memberships in those groups
+          await supabase
+            .from('profile_group_members')
+            .delete()
+            .eq('user_id', user.id)
+            .in('group_id', affectedGroupIds as any);
+          // For each affected group, check remaining active members
+          for (const gid of affectedGroupIds) {
+            const remainingResp: any = await supabase
+              .from('profile_group_members')
+              .select('user_id')
+              .eq('group_id', gid)
+              .eq('status', 'ACTIVE');
+            const remaining: any[] = Array.isArray(remainingResp?.data) ? remainingResp.data : [];
+            if (remaining.length <= 1) {
+              // If one member remains, remove their membership too
+              if (remaining.length === 1) {
+                const lastUserId = remaining[0]?.user_id;
+                if (lastUserId) {
+                  await supabase
+                    .from('profile_group_members')
+                    .delete()
+                    .eq('group_id', gid)
+                    .eq('user_id', lastUserId);
+                }
+              }
+              // Delete the group itself
+              await supabase.from('profile_groups').delete().eq('id', gid);
+            }
+          }
+        }
+      } catch {
+        // Best-effort only; apartment leave should succeed even if group clean-up fails
       }
       // Update local state
       setMyApartment((prev) => (prev ? ({ ...(prev as any), partner_ids: newPartnerIds } as Apartment) : prev));
