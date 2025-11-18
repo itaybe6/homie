@@ -800,6 +800,10 @@ export default function RequestsScreen() {
         throw new Error('אין הרשאה לאשר הזמנה זו');
       }
       const groupId = (invite as any).group_id as string;
+      // 2a) Make sure group is ACTIVE
+      try {
+        await supabase.from('profile_groups').update({ status: 'ACTIVE' }).eq('id', groupId);
+      } catch {}
       // 2) Mark invite as accepted
       const updInviteRes = await supabase
         .from('profile_group_invites')
@@ -853,16 +857,21 @@ export default function RequestsScreen() {
           prev.map((r) => (r.id === item.id ? { ...r, status: 'APPROVED' } as any : r))
         );
       }
-      // Best-effort: ensure inviter (sender) is ACTIVE in the same group too
+      // Best-effort: ensure group ACTIVE and both inviter and invitee are ACTIVE members (handles RPC path too)
       try {
         // Load invite (again if RPC path) to obtain group_id and inviter_id
         const { data: invRow } = await supabase
           .from('profile_group_invites')
-          .select('group_id, inviter_id')
+          .select('group_id, inviter_id, invitee_id')
           .eq('id', item.id)
           .maybeSingle();
         const ensureGroupId = (invRow as any)?.group_id as string | undefined;
         const inviterId = (invRow as any)?.inviter_id as string | undefined;
+        const inviteeId = (invRow as any)?.invitee_id as string | undefined;
+        if (ensureGroupId) {
+          // ensure group active
+          await supabase.from('profile_groups').update({ status: 'ACTIVE' }).eq('id', ensureGroupId);
+        }
         if (ensureGroupId && inviterId) {
           const insInviter = await supabase
             .from('profile_group_members')
@@ -876,6 +885,21 @@ export default function RequestsScreen() {
               .update({ status: 'ACTIVE' })
               .eq('group_id', ensureGroupId)
               .eq('user_id', inviterId);
+          }
+        }
+        if (ensureGroupId && inviteeId) {
+          const insInvitee = await supabase
+            .from('profile_group_members')
+            .insert([{ group_id: ensureGroupId, user_id: inviteeId, status: 'ACTIVE' } as any], {
+              onConflict: 'group_id,user_id',
+              ignoreDuplicates: true,
+            } as any);
+          if ((insInvitee as any)?.error || (insInvitee as any)?.status === 409) {
+            await supabase
+              .from('profile_group_members')
+              .update({ status: 'ACTIVE' })
+              .eq('group_id', ensureGroupId)
+              .eq('user_id', inviteeId);
           }
         }
       } catch (e) {

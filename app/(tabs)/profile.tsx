@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -14,6 +14,7 @@ import {
   Modal,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LogOut, Edit, Save, X, Plus, MapPin, Inbox, Trash2, Settings } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -54,6 +55,35 @@ export default function ProfileScreen() {
     fetchProfile();
   }, [user]);
 
+  // Re-fetch when the screen regains focus (after approvals/merges)
+  useFocusEffect(
+    (React as any).useCallback(() => {
+      fetchProfile();
+      return () => {};
+    }, [user?.id])
+  );
+
+  // Subscribe to realtime membership changes for the current user and refresh
+  useEffect(() => {
+    if (!user?.id) return;
+    try {
+      const channel = supabase
+        .channel(`profile-${user.id}-group-memberships`)
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'profile_group_members', filter: `user_id=eq.${user.id}` },
+          () => {
+            fetchProfile();
+          }
+        )
+        .subscribe();
+      return () => {
+        try { supabase.removeChannel(channel); } catch {}
+      };
+    } catch {
+      // ignore
+    }
+  }, [user?.id]);
   const getApartmentPrimaryImage = (apartment: Apartment): string => {
     const PLACEHOLDER = 'https://images.pexels.com/photos/1457842/pexels-photo-1457842.jpeg';
     const anyValue: any = (apartment as any).image_urls;

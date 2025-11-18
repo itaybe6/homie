@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, Image, ActivityIndicator, TouchableOpacity, Alert, Dimensions } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useFocusEffect } from '@react-navigation/native';
 import { computeGroupAwareLabel } from '@/lib/group';
 import { supabase } from '@/lib/supabase';
 import { User } from '@/types/database';
@@ -31,6 +32,7 @@ export default function UserProfileScreen() {
   const [meInApartment, setMeInApartment] = useState(false);
   const [profileInApartment, setProfileInApartment] = useState(false);
   const [mergeNotice, setMergeNotice] = useState<string | null>(null);
+  const [groupRefreshKey, setGroupRefreshKey] = useState(0);
   type ProfileApartment = {
     id: string;
     title?: string | null;
@@ -105,6 +107,14 @@ export default function UserProfileScreen() {
       }
     })();
   }, [id]);
+
+  // Re-fetch group context when screen regains focus (after approvals, etc.)
+  useFocusEffect(
+    React.useCallback(() => {
+      setGroupRefreshKey((k) => k + 1);
+      return () => {};
+    }, [])
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -181,6 +191,37 @@ export default function UserProfileScreen() {
     return () => {
       cancelled = true;
     };
+  }, [profile?.id, groupRefreshKey]);
+
+  // Subscribe to realtime changes in group memberships to refresh UI instantly
+  useEffect(() => {
+    if (!profile?.id) return;
+    try {
+      const channel = supabase
+        .channel(`user-${profile.id}-group-memberships`)
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'profile_group_members',
+            filter: `user_id=eq.${profile.id}`,
+          },
+          () => {
+            setGroupRefreshKey((k) => k + 1);
+          }
+        )
+        .subscribe((status) => {
+          // noop; subscription established
+        });
+      return () => {
+        try {
+          supabase.removeChannel(channel);
+        } catch {}
+      };
+    } catch {
+      // ignore
+    }
   }, [profile?.id]);
 
   useEffect(() => {
@@ -415,33 +456,83 @@ export default function UserProfileScreen() {
       }
       // Create group if none found
       if (!groupId) {
-        const { data: newGroup, error: cErr } = await supabase
-          .from('profile_groups')
-          .insert({
-            created_by: me.id,
-            name: 'שותפים',
-          })
-          .select('*')
-          .single();
-        if (cErr) throw cErr;
-        groupId = (newGroup as any)?.id;
+        // Try RPC first to bypass RLS safely
+        let createdId: string | undefined;
+        try {
+          const { data: rpcGroup, error: rpcErr } = await supabase.rpc('create_profile_group_self', {
+            p_name: 'שותפים',
+            p_status: 'ACTIVE',
+          });
+          if (rpcErr) {
+            // eslint-disable-next-line no-console
+            console.error('[merge] RPC create_profile_group_self failed', {
+              code: (rpcErr as any)?.code,
+              message: (rpcErr as any)?.message,
+              details: (rpcErr as any)?.details,
+              hint: (rpcErr as any)?.hint,
+            });
+          } else {
+            createdId = (rpcGroup as any)?.id || (rpcGroup as any)?.group_id || (rpcGroup as any);
+          }
+        } catch (e: any) {
+          // eslint-disable-next-line no-console
+          console.error('[merge] RPC create_profile_group_self exception', e?.message || e);
+        }
+        if (!createdId) {
+          const { data: newGroup, error: cErr } = await supabase
+            .from('profile_groups')
+            .insert({
+              created_by: me.id,
+              name: 'שותפים',
+              status: 'ACTIVE',
+            })
+            .select('*')
+            .single();
+          if (cErr) {
+            // eslint-disable-next-line no-console
+            console.error('[merge] direct insert profile_groups failed', {
+              code: (cErr as any)?.code,
+              message: (cErr as any)?.message,
+              details: (cErr as any)?.details,
+              hint: (cErr as any)?.hint,
+              meId: me.id,
+            });
+            throw cErr;
+          }
+          createdId = (newGroup as any)?.id;
+        }
+        groupId = createdId;
       }
+      // If we reused a group I created that is still PENDING, activate it now
+      try {
+        if ((createdByMeGroup as any)?.id && (createdByMeGroup as any)?.status && String((createdByMeGroup as any).status).toUpperCase() !== 'ACTIVE') {
+          await supabase
+            .from('profile_groups')
+            .update({ status: 'ACTIVE' })
+            .eq('id', (createdByMeGroup as any).id);
+        }
+      } catch {}
 
       // Ensure I (the inviter) am ACTIVE in this group before inviting anyone
       try {
-        const insertMe = await supabase
-          .from('profile_group_members')
-          .insert([{ group_id: groupId, user_id: me.id, status: 'ACTIVE' } as any], {
-            onConflict: 'group_id,user_id',
-            ignoreDuplicates: true,
-          } as any);
-        // If the row already exists (or insert ignored), force status to ACTIVE (best-effort)
-        if ((insertMe as any)?.error || (insertMe as any)?.status === 409) {
-          await supabase
+        // Prefer SECURITY DEFINER RPC to bypass RLS safely
+        const { error: rpcErr } = await supabase.rpc('add_self_to_group', { p_group_id: groupId });
+        if (rpcErr) {
+          // Fallback to client-side upsert if RPC not available
+          const insertMe = await supabase
             .from('profile_group_members')
-            .update({ status: 'ACTIVE' })
-            .eq('group_id', groupId as string)
-            .eq('user_id', me.id);
+            .insert([{ group_id: groupId, user_id: me.id, status: 'ACTIVE' } as any], {
+              onConflict: 'group_id,user_id',
+              ignoreDuplicates: true,
+            } as any);
+          // If the row already exists (or insert ignored), force status to ACTIVE (best-effort)
+          if ((insertMe as any)?.error || (insertMe as any)?.status === 409) {
+            await supabase
+              .from('profile_group_members')
+              .update({ status: 'ACTIVE' })
+              .eq('group_id', groupId as string)
+              .eq('user_id', me.id);
+          }
         }
       } catch {
         // ignore; worst case the invite still gets created and approver will join

@@ -110,6 +110,26 @@ export interface Request {
   updated_at: string;
 }
 
+// apartments_request table
+export type ApartmentRequestType = 'JOIN_APT' | 'GENERAL';
+export type ApartmentRequestStatus =
+  | 'PENDING'
+  | 'APPROVED'
+  | 'REJECTED'
+  | 'CANCELLED';
+
+export interface ApartmentRequest {
+  id: string;
+  sender_id: string;
+  recipient_id: string;
+  apartment_id?: string;
+  type: ApartmentRequestType;
+  status: ApartmentRequestStatus;
+  metadata?: any;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface UserSurveyResponse {
   id: number;
   user_id: string;

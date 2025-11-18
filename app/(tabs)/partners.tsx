@@ -108,11 +108,11 @@ useEffect(() => {
         .order('created_at', { ascending: false });
       if (usersError) throw usersError;
 
-      // ACTIVE groups and members (public readable)
+      // Groups considered merged/active (supporting multiple possible statuses)
       const { data: groups, error: gErr } = await supabase
         .from('profile_groups')
-        .select('id')
-        .eq('status', 'ACTIVE');
+        .select('id, status')
+        .in('status', ['ACTIVE', 'MERGED'] as any);
       if (gErr) throw gErr;
       const groupIds = (groups || []).map((g: any) => g.id as string);
 
@@ -120,11 +120,15 @@ useEffect(() => {
       if (groupIds.length) {
         const { data: mRows, error: mErr } = await supabase
           .from('profile_group_members')
-          .select('group_id, user_id')
-          .eq('status', 'ACTIVE')
+          .select('group_id, user_id, status')
           .in('group_id', groupIds);
         if (mErr) throw mErr;
-        members = mRows || [];
+        // Treat members as active unless explicitly removed/left
+        const filtered = (mRows || []).filter((r: any) => {
+          const s = String(r?.status || '').toUpperCase();
+          return s !== 'REMOVED' && s !== 'LEFT';
+        });
+        members = filtered.map((r: any) => ({ group_id: r.group_id, user_id: r.user_id }));
       }
 
       const groupUserIds = Array.from(new Set(members.map((m) => m.user_id)));
@@ -185,7 +189,8 @@ useEffect(() => {
         });
       }
 
-      const memberIdsInActiveGroups = new Set(activeGroups.flatMap((g) => g.users.map((u) => u.id)));
+      // Exclude everyone who belongs to any merged/active group (by membership), not just visible groups
+      const memberIdsInActiveGroups = new Set(members.map((m) => m.user_id));
 
       // Exclude members who share a group with the current user (so you don't see your own group-mates as singles)
       const groupIdsWithCurrentUser = new Set(

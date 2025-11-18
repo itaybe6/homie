@@ -167,11 +167,11 @@ export default function ProfileSettingsScreen() {
         throw updErr;
       }
       // Mark any active group memberships as LEFT
+      // Change: delete membership rows entirely instead of marking LEFT
       const { error: grpErr } = await supabase
         .from('profile_group_members')
-        .update({ status: 'LEFT' })
-        .eq('user_id', user.id)
-        .eq('status', 'ACTIVE');
+        .delete()
+        .eq('user_id', user.id);
       if (grpErr) {
         console.error('[LeaveApartment] Supabase update error (profile_group_members):', grpErr);
         // not throwing intentionally, leaving apt should succeed even if group update failed
@@ -275,15 +275,14 @@ export default function ProfileSettingsScreen() {
       setLeavingGroupId(groupId);
       console.log('[LeaveGroup] Sending Supabase update', {
         table: 'profile_group_members',
-        update: { status: 'LEFT' },
-        filters: { group_id: groupId, user_id: user.id, status: 'ACTIVE' },
+        action: 'DELETE',
+        filters: { group_id: groupId, user_id: user.id },
       });
       const { error } = await supabase
         .from('profile_group_members')
-        .update({ status: 'LEFT' })
+        .delete()
         .eq('group_id', groupId)
-        .eq('user_id', user.id)
-        .eq('status', 'ACTIVE');
+        .eq('user_id', user.id);
       if (error) {
         // eslint-disable-next-line no-console
         console.error('[LeaveGroup] Supabase update error', {
