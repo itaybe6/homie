@@ -42,10 +42,35 @@ export default function NotificationsScreen() {
     if (!user?.id) { setLoading(false); return; }
     try {
       setLoading(true);
+      // Determine whether the user is part of an ACTIVE group and, if so, collect all ACTIVE member ids
+      let recipientIds: string[] = [user.id];
+      try {
+        const { data: myMemberships } = await supabase
+          .from('profile_group_members')
+          .select('group_id')
+          .eq('user_id', user.id)
+          .eq('status', 'ACTIVE');
+        const myGroupIds = (myMemberships || [])
+          .map((r: any) => r?.group_id)
+          .filter(Boolean);
+        if (myGroupIds.length > 0) {
+          const { data: membersRows } = await supabase
+            .from('profile_group_members')
+            .select('user_id')
+            .eq('status', 'ACTIVE')
+            .in('group_id', myGroupIds as any);
+          const memberIds = (membersRows || []).map((r: any) => r.user_id).filter(Boolean);
+          if (memberIds.length > 0) {
+            recipientIds = Array.from(new Set(memberIds));
+          }
+        }
+      } catch {}
+
+      // Fetch notifications for the determined recipient set
       const { data, error } = await supabase
         .from('notifications')
         .select('*')
-        .eq('recipient_id', user.id)
+        .in('recipient_id', recipientIds as any)
         .order('created_at', { ascending: false });
       if (error) throw error;
       const notifications = ((data || []) as Notification[]);
