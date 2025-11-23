@@ -39,6 +39,26 @@ export type CompatUserSurvey = {
   cooking_style?: CookingStyle | null;
   home_vibe?: HomeVibe | null; // expectation for vibe/noise
   age?: number | null;
+  gender?: 'male' | 'female' | null;
+  occupation?: 'student' | 'worker' | string | null;
+  works_from_home?: boolean | null;
+  relationship_status?: string | null;
+  city?: string | null;
+  price_range?: number | null;
+  bills_included?: boolean | null;
+  preferred_city?: string | null;
+  preferred_neighborhoods?: string[] | null;
+  floor_preference?: string | null;
+  has_balcony?: boolean | null;
+  has_elevator?: boolean | null;
+  wants_master_room?: boolean | null;
+  move_in_month?: string | null;
+  is_sublet?: boolean | null;
+  sublet_month_from?: string | null;
+  sublet_month_to?: string | null;
+  preferred_roommates?: number | null;
+  pets_allowed?: boolean | null;
+  with_broker?: boolean | null;
   // Acceptance/preferences for partner
   partner_smoking_preference?: PartnerSmokingPref;
   partner_shabbat_preference?: PartnerShabbatPref;
@@ -46,6 +66,8 @@ export type CompatUserSurvey = {
   partner_pets_preference?: PartnerPetsPref;
   preferred_age_min?: number | null;
   preferred_age_max?: number | null;
+  preferred_gender?: 'male' | 'female' | 'any' | null;
+  preferred_occupation?: 'student' | 'worker' | 'any' | string | null;
   // Optional soft signals
   hobbies?: string[] | null;
   personality?: string[] | null;
@@ -58,13 +80,23 @@ export const weights = {
   pets: 5,
   shabbat: 5,
   kosher: 5,
-  partnerOver: 5,
-  noise: 5,
+  partnerOver: 3,
+  noise: 4,
   lifestyle: 3,
   cleanliness: 3,
-  cooking: 3,
-  social: 3,
+  cooking: 2,
+  social: 2,
   ageRange: 3,
+  genderPref: 4,
+  occupationPref: 2,
+  wfh: 1,
+  location: 4,
+  budget: 4,
+  moveIn: 3,
+  roommates: 2,
+  bills: 2,
+  amenities: 2,
+  petsPolicy: 3,
   hobbies: 1,
   personality: 1,
 } as const;
@@ -181,6 +213,195 @@ function ageWithinPreferred(targetAge: number | null | undefined, min?: number |
     return age - 2 <= (max as number) ? 0.5 : 0;
   }
   return 1;
+}
+
+const neutralPreferenceTerms = new Set(['לא משנה', 'לא משנה לי', 'any', 'הכל', 'כל דבר']);
+const hebrewMonthMap: Record<string, number> = {
+  ינואר: 0,
+  פברואר: 1,
+  מרץ: 2,
+  אפריל: 3,
+  מאי: 4,
+  יוני: 5,
+  יולי: 6,
+  אוגוסט: 7,
+  ספטמבר: 8,
+  אוקטובר: 9,
+  נובמבר: 10,
+  דצמבר: 11,
+};
+
+function normalizeText(value?: string | null): string | null {
+  if (!value) return null;
+  const trimmed = value.replace(/\s+/g, ' ').trim();
+  return trimmed ? trimmed.toLowerCase() : null;
+}
+
+function cityMatchScore(a?: string | null, b?: string | null): number {
+  const normA = normalizeText(a);
+  const normB = normalizeText(b);
+  if (!normA || !normB) return 0.5;
+  return normA === normB ? 1 : 0;
+}
+
+function preferenceMatch(
+  preference?: string | null,
+  candidate?: string | null,
+  options?: { neutralValues?: Set<string> },
+): number {
+  const pref = normalizeText(preference);
+  const value = normalizeText(candidate);
+  if (!pref || options?.neutralValues?.has(pref)) return 1;
+  if (!value) return 0.5;
+  return pref === value ? 1 : 0;
+}
+
+function booleanAgreement(
+  a?: boolean | null,
+  b?: boolean | null,
+  options?: { mismatchScore?: number; neutralScore?: number },
+): number {
+  if (a === null || a === undefined || b === null || b === undefined) {
+    return options?.neutralScore ?? 0.5;
+  }
+  return a === b ? 1 : options?.mismatchScore ?? 0;
+}
+
+function softBooleanPreferenceMatch(a?: boolean | null, b?: boolean | null): number {
+  return booleanAgreement(a, b, { mismatchScore: 0.7 });
+}
+
+function floorPreferenceMatch(a?: string | null, b?: string | null): number {
+  const normA = normalizeText(a);
+  const normB = normalizeText(b);
+  if (!normA || neutralPreferenceTerms.has(normA)) return 1;
+  if (!normB || neutralPreferenceTerms.has(normB)) return 1;
+  return normA === normB ? 1 : 0.5;
+}
+
+function calculateLocationCompatibility(
+  me: Partial<CompatUserSurvey>,
+  them: Partial<CompatUserSurvey>,
+): number {
+  const pieces: number[] = [];
+  pieces.push(cityMatchScore(me.preferred_city, them.preferred_city));
+  pieces.push(cityMatchScore(me.preferred_city, them.city));
+  pieces.push(cityMatchScore(them.preferred_city, me.city));
+  if ((me.preferred_neighborhoods && me.preferred_neighborhoods.length) || (them.preferred_neighborhoods && them.preferred_neighborhoods.length)) {
+    pieces.push(jaccardSimilarity(me.preferred_neighborhoods || null, them.preferred_neighborhoods || null));
+  }
+  const valid = pieces.filter((p) => typeof p === 'number' && !Number.isNaN(p));
+  if (!valid.length) return 0.5;
+  return average(valid);
+}
+
+function calculateBudgetCompatibility(a?: number | null, b?: number | null): number {
+  if (!Number.isFinite(a as number) || !Number.isFinite(b as number)) return 0.5;
+  const v1 = a as number;
+  const v2 = b as number;
+  if (v1 <= 0 || v2 <= 0) return 0.5;
+  const diff = Math.abs(v1 - v2);
+  const scale = Math.max(v1, v2, 1);
+  const ratio = diff / scale;
+  return Math.max(0, 1 - ratio);
+}
+
+function calculateRoommateCountMatch(a?: number | null, b?: number | null): number {
+  if (!Number.isFinite(a as number) || !Number.isFinite(b as number)) return 0.5;
+  const diff = Math.abs((a as number) - (b as number));
+  if (diff === 0) return 1;
+  if (diff === 1) return 0.7;
+  return Math.max(0, 1 - diff / 3);
+}
+
+function parseYearMonth(value?: string | null): number | null {
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const iso = trimmed.match(/^(\d{4})[-/](\d{1,2})$/);
+  if (iso) {
+    const year = parseInt(iso[1], 10);
+    const month = Math.min(Math.max(parseInt(iso[2], 10) - 1, 0), 11);
+    if (Number.isFinite(year)) return year * 12 + month;
+  }
+  const parts = trimmed.split(/\s+/);
+  if (parts.length >= 2) {
+    const monthName = parts[0];
+    const year = parseInt(parts[parts.length - 1], 10);
+    const month = hebrewMonthMap[monthName];
+    if (Number.isFinite(year) && typeof month === 'number') {
+      return year * 12 + month;
+    }
+  }
+  return null;
+}
+
+function calculateMonthDistance(a?: string | null, b?: string | null): number {
+  const idxA = parseYearMonth(a);
+  const idxB = parseYearMonth(b);
+  if (idxA === null || idxB === null) return 0.5;
+  const diff = Math.abs(idxA - idxB);
+  const MAX_DIFF = 6;
+  return Math.max(0, 1 - diff / MAX_DIFF);
+}
+
+function calculateSubletWindowOverlap(
+  startA?: string | null,
+  endA?: string | null,
+  startB?: string | null,
+  endB?: string | null,
+): number {
+  const sA = parseYearMonth(startA);
+  const eA = parseYearMonth(endA);
+  const sB = parseYearMonth(startB);
+  const eB = parseYearMonth(endB);
+  if (sA === null || eA === null || sB === null || eB === null) return 0.4;
+  const overlapStart = Math.max(sA, sB);
+  const overlapEnd = Math.min(eA, eB);
+  if (overlapEnd < overlapStart) return 0;
+  const overlap = overlapEnd - overlapStart + 1;
+  const span = Math.max(eA, eB) - Math.min(sA, sB) + 1;
+  if (span <= 0) return 0;
+  return Math.max(0, Math.min(1, overlap / span));
+}
+
+function calculateMoveInCompatibility(
+  me: Partial<CompatUserSurvey>,
+  them: Partial<CompatUserSurvey>,
+): number {
+  const meSublet = !!me.is_sublet;
+  const themSublet = !!them.is_sublet;
+  if (meSublet && themSublet) {
+    return calculateSubletWindowOverlap(
+      me.sublet_month_from,
+      me.sublet_month_to,
+      them.sublet_month_from,
+      them.sublet_month_to,
+    );
+  }
+  if (meSublet || themSublet) {
+    const subletUser = meSublet ? me : them;
+    const regularUser = meSublet ? them : me;
+    const start = parseYearMonth(subletUser.sublet_month_from || subletUser.move_in_month);
+    const end = parseYearMonth(subletUser.sublet_month_to || subletUser.sublet_month_from);
+    const regular = parseYearMonth(regularUser.move_in_month);
+    if (start !== null && end !== null && regular !== null) {
+      if (regular >= start && regular <= end) return 0.6;
+      const diff = Math.min(Math.abs(regular - start), Math.abs(regular - end));
+      return Math.max(0, 0.6 - diff * 0.1);
+    }
+    return 0.4;
+  }
+  return calculateMonthDistance(me.move_in_month, them.move_in_month);
+}
+
+function petsPolicyCompatibility(
+  petsAllowed?: boolean | null,
+  partnerHasPet?: boolean | null,
+): number {
+  if (!partnerHasPet) return 1;
+  if (petsAllowed === null || petsAllowed === undefined) return 0.5;
+  return petsAllowed ? 1 : 0;
 }
 
 export function calculateMatchScore(
@@ -331,6 +552,76 @@ export function calculateMatchScore(
     add(weights.ageRange, [s1, s2]);
   }
 
+  // Preferences: gender
+  {
+    const s1 = preferenceMatch(myAnswers.preferred_gender, theirAnswers.gender, { neutralValues: neutralPreferenceTerms });
+    const s2 = preferenceMatch(theirAnswers.preferred_gender, myAnswers.gender, { neutralValues: neutralPreferenceTerms });
+    add(weights.genderPref, [s1, s2]);
+  }
+
+  // Preferences: occupation & lifestyle overlap
+  {
+    const pref1 = preferenceMatch(myAnswers.preferred_occupation, theirAnswers.occupation, { neutralValues: neutralPreferenceTerms });
+    const pref2 = preferenceMatch(theirAnswers.preferred_occupation, myAnswers.occupation, { neutralValues: neutralPreferenceTerms });
+    const occSimilarity = calculateCategoryMatch(myAnswers.occupation || null, theirAnswers.occupation || null);
+    add(weights.occupationPref, [pref1, pref2, occSimilarity]);
+  }
+
+  // Work style (WFH)
+  {
+    const s = booleanAgreement(myAnswers.works_from_home, theirAnswers.works_from_home, { mismatchScore: 0.6 });
+    add(weights.wfh, [s]);
+  }
+
+  // Location expectations
+  {
+    const locationScore = calculateLocationCompatibility(myAnswers, theirAnswers);
+    add(weights.location, [locationScore]);
+  }
+
+  // Budget alignment & policies
+  {
+    const budgetScore = calculateBudgetCompatibility(myAnswers.price_range ?? null, theirAnswers.price_range ?? null);
+    add(weights.budget, [budgetScore]);
+  }
+
+  // Bills & broker preferences
+  {
+    const billsScore = booleanAgreement(myAnswers.bills_included, theirAnswers.bills_included);
+    const brokerScore = booleanAgreement(myAnswers.with_broker, theirAnswers.with_broker);
+    add(weights.bills, [billsScore, brokerScore]);
+  }
+
+  // Move-in timing
+  {
+    const moveInScore = calculateMoveInCompatibility(myAnswers, theirAnswers);
+    add(weights.moveIn, [moveInScore]);
+  }
+
+  // Preferred roommates count
+  {
+    const roommatesScore = calculateRoommateCountMatch(myAnswers.preferred_roommates, theirAnswers.preferred_roommates);
+    add(weights.roommates, [roommatesScore]);
+  }
+
+  // Amenities alignment
+  {
+    const amenityScores = [
+      softBooleanPreferenceMatch(myAnswers.has_balcony, theirAnswers.has_balcony),
+      softBooleanPreferenceMatch(myAnswers.has_elevator, theirAnswers.has_elevator),
+      softBooleanPreferenceMatch(myAnswers.wants_master_room, theirAnswers.wants_master_room),
+      floorPreferenceMatch(myAnswers.floor_preference, theirAnswers.floor_preference),
+    ];
+    add(weights.amenities, amenityScores);
+  }
+
+  // Pets allowed policy (apartment constraints)
+  {
+    const s1 = petsPolicyCompatibility(myAnswers.pets_allowed, theirAnswers.has_pet);
+    const s2 = petsPolicyCompatibility(theirAnswers.pets_allowed, myAnswers.has_pet);
+    add(weights.petsPolicy, [s1, s2]);
+  }
+
   // Soft: hobbies
   {
     const s = jaccardSimilarity(myAnswers.hobbies || null, theirAnswers.hobbies || null);
@@ -347,7 +638,3 @@ export function calculateMatchScore(
   const percent = (totalScore / totalPossible) * 100;
   return Math.round(percent);
 }
-
-export { calculateMatchScore };
-
-
