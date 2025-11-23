@@ -46,7 +46,7 @@ export default function ApartmentDetailsScreen() {
   const [members, setMembers] = useState<User[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [activeIdx, setActiveIdx] = useState(0);
-  const [failed, setFailed] = useState<Record<number, boolean>>({});
+  const [imageCandidateIndex, setImageCandidateIndex] = useState<Record<number, number>>({});
   const [isMembersOpen, setIsMembersOpen] = useState(false);
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [addCandidates, setAddCandidates] = useState<User[]>([]);
@@ -101,6 +101,11 @@ export default function ApartmentDetailsScreen() {
     };
     checkAssigned();
   }, [user?.id]);
+
+  useEffect(() => {
+    setImageCandidateIndex({});
+    setActiveIdx(0);
+  }, [apartment?.id]);
 
   const fetchApartmentDetails = async () => {
     try {
@@ -230,18 +235,34 @@ export default function ApartmentDetailsScreen() {
       const transformed = base.replace('/storage/v1/object/public/', '/storage/v1/render/image/public/');
       const params: string[] = [];
       if (query) params.push(query);
-      params.push('width=1200', 'quality=90');
+      params.push('width=1200', 'quality=90', 'format=webp');
       return `${transformed}?${params.join('&')}`;
     }
     return trimmed;
   };
 
-  const images: string[] = (() => {
-    const arr = normalizeImages((apartment as any).image_urls)
-      .map(transformSupabaseImageUrl)
-      .filter((url): url is string => !!url);
-    return arr.length ? arr : [PLACEHOLDER];
+  const galleryImages: string[][] = (() => {
+    const raw = normalizeImages((apartment as any).image_urls);
+    const candidates = raw.map((original) => {
+      const set = new Set<string>();
+      const transformed = transformSupabaseImageUrl(original);
+      [transformed, original, PLACEHOLDER].forEach((url) => {
+        const trimmed = (url || '').trim();
+        if (trimmed) set.add(trimmed);
+      });
+      return Array.from(set);
+    });
+    if (candidates.length === 0) {
+      return [[PLACEHOLDER]];
+    }
+    return candidates;
   })();
+
+  const getImageForIndex = (idx: number): string => {
+    const candidates = galleryImages[idx] || [PLACEHOLDER];
+    const useIdx = imageCandidateIndex[idx] ?? 0;
+    return candidates[Math.min(useIdx, candidates.length - 1)] || PLACEHOLDER;
+  };
 
   const normalizeIds = (value: any): string[] => {
     if (Array.isArray(value)) return value.filter(Boolean);
@@ -259,12 +280,17 @@ export default function ApartmentDetailsScreen() {
     return [];
   };
 
+  const currentPartnerIds: string[] = normalizeIds((apartment as any).partner_ids);
   const roommatesCount = members.length; // number of partners (not including owner)
+  const partnerSlotsUsed = currentPartnerIds.length;
+  const totalRoommateCapacity =
+    typeof apartment.roommate_capacity === 'number' ? apartment.roommate_capacity : null;
+  const availableRoommateSlots =
+    totalRoommateCapacity !== null ? Math.max(0, totalRoommateCapacity - partnerSlotsUsed) : null;
   const roommatesNeeded = Math.max(
     0,
     (apartment.bedrooms || 0) - (roommatesCount + 1) // +1 for owner when calculating needed
   );
-  const currentPartnerIds: string[] = normalizeIds((apartment as any).partner_ids);
   const isMember = !!(
     user?.id &&
     currentPartnerIds.map((v) => String(v).toLowerCase()).includes(String(user.id).toLowerCase())
@@ -697,6 +723,13 @@ export default function ApartmentDetailsScreen() {
     }
   };
 
+  const capacityMessage =
+    availableRoommateSlots === null
+      ? null
+      : availableRoommateSlots > 0
+      ? `עוד ${availableRoommateSlots} ${availableRoommateSlots === 1 ? 'שותף' : 'שותפים'} יכולים להצטרף לדירה`
+      : 'אין מקומות פנויים לשותפים כרגע';
+
   const goPrev = () => {
     if (activeIdx <= 0) return;
     const next = activeIdx - 1;
@@ -705,7 +738,7 @@ export default function ApartmentDetailsScreen() {
   };
 
   const goNext = () => {
-    if (activeIdx >= images.length - 1) return;
+    if (activeIdx >= galleryImages.length - 1) return;
     const next = activeIdx + 1;
     galleryRef.current?.scrollTo({ x: next * screenWidth, animated: true });
     setActiveIdx(next);
@@ -764,20 +797,30 @@ export default function ApartmentDetailsScreen() {
               setActiveIdx(idx);
             }}
           >
-            {images.map((uri, idx) => (
+            {galleryImages.map((_, idx) => {
+              const uri = getImageForIndex(idx);
+              return (
               <View key={`${uri}-${idx}`} style={[styles.slide, { width: screenWidth }]}>
                 <Image
-                  source={{ uri: failed[idx] ? PLACEHOLDER : uri }}
+                  source={{ uri }}
                   style={styles.image}
                   resizeMode="cover"
-                  onError={() => setFailed((f) => ({ ...f, [idx]: true }))}
+                  onError={() =>
+                    setImageCandidateIndex((prev) => {
+                      const candidates = galleryImages[idx] || [PLACEHOLDER];
+                      const current = prev[idx] ?? 0;
+                      const next = Math.min(current + 1, candidates.length - 1);
+                      if (next === current) return prev;
+                      return { ...prev, [idx]: next };
+                    })
+                  }
                 />
                 <LinearGradient
                   colors={['transparent', 'rgba(15,15,20,0.6)', 'rgba(15,15,20,0.95)']}
                   style={styles.imageGradient}
                 />
               </View>
-            ))}
+            );})}
           </ScrollView>
 
           {/* Price overlay at bottom-left of the image */}
@@ -789,7 +832,22 @@ export default function ApartmentDetailsScreen() {
             </View>
           </View>
 
-          {images.length > 1 ? (
+          {availableRoommateSlots !== null ? (
+            <View style={styles.capacityOverlay}>
+              <View style={styles.capacityOverlaySlots}>
+                <Text style={styles.capacityOverlaySlotsText}>
+                  {partnerSlotsUsed}/{totalRoommateCapacity ?? 0}
+                </Text>
+                <Text style={styles.capacityOverlaySlotsLabel}>שותפים</Text>
+              </View>
+              <View style={styles.capacityOverlayTextWrap}>
+                <Text style={styles.capacityOverlayTitle}>זמינות לשותפים</Text>
+                <Text style={styles.capacityOverlaySubtitle}>{capacityMessage ?? ''}</Text>
+              </View>
+            </View>
+          ) : null}
+
+          {galleryImages.length > 1 ? (
             <>
               <TouchableOpacity onPress={goPrev} style={[styles.navBtn, styles.navBtnLeft]} activeOpacity={0.85}>
                 <ChevronLeft size={18} color="#FFFFFF" />
@@ -798,7 +856,7 @@ export default function ApartmentDetailsScreen() {
                 <ChevronRight size={18} color="#FFFFFF" />
               </TouchableOpacity>
               <View style={styles.dotsRow}>
-                {images.map((_, i) => (
+                {galleryImages.map((_, i) => (
                   <View key={`dot-${i}`} style={[styles.dot, i === activeIdx && styles.dotActive]} />
                 ))}
               </View>
@@ -1381,6 +1439,59 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 12,
     marginBottom: 16,
+  },
+  capacityOverlay: {
+    position: 'absolute',
+    right: 16,
+    bottom: 12,
+    zIndex: 6,
+    backgroundColor: 'rgba(20,20,32,0.92)',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(124,92,255,0.35)',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  capacityOverlaySlots: {
+    minWidth: 64,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(124,92,255,0.16)',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(124,92,255,0.35)',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  capacityOverlaySlotsText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '900',
+  },
+  capacityOverlaySlotsLabel: {
+    color: '#C9CDD6',
+    fontSize: 11,
+    fontWeight: '700',
+    marginTop: 4,
+  },
+  capacityOverlayTextWrap: {
+    flex: 1,
+    writingDirection: 'rtl',
+  },
+  capacityOverlayTitle: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '800',
+    marginBottom: 4,
+    textAlign: 'right',
+  },
+  capacityOverlaySubtitle: {
+    color: '#C9CDD6',
+    fontSize: 12,
+    textAlign: 'right',
   },
   detailBoxDark: {
     flex: 1,

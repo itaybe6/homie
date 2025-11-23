@@ -1,7 +1,7 @@
 import { View, Text, StyleSheet, TouchableOpacity, Image } from 'react-native';
 import { MapPin, Bed, Bath } from 'lucide-react-native';
 import { Apartment } from '@/types/database';
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 
 interface ApartmentCardProps {
   apartment: Apartment;
@@ -63,23 +63,47 @@ export default function ApartmentCard({
     return trimmed;
   };
 
-  const primaryImage = useMemo(() => {
-    const urls = normalizeImageUrls((apartment as any).image_urls)
-      .map(transformSupabaseImageUrl)
-      .filter((url): url is string => !!url);
-    return urls[0] || PLACEHOLDER;
+  const imageCandidates = useMemo(() => {
+    const raw = normalizeImageUrls((apartment as any).image_urls);
+    const unique = new Set<string>();
+    raw.forEach((original) => {
+      const transformed = transformSupabaseImageUrl(original);
+      [transformed, original].forEach((url) => {
+        const trimmed = (url || '').trim();
+        if (trimmed) unique.add(trimmed);
+      });
+    });
+    if (!unique.size) unique.add(PLACEHOLDER);
+    if (!unique.has(PLACEHOLDER)) {
+      unique.add(PLACEHOLDER);
+    }
+    return Array.from(unique);
   }, [apartment]);
 
-  const [failed, setFailed] = useState(false);
+  const [imageIdx, setImageIdx] = useState(0);
+  const candidateKey = imageCandidates.join('|');
+
+  useEffect(() => {
+    setImageIdx(0);
+  }, [candidateKey]);
+
+  const currentImage = imageCandidates[Math.min(imageIdx, imageCandidates.length - 1)] || PLACEHOLDER;
 
   return (
     <TouchableOpacity style={styles.card} onPress={onPress}>
       <View style={styles.imageWrap}>
         <Image
-          source={{ uri: failed ? PLACEHOLDER : primaryImage }}
+          source={{ uri: currentImage }}
           style={styles.image}
           resizeMode="cover"
-          onError={() => setFailed(true)}
+          onError={() => {
+            const nextIdx = imageIdx + 1;
+            if (nextIdx < imageCandidates.length) {
+              setImageIdx(nextIdx);
+            } else if (currentImage !== PLACEHOLDER) {
+              setImageIdx(imageCandidates.length - 1);
+            }
+          }}
         />
         
       </View>
