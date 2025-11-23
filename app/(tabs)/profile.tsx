@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -23,7 +23,7 @@ import { supabase } from '@/lib/supabase';
 import { authService } from '@/lib/auth';
 import { useAuthStore } from '@/stores/authStore';
 import { useApartmentStore } from '@/stores/apartmentStore';
-import { User, Apartment } from '@/types/database';
+import { User, Apartment, UserSurveyResponse } from '@/types/database';
 
 
 export default function ProfileScreen() {
@@ -45,6 +45,7 @@ export default function ProfileScreen() {
   const [sharedGroups, setSharedGroups] = useState<
     { id: string; name?: string | null; members: Pick<User, 'id' | 'full_name' | 'avatar_url'>[] }[]
   >([]);
+  const [surveyResponse, setSurveyResponse] = useState<UserSurveyResponse | null>(null);
 
   const [fullName, setFullName] = useState('');
   const [age, setAge] = useState('');
@@ -115,6 +116,68 @@ export default function ProfileScreen() {
     return publicUrl.substring(idx + marker.length);
   };
 
+  const formatYesNo = (value?: boolean | null): string => {
+    if (value === undefined || value === null) return '';
+    return value ? 'כן' : 'לא';
+  };
+
+  const formatMonthLabel = (value?: string | null): string => {
+    if (!value) return '';
+    const [year, month] = value.split('-');
+    if (year && month) {
+      const yearNum = parseInt(year, 10);
+      const monthNum = parseInt(month, 10) - 1;
+      if (!Number.isNaN(yearNum) && !Number.isNaN(monthNum)) {
+        const date = new Date(yearNum, monthNum, 1);
+        if (!Number.isNaN(date.getTime())) {
+          try {
+            return date.toLocaleDateString('he-IL', { month: 'short', year: 'numeric' });
+          } catch {
+            return `${month}/${year.slice(-2)}`;
+          }
+        }
+      }
+    }
+    return value;
+  };
+
+  const formatCurrency = (value?: number | null): string => {
+    if (typeof value !== 'number' || Number.isNaN(value)) return '';
+    try {
+      return new Intl.NumberFormat('he-IL', {
+        style: 'currency',
+        currency: 'ILS',
+        maximumFractionDigits: 0,
+      }).format(value);
+    } catch {
+      return `₪${value}`;
+    }
+  };
+
+  const normalizeNeighborhoods = (value: any): string => {
+    if (!value) return '';
+    if (Array.isArray(value)) {
+      return value.filter(Boolean).join(' • ');
+    }
+    if (typeof value === 'string') {
+      try {
+        const parsed = JSON.parse(value);
+        if (Array.isArray(parsed)) {
+          return parsed.filter(Boolean).join(' • ');
+        }
+      } catch {
+        // fall through to cleanup
+      }
+      return value
+        .replace(/[{}\[\]"]/g, ' ')
+        .split(',')
+        .map((segment) => segment.trim())
+        .filter(Boolean)
+        .join(' • ');
+    }
+    return '';
+  };
+
   const removeImageAt = async (idx: number) => {
     try {
       if (!user?.id || !profile?.image_urls) return;
@@ -155,9 +218,12 @@ export default function ProfileScreen() {
 
   const fetchProfile = async () => {
     if (!user) {
+      setSurveyResponse(null);
       setIsLoading(false);
       return;
     }
+
+    setSurveyResponse(null);
 
     try {
       const { data: profileData, error: profileError } = await supabase
@@ -173,6 +239,21 @@ export default function ProfileScreen() {
         setAge(profileData.age?.toString() || '');
         setBio(profileData.bio || '');
       }
+
+      let latestSurvey: UserSurveyResponse | null = null;
+      try {
+        const { data: surveyRows, error: surveyError } = await supabase
+          .from('user_survey_responses')
+          .select('*')
+          .eq('user_id', user.id)
+          .order('updated_at', { ascending: false })
+          .limit(1);
+        if (surveyError) throw surveyError;
+        latestSurvey = (surveyRows && surveyRows[0]) || null;
+      } catch (surveyErr) {
+        console.error('Error fetching survey response:', surveyErr);
+      }
+      setSurveyResponse(latestSurvey);
 
       const [{ data: ownedApts, error: ownedError }, { data: partnerApts, error: partnerError }] =
         await Promise.all([
@@ -476,6 +557,118 @@ export default function ProfileScreen() {
     }
   };
 
+  const surveyHighlights = useMemo(() => {
+    if (!surveyResponse) return [];
+    const highlights: { label: string; value: string }[] = [];
+    const push = (label: string, raw?: string) => {
+      if (!raw) return;
+      const trimmed = raw.trim();
+      if (!trimmed) return;
+      highlights.push({ label, value: trimmed });
+    };
+
+    push('עיר מועדפת', surveyResponse.preferred_city || undefined);
+    if (typeof surveyResponse.price_range === 'number') {
+      const formatted = formatCurrency(surveyResponse.price_range);
+      push('תקציב חודשי', formatted);
+    }
+    push('כניסה מתוכננת', formatMonthLabel(surveyResponse.move_in_month));
+    push('וייב יומיומי', surveyResponse.lifestyle || surveyResponse.home_vibe || undefined);
+    if (surveyResponse.is_sublet) {
+      highlights.push({ label: 'סאבלט', value: 'כן' });
+    }
+
+    return highlights.slice(0, 4);
+  }, [surveyResponse]);
+
+  const surveyItems = useMemo(() => {
+    if (!surveyResponse) return [];
+    const items: { label: string; value: string }[] = [];
+
+    const add = (label: string, raw?: string | number | null) => {
+      if (raw === undefined || raw === null) return;
+      const value =
+        typeof raw === 'string'
+          ? raw.trim()
+          : typeof raw === 'number' && Number.isFinite(raw)
+            ? `${raw}`
+            : '';
+      if (!value) return;
+      items.push({ label, value });
+    };
+
+    const addBool = (label: string, raw?: boolean | null) => {
+      const formatted = formatYesNo(raw);
+      if (!formatted) return;
+      items.push({ label, value: formatted });
+    };
+
+    add('עיסוק', surveyResponse.occupation);
+    if (typeof surveyResponse.student_year === 'number' && surveyResponse.student_year > 0) {
+      add('שנת לימודים', `שנה ${surveyResponse.student_year}`);
+    }
+    addBool('עבודה מהבית', surveyResponse.works_from_home);
+    addBool('שומר/ת כשרות', surveyResponse.keeps_kosher);
+    addBool('שומר/ת שבת', surveyResponse.is_shomer_shabbat);
+    add('תזונה', surveyResponse.diet_type);
+    addBool('מעשן/ת', surveyResponse.is_smoker);
+    add('מצב זוגי', surveyResponse.relationship_status);
+    addBool('חיית מחמד בבית', surveyResponse.has_pet);
+    if (typeof surveyResponse.cleanliness_importance === 'number') {
+      add('חשיבות ניקיון', `${surveyResponse.cleanliness_importance}/5`);
+    }
+    add('תדירות ניקיון', surveyResponse.cleaning_frequency);
+    add('העדפת אירוח', surveyResponse.hosting_preference);
+    add('סטייל בישול', surveyResponse.cooking_style);
+    add('וייב בבית', surveyResponse.home_vibe);
+    addBool('תת-השכרה', surveyResponse.is_sublet);
+    if (surveyResponse.sublet_month_from || surveyResponse.sublet_month_to) {
+      const period = [formatMonthLabel(surveyResponse.sublet_month_from), formatMonthLabel(surveyResponse.sublet_month_to)]
+        .filter(Boolean)
+        .join(' → ');
+      add('טווח סאבלט', period);
+    }
+    if (typeof surveyResponse.price_range === 'number') {
+      add('תקציב שכירות', formatCurrency(surveyResponse.price_range));
+    }
+    addBool('חשבונות כלולים', surveyResponse.bills_included);
+    add('עיר מועדפת', surveyResponse.preferred_city);
+    const neighborhoodsJoined = normalizeNeighborhoods((surveyResponse.preferred_neighborhoods as unknown) ?? null);
+    if (neighborhoodsJoined) {
+      add('שכונות מועדפות', neighborhoodsJoined);
+    }
+    add('קומה מועדפת', surveyResponse.floor_preference);
+    addBool('מרפסת', surveyResponse.has_balcony);
+    addBool('מעלית', surveyResponse.has_elevator);
+    addBool('חדר מאסטר', surveyResponse.wants_master_room);
+    add('חודש כניסה', formatMonthLabel(surveyResponse.move_in_month));
+    if (typeof surveyResponse.preferred_roommates === 'number') {
+      add('מספר שותפים מועדף', `${surveyResponse.preferred_roommates}`);
+    }
+    addBool('חיות מורשות', surveyResponse.pets_allowed);
+    addBool('עם מתווך', surveyResponse.with_broker);
+    add('טווח גילאים רצוי', surveyResponse.preferred_age_range);
+    add('מגדר שותפים', surveyResponse.preferred_gender);
+    add('עיסוק שותפים', surveyResponse.preferred_occupation);
+    add('שותפים ושבת', surveyResponse.partner_shabbat_preference);
+    add('שותפים ותזונה', surveyResponse.partner_diet_preference);
+    add('שותפים ועישון', surveyResponse.partner_smoking_preference);
+    add('שותפים וחיות', surveyResponse.partner_pets_preference);
+
+    return items;
+  }, [surveyResponse]);
+
+  const surveyStatusLabel = surveyResponse
+    ? surveyResponse.is_completed
+      ? 'הסקר הושלם'
+      : 'בטיוטה'
+    : 'טרם מולא';
+  const surveyStatusStyle = surveyResponse
+    ? surveyResponse.is_completed
+      ? styles.surveyBadgeSuccess
+      : styles.surveyBadgePending
+    : styles.surveyBadgeMuted;
+
   if (isLoading) {
     return (
       <View style={styles.centerContainer}>
@@ -710,6 +903,58 @@ export default function ProfileScreen() {
             })}
           </View>
         )}
+
+        <View style={styles.sectionDark}>
+          <LinearGradient
+            colors={['rgba(124,92,255,0.28)', 'rgba(60,49,120,0.32)', 'rgba(15,15,20,0.92)']}
+            start={{ x: 1, y: 0 }}
+            end={{ x: 0, y: 1 }}
+            style={styles.surveyCard}
+          >
+            <View style={styles.surveyHeaderRow}>
+              <Text style={styles.surveyTitle}>סיכום הסקר שלי</Text>
+              <View style={[styles.surveyBadge, surveyStatusStyle]}>
+                <Text style={styles.surveyBadgeText}>{surveyStatusLabel}</Text>
+              </View>
+            </View>
+
+            {!!surveyHighlights.length && (
+              <View style={styles.surveyHighlightsRow}>
+                {surveyHighlights.map((item) => (
+                  <View key={`${item.label}-${item.value}`} style={styles.surveyHighlightPill}>
+                    <Text style={styles.surveyHighlightLabel}>{item.label}</Text>
+                    <Text style={styles.surveyHighlightValue}>{item.value}</Text>
+                  </View>
+                ))}
+              </View>
+            )}
+
+            {surveyResponse ? (
+              surveyItems.length ? (
+                <View style={styles.surveyGrid}>
+                  {surveyItems.map((item) => (
+                    <View key={`${item.label}-${item.value}`} style={styles.surveyCell}>
+                      <Text style={styles.surveyCellLabel}>{item.label}</Text>
+                      <Text style={styles.surveyCellValue}>{item.value}</Text>
+                    </View>
+                  ))}
+                </View>
+              ) : (
+                <View style={styles.surveyEmptyState}>
+                  <Text style={styles.surveyEmptyText}>
+                    סקר ההעדפות הושלם אך אין עדיין נתונים להצגה.
+                  </Text>
+                </View>
+              )
+            ) : (
+              <View style={styles.surveyEmptyState}>
+                <Text style={styles.surveyEmptyText}>
+                  ברגע שתמלא/י את סקר ההעדפות נציג כאן את ההתאמות האישיות שלך.
+                </Text>
+              </View>
+            )}
+          </LinearGradient>
+        </View>
 
         {/* moved logout and delete actions to /profile/settings */}
       </ScrollView>
@@ -1119,6 +1364,115 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '800',
     marginBottom: 10,
+  },
+  surveyCard: {
+    borderRadius: 20,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    overflow: 'hidden',
+  },
+  surveyHeaderRow: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  surveyTitle: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  surveyBadge: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderColor: 'rgba(255,255,255,0.2)',
+  },
+  surveyBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  surveyBadgeSuccess: {
+    backgroundColor: 'rgba(34,197,94,0.18)',
+    borderColor: 'rgba(34,197,94,0.45)',
+  },
+  surveyBadgePending: {
+    backgroundColor: 'rgba(250,204,21,0.16)',
+    borderColor: 'rgba(250,204,21,0.4)',
+  },
+  surveyBadgeMuted: {
+    backgroundColor: 'rgba(148,163,184,0.14)',
+    borderColor: 'rgba(148,163,184,0.32)',
+  },
+  surveyHighlightsRow: {
+    flexDirection: 'row-reverse',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginBottom: 12,
+  },
+  surveyHighlightPill: {
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    width: '48%',
+  },
+  surveyHighlightLabel: {
+    color: '#9DA4AE',
+    fontSize: 12,
+    marginBottom: 2,
+    textAlign: 'right',
+    fontWeight: '600',
+  },
+  surveyHighlightValue: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '800',
+    textAlign: 'right',
+  },
+  surveyGrid: {
+    flexDirection: 'row-reverse',
+    flexWrap: 'wrap',
+    gap: 12,
+  },
+  surveyCell: {
+    backgroundColor: 'rgba(15,15,20,0.6)',
+    borderRadius: 16,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.05)',
+    width: '48%',
+  },
+  surveyCellLabel: {
+    color: '#9DA4AE',
+    fontSize: 12,
+    marginBottom: 6,
+    textAlign: 'right',
+    fontWeight: '600',
+  },
+  surveyCellValue: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '800',
+    textAlign: 'right',
+    lineHeight: 20,
+  },
+  surveyEmptyState: {
+    paddingVertical: 18,
+    paddingHorizontal: 4,
+    gap: 8,
+  },
+  surveyEmptyText: {
+    color: '#D1D5DB',
+    fontSize: 14,
+    lineHeight: 20,
+    textAlign: 'right',
   },
   sharedCard: {
     backgroundColor: '#15151C',

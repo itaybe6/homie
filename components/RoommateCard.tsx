@@ -11,9 +11,10 @@ type RoommateCardProps = {
   onPass: (user: User) => void;
   onOpen?: (user: User) => void;
   style?: ViewStyle;
+  matchPercent?: number | null;
 };
 
-function RoommateCardBase({ user, onLike, onPass, onOpen, style }: RoommateCardProps) {
+function RoommateCardBase({ user, onLike, onPass, onOpen, style, matchPercent }: RoommateCardProps) {
   const DEFAULT_AVATAR = 'https://cdn-icons-png.flaticon.com/512/847/847969.png';
   const router = useRouter();
   type ProfileApartment = {
@@ -86,6 +87,8 @@ function RoommateCardBase({ user, onLike, onPass, onOpen, style }: RoommateCardP
     };
   }, [user?.id]);
 
+  const formattedMatch = matchPercent === null || matchPercent === undefined ? '--%' : `${matchPercent}%`;
+
   return (
     <View style={[styles.card, style]}>
       <TouchableOpacity activeOpacity={0.9} onPress={() => onOpen?.(user)}>
@@ -95,6 +98,10 @@ function RoommateCardBase({ user, onLike, onPass, onOpen, style }: RoommateCardP
             style={styles.image}
             resizeMode="cover"
           />
+          <View style={styles.matchBadge}>
+            <Text style={styles.matchBadgeValue}>{formattedMatch}</Text>
+            <Text style={styles.matchBadgeLabel}>התאמה</Text>
+          </View>
         </View>
       </TouchableOpacity>
 
@@ -175,9 +182,7 @@ function RoommateCardBase({ user, onLike, onPass, onOpen, style }: RoommateCardP
                       </View>
                     ) : null}
                   </View>
-                  <View style={{ flex: 0 }}>
-                    <Text style={styles.aptCta}>לצפייה</Text>
-                  </View>
+                 
                 </TouchableOpacity>
               );
             })}
@@ -203,10 +208,36 @@ const styles = StyleSheet.create({
     width: '100%',
     height: 260,
     backgroundColor: '#22232E',
+    position: 'relative',
   },
   image: {
     width: '100%',
     height: '100%',
+  },
+  matchBadge: {
+    position: 'absolute',
+    top: 16,
+    right: 16,
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(15,15,20,0.78)',
+    borderWidth: 1,
+    borderColor: 'rgba(124,92,255,0.35)',
+    zIndex: 2,
+  },
+  matchBadgeValue: {
+    color: '#FFFFFF',
+    fontSize: 20,
+    fontWeight: '800',
+  },
+  matchBadgeLabel: {
+    color: '#C9CDD6',
+    fontSize: 12,
+    fontWeight: '600',
+    marginTop: 2,
   },
   content: {
     paddingHorizontal: 16,

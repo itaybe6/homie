@@ -19,13 +19,28 @@ import { SlidersHorizontal, ChevronLeft, ChevronRight, Heart, X, MapPin } from '
 import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/authStore';
-import { User } from '@/types/database';
+import { User, UserSurveyResponse } from '@/types/database';
 import { computeGroupAwareLabel } from '@/lib/group';
 import RoommateCard from '@/components/RoommateCard';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { cityNeighborhoods, canonicalizeCityName } from '@/assets/data/neighborhoods';
 import { Apartment } from '@/types/database';
 // GroupCard implemented inline below
+
+import {
+  calculateMatchScore,
+  CompatUserSurvey,
+  PartnerSmokingPref,
+  PartnerShabbatPref,
+  PartnerDietPref,
+  PartnerPetsPref,
+  DietType,
+  Lifestyle,
+  CleaningFrequency,
+  HostingPreference,
+  CookingStyle,
+  HomeVibe,
+} from '@/utils/matchCalculator';
 
 type BrowseItem =
   | { type: 'user'; user: User }
@@ -47,13 +62,116 @@ export default function PartnersScreen() {
   const [groupGender, setGroupGender] = useState<'any' | 'male' | 'female'>('any');
   const [groupSize, setGroupSize] = useState<'any' | 2 | 3>('any');
   const [selectedCities, setSelectedCities] = useState<string[]>([]);
+  const [matchScores, setMatchScores] = useState<Record<string, number | null>>({});
 
   const screenWidth = Dimensions.get('window').width;
   const translateX = useRef(new Animated.Value(0)).current;
 
-useEffect(() => {
-  fetchUsersAndGroups();
-}, [currentUser?.id]);
+  useEffect(() => {
+    fetchUsersAndGroups();
+  }, [currentUser?.id]);
+
+  const parsePreferredAgeRange = (value?: string | null): { min: number | null; max: number | null } => {
+    if (!value) return { min: null, max: null };
+    const matches = (value.match(/\d+/g) || []).map((n) => parseInt(n, 10)).filter((n) => !Number.isNaN(n));
+    if (!matches.length) return { min: null, max: null };
+    if (matches.length === 1) {
+      return { min: matches[0], max: null };
+    }
+    const [first, second] = matches;
+    if (second !== undefined) {
+      return { min: Math.min(first, second), max: Math.max(first, second) };
+    }
+    return { min: first, max: null };
+  };
+
+  const buildCompatSurvey = (
+    userEntry: User | undefined,
+    survey?: UserSurveyResponse | null,
+  ): Partial<CompatUserSurvey> => {
+    const compat: Partial<CompatUserSurvey> = {};
+    if (typeof userEntry?.age === 'number') compat.age = userEntry.age;
+
+    if (typeof survey?.is_smoker === 'boolean') compat.is_smoker = survey.is_smoker;
+    if (typeof survey?.has_pet === 'boolean') compat.has_pet = survey.has_pet;
+    if (typeof survey?.is_shomer_shabbat === 'boolean') compat.is_shomer_shabbat = survey.is_shomer_shabbat;
+    if (typeof survey?.keeps_kosher === 'boolean') compat.keeps_kosher = survey.keeps_kosher;
+    if (survey?.diet_type) compat.diet_type = survey.diet_type as DietType;
+    if (survey?.lifestyle) compat.lifestyle = survey.lifestyle as Lifestyle;
+    if (typeof survey?.cleanliness_importance === 'number')
+      compat.cleanliness_importance = survey.cleanliness_importance;
+    if (survey?.cleaning_frequency) compat.cleaning_frequency = survey.cleaning_frequency as CleaningFrequency;
+    if (survey?.hosting_preference) compat.hosting_preference = survey.hosting_preference as HostingPreference;
+    if (survey?.cooking_style) compat.cooking_style = survey.cooking_style as CookingStyle;
+    if (survey?.home_vibe) compat.home_vibe = survey.home_vibe as HomeVibe;
+
+    if (survey?.partner_smoking_preference)
+      compat.partner_smoking_preference = survey.partner_smoking_preference as PartnerSmokingPref;
+    if (survey?.partner_pets_preference)
+      compat.partner_pets_preference = survey.partner_pets_preference as PartnerPetsPref;
+    if (survey?.partner_diet_preference)
+      compat.partner_diet_preference = survey.partner_diet_preference as PartnerDietPref;
+    if (survey?.partner_shabbat_preference)
+      compat.partner_shabbat_preference = survey.partner_shabbat_preference as PartnerShabbatPref;
+
+    const { min, max } = parsePreferredAgeRange(survey?.preferred_age_range);
+    if (typeof min === 'number') compat.preferred_age_min = min;
+    if (typeof max === 'number') compat.preferred_age_max = max;
+
+    return compat;
+  };
+
+  const computeMatchPercentages = async (
+    candidateIds: string[],
+    userMap: Record<string, User>,
+  ): Promise<Record<string, number | null>> => {
+    const authId = useAuthStore.getState().user?.id || currentUser?.id;
+    if (!authId || !candidateIds.length) return {};
+    const uniqueIds = Array.from(new Set([...candidateIds, authId]));
+    try {
+      const { data: surveyRows, error } = await supabase
+        .from('user_survey_responses')
+        .select('*')
+        .in('user_id', uniqueIds);
+      if (error) {
+        console.error('failed to fetch survey responses for matching', error);
+        return {};
+      }
+      const surveys = Object.fromEntries(
+        (surveyRows || []).map((row) => [row.user_id, row as UserSurveyResponse]),
+      ) as Record<string, UserSurveyResponse>;
+      const mySurvey = surveys[authId];
+      const results: Record<string, number | null> = {};
+      if (!mySurvey) {
+        candidateIds.forEach((id) => {
+          if (id !== authId) results[id] = null;
+        });
+        return results;
+      }
+
+      if (currentUser) {
+        userMap[authId] = currentUser;
+      }
+      const myCompat = buildCompatSurvey(userMap[authId], mySurvey);
+
+      candidateIds.forEach((id) => {
+        if (id === authId) return;
+        const otherSurvey = surveys[id];
+        if (!otherSurvey) {
+          results[id] = null;
+          return;
+        }
+        const otherCompat = buildCompatSurvey(userMap[id], otherSurvey);
+        const score = calculateMatchScore(myCompat, otherCompat);
+        results[id] = Number.isFinite(score) ? score : null;
+      });
+
+      return results;
+    } catch (error) {
+      console.error('failed to compute match percentages', error);
+      return {};
+    }
+  };
 
   const userPassesFilters = (u: User) => {
     // Gender filter
@@ -99,6 +217,7 @@ useEffect(() => {
 
   const fetchUsersAndGroups = async () => {
     setIsLoading(true);
+    setMatchScores({});
     try {
       const authId = useAuthStore.getState().user?.id || currentUser?.id;
 
@@ -280,6 +399,34 @@ useEffect(() => {
 
       setItems(combinedItems);
       setCurrentIndex(0);
+
+      const userMap: Record<string, User> = {};
+      const candidateIdSet = new Set<string>();
+      combinedItems.forEach((item) => {
+        if (item.type === 'user') {
+          const single = (item as { type: 'user'; user: User }).user;
+          if (single?.id) {
+            userMap[single.id] = single;
+            candidateIdSet.add(single.id);
+          }
+        } else if (item.type === 'group') {
+          const groupUsers = (item as { type: 'group'; users: User[] }).users;
+          groupUsers.forEach((member) => {
+            if (member?.id) {
+              userMap[member.id] = member;
+              candidateIdSet.add(member.id);
+            }
+          });
+        }
+      });
+      if (currentUser?.id) {
+        userMap[currentUser.id] = currentUser;
+      }
+      const candidateIds = Array.from(candidateIdSet);
+      const newMatchScores = await computeMatchPercentages(candidateIds, userMap);
+      if (Object.keys(newMatchScores).length) {
+        setMatchScores(newMatchScores);
+      }
     } catch (e) {
       console.error('Failed to fetch users', e);
       setItems([]);
@@ -575,6 +722,7 @@ useEffect(() => {
               {items[currentIndex].type === 'user' ? (
                 <RoommateCard
                   user={(items[currentIndex] as any).user}
+                  matchPercent={matchScores[(items[currentIndex] as any).user.id] ?? null}
                   onLike={handleLike}
                   onPass={handlePass}
                   onOpen={(u) =>
@@ -589,6 +737,7 @@ useEffect(() => {
                   groupId={(items[currentIndex] as any).groupId}
                   users={(items[currentIndex] as any).users}
                   apartment={(items[currentIndex] as any).apartment}
+                  matchScores={matchScores}
                   onLike={(groupId, users) => handleGroupLike(groupId, users)}
                   onPass={(groupId, users) => handleGroupPass(groupId, users)}
                   onOpen={(userId: string) =>
@@ -1078,6 +1227,7 @@ function GroupCard({
   groupId,
   users,
   apartment,
+  matchScores,
   onOpen,
   onLike,
   onPass,
@@ -1086,6 +1236,7 @@ function GroupCard({
   groupId: string;
   users: User[];
   apartment?: Apartment;
+  matchScores?: Record<string, number | null>;
   onOpen: (id: string) => void;
   onLike: (groupId: string, users: User[]) => void;
   onPass: (groupId: string, users: User[]) => void;
@@ -1095,6 +1246,8 @@ function GroupCard({
   const extra = users.length - displayUsers.length;
   const DEFAULT_AVATAR = 'https://cdn-icons-png.flaticon.com/512/847/847969.png';
   const isOneRowLayout = displayUsers.length === 3 || displayUsers.length === 4;
+  const formatMatchPercent = (value: number | null | undefined) =>
+    value === null || value === undefined ? '--%' : `${value}%`;
 
   return (
     <View style={groupStyles.card}>
@@ -1103,6 +1256,7 @@ function GroupCard({
           const rows = isOneRowLayout ? 1 : Math.ceil(displayUsers.length / 2);
           const cellHeight = rows === 1 ? 240 : 120;
           const isLastWithExtra = idx === displayUsers.length - 1 && extra > 0;
+          const matchPercent = matchScores?.[u.id] ?? null;
           return (
             <TouchableOpacity
               key={u.id}
@@ -1117,12 +1271,18 @@ function GroupCard({
                 isOneRowLayout && idx === displayUsers.length - 1 ? { borderRightWidth: 0 } : null,
               ]}
             >
-              <Image source={{ uri: u.avatar_url || DEFAULT_AVATAR }} style={groupStyles.cellImage} />
-              {isLastWithExtra ? (
-                <View style={groupStyles.extraOverlay}>
-                  <Text style={groupStyles.extraOverlayText}>+{extra}</Text>
+              <View style={groupStyles.cellImageWrap}>
+                <Image source={{ uri: u.avatar_url || DEFAULT_AVATAR }} style={groupStyles.cellImage} />
+                <View style={[groupStyles.matchBadge, groupStyles.matchBadgeLarge]}>
+                  <Text style={groupStyles.matchBadgeValue}>{formatMatchPercent(matchPercent)}</Text>
+                  <Text style={groupStyles.matchBadgeLabel}>התאמה</Text>
                 </View>
-              ) : null}
+                {isLastWithExtra ? (
+                  <View style={groupStyles.extraOverlay}>
+                    <Text style={groupStyles.extraOverlayText}>+{extra}</Text>
+                  </View>
+                ) : null}
+              </View>
             </TouchableOpacity>
           );
         })}
@@ -1136,7 +1296,12 @@ function GroupCard({
             onPress={() => onOpen(u.id)}
             style={groupStyles.memberRow}
           >
-            <Image source={{ uri: u.avatar_url || DEFAULT_AVATAR }} style={groupStyles.memberAvatar} />
+            <View style={groupStyles.memberAvatarWrap}>
+              <Image source={{ uri: u.avatar_url || DEFAULT_AVATAR }} style={groupStyles.memberAvatar} />
+              <View style={[groupStyles.matchBadge, groupStyles.matchBadgeSmall]}>
+                <Text style={groupStyles.matchBadgeValueSmall}>{formatMatchPercent(matchScores?.[u.id])}</Text>
+              </View>
+            </View>
             <View style={groupStyles.memberInfo}>
               <Text style={groupStyles.memberNameAge} numberOfLines={1}>
                 {u.full_name}{u.age ? `, ${u.age}` : ''}
@@ -1233,9 +1398,53 @@ const groupStyles = StyleSheet.create({
     borderBottomWidth: 1,
     borderColor: 'rgba(255,255,255,0.06)',
   },
+  cellImageWrap: {
+    width: '100%',
+    height: '100%',
+    position: 'relative',
+  },
   cellImage: {
     width: '100%',
     height: '100%',
+  },
+  matchBadge: {
+    position: 'absolute',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(15,15,20,0.78)',
+    borderWidth: 1,
+    borderColor: 'rgba(124,92,255,0.35)',
+    zIndex: 3,
+  },
+  matchBadgeLarge: {
+    top: 12,
+    right: 12,
+    width: 58,
+    height: 58,
+    borderRadius: 29,
+  },
+  matchBadgeSmall: {
+    bottom: -6,
+    right: -6,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+  },
+  matchBadgeValue: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  matchBadgeValueSmall: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  matchBadgeLabel: {
+    color: '#C9CDD6',
+    fontSize: 11,
+    fontWeight: '600',
+    marginTop: 2,
   },
   extraOverlay: {
     position: 'absolute',
@@ -1263,6 +1472,12 @@ const groupStyles = StyleSheet.create({
     paddingVertical: 10,
     borderTopWidth: 1,
     borderColor: 'rgba(255,255,255,0.06)',
+  },
+  memberAvatarWrap: {
+    width: 60,
+    height: 60,
+    borderRadius: 12,
+    position: 'relative',
   },
   memberAvatar: {
     width: 60,
