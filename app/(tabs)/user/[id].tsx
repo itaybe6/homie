@@ -13,7 +13,12 @@ import { UserSurveyResponse } from '@/types/database';
 
 export default function UserProfileScreen() {
   const router = useRouter();
-  const { id, from } = useLocalSearchParams() as { id?: string; from?: string };
+  const { id, from } = useLocalSearchParams() as { id?: string | string[]; from?: string };
+  const routeUserId = React.useMemo(() => {
+    if (!id) return undefined;
+    if (Array.isArray(id)) return id[0];
+    return id;
+  }, [id]);
   const insets = useSafeAreaInsets();
   const contentTopPadding = insets.top ;
   const contentBottomPadding = Math.max(180, insets.bottom + 120);
@@ -40,10 +45,18 @@ export default function UserProfileScreen() {
     image_urls?: any;
     bedrooms?: number | null;
     bathrooms?: number | null;
-    rooms?: number | null;
+    owner_id?: string | null;
+    partner_ids?: (string | null)[] | null;
   };
   const [profileApartments, setProfileApartments] = useState<ProfileApartment[]>([]);
   const [profileAptLoading, setProfileAptLoading] = useState(false);
+  const [apartmentOccupants, setApartmentOccupants] = useState<Record<string, GroupMember[]>>({});
+  useEffect(() => {
+    console.log('[profile-screen] render snapshot', {
+      routeUserId,
+      profileId: profile?.id,
+    });
+  }, [routeUserId, profile?.id]);
   const showMergeBlockedAlert = () => {
     const title = 'לא ניתן למזג פרופילים';
     const msg =
@@ -81,6 +94,45 @@ export default function UserProfileScreen() {
         }
       } catch {
         // Not JSON – try Postgres array literal format: {"a","b"} or {a,b}
+        try {
+          const cleaned = value.replace(/^\s*\{|\}\s*$/g, '');
+          if (!cleaned) return [];
+          return cleaned
+            .split(',')
+            .map((s) => s.replace(/^"+|"+$/g, '').trim())
+            .filter(Boolean);
+        } catch {
+          return [];
+        }
+      }
+    }
+    return [];
+  };
+
+  const normalizePartnerIds = (value: unknown): string[] => {
+    if (!value) return [];
+    if (Array.isArray(value)) {
+      return (value as unknown[])
+        .map((id) => {
+          if (typeof id === 'string') return id.trim();
+          if (id === null || id === undefined) return '';
+          return String(id).trim();
+        })
+        .filter(Boolean) as string[];
+    }
+    if (typeof value === 'string') {
+      try {
+        const parsed = JSON.parse(value);
+        if (Array.isArray(parsed)) {
+          return parsed
+            .map((id: unknown) => {
+              if (typeof id === 'string') return id.trim();
+              if (id === null || id === undefined) return '';
+              return String(id).trim();
+            })
+            .filter(Boolean) as string[];
+        }
+      } catch {
         try {
           const cleaned = value.replace(/^\s*\{|\}\s*$/g, '');
           if (!cleaned) return [];
@@ -222,7 +274,7 @@ export default function UserProfileScreen() {
     } catch {
       // ignore
     }
-  }, [profile?.id]);
+  }, [profile?.id, routeUserId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -278,30 +330,117 @@ export default function UserProfileScreen() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      if (!profile?.id) {
+      const targetUserId = profile?.id || routeUserId;
+      if (!targetUserId) {
         setProfileApartments([]);
+        setApartmentOccupants({});
         return;
       }
+      // Debug: track profile ID for apartment loading
+      console.log('[profile-screen] loading apartments for profile', targetUserId, {
+        hasProfileId: !!profile?.id,
+        fromRoute: routeUserId,
+      });
       try {
         setProfileAptLoading(true);
-        const [owned, partner] = await Promise.all([
-          supabase
-            .from('apartments')
-            .select('id, title, city, image_urls, bedrooms, bathrooms, rooms')
-            .eq('owner_id', profile.id),
-          supabase
-            .from('apartments')
-            .select('id, title, city, image_urls, bedrooms, bathrooms, rooms')
-            .contains('partner_ids', [profile.id] as any),
-        ]);
+        const selectColumns =
+          'id, title, city, image_urls, bedrooms, bathrooms, owner_id, partner_ids';
+        const owned = await supabase
+          .from('apartments')
+          .select(selectColumns)
+          .eq('owner_id', targetUserId);
+        if (owned.error) {
+          console.error('[profile-screen] owned apartments error', owned.error);
+        }
+        const partnerFilter = `{${JSON.stringify(targetUserId)}}`;
+        const partner = await supabase
+          .from('apartments')
+          .select(selectColumns)
+          .filter('partner_ids', 'cs', partnerFilter);
+        if (partner.error) {
+          console.error('[profile-screen] partner apartments error', partner.error, {
+            filter: partnerFilter,
+          });
+        }
+        console.log('[profile-screen] apartments query result', {
+          ownedError: owned.error,
+          partnerError: partner.error,
+          ownedCount: owned.data?.length,
+          partnerCount: partner.data?.length,
+          partnerFilter,
+        });
         const merged = [...(owned.data || []), ...(partner.data || [])] as ProfileApartment[];
         const unique: Record<string, ProfileApartment> = {};
         merged.forEach((a) => {
           if (a?.id) unique[a.id] = a;
         });
-        if (!cancelled) setProfileApartments(Object.values(unique));
+        const uniqueApartments = Object.values(unique);
+        console.log('[profile-screen] unique apartments', uniqueApartments);
+        if (!cancelled) {
+          setProfileApartments(uniqueApartments);
+        }
+        if (cancelled) return;
+        if (!uniqueApartments.length) {
+          if (!cancelled) setApartmentOccupants({});
+          return;
+        }
+        try {
+          const occupantIdSet = new Set<string>();
+          uniqueApartments.forEach((apt) => {
+            if (apt.owner_id) {
+              occupantIdSet.add(String(apt.owner_id));
+            }
+            normalizePartnerIds(apt.partner_ids).forEach((pid) => occupantIdSet.add(pid));
+          });
+          console.log('[profile-screen] occupantIdSet', Array.from(occupantIdSet));
+          if (!occupantIdSet.size) {
+            if (!cancelled) setApartmentOccupants({});
+            return;
+          }
+          const { data: occupantRows, error: occupantError } = await supabase
+            .from('users')
+            .select('id, full_name, avatar_url')
+            .in('id', Array.from(occupantIdSet));
+          if (occupantError) throw occupantError;
+          console.log('[profile-screen] occupant rows', occupantRows?.length);
+          const userMap = new Map<string, GroupMember>();
+          (occupantRows || []).forEach((user) => {
+            if (user?.id) {
+              userMap.set(user.id, user as GroupMember);
+            }
+          });
+          const occupantMap: Record<string, GroupMember[]> = {};
+          uniqueApartments.forEach((apt) => {
+            const occupantOrder: string[] = [];
+            if (apt.owner_id) {
+              occupantOrder.push(String(apt.owner_id));
+            }
+            const partnerIds = normalizePartnerIds(apt.partner_ids);
+            if (partnerIds.length) {
+              occupantOrder.push(...partnerIds);
+            }
+            const seen = new Set<string>();
+            occupantMap[apt.id] = occupantOrder
+              .filter((occupantId) => {
+                if (seen.has(occupantId) || !userMap.has(occupantId)) {
+                  return false;
+                }
+                seen.add(occupantId);
+                return true;
+              })
+              .map((occupantId) => userMap.get(occupantId) as GroupMember);
+          });
+          console.log('[profile-screen] occupantMap', occupantMap);
+          if (!cancelled) setApartmentOccupants(occupantMap);
+        } catch (loadOccupantsError) {
+          console.error('Failed to load apartment occupants', loadOccupantsError);
+          if (!cancelled) setApartmentOccupants({});
+        }
       } catch {
-        if (!cancelled) setProfileApartments([]);
+        if (!cancelled) {
+          setProfileApartments([]);
+          setApartmentOccupants({});
+        }
       } finally {
         if (!cancelled) setProfileAptLoading(false);
       }
@@ -726,6 +865,9 @@ export default function UserProfileScreen() {
               : [];
             const firstImg =
               imgs?.length ? (imgs[0] as string) : 'https://images.pexels.com/photos/1457842/pexels-photo-1457842.jpeg';
+            const occupantMembers = apartmentOccupants[apt.id] || [];
+            const visibleOccupants = occupantMembers.slice(0, 4);
+            const overflowCount = occupantMembers.length - visibleOccupants.length;
             return (
               <TouchableOpacity
                 key={apt.id}
@@ -744,6 +886,33 @@ export default function UserProfileScreen() {
                     <Text style={styles.aptMeta} numberOfLines={1}>
                       {apt.city}
                     </Text>
+                  ) : null}
+                  {!!visibleOccupants.length ? (
+                    <View style={styles.aptOccupantsRow}>
+                      {visibleOccupants.map((member, idx) => {
+                        const fallbackInitial = ((member.full_name || '').trim().charAt(0) || '?').toUpperCase();
+                        return (
+                          <View
+                            key={member.id}
+                            style={[
+                              styles.aptOccupantAvatarWrap,
+                              idx !== 0 && styles.aptOccupantOverlap,
+                            ]}
+                          >
+                            {member.avatar_url ? (
+                              <Image source={{ uri: member.avatar_url }} style={styles.aptOccupantAvatarImg} />
+                            ) : (
+                              <Text style={styles.aptOccupantFallback}>{fallbackInitial}</Text>
+                            )}
+                          </View>
+                        );
+                      })}
+                      {overflowCount > 0 ? (
+                        <View style={[styles.aptOccupantAvatarWrap, styles.aptOccupantOverflow]}>
+                          <Text style={styles.aptOccupantOverflowText}>+{overflowCount}</Text>
+                        </View>
+                      ) : null}
+                    </View>
                   ) : null}
                 </View>
                 <View style={{ flex: 0 }}>
@@ -1475,6 +1644,45 @@ const styles = StyleSheet.create({
   aptCta: {
     color: '#7C5CFF',
     fontSize: 13,
+    fontWeight: '800',
+  },
+  aptOccupantsRow: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 6,
+    marginTop: 10,
+  },
+  aptOccupantAvatarWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,255,255,0.2)',
+    backgroundColor: '#1F1F29',
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  aptOccupantOverlap: {
+    marginRight: -12,
+  },
+  aptOccupantAvatarImg: {
+    width: '100%',
+    height: '100%',
+  },
+  aptOccupantFallback: {
+    color: '#E5E7EB',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  aptOccupantOverflow: {
+    borderColor: '#7C5CFF',
+    backgroundColor: 'rgba(124,92,255,0.12)',
+  },
+  aptOccupantOverflowText: {
+    color: '#7C5CFF',
+    fontSize: 12,
     fontWeight: '800',
   },
 });
