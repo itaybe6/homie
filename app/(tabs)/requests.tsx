@@ -948,180 +948,174 @@ export default function RequestsScreen() {
     if (!user?.id) return;
     try {
       setActionId(item.id);
-      // Manual acceptance (RPC disabled to avoid forbidden errors)
-      // 1) Load invite to get group_id and validate invitee
+      // 1) Load invite (holds inviter_id, invitee_id, and optional inviter group_id)
       const { data: invite, error: inviteErr } = await supabase
         .from('profile_group_invites')
         .select('id, group_id, invitee_id, inviter_id, status')
         .eq('id', item.id)
         .maybeSingle();
-      if (inviteErr) {
-        // eslint-disable-next-line no-console
-        console.error('[group-approve] load invite error', {
-          code: (inviteErr as any)?.code,
-          message: inviteErr.message,
-          details: (inviteErr as any)?.details,
-          hint: (inviteErr as any)?.hint,
-        });
-        throw inviteErr;
-      }
+      if (inviteErr) throw inviteErr;
       if (!invite) throw new Error('הזמנה לא נמצאה');
-      const groupId = (invite as any).group_id as string;
-      const inviteeId = (invite as any).invitee_id as string;
       const inviterId = (invite as any).inviter_id as string;
+      const inviteeId = (invite as any).invitee_id as string;
 
-      // Determine current active groups for invitee and current approver (may be a groupmate)
-      let inviteeActiveGroupId: string | undefined;
-      const mergeGroupIds = new Set<string>();
-      mergeGroupIds.add(groupId);
-      try {
-        const participantsToCheck = Array.from(new Set([inviteeId, user.id].filter(Boolean)));
-        if (participantsToCheck.length) {
-          const { data: membershipRows } = await supabase
-            .from('profile_group_members')
-            .select('group_id, user_id')
-            .eq('status', 'ACTIVE')
-            .in('user_id', participantsToCheck as any);
-          (membershipRows || []).forEach((row: any) => {
-            if (row?.group_id) {
-              mergeGroupIds.add(row.group_id);
-              if (row.user_id === inviteeId) {
-                inviteeActiveGroupId = row.group_id;
-              }
-            }
-          });
-        }
-      } catch {}
-      const needsMerge = mergeGroupIds.size > 1;
-
-      // Allow approval by the invitee OR any ACTIVE groupmate of the invitee (best-effort check only)
-      if (inviteeId !== user.id) {
-        try {
-          if (inviteeActiveGroupId) {
-            await supabase
-              .from('profile_group_members')
-              .select('user_id')
-              .eq('group_id', inviteeActiveGroupId)
-              .eq('user_id', user.id)
-              .eq('status', 'ACTIVE')
-              .maybeSingle();
-          }
-        } catch {}
-      }
-
-      // 2a) Make sure group is ACTIVE
-      try {
-        await supabase.from('profile_groups').update({ status: 'ACTIVE' }).eq('id', groupId);
-      } catch {}
-      // 2) Mark invite as accepted
-      const updInviteRes = await supabase
+      // 2) Accept the invite
+      await supabase
         .from('profile_group_invites')
         .update({ status: 'ACCEPTED', responded_at: new Date().toISOString() })
         .eq('id', item.id);
-      if ((updInviteRes as any)?.error) {
-        // eslint-disable-next-line no-console
-        console.error('[group-approve] update invite error', {
-          code: ((updInviteRes as any).error as any)?.code,
-          message: (updInviteRes as any).error?.message,
-          details: ((updInviteRes as any).error as any)?.details,
-          hint: ((updInviteRes as any).error as any)?.hint,
-        });
-        throw (updInviteRes as any).error;
-      }
-      if (!needsMerge) {
-        // 3) Add the invitee as ACTIVE member of inviter's group (only when no merge needed)
-        const tryInsert = await supabase
+      
+      // 3) Determine ACTIVE group ids
+      // Prefer the approver's (me) actual membership; for inviter, fall back to invite.group_id if RLS hides membership
+      const [{ data: meGroupRow }, { data: inviterGroupRow }] = await Promise.all([
+        supabase
           .from('profile_group_members')
-          .insert([{ group_id: groupId, user_id: inviteeId, status: 'ACTIVE' } as any], {
+          .select('group_id')
+          .eq('user_id', user.id)
+          .eq('status', 'ACTIVE')
+          .maybeSingle(),
+        supabase
+          .from('profile_group_members')
+          .select('group_id')
+          .eq('user_id', inviterId)
+          .eq('status', 'ACTIVE')
+          .maybeSingle(),
+      ]);
+      const approverGroupId = (meGroupRow as any)?.group_id as string | undefined;
+      let inviterGroupId = (inviterGroupRow as any)?.group_id as string | undefined;
+
+      // Detect "temporary" groups that hold only the inviter (created automatically on request send)
+      let inviterSoloGroupId: string | undefined;
+      if (inviterGroupId) {
+        try {
+          const { data: inviterGroupMembers } = await supabase
+            .from('profile_group_members')
+            .select('user_id')
+            .eq('group_id', inviterGroupId)
+            .eq('status', 'ACTIVE');
+          const members = (inviterGroupMembers || []) as any[];
+          if (members.length === 1 && members[0]?.user_id === inviterId) {
+            inviterSoloGroupId = inviterGroupId;
+          }
+        } catch {
+          inviterSoloGroupId = undefined;
+        }
+      }
+
+      if (inviterSoloGroupId) {
+        try {
+          await supabase.from('profile_group_members').delete().eq('group_id', inviterSoloGroupId);
+        } catch {}
+        try {
+          await supabase.from('profile_group_invites').delete().eq('group_id', inviterSoloGroupId);
+        } catch {}
+        try {
+          await supabase.from('profile_groups').delete().eq('id', inviterSoloGroupId);
+        } catch {}
+        inviterGroupId = undefined;
+      }
+
+      // 4) Execute the correct scenario (early return per case)
+      if (approverGroupId && !inviterGroupId) {
+        // Case 1: invitee has group, inviter doesn't → add inviter to invitee's group
+        const insertRes = await supabase
+          .from('profile_group_members')
+          .insert([{ group_id: approverGroupId, user_id: inviterId, status: 'ACTIVE' } as any], {
             onConflict: 'group_id,user_id',
             ignoreDuplicates: true,
           } as any);
-        if (tryInsert?.error) {
-          // eslint-disable-next-line no-console
-          console.error('[group-approve] insert member error', {
-            code: (tryInsert.error as any)?.code,
-            message: tryInsert.error.message,
-            details: (tryInsert.error as any)?.details,
-            hint: (tryInsert.error as any)?.hint,
-          });
+        if ((insertRes as any)?.error) {
+          // Fallback: if cannot add directly (RLS), send an invite to join my group
+          try {
+            await supabase.from('profile_group_invites').insert({
+              inviter_id: user.id,
+              invitee_id: inviterId,
+              group_id: approverGroupId,
+              status: 'PENDING',
+            } as any, { ignoreDuplicates: true } as any);
+          } catch {}
         }
-        if (tryInsert?.error || (tryInsert as any)?.status === 409) {
-          const updateRes = await supabase
-            .from('profile_group_members')
-            .update({ status: 'ACTIVE' })
-            .eq('group_id', groupId)
-            .eq('user_id', inviteeId);
-          if (updateRes?.error) {
-            // eslint-disable-next-line no-console
-            console.error('[group-approve] update member error', {
-              code: (updateRes.error as any)?.code,
-              message: updateRes.error.message,
-              details: (updateRes.error as any)?.details,
-              hint: (updateRes.error as any)?.hint,
-            });
-          }
+        // Optimistic UI
+        setReceived((prev) => prev.map((r) => (r.id === item.id ? { ...r, status: 'APPROVED' } as any : r)));
+        // Notify and refresh after handling below
+      } else if (!approverGroupId && inviterGroupId) {
+        // Case 2: inviter has group, invitee doesn't → add invitee to inviter's group
+        const insertRes = await supabase
+          .from('profile_group_members')
+          .insert([{ group_id: inviterGroupId, user_id: inviteeId, status: 'ACTIVE' } as any], {
+            onConflict: 'group_id,user_id',
+            ignoreDuplicates: true,
+          } as any);
+        if ((insertRes as any)?.error) {
+          try {
+            await supabase.from('profile_group_invites').insert({
+              inviter_id: user.id,
+              invitee_id: inviteeId,
+              group_id: inviterGroupId,
+              status: 'PENDING',
+            } as any, { ignoreDuplicates: true } as any);
+          } catch {}
         }
-      }
-      // Optimistic UI update so buttons disappear immediately
-      setReceived((prev) =>
-        prev.map((r) => (r.id === item.id ? { ...r, status: 'APPROVED' } as any : r))
-      );
-      // Group merge: create a brand-new group for everyone and retire old groups to avoid unique-constraint conflicts
-      try {
-        if (needsMerge) {
-          const mergeIds = Array.from(mergeGroupIds);
-          // Load all ACTIVE members from every group being merged
-          const { data: mergeMembers } = await supabase
-            .from('profile_group_members')
-            .select('user_id')
-            .eq('status', 'ACTIVE')
-            .in('group_id', mergeIds as any);
-          const memberSet = new Set<string>((mergeMembers || []).map((r: any) => r.user_id).filter(Boolean));
-          if (inviterId) memberSet.add(inviterId);
-          if (inviteeId) memberSet.add(inviteeId);
-          memberSet.add(user.id);
-          const allMemberIds = Array.from(memberSet);
-
-          // Step 1: deactivate existing ACTIVE memberships for these groups (to satisfy single-active constraint)
+        setReceived((prev) => prev.map((r) => (r.id === item.id ? { ...r, status: 'APPROVED' } as any : r)));
+      } else if (!approverGroupId && !inviterGroupId) {
+        // Case 3: neither has a group → create new group and add both
+        const { data: created } = await supabase
+          .from('profile_groups')
+          .insert({ created_by: user.id, name: 'שותפים', status: 'ACTIVE' } as any)
+          .select('id')
+          .single();
+        const newGroupId = (created as any)?.id as string;
+        if (newGroupId) {
           await supabase
             .from('profile_group_members')
-            .update({ status: 'INACTIVE', updated_at: new Date().toISOString() } as any)
-            .in('group_id', mergeIds as any)
-            .eq('status', 'ACTIVE');
-
-          // Step 2: create the new unified group
-          const { data: newGroup, error: newGroupErr } = await supabase
-            .from('profile_groups')
-            .insert({ created_by: user.id, name: 'שותפים', status: 'ACTIVE' } as any)
-            .select('id')
-            .single();
-          if (!newGroupErr && (newGroup as any)?.id) {
-            const newGroupId = (newGroup as any).id as string;
-
-            // Step 3: add all members to the new group as ACTIVE
-            if (allMemberIds.length) {
-              await supabase
-                .from('profile_group_members')
-                .insert(
-                  allMemberIds.map((uid) => ({ group_id: newGroupId, user_id: uid, status: 'ACTIVE' })) as any[],
-                  { onConflict: 'group_id,user_id', ignoreDuplicates: true } as any
-                );
-            }
-
-            // Step 4: cleanup old groups and their invites
-            try {
-              await supabase.from('profile_groups').update({ status: 'ARCHIVED' } as any).in('id', mergeIds as any);
-            } catch {}
-            try {
-              await supabase.from('profile_group_invites').delete().in('group_id', mergeIds as any);
-            } catch {}
-          }
+            .insert(
+              [
+                { group_id: newGroupId, user_id: inviterId, status: 'ACTIVE' },
+                { group_id: newGroupId, user_id: inviteeId, status: 'ACTIVE' },
+              ] as any[],
+              { onConflict: 'group_id,user_id', ignoreDuplicates: true } as any
+            );
         }
-      } catch (e) {
-        // eslint-disable-next-line no-console
-        console.warn('[group-approve] merge-to-new-group failed', e);
+        setReceived((prev) => prev.map((r) => (r.id === item.id ? { ...r, status: 'APPROVED' } as any : r)));
+      } else if (approverGroupId && inviterGroupId && approverGroupId !== inviterGroupId) {
+        // Case 4: both have groups → merge into a brand new group
+        const [aMembersRes, bMembersRes] = await Promise.all([
+          supabase.from('profile_group_members').select('user_id').eq('group_id', approverGroupId).eq('status', 'ACTIVE'),
+          supabase.from('profile_group_members').select('user_id').eq('group_id', inviterGroupId).eq('status', 'ACTIVE'),
+        ]);
+        const uniqueMembers = Array.from(
+          new Set<string>([
+            ...(aMembersRes.data || []).map((r: any) => r.user_id),
+            ...(bMembersRes.data || []).map((r: any) => r.user_id),
+            inviterId,
+            inviteeId,
+          ].filter(Boolean) as string[])
+        );
+        const { data: newGroup } = await supabase
+          .from('profile_groups')
+          .insert({ created_by: user.id, name: 'שותפים', status: 'ACTIVE' } as any)
+          .select('id')
+          .single();
+        const newGroupId = (newGroup as any)?.id as string;
+        if (newGroupId && uniqueMembers.length) {
+          await supabase
+            .from('profile_group_members')
+            .insert(
+              uniqueMembers.map((uid) => ({ group_id: newGroupId, user_id: uid, status: 'ACTIVE' })) as any[],
+              { onConflict: 'group_id,user_id', ignoreDuplicates: true } as any
+            );
+          // Archive old groups and clean invites targeting them (safer than hard delete)
+          try {
+            await supabase.from('profile_groups').update({ status: 'ARCHIVED' } as any).in('id', [approverGroupId, inviterGroupId] as any);
+          } catch {}
+          try {
+            await supabase.from('profile_group_invites').delete().in('group_id', [approverGroupId, inviterGroupId] as any);
+          } catch {}
+        }
+        setReceived((prev) => prev.map((r) => (r.id === item.id ? { ...r, status: 'APPROVED' } as any : r)));
       }
-      // Notify inviter that invite was accepted
+
+      // 5) Notify inviter
       try {
         const approverName = await computeGroupAwareLabel(user.id);
         await supabase.from('notifications').insert({
@@ -1132,7 +1126,7 @@ export default function RequestsScreen() {
           is_read: false,
         });
       } catch {}
-      // If the inviter is already a partner (or owner) in apartment(s), add the approver as a partner too
+      // 6) Keep the existing convenience: add approver to inviter apartments if relevant
       try {
         const inviterId = item.sender_id;
         const approverId = user.id;
@@ -1187,6 +1181,31 @@ export default function RequestsScreen() {
       setReceived((prev) =>
         prev.map((r) => (r.id === item.id ? { ...r, status: 'REJECTED' } as any : r))
       );
+      // Clean up inviter's temporary solo group if exists
+      try {
+        const inviterId = item.sender_id;
+        if (inviterId) {
+          const { data: inviterMembership } = await supabase
+            .from('profile_group_members')
+            .select('group_id')
+            .eq('user_id', inviterId)
+            .eq('status', 'ACTIVE')
+            .maybeSingle();
+          const inviterGroupId = (inviterMembership as any)?.group_id as string | undefined;
+          if (inviterGroupId) {
+            const { data: members } = await supabase
+              .from('profile_group_members')
+              .select('user_id')
+              .eq('group_id', inviterGroupId)
+              .eq('status', 'ACTIVE');
+            if ((members || []).length === 1 && (members || [])[0]?.user_id === inviterId) {
+              await supabase.from('profile_group_members').delete().eq('group_id', inviterGroupId);
+              await supabase.from('profile_group_invites').delete().eq('group_id', inviterGroupId);
+              await supabase.from('profile_groups').delete().eq('id', inviterGroupId);
+            }
+          }
+        }
+      } catch {}
       await fetchAll();
     } catch (e: any) {
       console.error('reject group invite failed', e);
