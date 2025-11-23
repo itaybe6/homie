@@ -718,13 +718,6 @@ export default function ApartmentDetailsScreen() {
     }
   };
 
-  const capacityMessage =
-    availableRoommateSlots === null
-      ? null
-      : availableRoommateSlots > 0
-      ? `עוד ${availableRoommateSlots} ${availableRoommateSlots === 1 ? 'שותף' : 'שותפים'} יכולים להצטרף לדירה`
-      : 'אין מקומות פנויים לשותפים כרגע';
-
   const goPrev = () => {
     if (activeIdx <= 0) return;
     const next = activeIdx - 1;
@@ -826,16 +819,10 @@ export default function ApartmentDetailsScreen() {
 
           {availableRoommateSlots !== null ? (
             <View style={styles.capacityOverlay}>
-              <View style={styles.capacityOverlaySlots}>
-                <Text style={styles.capacityOverlaySlotsText}>
-                  {partnerSlotsUsed}/{totalRoommateCapacity ?? 0}
-                </Text>
-                <Text style={styles.capacityOverlaySlotsLabel}>שותפים</Text>
-              </View>
-              <View style={styles.capacityOverlayTextWrap}>
-                <Text style={styles.capacityOverlayTitle}>זמינות לשותפים</Text>
-                <Text style={styles.capacityOverlaySubtitle}>{capacityMessage ?? ''}</Text>
-              </View>
+              <Text style={styles.capacityOverlayValue}>
+                {partnerSlotsUsed}/{totalRoommateCapacity ?? 0}
+              </Text>
+              <Users size={18} color="#FFFFFF" />
             </View>
           ) : null}
 
@@ -1442,48 +1429,15 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(124,92,255,0.35)',
     paddingHorizontal: 16,
-    paddingVertical: 14,
-    flexDirection: 'row',
+    paddingVertical: 12,
+    flexDirection: 'row-reverse',
     alignItems: 'center',
-    gap: 12,
+    gap: 8,
   },
-  capacityOverlaySlots: {
-    minWidth: 64,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(124,92,255,0.16)',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(124,92,255,0.35)',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-  },
-  capacityOverlaySlotsText: {
+  capacityOverlayValue: {
     color: '#FFFFFF',
     fontSize: 16,
-    fontWeight: '900',
-  },
-  capacityOverlaySlotsLabel: {
-    color: '#C9CDD6',
-    fontSize: 11,
-    fontWeight: '700',
-    marginTop: 4,
-  },
-  capacityOverlayTextWrap: {
-    flex: 1,
-    writingDirection: 'rtl',
-  },
-  capacityOverlayTitle: {
-    color: '#FFFFFF',
-    fontSize: 15,
     fontWeight: '800',
-    marginBottom: 4,
-    textAlign: 'right',
-  },
-  capacityOverlaySubtitle: {
-    color: '#C9CDD6',
-    fontSize: 12,
-    textAlign: 'right',
   },
   detailBoxDark: {
     flex: 1,
