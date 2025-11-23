@@ -1078,40 +1078,70 @@ export default function RequestsScreen() {
         }
         setReceived((prev) => prev.map((r) => (r.id === item.id ? { ...r, status: 'APPROVED' } as any : r)));
       } else if (approverGroupId && inviterGroupId && approverGroupId !== inviterGroupId) {
-        // Case 4: both have groups → merge into a brand new group
-        const [aMembersRes, bMembersRes] = await Promise.all([
-          supabase.from('profile_group_members').select('user_id').eq('group_id', approverGroupId).eq('status', 'ACTIVE'),
-          supabase.from('profile_group_members').select('user_id').eq('group_id', inviterGroupId).eq('status', 'ACTIVE'),
+        // Case 4: both have groups → merge into a brand-new group with all members
+        const [approverMembersRes, inviterMembersRes] = await Promise.all([
+          supabase
+            .from('profile_group_members')
+            .select('user_id')
+            .eq('group_id', approverGroupId)
+            .eq('status', 'ACTIVE'),
+          supabase
+            .from('profile_group_members')
+            .select('user_id')
+            .eq('group_id', inviterGroupId)
+            .eq('status', 'ACTIVE'),
         ]);
-        const uniqueMembers = Array.from(
-          new Set<string>([
-            ...(aMembersRes.data || []).map((r: any) => r.user_id),
-            ...(bMembersRes.data || []).map((r: any) => r.user_id),
-            inviterId,
-            inviteeId,
-          ].filter(Boolean) as string[])
-        );
-        const { data: newGroup } = await supabase
+        const memberSet = new Set<string>();
+        (approverMembersRes.data || []).forEach((row: any) => row?.user_id && memberSet.add(row.user_id));
+        (inviterMembersRes.data || []).forEach((row: any) => row?.user_id && memberSet.add(row.user_id));
+        if (inviterId) memberSet.add(inviterId);
+        if (inviteeId) memberSet.add(inviteeId);
+        memberSet.add(user.id);
+        const allMemberIds = Array.from(memberSet);
+
+        const { data: newGroupRow, error: newGroupErr } = await supabase
           .from('profile_groups')
           .insert({ created_by: user.id, name: 'שותפים', status: 'ACTIVE' } as any)
           .select('id')
           .single();
-        const newGroupId = (newGroup as any)?.id as string;
-        if (newGroupId && uniqueMembers.length) {
+        if (newGroupErr) throw newGroupErr;
+        const newGroupId = (newGroupRow as any)?.id as string;
+
+        const groupsToMerge = [approverGroupId, inviterGroupId].filter(Boolean) as string[];
+        if (groupsToMerge.length) {
           await supabase
             .from('profile_group_members')
+            .update({ status: 'LEFT' } as any)
+            .in('group_id', groupsToMerge as any)
+            .eq('status', 'ACTIVE');
+        }
+
+        if (allMemberIds.length) {
+          const { error: memberInsertErr } = await supabase
+            .from('profile_group_members')
             .insert(
-              uniqueMembers.map((uid) => ({ group_id: newGroupId, user_id: uid, status: 'ACTIVE' })) as any[],
+              allMemberIds.map((uid) => ({ group_id: newGroupId, user_id: uid, status: 'ACTIVE' })) as any[],
               { onConflict: 'group_id,user_id', ignoreDuplicates: true } as any
             );
-          // Archive old groups and clean invites targeting them (safer than hard delete)
-          try {
-            await supabase.from('profile_groups').update({ status: 'ARCHIVED' } as any).in('id', [approverGroupId, inviterGroupId] as any);
-          } catch {}
-          try {
-            await supabase.from('profile_group_invites').delete().in('group_id', [approverGroupId, inviterGroupId] as any);
-          } catch {}
+          if (memberInsertErr) throw memberInsertErr;
         }
+
+        try {
+          if (groupsToMerge.length) {
+            await supabase.from('profile_group_invites').delete().in('group_id', groupsToMerge as any);
+          }
+        } catch {}
+        try {
+          if (groupsToMerge.length) {
+            await supabase.from('profile_group_members').delete().in('group_id', groupsToMerge as any);
+          }
+        } catch {}
+        try {
+          if (groupsToMerge.length) {
+            await supabase.from('profile_groups').delete().in('id', groupsToMerge as any);
+          }
+        } catch {}
+
         setReceived((prev) => prev.map((r) => (r.id === item.id ? { ...r, status: 'APPROVED' } as any : r)));
       }
 
