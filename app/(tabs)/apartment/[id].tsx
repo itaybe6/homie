@@ -192,23 +192,54 @@ export default function ApartmentDetailsScreen() {
     'https://images.pexels.com/photos/1457842/pexels-photo-1457842.jpeg';
 
   const normalizeImages = (value: any): string[] => {
-    if (Array.isArray(value)) return value.filter(Boolean);
+    if (!value) return [];
+    if (Array.isArray(value)) {
+      return (value as unknown[])
+        .map((v) => (typeof v === 'string' ? v.trim() : String(v || '').trim()))
+        .filter(Boolean);
+    }
     if (typeof value === 'string') {
       try {
         const parsed = JSON.parse(value);
-        if (Array.isArray(parsed)) return parsed.filter(Boolean);
-      } catch {}
-      return value
-        .replace(/^{|}$/g, '')
-        .split(',')
-        .map((s: string) => s.replace(/^"+|"+$/g, '').trim())
-        .filter(Boolean);
+        if (Array.isArray(parsed)) {
+          return parsed
+            .map((v) => (typeof v === 'string' ? v.trim() : String(v || '').trim()))
+            .filter(Boolean);
+        }
+      } catch {
+        try {
+          return value
+            .replace(/^\s*\{|\}\s*$/g, '')
+            .split(',')
+            .map((s: string) => s.replace(/^"+|"+$/g, '').trim())
+            .filter(Boolean);
+        } catch {
+          return [];
+        }
+      }
     }
     return [];
   };
 
+  const transformSupabaseImageUrl = (value: string): string => {
+    if (!value) return '';
+    const trimmed = value.trim();
+    if (!trimmed) return '';
+    if (trimmed.includes('/storage/v1/object/public/')) {
+      const [base, query] = trimmed.split('?');
+      const transformed = base.replace('/storage/v1/object/public/', '/storage/v1/render/image/public/');
+      const params: string[] = [];
+      if (query) params.push(query);
+      params.push('width=1200', 'quality=90');
+      return `${transformed}?${params.join('&')}`;
+    }
+    return trimmed;
+  };
+
   const images: string[] = (() => {
-    const arr = normalizeImages((apartment as any).image_urls);
+    const arr = normalizeImages((apartment as any).image_urls)
+      .map(transformSupabaseImageUrl)
+      .filter((url): url is string => !!url);
     return arr.length ? arr : [PLACEHOLDER];
   })();
 

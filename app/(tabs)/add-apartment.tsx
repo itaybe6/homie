@@ -48,6 +48,9 @@ export default function AddApartmentScreen() {
   const [neighborhoodSearchQuery, setNeighborhoodSearchQuery] = useState('');
   const [isLoadingNeighborhoods, setIsLoadingNeighborhoods] = useState(false);
   const [includeAsPartner, setIncludeAsPartner] = useState(false);
+  const [roommateCapacity, setRoommateCapacity] = useState<number | null>(null);
+  const [isRoommateDropdownOpen, setIsRoommateDropdownOpen] = useState(false);
+  const roommateCapacityOptions = [2, 3, 4, 5];
 
   useEffect(() => {
     setSessionToken(createSessionToken());
@@ -206,7 +209,8 @@ export default function AddApartmentScreen() {
       !city ||
       !price ||
       !bedrooms ||
-      !bathrooms
+      !bathrooms ||
+      roommateCapacity === null
     ) {
       setError('אנא מלא את כל השדות החובה');
       return;
@@ -215,6 +219,7 @@ export default function AddApartmentScreen() {
     const priceNum = parseFloat(price);
     const bedroomsNum = parseInt(bedrooms);
     const bathroomsNum = parseInt(bathrooms);
+    const roommatesNum = roommateCapacity as number;
 
     if (isNaN(priceNum) || priceNum <= 0) {
       setError('מחיר לא תקין');
@@ -231,8 +236,14 @@ export default function AddApartmentScreen() {
       return;
     }
 
+    if (!roommateCapacityOptions.includes(roommatesNum)) {
+      setError('בחירת כמות השותפים אינה תקפה');
+      return;
+    }
+
     setIsLoading(true);
     setError('');
+    setIsRoommateDropdownOpen(false);
 
     try {
       // Ensure user is authenticated
@@ -267,6 +278,7 @@ export default function AddApartmentScreen() {
           price: priceNum,
           bedrooms: bedroomsNum,
           bathrooms: bathroomsNum,
+          roommate_capacity: roommatesNum,
           image_urls: uploadedUrls.length ? uploadedUrls : null,
         })
         .select()
@@ -308,6 +320,8 @@ export default function AddApartmentScreen() {
     // room type removed
     setBedrooms('');
     setBathrooms('');
+    setRoommateCapacity(null);
+    setIsRoommateDropdownOpen(false);
     setImages([]);
     setError('');
   };
@@ -530,6 +544,43 @@ export default function AddApartmentScreen() {
                   placeholderTextColor="#9AA0A6"
                 />
               </View>
+            </View>
+
+            <View style={[styles.inputGroup, isRoommateDropdownOpen ? styles.inputGroupRaised : null]}>
+              <Text style={styles.label}>
+                מתאים לכמות שותפים <Text style={styles.required}>*</Text>
+              </Text>
+              <TouchableOpacity
+                style={[styles.input, styles.selectButton]}
+                onPress={() => setIsRoommateDropdownOpen((prev) => !prev)}
+                disabled={isLoading}
+              >
+                <Text
+                  style={[
+                    styles.selectButtonText,
+                    roommateCapacity === null && styles.selectButtonPlaceholder,
+                  ]}
+                >
+                  {roommateCapacity !== null ? `${roommateCapacity} שותפים` : 'בחר מספר שותפים'}
+                </Text>
+                <Text style={styles.selectButtonArrow}>▼</Text>
+              </TouchableOpacity>
+              {isRoommateDropdownOpen ? (
+                <View style={styles.suggestionsBox}>
+                  {roommateCapacityOptions.map((value) => (
+                    <TouchableOpacity
+                      key={value}
+                      style={styles.suggestionItem}
+                      onPress={() => {
+                        setRoommateCapacity(value);
+                        setIsRoommateDropdownOpen(false);
+                      }}
+                    >
+                      <Text style={styles.suggestionText}>{`${value} שותפים`}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              ) : null}
             </View>
 
             <View style={[styles.inputGroup, styles.switchRow]}>

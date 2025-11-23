@@ -68,7 +68,7 @@ export interface Apartment {
   room_type: string;
   bedrooms: number;
   bathrooms: number;
-  image_url?: string;
+  roommate_capacity?: number;
   image_urls?: string[]; // new: multiple images
   partner_ids?: string[]; // national IDs of roommates associated to the apartment
   created_at: string;

@@ -15,23 +15,59 @@ export default function ApartmentCard({
   const PLACEHOLDER =
     'https://images.pexels.com/photos/1457842/pexels-photo-1457842.jpeg';
 
-  const primaryImage = useMemo(() => {
-    const value: any = (apartment as any).image_urls;
-    if (Array.isArray(value) && value[0]) return value[0] as string;
+  const normalizeImageUrls = (value: unknown): string[] => {
+    if (!value) return [];
+    if (Array.isArray(value)) {
+      return (value as unknown[])
+        .map((item) => (typeof item === 'string' ? item.trim() : String(item || '').trim()))
+        .filter(Boolean);
+    }
     if (typeof value === 'string') {
       try {
         const parsed = JSON.parse(value);
-        if (Array.isArray(parsed) && parsed[0]) return parsed[0] as string;
+        if (Array.isArray(parsed)) {
+          return parsed
+            .map((item) => (typeof item === 'string' ? item.trim() : String(item || '').trim()))
+            .filter(Boolean);
+        }
       } catch {
-        const asArray = value
-          .replace(/^{|}$/g, '')
-          .split(',')
-          .map((s: string) => s.replace(/^"+|"+$/g, '').trim())
-          .filter(Boolean);
-        if (asArray[0]) return asArray[0];
+        try {
+          return value
+            .replace(/^\s*\{|\}\s*$/g, '')
+            .split(',')
+            .map((s) => s.replace(/^"+|"+$/g, '').trim())
+            .filter(Boolean);
+        } catch {
+          return [];
+        }
       }
     }
-    return PLACEHOLDER;
+    return [];
+  };
+
+  const transformSupabaseImageUrl = (value: string): string => {
+    if (!value) return '';
+    const trimmed = value.trim();
+    if (!trimmed) return '';
+    if (trimmed.includes('/storage/v1/object/public/')) {
+      const [base, query] = trimmed.split('?');
+      const transformed = base.replace(
+        '/storage/v1/object/public/',
+        '/storage/v1/render/image/public/'
+      );
+      const params: string[] = [];
+      if (query) params.push(query);
+      params.push('width=800', 'quality=85', 'format=webp');
+      return `${transformed}?${params.join('&')}`;
+    }
+    return trimmed;
+  };
+
+  const primaryImage = useMemo(() => {
+    const urls = normalizeImageUrls((apartment as any).image_urls)
+      .map(transformSupabaseImageUrl)
+      .filter((url): url is string => !!url);
+    return urls[0] || PLACEHOLDER;
   }, [apartment]);
 
   const [failed, setFailed] = useState(false);

@@ -78,6 +78,45 @@ export default function UserProfileScreen() {
     } catch {}
   };
 
+  const APT_IMAGE_PLACEHOLDER =
+    'https://images.pexels.com/photos/1457842/pexels-photo-1457842.jpeg';
+
+  const transformSupabaseImageUrl = (value: string): string => {
+    if (!value) return '';
+    const trimmed = value.trim();
+    if (!trimmed) return '';
+    if (trimmed.includes('/storage/v1/object/public/')) {
+      const [base, query] = trimmed.split('?');
+      const transformed = base.replace('/storage/v1/object/public/', '/storage/v1/render/image/public/');
+      const params: string[] = [];
+      if (query) {
+        params.push(query);
+      }
+      params.push('width=800', 'quality=85');
+      return `${transformed}?${params.join('&')}`;
+    }
+    return trimmed;
+  };
+
+  const ApartmentImageThumb = ({
+    uri,
+    style,
+  }: {
+    uri: string;
+    style?: any;
+  }) => {
+    const [failed, setFailed] = useState(false);
+    const resolved = failed ? APT_IMAGE_PLACEHOLDER : uri || APT_IMAGE_PLACEHOLDER;
+    return (
+      <Image
+        source={{ uri: resolved }}
+        style={style}
+        resizeMode="cover"
+        onError={() => setFailed(true)}
+      />
+    );
+  };
+
 
   const normalizeImageUrls = (value: unknown): string[] => {
     if (!value) return [];
@@ -860,11 +899,11 @@ export default function UserProfileScreen() {
             הדירה של {profile.full_name?.split(' ')?.[0] || 'המשתמש/ת'}
           </Text>
           {profileApartments.map((apt) => {
-            const imgs = Array.isArray(apt.image_urls)
-              ? (apt.image_urls as any[])
-              : [];
-            const firstImg =
-              imgs?.length ? (imgs[0] as string) : 'https://images.pexels.com/photos/1457842/pexels-photo-1457842.jpeg';
+            const rawImages = normalizeImageUrls(apt.image_urls);
+            const aptImages = rawImages
+              .map(transformSupabaseImageUrl)
+              .filter((url): url is string => !!url);
+            const firstImg = aptImages.length > 0 ? aptImages[0] : APT_IMAGE_PLACEHOLDER;
             const occupantMembers = apartmentOccupants[apt.id] || [];
             const visibleOccupants = occupantMembers.slice(0, 4);
             const overflowCount = occupantMembers.length - visibleOccupants.length;
@@ -876,7 +915,7 @@ export default function UserProfileScreen() {
                 onPress={() => router.push({ pathname: '/apartment/[id]', params: { id: apt.id } })}
               >
                 <View style={styles.aptThumbWrap}>
-                  <Image source={{ uri: firstImg }} style={styles.aptThumbImg} />
+                  <ApartmentImageThumb uri={firstImg} style={styles.aptThumbImg} />
                 </View>
                 <View style={styles.aptInfo}>
                   <Text style={styles.aptTitle} numberOfLines={1}>
@@ -914,9 +953,25 @@ export default function UserProfileScreen() {
                       ) : null}
                     </View>
                   ) : null}
-                </View>
-                <View style={{ flex: 0 }}>
-                  <Text style={styles.aptCta}>לצפייה</Text>
+                  {!!aptImages.length ? (
+                    <ScrollView
+                      horizontal
+                      showsHorizontalScrollIndicator={false}
+                      style={styles.aptImagesScroll}
+                      contentContainerStyle={styles.aptImagesContent}
+                    >
+                      {aptImages.map((url, idx) => {
+                        const isLast = idx === aptImages.length - 1;
+                        return (
+                          <ApartmentImageThumb
+                            key={`${apt.id}-img-${idx}`}
+                            uri={url}
+                            style={[styles.aptImageThumb, !isLast ? styles.aptImageThumbSpacing : null]}
+                          />
+                        );
+                      })}
+                    </ScrollView>
+                  ) : null}
                 </View>
               </TouchableOpacity>
             );
@@ -1684,5 +1739,26 @@ const styles = StyleSheet.create({
     color: '#7C5CFF',
     fontSize: 12,
     fontWeight: '800',
+  },
+  aptImagesScroll: {
+    marginTop: 12,
+    width: '100%',
+    alignSelf: 'stretch',
+  },
+  aptImagesContent: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    paddingVertical: 4,
+  },
+  aptImageThumb: {
+    width: 92,
+    height: 72,
+    borderRadius: 10,
+    backgroundColor: '#1F1F29',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  aptImageThumbSpacing: {
+    marginLeft: 8,
   },
 });
