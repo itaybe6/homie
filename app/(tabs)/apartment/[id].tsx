@@ -121,7 +121,6 @@ export default function ApartmentDetailsScreen() {
         router.back();
         return;
       }
-
       setApartment(aptData);
 
       const { data: ownerData, error: ownerError } = await supabase
@@ -264,7 +263,7 @@ export default function ApartmentDetailsScreen() {
     return candidates[Math.min(useIdx, candidates.length - 1)] || PLACEHOLDER;
   };
 
-  const normalizeIds = (value: any): string[] => {
+  function normalizeIds(value: any): string[] {
     if (Array.isArray(value)) return value.filter(Boolean);
     if (typeof value === 'string') {
       try {
@@ -278,7 +277,7 @@ export default function ApartmentDetailsScreen() {
         .filter(Boolean);
     }
     return [];
-  };
+  }
 
   const currentPartnerIds: string[] = normalizeIds((apartment as any).partner_ids);
   const roommatesCount = members.length; // number of partners (not including owner)
@@ -805,15 +804,15 @@ export default function ApartmentDetailsScreen() {
                   source={{ uri }}
                   style={styles.image}
                   resizeMode="cover"
-                  onError={() =>
+                  onError={() => {
                     setImageCandidateIndex((prev) => {
                       const candidates = galleryImages[idx] || [PLACEHOLDER];
                       const current = prev[idx] ?? 0;
                       const next = Math.min(current + 1, candidates.length - 1);
                       if (next === current) return prev;
                       return { ...prev, [idx]: next };
-                    })
-                  }
+                    });
+                  }}
                 />
                 <LinearGradient
                   colors={['transparent', 'rgba(15,15,20,0.6)', 'rgba(15,15,20,0.95)']}

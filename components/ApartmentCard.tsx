@@ -1,5 +1,5 @@
 import { View, Text, StyleSheet, TouchableOpacity, Image } from 'react-native';
-import { MapPin, Bed, Bath } from 'lucide-react-native';
+import { MapPin, Bed, Bath, Users } from 'lucide-react-native';
 import { Apartment } from '@/types/database';
 import { useState, useMemo, useEffect } from 'react';
 
@@ -63,6 +63,32 @@ export default function ApartmentCard({
     return trimmed;
   };
 
+  const normalizePartnerIds = (value: unknown): string[] => {
+    if (!value) return [];
+    if (Array.isArray(value)) {
+      return (value as unknown[])
+        .map((item) => (typeof item === 'string' ? item.trim() : String(item || '').trim()))
+        .filter(Boolean);
+    }
+    if (typeof value === 'string') {
+      try {
+        const parsed = JSON.parse(value);
+        if (Array.isArray(parsed)) {
+          return parsed
+            .map((item) => (typeof item === 'string' ? item.trim() : String(item || '').trim()))
+            .filter(Boolean);
+        }
+      } catch {
+        return value
+          .replace(/^\s*\{|\}\s*$/g, '')
+          .split(',')
+          .map((s) => s.replace(/^"+|"+$/g, '').trim())
+          .filter(Boolean);
+      }
+    }
+    return [];
+  };
+
   const imageCandidates = useMemo(() => {
     const raw = normalizeImageUrls((apartment as any).image_urls);
     const unique = new Set<string>();
@@ -89,6 +115,17 @@ export default function ApartmentCard({
 
   const currentImage = imageCandidates[Math.min(imageIdx, imageCandidates.length - 1)] || PLACEHOLDER;
 
+  const partnerIds = useMemo(
+    () => normalizePartnerIds((apartment as any).partner_ids),
+    [apartment]
+  );
+  const totalRoommateCapacity =
+    typeof (apartment as any).roommate_capacity === 'number'
+      ? (apartment as any).roommate_capacity
+      : null;
+  const partnerSlotsUsed = partnerIds.length;
+  const availableRoommateSlots =
+    totalRoommateCapacity !== null ? Math.max(0, totalRoommateCapacity - partnerSlotsUsed) : null;
   return (
     <TouchableOpacity style={styles.card} onPress={onPress}>
       <View style={styles.imageWrap}>
@@ -105,7 +142,18 @@ export default function ApartmentCard({
             }
           }}
         />
-        
+        {totalRoommateCapacity !== null ? (
+          <View style={styles.capacityOverlayWrap}>
+            <View style={styles.capacityOverlay}>
+              <View style={styles.capacityOverlaySlots}>
+                <Users size={16} color="#FFFFFF" />
+                <Text style={styles.capacityOverlaySlotsText}>
+                  {partnerSlotsUsed}/{totalRoommateCapacity}
+                </Text>
+              </View>
+            </View>
+          </View>
+        ) : null}
       </View>
       <View style={styles.content}>
         <View style={styles.titleRow}>
@@ -180,6 +228,42 @@ const styles = StyleSheet.create({
     width: '100%',
     height: 200,
     backgroundColor: '#22232E',
+  },
+  capacityOverlayWrap: {
+    position: 'absolute',
+    right: 12,
+    bottom: 12,
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    alignItems: 'flex-end',
+  },
+  capacityOverlay: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(20,20,32,0.92)',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(124,92,255,0.35)',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 8,
+  },
+  capacityOverlaySlots: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(124,92,255,0.18)',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(124,92,255,0.35)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  capacityOverlaySlotsText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '800',
   },
   overlayButton: {
     position: 'absolute',
