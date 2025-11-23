@@ -1016,6 +1016,7 @@ export default function RequestsScreen() {
       }
 
       // 4) Execute the correct scenario (early return per case)
+      let finalGroupId: string | undefined;
       if (approverGroupId && !inviterGroupId) {
         // Case 1: invitee has group, inviter doesn't → add inviter to invitee's group
         const insertRes = await supabase
@@ -1037,7 +1038,7 @@ export default function RequestsScreen() {
         }
         // Optimistic UI
         setReceived((prev) => prev.map((r) => (r.id === item.id ? { ...r, status: 'APPROVED' } as any : r)));
-        // Notify and refresh after handling below
+        finalGroupId = approverGroupId;
       } else if (!approverGroupId && inviterGroupId) {
         // Case 2: inviter has group, invitee doesn't → add invitee to inviter's group
         const insertRes = await supabase
@@ -1057,6 +1058,7 @@ export default function RequestsScreen() {
           } catch {}
         }
         setReceived((prev) => prev.map((r) => (r.id === item.id ? { ...r, status: 'APPROVED' } as any : r)));
+        finalGroupId = inviterGroupId;
       } else if (!approverGroupId && !inviterGroupId) {
         // Case 3: neither has a group → create new group and add both
         const { data: created } = await supabase
@@ -1077,6 +1079,7 @@ export default function RequestsScreen() {
             );
         }
         setReceived((prev) => prev.map((r) => (r.id === item.id ? { ...r, status: 'APPROVED' } as any : r)));
+        finalGroupId = newGroupId;
       } else if (approverGroupId && inviterGroupId && approverGroupId !== inviterGroupId) {
         // Case 4: both have groups → merge into a brand-new group with all members
         const [approverMembersRes, inviterMembersRes] = await Promise.all([
@@ -1143,7 +1146,66 @@ export default function RequestsScreen() {
         } catch {}
 
         setReceived((prev) => prev.map((r) => (r.id === item.id ? { ...r, status: 'APPROVED' } as any : r)));
+        finalGroupId = newGroupId;
       }
+
+      if (!finalGroupId) {
+        finalGroupId = approverGroupId || inviterGroupId;
+      }
+
+      let finalGroupMemberIds: string[] = [];
+      if (finalGroupId) {
+        try {
+          const { data: finalMembers } = await supabase
+            .from('profile_group_members')
+            .select('user_id')
+            .eq('group_id', finalGroupId)
+            .eq('status', 'ACTIVE');
+          finalGroupMemberIds = (finalMembers || []).map((row: any) => row.user_id).filter(Boolean);
+        } catch {}
+      }
+
+      const syncApartmentsForUser = async (targetUserId?: string) => {
+        if (!targetUserId || !finalGroupMemberIds.length) return;
+        try {
+          const [{ data: ownerApts }, { data: partnerApts }] = await Promise.all([
+            supabase.from('apartments').select('id, owner_id, partner_ids').eq('owner_id', targetUserId),
+            supabase.from('apartments').select('id, owner_id, partner_ids').contains('partner_ids', [targetUserId] as any),
+          ]);
+          const mapById: Record<string, any> = {};
+          (ownerApts || []).forEach((apt: any) => {
+            mapById[apt.id] = apt;
+          });
+          (partnerApts || []).forEach((apt: any) => {
+            mapById[apt.id] = apt;
+          });
+          const targets = Object.values(mapById);
+          if (!targets.length) return;
+          await Promise.all(
+            targets.map(async (apt: any) => {
+              const ownerId = apt?.owner_id as string | undefined;
+              const currentPartnerIds: string[] = Array.isArray(apt?.partner_ids)
+                ? (apt.partner_ids as string[]).filter(Boolean)
+                : [];
+              const currentSet = new Set<string>(currentPartnerIds);
+              finalGroupMemberIds.forEach((uid) => {
+                if (!uid || uid === ownerId) return;
+                currentSet.add(uid);
+              });
+              const newPartnerIds = Array.from(currentSet);
+              const originalSorted = [...new Set(currentPartnerIds)].sort();
+              const newSorted = [...new Set(newPartnerIds)].sort();
+              if (originalSorted.join(',') !== newSorted.join(',')) {
+                await supabase.from('apartments').update({ partner_ids: newPartnerIds }).eq('id', apt.id);
+              }
+            })
+          );
+        } catch (err) {
+          console.warn('sync apartment partners failed', { targetUserId, err });
+        }
+      };
+
+      await Promise.all([syncApartmentsForUser(inviterId), syncApartmentsForUser(inviteeId)]);
 
       // 5) Notify inviter
       try {
@@ -1156,39 +1218,6 @@ export default function RequestsScreen() {
           is_read: false,
         });
       } catch {}
-      // 6) Keep the existing convenience: add approver to inviter apartments if relevant
-      try {
-        const inviterId = item.sender_id;
-        const approverId = user.id;
-        if (inviterId && approverId && inviterId !== approverId) {
-          const [
-            { data: aptsByPartner },
-            { data: aptsByOwner },
-          ] = await Promise.all([
-            supabase.from('apartments').select('id, partner_ids').contains('partner_ids', [inviterId] as any),
-            supabase.from('apartments').select('id, partner_ids').eq('owner_id', inviterId),
-          ]);
-          const merged: any[] = [...(aptsByPartner || []), ...(aptsByOwner || [])];
-          const uniqueById: Record<string, any> = {};
-          merged.forEach((a: any) => {
-            uniqueById[a.id] = a;
-          });
-          const targets = Object.values(uniqueById);
-          if (targets.length) {
-            await Promise.all(
-              targets.map(async (apt: any) => {
-                const currentPartnerIds: string[] = Array.isArray(apt.partner_ids) ? (apt.partner_ids as string[]) : [];
-                if (!currentPartnerIds.includes(approverId)) {
-                  const newPartnerIds = Array.from(new Set([...(currentPartnerIds || []), approverId]));
-                  await supabase.from('apartments').update({ partner_ids: newPartnerIds }).eq('id', apt.id);
-                }
-              })
-            );
-          }
-        }
-      } catch (e) {
-        console.warn('auto-add approver to inviter apartments failed', e);
-      }
       await fetchAll();
       Alert.alert('הצלחה', 'אושרת להצטרף לקבוצה');
     } catch (e: any) {
