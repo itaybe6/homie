@@ -160,6 +160,9 @@ export default function ApartmentDetailsScreen() {
         style: 'destructive',
         onPress: async () => {
           try {
+            const imageUrls = normalizeImages((apartment as any).image_urls);
+            await deleteApartmentImages(imageUrls);
+
             const { error } = await supabase
               .from('apartments')
               .delete()
@@ -223,6 +226,50 @@ export default function ApartmentDetailsScreen() {
       }
     }
     return [];
+  };
+
+  const extractStoragePathsFromUrls = (urls: string[]): string[] => {
+    const marker = '/apartment-images/';
+    const unique = new Set<string>();
+
+    urls.forEach((url) => {
+      if (!url) return;
+      try {
+        const decoded = decodeURIComponent(url);
+        const idx = decoded.indexOf(marker);
+        if (idx === -1) return;
+        const fragment = decoded.slice(idx + marker.length).split('?')[0];
+        const path = fragment.replace(/^public\//, '').trim();
+        if (path) unique.add(path);
+      } catch {
+        const fallbackIdx = url.indexOf(marker);
+        if (fallbackIdx === -1) return;
+        const fragment = url.slice(fallbackIdx + marker.length).split('?')[0];
+        const path = fragment.replace(/^public\//, '').trim();
+        if (path) unique.add(path);
+      }
+    });
+
+    return Array.from(unique);
+  };
+
+  const deleteApartmentImages = async (urls: string[]): Promise<void> => {
+    if (!urls?.length) return;
+    const paths = extractStoragePathsFromUrls(urls);
+    if (!paths.length) return;
+
+    const chunkSize = 30;
+    for (let i = 0; i < paths.length; i += chunkSize) {
+      const chunk = paths.slice(i, i + chunkSize);
+      try {
+        const { error } = await supabase.storage.from('apartment-images').remove(chunk);
+        if (error) {
+          console.error('Failed to remove apartment images chunk', error);
+        }
+      } catch (err) {
+        console.error('Failed to remove apartment images chunk', err);
+      }
+    }
   };
 
   const transformSupabaseImageUrl = (value: string): string => {
@@ -718,18 +765,42 @@ export default function ApartmentDetailsScreen() {
     }
   };
 
+  const scrollToSlide = (index: number) => {
+    if (!galleryRef.current) return;
+    const offset = index * screenWidth;
+    const scrollView: any = galleryRef.current;
+
+    if (typeof scrollView.scrollTo === 'function') {
+      scrollView.scrollTo({ x: offset, animated: Platform.OS !== 'web' });
+    }
+
+    if (Platform.OS === 'web') {
+      const webNode =
+        scrollView.getScrollableNode?.() ??
+        scrollView._scrollRef ??
+        scrollView.getInnerViewNode?.() ??
+        scrollView.getNativeScrollRef?.();
+
+      if (webNode) {
+        if (typeof webNode.scrollTo === 'function') {
+          webNode.scrollTo({ left: offset, behavior: 'smooth' });
+        } else {
+          webNode.scrollLeft = offset;
+        }
+      }
+    }
+
+    setActiveIdx(index);
+  };
+
   const goPrev = () => {
     if (activeIdx <= 0) return;
-    const next = activeIdx - 1;
-    galleryRef.current?.scrollTo({ x: next * screenWidth, animated: true });
-    setActiveIdx(next);
+    scrollToSlide(activeIdx - 1);
   };
 
   const goNext = () => {
     if (activeIdx >= galleryImages.length - 1) return;
-    const next = activeIdx + 1;
-    galleryRef.current?.scrollTo({ x: next * screenWidth, animated: true });
-    setActiveIdx(next);
+    scrollToSlide(activeIdx + 1);
   };
 
   return (

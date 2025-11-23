@@ -20,6 +20,7 @@ import { useAuthStore } from '@/stores/authStore';
 import { useApartmentStore } from '@/stores/apartmentStore';
 import { Apartment } from '@/types/database';
 import { ArrowLeft } from 'lucide-react-native';
+import * as ImageManipulator from 'expo-image-manipulator';
 
 type ImageItem = { uri: string; isLocal: boolean };
 
@@ -65,6 +66,50 @@ export default function EditApartmentScreen() {
         .filter(Boolean);
     }
     return [];
+  };
+
+  const normalizeImageForUpload = async (
+    sourceUri: string,
+  ): Promise<{ uri: string; ext: string; mime: string }> => {
+    const lowerUri = sourceUri.toLowerCase();
+    const match = lowerUri.match(/\.([a-z0-9]{1,5})(?:\?.*)?$/);
+    const rawExt = match ? match[1] : '';
+    const ext = rawExt === 'jpeg' ? 'jpg' : rawExt;
+    const isHeic = ext === 'heic' || ext === 'heif';
+
+    if (isHeic) {
+      try {
+        const converted = await ImageManipulator.manipulateAsync(
+          sourceUri,
+          [],
+          { compress: 0.9, format: ImageManipulator.SaveFormat.JPEG },
+        );
+        return { uri: converted.uri, ext: 'jpg', mime: 'image/jpeg' };
+      } catch (err) {
+        console.warn('Failed to convert HEIC image', err);
+        throw new Error('לא הצלחנו להמיר קובץ HEIC, שמור כ-JPG/PNG ונסה שוב');
+      }
+    }
+
+    if (ext === 'png') {
+      return { uri: sourceUri, ext: 'png', mime: 'image/png' };
+    }
+
+    if (ext === 'jpg') {
+      return { uri: sourceUri, ext: 'jpg', mime: 'image/jpeg' };
+    }
+
+    try {
+      const converted = await ImageManipulator.manipulateAsync(
+        sourceUri,
+        [],
+        { compress: 0.9, format: ImageManipulator.SaveFormat.JPEG },
+      );
+      return { uri: converted.uri, ext: 'jpg', mime: 'image/jpeg' };
+    } catch (err) {
+      console.warn('Failed to normalize image', err);
+      throw new Error('לא הצלחנו לעבד את התמונה, נסה פורמט JPG או PNG');
+    }
   };
 
   const load = async () => {
@@ -156,16 +201,15 @@ export default function EditApartmentScreen() {
   };
 
   const uploadImage = async (userId: string, uri: string): Promise<string> => {
-    const match = uri.match(/\.([a-zA-Z0-9]{1,5})(?:\?.*)?$/);
-    const ext = match ? match[1].toLowerCase() : 'jpg';
-    const fileName = `${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
+    const normalized = await normalizeImageForUpload(uri);
+    const fileName = `${Date.now()}_${Math.random().toString(36).slice(2)}.${normalized.ext}`;
     const path = `apartments/${userId}/${fileName}`;
-    const res = await fetch(uri);
+    const res = await fetch(normalized.uri);
     const arrayBuffer = await res.arrayBuffer();
     const { error: upErr } = await supabase
       .storage
       .from('apartment-images')
-      .upload(path, arrayBuffer, { upsert: true, contentType: `image/${ext === 'png' ? 'png' : 'jpeg'}` });
+      .upload(path, arrayBuffer, { upsert: true, contentType: normalized.mime });
     if (upErr) throw upErr;
     const { data } = supabase.storage.from('apartment-images').getPublicUrl(path);
     return data.publicUrl;
