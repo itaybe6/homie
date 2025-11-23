@@ -391,8 +391,11 @@ export async function autocompleteAddresses(
     await loadGoogleMapsJs();
     const g = (window as any).google;
     const places = g?.maps?.places;
-    // If Places JS isn't available or SuggestionService is missing, fall through to HTTP API below
-    if (places?.AutocompleteSuggestionService) {
+    if (!places) {
+      console.warn('Google Maps Places library failed to load');
+      return [];
+    }
+    if (places.AutocompleteSuggestionService) {
       const svc = new places.AutocompleteSuggestionService();
       if (!webSessionToken) webSessionToken = new places.AutocompleteSessionToken();
       let origin: any = undefined;
@@ -415,7 +418,52 @@ export async function autocompleteAddresses(
         });
       });
     }
-    // Fallthrough → use HTTP API below
+    if (places.AutocompleteService) {
+      if (!warnedLegacyFallback) {
+        console.warn('Using legacy AutocompleteService. Consider enabling Places API (New).');
+        warnedLegacyFallback = true;
+      }
+      try {
+        const service = new places.AutocompleteService();
+        if (!webSessionToken) webSessionToken = new places.AutocompleteSessionToken();
+        let origin: any = undefined;
+        if (cityPlaceId) {
+          const loc = await getPlaceLocation(cityPlaceId);
+          if (loc) origin = new g.maps.LatLng(loc.lat, loc.lng);
+        }
+        return new Promise((resolve) => {
+          const request: any = {
+            input: query,
+            types: ['address'],
+            componentRestrictions: { country: 'il' },
+            sessionToken: webSessionToken,
+          };
+          if (origin) {
+            request.location = origin;
+            request.radius = 30000;
+          }
+          service.getPlacePredictions((request as any), (preds: any[] | null) => {
+            const filtered = (preds || []).filter((p: any) => {
+              const types: string[] = p.types || [];
+              const isAddressLike =
+                types.includes('street_address') ||
+                types.includes('premise') ||
+                types.includes('route') ||
+                types.includes('geocode') ||
+                types.includes('address');
+              if (!isAddressLike) return false;
+              if (cityNameForFilter) return String(p.description).includes(cityNameForFilter);
+              return true;
+            });
+            resolve(filtered.map((p: any) => p.description));
+          });
+        });
+      } catch (err) {
+        console.warn('AutocompleteService failed', err);
+      }
+    }
+    console.warn('No Google Places autocomplete service available');
+    return [];
   }
 
   let locationParams = '';
@@ -427,26 +475,37 @@ export async function autocompleteAddresses(
     }
   }
 
+  if (!GOOGLE_KEY) return [];
+
   const base = `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(
     query,
   )}&components=country:il&types=geocode&language=he${locationParams}`;
   const tokenPart = sessionToken ? `&sessiontoken=${encodeURIComponent(sessionToken)}` : '';
   const url = `${base}&key=${encodeURIComponent(GOOGLE_KEY)}${tokenPart}`;
-  const res = await fetch(url);
-  const data = await res.json();
-  if (data.status !== 'OK' && data.status !== 'ZERO_RESULTS') return [];
+  try {
+    const res = await fetch(url);
+    const data = await res.json();
+    if (data.status !== 'OK' && data.status !== 'ZERO_RESULTS') return [];
 
-  const preds: any[] = data.predictions || [];
-  const filtered = preds.filter((p) => {
-    const types: string[] = p.types || [];
-    const isAddressLike = types.includes('street_address') || types.includes('premise') || types.includes('route') || types.includes('geocode');
-    if (!isAddressLike) return false;
-    if (cityNameForFilter) {
-      return String(p.description).includes(cityNameForFilter);
-    }
-    return true;
-  });
-  return filtered.map((p) => p.description);
+    const preds: any[] = data.predictions || [];
+    const filtered = preds.filter((p) => {
+      const types: string[] = p.types || [];
+      const isAddressLike =
+        types.includes('street_address') ||
+        types.includes('premise') ||
+        types.includes('route') ||
+        types.includes('geocode');
+      if (!isAddressLike) return false;
+      if (cityNameForFilter) {
+        return String(p.description).includes(cityNameForFilter);
+      }
+      return true;
+    });
+    return filtered.map((p) => p.description);
+  } catch (err) {
+    console.warn('HTTP autocomplete failed (expected on web due to CORS)', err);
+    return [];
+  }
 }
 
 

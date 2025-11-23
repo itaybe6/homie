@@ -19,6 +19,7 @@ import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/authStore';
 import { useApartmentStore } from '@/stores/apartmentStore';
 import * as ImagePicker from 'expo-image-picker';
+import * as ImageManipulator from 'expo-image-manipulator';
 import { autocompleteAddresses, createSessionToken } from '@/lib/googlePlaces';
 import { getNeighborhoodsForCityName, searchCitiesWithNeighborhoods } from '@/lib/neighborhoods';
 
@@ -157,19 +158,61 @@ export default function AddApartmentScreen() {
     setImages((prev) => prev.filter((_, i) => i !== idx));
   };
 
+  const normalizeImageForUpload = async (
+    sourceUri: string,
+  ): Promise<{ uri: string; ext: string; mime: string }> => {
+    const lowerUri = sourceUri.toLowerCase();
+    const match = lowerUri.match(/\.([a-z0-9]{1,5})(?:\?.*)?$/);
+    const rawExt = match ? match[1] : '';
+    const ext = rawExt === 'jpeg' ? 'jpg' : rawExt;
+    const isHeic = ext === 'heic' || ext === 'heif';
+
+    if (isHeic) {
+      try {
+        const converted = await ImageManipulator.manipulateAsync(
+          sourceUri,
+          [],
+          { compress: 0.9, format: ImageManipulator.SaveFormat.JPEG },
+        );
+        return { uri: converted.uri, ext: 'jpg', mime: 'image/jpeg' };
+      } catch (err) {
+        console.warn('Failed to convert HEIC image', err);
+        throw new Error('לא הצלחנו להמיר קובץ HEIC, נסה שמירה כ-JPEG');
+      }
+    }
+
+    if (ext === 'png') {
+      return { uri: sourceUri, ext: 'png', mime: 'image/png' };
+    }
+
+    if (ext === 'jpg') {
+      return { uri: sourceUri, ext: 'jpg', mime: 'image/jpeg' };
+    }
+
+    // Unknown extension (blob URIs, missing suffix, etc.) → convert to JPEG for safety
+    try {
+      const converted = await ImageManipulator.manipulateAsync(
+        sourceUri,
+        [],
+        { compress: 0.9, format: ImageManipulator.SaveFormat.JPEG },
+      );
+      return { uri: converted.uri, ext: 'jpg', mime: 'image/jpeg' };
+    } catch (err) {
+      console.warn('Failed to normalize image', err);
+      throw new Error('לא הצלחנו לעבד את התמונה, נסה פורמט JPG או PNG');
+    }
+  };
+
   const uploadImage = async (userId: string, uri: string): Promise<string> => {
-    // Try to infer extension safely (blob: URIs won't have one)
-    const match = uri.match(/\.([a-zA-Z0-9]{1,5})(?:\?.*)?$/);
-    const ext = match ? match[1].toLowerCase() : 'jpg';
-    const fileName = `${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
+    const normalized = await normalizeImageForUpload(uri);
+    const fileName = `${Date.now()}_${Math.random().toString(36).slice(2)}.${normalized.ext}`;
     const path = `apartments/${userId}/${fileName}`;
-    // On native, Response.blob/File may not exist; use arrayBuffer instead
-    const res = await fetch(uri);
+    const res = await fetch(normalized.uri);
     const arrayBuffer = await res.arrayBuffer();
     const { error: upErr } = await supabase
       .storage
       .from('apartment-images')
-      .upload(path, arrayBuffer, { upsert: true, contentType: `image/${ext === 'png' ? 'png' : 'jpeg'}` });
+      .upload(path, arrayBuffer, { upsert: true, contentType: normalized.mime });
     if (upErr) throw upErr;
     const { data } = supabase.storage.from('apartment-images').getPublicUrl(path);
     return data.publicUrl;
@@ -584,11 +627,14 @@ export default function AddApartmentScreen() {
             </View>
 
             <View style={[styles.inputGroup, styles.switchRow]}>
-              <Text style={styles.label}>האם אתה שותף בדירה?</Text>
+              <Text style={[styles.label, styles.switchLabel]}>האם אתה שותף בדירה?</Text>
               <Switch
                 value={includeAsPartner}
                 onValueChange={setIncludeAsPartner}
                 disabled={isLoading}
+                trackColor={{ false: '#2A2A37', true: '#3FC1A9' }}
+                thumbColor="#FFFFFF"
+                ios_backgroundColor="#2A2A37"
               />
             </View>
 
@@ -761,7 +807,12 @@ const styles = StyleSheet.create({
   switchRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    justifyContent: 'flex-end',
+    gap: 12,
+  },
+  switchLabel: {
+    flex: 1,
+    textAlign: 'right',
   },
   halfWidth: {
     flex: 1,

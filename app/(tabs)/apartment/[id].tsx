@@ -286,10 +286,6 @@ export default function ApartmentDetailsScreen() {
     typeof apartment.roommate_capacity === 'number' ? apartment.roommate_capacity : null;
   const availableRoommateSlots =
     totalRoommateCapacity !== null ? Math.max(0, totalRoommateCapacity - partnerSlotsUsed) : null;
-  const roommatesNeeded = Math.max(
-    0,
-    (apartment.bedrooms || 0) - (roommatesCount + 1) // +1 for owner when calculating needed
-  );
   const isMember = !!(
     user?.id &&
     currentPartnerIds.map((v) => String(v).toLowerCase()).includes(String(user.id).toLowerCase())
@@ -779,9 +775,6 @@ export default function ApartmentDetailsScreen() {
               {apartment.city}
             </Text>
           </View>
-          <Text style={styles.subMeta}>
-            {apartment.bedrooms} חדרים · {roommatesNeeded} מחפשי שותף
-          </Text>
         </View>
         <View style={styles.galleryContainer}>
           <ScrollView
