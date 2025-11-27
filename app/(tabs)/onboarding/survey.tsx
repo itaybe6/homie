@@ -1147,7 +1147,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
   },
   chipActive: {
-    backgroundColor: '#7C5CFF',
+    backgroundColor: '#4C1D95',
     borderColor: 'rgba(124,92,255,0.8)',
   },
   chipText: {
@@ -1311,7 +1311,7 @@ const styles = StyleSheet.create({
     color: '#9DA4AE',
   },
   primaryBtn: {
-    backgroundColor: '#7C5CFF',
+    backgroundColor: '#4C1D95',
     paddingHorizontal: 18,
     paddingVertical: 12,
     borderRadius: 12,

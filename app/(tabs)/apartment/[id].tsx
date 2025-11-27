@@ -182,7 +182,7 @@ export default function ApartmentDetailsScreen() {
   if (isLoading) {
     return (
       <View style={styles.centerContainer}>
-        <ActivityIndicator size="large" color="#7C5CFF" />
+        <ActivityIndicator size="large" color="#4C1D95" />
       </View>
     );
   }
@@ -959,17 +959,17 @@ export default function ApartmentDetailsScreen() {
         <View style={styles.content}>
           <View style={styles.detailsRow}>
             <View style={styles.detailBoxDark}>
-              <Bed size={20} color="#7C5CFF" />
+              <Bed size={20} color="#4C1D95" />
               <Text style={styles.detailValueDark}>{apartment.bedrooms}</Text>
               <Text style={styles.detailLabelDark}>חדרי שינה</Text>
             </View>
             <View style={styles.detailBoxDark}>
-              <Bath size={20} color="#7C5CFF" />
+              <Bath size={20} color="#4C1D95" />
               <Text style={styles.detailValueDark}>{apartment.bathrooms}</Text>
               <Text style={styles.detailLabelDark}>חדרי רחצה</Text>
             </View>
             <TouchableOpacity style={styles.detailBoxDark} onPress={() => setIsMembersOpen(true)} activeOpacity={0.9}>
-              <Users size={20} color="#7C5CFF" />
+              <Users size={20} color="#4C1D95" />
               <Text style={styles.detailValueDark}>{roommatesCount}</Text>
               <Text style={styles.detailLabelDark}>שותפים</Text>
             </TouchableOpacity>
@@ -1095,7 +1095,7 @@ export default function ApartmentDetailsScreen() {
             <ScrollView contentContainerStyle={styles.sheetContent}>
               {isAdding ? (
                 <View style={{ paddingVertical: 20, alignItems: 'center' }}>
-                  <ActivityIndicator size="small" color="#7C5CFF" />
+                  <ActivityIndicator size="small" color="#4C1D95" />
                 </View>
               ) : (
                 <>

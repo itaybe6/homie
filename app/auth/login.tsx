@@ -9,22 +9,32 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+   Image,
+   Keyboard,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { Home } from 'lucide-react-native';
 import { authService } from '@/lib/auth';
 import { useAuthStore } from '@/stores/authStore';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+ import { Eye, EyeOff, ArrowLeft } from 'lucide-react-native';
+ // Removed vector icon for Google since it is single-color; using multicolor image instead
+ import LavaLamp from '../../components/LavaLamp';
 
-const ACCENT_PURPLE = '#7C5CFF';
+const ACCENT_PURPLE = '#4C1D95'; // deeper purple
+const SHEET_TOP_OFFSET = 72;
 
 export default function LoginScreen() {
   const router = useRouter();
   const setUser = useAuthStore((s) => s.setUser);
+  const insets = useSafeAreaInsets();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [isPasswordVisible, setPasswordVisible] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
+  const [isKeyboardOpen, setIsKeyboardOpen] = useState(false);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
 
   // Clear any broken/partial session so the login screen doesn't log refresh errors on mount
   useEffect(() => {
@@ -35,6 +45,19 @@ export default function LoginScreen() {
         // ignore – getCurrentUser already clears invalid refresh tokens locally
       }
     })();
+    const showSub = Keyboard.addListener('keyboardDidShow', (e) => {
+      setIsKeyboardOpen(true);
+      // height of the keyboard to paint white filler above it
+      setKeyboardHeight(e.endCoordinates?.height ?? 0);
+    });
+    const hideSub = Keyboard.addListener('keyboardDidHide', () => {
+      setIsKeyboardOpen(false);
+      setKeyboardHeight(0);
+    });
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
   }, []);
 
   const handleLogin = async () => {
@@ -57,70 +80,168 @@ export default function LoginScreen() {
       setIsLoading(false);
     }
   };
+ 
+   const handleGoogleSignIn = async () => {
+     try {
+       setIsLoading(true);
+       // Hook your Google sign-in flow here (expo-auth-session / firebase / supabase, etc.)
+       console.log('Google sign-in pressed');
+     } finally {
+       setIsLoading(false);
+     }
+   };
 
   return (
-    <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-      <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
+    <View style={{ flex: 1 }}>
+      <LavaLamp hue="purple" intensity={60} count={5} duration={16000} backgroundColor="#2E1065" />
+      <KeyboardAvoidingView
+        style={styles.container}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={insets.top}
+      >
         <View style={styles.content}>
-          <View style={styles.header}> 
-            <View style={styles.logoWrap}>
-              <Home size={28} color="#FFFFFF" />
-            </View>
-            <Text style={styles.title}>ברוך הבא ל־Homie</Text>
-            <Text style={styles.subtitle}>התחבר לחשבון שלך</Text>
-          </View>
-
-          {error ? <Text style={styles.error}>{error}</Text> : null}
-
-          <View style={styles.card}>
-            <TextInput
-              style={styles.input}
-              placeholder="אימייל"
-              value={email}
-              onChangeText={setEmail}
-              autoCapitalize="none"
-              keyboardType="email-address"
-              placeholderTextColor="#9DA4AE"
-            />
-            <TextInput
-              style={styles.input}
-              placeholder="סיסמה"
-              value={password}
-              onChangeText={setPassword}
-              secureTextEntry
-              placeholderTextColor="#9DA4AE"
-            />
-            <TouchableOpacity style={[styles.button, isLoading && styles.buttonDisabled]} onPress={handleLogin} disabled={isLoading}>
-              {isLoading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.buttonText}>התחבר</Text>}
+          <View style={[styles.header, { paddingTop: insets.top + 24, paddingBottom: 16 }]}>
+            <TouchableOpacity
+              onPress={() => router.replace('/auth/intro')}
+              accessibilityRole="button"
+              accessibilityLabel="חזרה"
+              style={styles.backButton}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
+              <ArrowLeft color="#FFFFFF" size={24} />
             </TouchableOpacity>
+            <Image
+               source={require('../../assets/images/logo slog.png')}
+              style={styles.logo}
+              resizeMode="contain"
+              accessible
+              accessibilityLabel="Homie logo"
+            />
           </View>
 
-          <TouchableOpacity style={styles.linkContainer} onPress={() => router.replace('/auth/register')} disabled={isLoading}>
-            <Text style={styles.linkText}>אין לך חשבון? הרשם כאן</Text>
-          </TouchableOpacity>
+          {error ? <Text style={styles.errorLight}>{error}</Text> : null}
+
+          <View style={[styles.sheet, isKeyboardOpen ? { paddingBottom: 8 } : null]}>
+            <View style={styles.sheetHeader}>
+              <Text style={styles.sheetTitle}>מצא את השותפים שלך</Text>
+              <Text style={styles.sheetSubtitle}>התחבר לחשבון שלך</Text>
+            </View>
+            <View style={{ paddingBottom: isKeyboardOpen ? 8 : insets.bottom + 24 }}>
+              <View style={styles.form}>
+                <TextInput
+                  style={styles.inputLight}
+                  placeholder="אימייל"
+                  value={email}
+                  onChangeText={setEmail}
+                  autoCapitalize="none"
+                  keyboardType="email-address"
+                  placeholderTextColor="#9DA4AE"
+                />
+                <View style={styles.inputWrapper}>
+                  <TextInput
+                    style={styles.inputLight}
+                    placeholder="סיסמה"
+                    value={password}
+                    onChangeText={setPassword}
+                    secureTextEntry={!isPasswordVisible}
+                    placeholderTextColor="#9DA4AE"
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                  />
+                  <TouchableOpacity
+                    accessibilityRole="button"
+                    accessibilityLabel={isPasswordVisible ? 'הסתר סיסמה' : 'הצג סיסמה'}
+                    onPress={() => setPasswordVisible((v) => !v)}
+                    style={styles.inputIconButton}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                  >
+                    {isPasswordVisible ? <EyeOff color="#6B7280" /> : <Eye color="#6B7280" />}
+                  </TouchableOpacity>
+                </View>
+                <TouchableOpacity style={[styles.button, isLoading && styles.buttonDisabled]} onPress={handleLogin} disabled={isLoading}>
+                  {isLoading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.buttonText}>התחבר</Text>}
+                </TouchableOpacity>
+ 
+                 <View style={styles.dividerRow}>
+                   <View style={styles.line} />
+                   <Text style={styles.dividerText}>או התחברות עם</Text>
+                   <View style={styles.line} />
+                 </View>
+ 
+                <TouchableOpacity
+                   style={styles.oauthBtn}
+                   onPress={handleGoogleSignIn}
+                   disabled={isLoading}
+                   activeOpacity={0.9}
+                 >
+                  {/* Use local multi-color SVG for Google icon */}
+                  {/** We render a local SVG component to ensure brand colors **/}
+                  {/** and avoid single-color font icons. **/}
+                  <View style={{ marginLeft: 6 }}>
+                    {require('../../components/icons/GoogleSvg').default({
+                      width: 18,
+                      height: 18,
+                    })}
+                  </View>
+                   <Text style={styles.oauthText}>Google</Text>
+                 </TouchableOpacity>
+                <TouchableOpacity style={styles.linkContainerCenter} onPress={() => router.replace('/auth/register')} disabled={isLoading}>
+                  <Text style={styles.linkTextPurple}>אין לך חשבון? הרשם כאן</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+
         </View>
-      </ScrollView>
-    </KeyboardAvoidingView>
+      </KeyboardAvoidingView>
+      {/* White filler above the system keyboard to avoid showing background color */}
+      <View
+        pointerEvents="none"
+        style={{
+          position: 'absolute',
+          left: 0,
+          right: 0,
+          bottom: 0,
+          height: isKeyboardOpen ? keyboardHeight : 0,
+          backgroundColor: '#FFFFFF',
+        }}
+      />
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0F0F14',
+    backgroundColor: 'transparent',
   },
   scrollContent: {
     flexGrow: 1,
   },
   content: {
     flex: 1,
-    justifyContent: 'center',
+    justifyContent: 'flex-start',
     paddingHorizontal: 24,
-    paddingVertical: 40,
+    paddingTop: 24,
+    paddingBottom: 0,
   },
   header: {
-    alignItems: 'flex-end',
-    marginBottom: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 30,
+    backgroundColor: 'transparent',
+    marginHorizontal: 0,
+    paddingHorizontal: 24,
+  },
+  backButton: {
+    position: 'absolute',
+    left: 16,
+    top: 45,
+    zIndex: 10,
+  },
+  logo: {
+    width: 320,
+    height: 100,
   },
   logoWrap: {
     width: 56,
@@ -135,13 +256,67 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: '#FFFFFF',
     marginTop: 14,
-    textAlign: 'right',
+    textAlign: 'center',
   },
   subtitle: {
     fontSize: 14,
     color: '#9DA4AE',
     marginTop: 6,
+    textAlign: 'center',
+  },
+  sheet: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    paddingHorizontal: 40,
+    paddingTop: 38,
+    paddingBottom: 40,
+    // Stretch to full width (cancel outer content padding)
+    marginHorizontal: -24,
+    // sheet now starts right after the purple fill
+    marginTop: 0,
+  },
+  sheetHeader: {
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  sheetTitle: {
+    fontSize: 24,
+    fontWeight: '800',
+    color: ACCENT_PURPLE,
+    textAlign: 'center',
+  },
+  sheetSubtitle: {
+    marginTop: 4,
+    fontSize: 14,
+    color: ACCENT_PURPLE,
+    textAlign: 'center',
+  },
+  form: {
+    gap: 12,
+  },
+  inputWrapper: {
+    position: 'relative',
+    justifyContent: 'center',
+  },
+  inputLight: {
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderRadius: 12,
+    fontSize: 16,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    color: '#111827',
     textAlign: 'right',
+    writingDirection: 'rtl',
+  },
+  inputIconButton: {
+    position: 'absolute',
+    left: 12,
+    // vertically align around text input's content
+    top: 12,
   },
   card: {
     backgroundColor: '#141420',
@@ -168,31 +343,64 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     borderRadius: 12,
     alignItems: 'center',
-    marginTop: 8,
+    marginTop: 4,
   },
   buttonDisabled: {
     opacity: 0.6,
   },
   buttonText: {
-    color: '#0F0F14',
+    color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '800',
   },
-  linkContainer: {
-    alignItems: 'flex-end',
-    marginTop: 16,
+  dividerRow: {
+    marginTop: 12,
+    marginBottom: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
-  linkText: {
+  line: {
+    flex: 1,
+    height: 1,
+    backgroundColor: '#E5E7EB',
+  },
+  dividerText: {
+    color: '#9DA4AE',
+    fontSize: 12,
+  },
+  oauthBtn: {
+    marginTop: 4,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 6,
+  },
+  oauthText: {
+    color: '#111827',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  linkContainerCenter: {
+    alignItems: 'center',
+    marginTop: 8,
+  },
+  linkTextPurple: {
     color: ACCENT_PURPLE,
     fontSize: 14,
-    textAlign: 'right',
+    textAlign: 'center',
   },
-  error: {
-    backgroundColor: 'rgba(255,59,48,0.12)',
-    color: '#FF9AA2',
+  errorLight: {
+    backgroundColor: 'rgba(255,59,48,0.08)',
+    color: '#B91C1C',
     padding: 12,
     borderRadius: 12,
-    textAlign: 'right',
+    textAlign: 'center',
     marginBottom: 12,
   },
 });

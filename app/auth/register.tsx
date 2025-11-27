@@ -22,7 +22,7 @@ import { supabase } from '@/lib/supabase';
 import { autocompleteCities, createSessionToken, PlacePrediction } from '@/lib/googlePlaces';
 
 // App primary accent color (align with dark theme)
-const PRIMARY = '#7C5CFF';
+const PRIMARY = '#4C1D95';
 
 export default function RegisterScreen() {
   const router = useRouter();

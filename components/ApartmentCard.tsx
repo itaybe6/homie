@@ -169,12 +169,12 @@ export default function ApartmentCard({
 
         <View style={styles.detailsRow}>
           <View style={styles.detail}>
-            <Bed size={16} color="#7C5CFF" />
+            <Bed size={16} color="#4C1D95" />
             <Text style={styles.detailText}>{apartment.bedrooms}</Text>
           </View>
 
           <View style={styles.detail}>
-            <Bath size={16} color="#7C5CFF" />
+            <Bath size={16} color="#4C1D95" />
             <Text style={styles.detailText}>{apartment.bathrooms}</Text>
           </View>
         </View>

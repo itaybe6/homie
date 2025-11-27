@@ -220,7 +220,7 @@ export default function AdminDashboard() {
 
   const statCards = useMemo(
     () => [
-      { key: 'users', title: 'משתמשים', value: totalUsers, icon: Users, color: '#7C5CFF' },
+      { key: 'users', title: 'משתמשים', value: totalUsers, icon: Users, color: '#4C1D95' },
       { key: 'apartments', title: 'דירות', value: totalApartments, icon: HomeIcon, color: '#00BCD4' },
       { key: 'regularUsers', title: 'משתמשים רגילים', value: regularUsersCount, icon: Users, color: '#60A5FA' },
       { key: 'owners', title: 'בעלי דירות', value: ownersCount, icon: HomeIcon, color: '#34D399' },
@@ -263,7 +263,7 @@ export default function AdminDashboard() {
 
       {loading ? (
         <View style={styles.center}>
-          <ActivityIndicator size="large" color="#7C5CFF" />
+          <ActivityIndicator size="large" color="#4C1D95" />
         </View>
       ) : active === 'overview' ? (
         <ScrollView contentContainerStyle={styles.scrollContent}>
@@ -766,7 +766,7 @@ const styles = StyleSheet.create({
   },
   segmentActive: {
     backgroundColor: '#1B1B29',
-    borderColor: '#7C5CFF',
+    borderColor: '#4C1D95',
   },
   segmentText: {
     color: '#9DA4AE',
@@ -968,7 +968,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   subTabBtnActive: {
-    borderColor: '#7C5CFF',
+    borderColor: '#4C1D95',
     backgroundColor: '#1B1B29',
   },
   subTabText: {
@@ -1130,7 +1130,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   toggleBtnActive: {
-    borderColor: '#7C5CFF',
+    borderColor: '#4C1D95',
     backgroundColor: '#1B1B29',
   },
   toggleText: {
@@ -1163,7 +1163,7 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   filterBtn: {
-    backgroundColor: '#7C5CFF',
+    backgroundColor: '#4C1D95',
     borderRadius: 12,
     paddingVertical: 10,
     paddingHorizontal: 16,

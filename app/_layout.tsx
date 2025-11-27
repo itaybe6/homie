@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { I18nManager, Platform, View } from 'react-native';
-import { Stack } from 'expo-router';
+import { Stack, usePathname } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useFrameworkReady } from '@/hooks/useFrameworkReady';
 import { authService } from '@/lib/auth';
@@ -8,11 +8,14 @@ import { useAuthStore } from '@/stores/authStore';
 import * as Notifications from 'expo-notifications';
 import { usePushNotifications } from '@/hooks/usePushNotifications';
 import GlobalTopBar from '@/components/GlobalTopBar';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 export default function RootLayout() {
   useFrameworkReady();
   const { setUser, setLoading } = useAuthStore();
   usePushNotifications();
+  const pathname = usePathname();
+  const showTopBar = pathname !== '/auth/intro' && pathname !== '/auth/login';
 
   useEffect(() => {
     let isMounted = true;
@@ -77,13 +80,13 @@ export default function RootLayout() {
   }, [setUser, setLoading]);
 
   return (
-    <View style={{ flex: 1, writingDirection: 'rtl' }}>
+    <GestureHandlerRootView style={{ flex: 1, writingDirection: 'rtl' }}>
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="+not-found" />
       </Stack>
       {/* Global transparent top bar: notifications (left), Homie (center), requests (right) */}
-      <GlobalTopBar />
+      {showTopBar && <GlobalTopBar />}
       <StatusBar style="auto" />
-    </View>
+    </GestureHandlerRootView>
   );
 }

@@ -218,7 +218,7 @@ export default function HomeScreen() {
   if (isLoading && !refreshing) {
     return (
       <View style={styles.centerContainer}>
-        <ActivityIndicator size="large" color="#7C5CFF" />
+        <ActivityIndicator size="large" color="#4C1D95" />
       </View>
     );
   }
@@ -266,7 +266,7 @@ export default function HomeScreen() {
           <RefreshControl
             refreshing={refreshing}
             onRefresh={onRefresh}
-            tintColor="#7C5CFF"
+            tintColor="#4C1D95"
           />
         }
         ListEmptyComponent={
@@ -660,7 +660,7 @@ const styles = StyleSheet.create({
   },
   chipSelected: {
     backgroundColor: '#2B2141',
-    borderColor: '#7C5CFF',
+    borderColor: '#4C1D95',
   },
   chipText: {
     color: '#C9CDD6',
@@ -698,7 +698,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#7C5CFF',
+    backgroundColor: '#4C1D95',
   },
   applyText: {
     color: '#FFFFFF',

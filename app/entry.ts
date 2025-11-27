@@ -1,3 +1,4 @@
+import 'react-native-gesture-handler';
 import * as React from 'react';
 import { Platform, StyleSheet, Text, TextInput, I18nManager } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';

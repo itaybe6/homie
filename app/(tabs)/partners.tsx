@@ -764,7 +764,7 @@ export default function PartnersScreen() {
   if (isLoading) {
     return (
       <View style={styles.centerContainer}>
-        <ActivityIndicator size="large" color="#7C5CFF" />
+        <ActivityIndicator size="large" color="#4C1D95" />
       </View>
     );
   }
@@ -1251,7 +1251,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.06)',
   },
   chipActive: {
-    backgroundColor: '#7C5CFF',
+    backgroundColor: '#4C1D95',
     borderColor: 'rgba(255,255,255,0.15)',
   },
   chipText: {
