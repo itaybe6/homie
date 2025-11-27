@@ -194,7 +194,7 @@ export default function EditProfileScreen() {
   if (loading) {
     return (
       <View style={styles.center}>
-        <ActivityIndicator size="large" color="#7C5CFF" />
+        <ActivityIndicator size="large" color="#4C1D95" />
       </View>
     );
   }
@@ -384,7 +384,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    backgroundColor: '#7C5CFF',
+    backgroundColor: '#4C1D95',
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderRadius: 12,

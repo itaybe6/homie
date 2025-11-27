@@ -358,7 +358,7 @@ const styles = StyleSheet.create({
     writingDirection: 'rtl',
   },
   aptCta: {
-    color: '#7C5CFF',
+    color: '#4C1D95',
     fontSize: 13,
     fontWeight: '800',
     paddingHorizontal: 12,

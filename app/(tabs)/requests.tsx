@@ -1936,13 +1936,13 @@ export default function RequestsScreen() {
 
       {loading ? (
         <View style={styles.centerContainer}>
-          <ActivityIndicator size="large" color="#7C5CFF" />
+          <ActivityIndicator size="large" color="#4C1D95" />
         </View>
       ) : (
         <FlatList
           data={[{ key: tab }]}
           keyExtractor={(i) => i.key}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#7C5CFF" />}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#4C1D95" />}
           renderItem={({ item }) => {
             if (item.key === 'incoming') {
               return <Section title="בקשות אליי" data={filteredReceived} incoming />;

@@ -672,7 +672,7 @@ export default function ProfileScreen() {
   if (isLoading) {
     return (
       <View style={styles.centerContainer}>
-        <ActivityIndicator size="large" color="#7C5CFF" />
+        <ActivityIndicator size="large" color="#4C1D95" />
       </View>
     );
   }
@@ -687,7 +687,7 @@ export default function ProfileScreen() {
           </Text>
           <TouchableOpacity
             onPress={() => router.push('/auth/login')}
-            style={{ backgroundColor: '#7C5CFF', paddingHorizontal: 18, paddingVertical: 12, borderRadius: 10 }}>
+            style={{ backgroundColor: '#4C1D95', paddingHorizontal: 18, paddingVertical: 12, borderRadius: 10 }}>
             <Text style={{ color: '#0F0F14', fontWeight: '800' }}>כניסה / הרשמה</Text>
           </TouchableOpacity>
         </View>
@@ -1325,7 +1325,7 @@ const styles = StyleSheet.create({
     padding: 8,
   },
   saveButton: {
-    backgroundColor: '#7C5CFF',
+    backgroundColor: '#4C1D95',
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 10,

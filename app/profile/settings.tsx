@@ -525,7 +525,7 @@ export default function ProfileSettingsScreen() {
         </TouchableOpacity>
       </View>
 
-      <View style={styles.content}>
+      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.profileCard}>
           <View style={styles.avatarWrap}>
             <Image
@@ -720,7 +720,7 @@ export default function ProfileSettingsScreen() {
             <ChevronLeft size={18} color="#9DA4AE" />
           </TouchableOpacity>
         </View>
-      </View>
+      </ScrollView>
       {/* My apartment modal */}
       {showAptModal && (
         <Modal visible transparent animationType="fade" onRequestClose={() => setShowAptModal(false)}>
@@ -734,7 +734,7 @@ export default function ProfileSettingsScreen() {
               </View>
               {aptLoading ? (
                 <View style={{ paddingVertical: 24, alignItems: 'center' }}>
-                  <ActivityIndicator size="large" color="#7C5CFF" />
+                  <ActivityIndicator size="large" color="#4C1D95" />
                 </View>
               ) : !myApartment ? (
                 <Text style={styles.sharedEmptyText}>לא נמצאה דירה משויכת.</Text>
@@ -808,7 +808,7 @@ export default function ProfileSettingsScreen() {
 
               {sharedLoading ? (
                 <View style={{ paddingVertical: 24, alignItems: 'center' }}>
-                  <ActivityIndicator size="large" color="#7C5CFF" />
+                  <ActivityIndicator size="large" color="#4C1D95" />
                 </View>
               ) : sharedGroups.length === 0 ? (
                 <Text style={styles.sharedEmptyText}>אין לך פרופילים משותפים פעילים.</Text>

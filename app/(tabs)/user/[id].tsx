@@ -762,7 +762,7 @@ export default function UserProfileScreen() {
   if (isLoading) {
     return (
       <View style={styles.center}>
-        <ActivityIndicator size="large" color="#7C5CFF" />
+        <ActivityIndicator size="large" color="#4C1D95" />
       </View>
     );
   }
@@ -1493,14 +1493,14 @@ const styles = StyleSheet.create({
     marginTop: 4,
     height: 48,
     borderRadius: 14,
-    backgroundColor: '#7C5CFF',
+    backgroundColor: '#4C1D95',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.18)',
     alignItems: 'center',
     justifyContent: 'center',
     flexDirection: 'row',
     gap: 8,
-    shadowColor: '#7C5CFF',
+    shadowColor: '#4C1D95',
     shadowOpacity: 0.26,
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 4 },
@@ -1553,7 +1553,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 999,
-    backgroundColor: '#7C5CFF',
+    backgroundColor: '#4C1D95',
     marginBottom: 12,
   },
   groupBadgeText: {
@@ -1589,7 +1589,7 @@ const styles = StyleSheet.create({
     marginRight: -14,
   },
   groupAvatarHighlighted: {
-    borderColor: '#7C5CFF',
+    borderColor: '#4C1D95',
     borderWidth: 3,
   },
   groupAvatarImg: {
@@ -1697,7 +1697,7 @@ const styles = StyleSheet.create({
     textAlign: 'right',
   },
   aptCta: {
-    color: '#7C5CFF',
+    color: '#4C1D95',
     fontSize: 13,
     fontWeight: '800',
   },
@@ -1732,11 +1732,11 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   aptOccupantOverflow: {
-    borderColor: '#7C5CFF',
+    borderColor: '#4C1D95',
     backgroundColor: 'rgba(124,92,255,0.12)',
   },
   aptOccupantOverflowText: {
-    color: '#7C5CFF',
+    color: '#4C1D95',
     fontSize: 12,
     fontWeight: '800',
   },

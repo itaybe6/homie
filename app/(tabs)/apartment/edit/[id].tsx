@@ -326,7 +326,7 @@ export default function EditApartmentScreen() {
   if (isLoading) {
     return (
       <View style={styles.centerContainer}>
-        <ActivityIndicator size="large" color="#7C5CFF" />
+        <ActivityIndicator size="large" color="#4C1D95" />
       </View>
     );
   }
@@ -599,7 +599,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   button: {
-    backgroundColor: '#7C5CFF',
+    backgroundColor: '#4C1D95',
     paddingVertical: 16,
     borderRadius: 12,
     alignItems: 'center',
@@ -640,7 +640,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   addImagesBtn: {
-    backgroundColor: '#7C5CFF',
+    backgroundColor: '#4C1D95',
     paddingVertical: 10,
     paddingHorizontal: 14,
     borderRadius: 10,
