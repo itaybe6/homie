@@ -279,7 +279,7 @@ const styles = StyleSheet.create({
   },
   sheetHeader: {
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: 16,
   },
   sheetTitle: {
     fontSize: 24,

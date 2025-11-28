@@ -238,7 +238,15 @@ export default function RegisterScreen() {
       </View>
       {/* Back to login */}
       <TouchableOpacity
-        onPress={() => router.replace('/auth/login')}
+        onPress={() => {
+          if (step === 1) {
+            setError('');
+            setFormStep(0);
+            setStep(0);
+          } else {
+            router.replace('/auth/login');
+          }
+        }}
         accessibilityRole="button"
         accessibilityLabel="סגור"
         style={[styles.backBtn, { top: insets.top + 8 }]}
