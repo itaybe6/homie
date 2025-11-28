@@ -129,7 +129,8 @@ export const authService = {
   },
 
   async signOut() {
-    const { error } = await supabase.auth.signOut();
+    // Use global scope to clear cookies on web as well
+    const { error } = await supabase.auth.signOut({ scope: 'global' as any });
     if (error) throw error;
   },
 

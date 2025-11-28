@@ -587,9 +587,6 @@ export default function ProfileSettingsScreen() {
             onPress={() => setShowAptModal(true)}
             activeOpacity={0.9}
           >
-            <View style={styles.itemIcon}>
-              <Home size={18} color="#E5E7EB" />
-            </View>
             <View style={styles.itemTextWrap}>
               <Text style={styles.groupItemTitle}>הדירה שלי</Text>
               <Text style={styles.groupItemSub}>צפייה ויציאה מהדירה</Text>
@@ -877,10 +874,6 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 16,
     top: 8,
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: 'rgba(255,255,255,0.1)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1104,10 +1097,8 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   itemIcon: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: 'rgba(255,255,255,0.08)',
+    // remove square background around icons
+    backgroundColor: 'transparent',
     alignItems: 'center',
     justifyContent: 'center',
   },

@@ -7,19 +7,25 @@ import {
   StyleSheet,
   ActivityIndicator,
   KeyboardAvoidingView,
+  Keyboard,
+  TouchableWithoutFeedback,
   Platform,
   ScrollView,
   Image,
+  Modal,
   Animated,
   Easing,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { authService } from '@/lib/auth';
 import { useAuthStore } from '@/stores/authStore';
-import { Home, Camera, Edit3 } from 'lucide-react-native';
+import { Home, Camera, Pencil, X, ChevronRight, Eye, EyeOff, Check } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
+import { BlurView } from 'expo-blur';
 import { supabase } from '@/lib/supabase';
 import { autocompleteCities, createSessionToken, PlacePrediction } from '@/lib/googlePlaces';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import LavaLamp from '../../components/LavaLamp';
 
 // App primary accent color (align with dark theme)
 const PRIMARY = '#4C1D95';
@@ -27,6 +33,7 @@ const PRIMARY = '#4C1D95';
 export default function RegisterScreen() {
   const router = useRouter();
   const setUser = useAuthStore((state) => state.setUser);
+  const insets = useSafeAreaInsets();
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -40,11 +47,20 @@ export default function RegisterScreen() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [mode, setMode] = useState<'user' | 'owner'>('user');
+  // step 0: choose account type; step 1: fill form for chosen type
+  const [step, setStep] = useState<0 | 1>(0);
+  // formStep for renter: 0-basic, 1-profile (age/gender/bio), 2-avatar, 3-credentials
+  // for owner: 0-basic, 1-credentials
+  const [formStep, setFormStep] = useState<0 | 1 | 2 | 3>(0);
   const [segWidth, setSegWidth] = useState(0);
   const segAnim = useRef(new Animated.Value(0)).current;
   // Owner apartment details will be collected later in a dedicated screen
-  const [gender, setGender] = useState<'male' | 'female' | ''>('');
+  const [gender, setGender] = useState<'male' | 'female' | 'other' | ''>('');
   const [bio, setBio] = useState('');
+  const [isGenderPickerOpen, setIsGenderPickerOpen] = useState(false);
+  const [isAgePickerOpen, setIsAgePickerOpen] = useState(false);
+  const [isPasswordVisible, setPasswordVisible] = useState(false);
+  const [isConfirmPasswordVisible, setConfirmPasswordVisible] = useState(false);
 
   useEffect(() => {
     setSessionToken(createSessionToken());
@@ -160,7 +176,7 @@ export default function RegisterScreen() {
         age: age ? Number(age) : undefined,
         city: city.trim() || undefined,
         bio: mode === 'user' ? (bio.trim() || undefined) : undefined,
-        gender: mode === 'user' && gender ? gender : undefined,
+        gender: mode === 'user' && (gender === 'male' || gender === 'female') ? gender : undefined,
         avatarUrl: avatarForSignup,
         // Always create users profile so FK from apartments(owner_id) -> users(id) passes
         createProfile: true,
@@ -192,279 +208,488 @@ export default function RegisterScreen() {
     }
   };
 
+  const handleNextFromBasic = () => {
+    if (!fullName || !phone || !city) {
+      setError('אנא מלא שם מלא, טלפון ועיר');
+      return;
+    }
+    setError('');
+    setFormStep(1);
+  };
+
+  const handleNextFromProfile = () => {
+    // No required fields here yet, but can be enforced later
+    setError('');
+    setFormStep(2);
+  };
+
+  const handleNextFromAvatar = () => {
+    setError('');
+    setFormStep(3);
+  };
+
   return (
     <KeyboardAvoidingView
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        keyboardShouldPersistTaps="handled">
-        <View style={styles.content}>
-          <View style={styles.header}>
-            <View style={styles.logoWrap}>
-              <Home size={32} color="#fff" />
-            </View>
-            <Text style={styles.title}>ברוך הבא ל־Homie</Text>
-            <Text style={styles.subtitle}>צור חשבון חדש</Text>
+      {/* Animated “liquid glass” background */}
+      <View pointerEvents="none" style={styles.bgWrap}>
+        <LavaLamp hue="purple" intensity={40} count={5} duration={16000} backgroundColor="#F5F3FF" />
+      </View>
+      {/* Back to login */}
+      <TouchableOpacity
+        onPress={() => router.replace('/auth/login')}
+        accessibilityRole="button"
+        accessibilityLabel="סגור"
+        style={[styles.backBtn, { top: insets.top + 8 }]}
+        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+      >
+        <X size={24} color={PRIMARY} />
+      </TouchableOpacity>
+      <View style={{ flex: 1 }}>
+        <View style={[styles.content, (step === 1 || step === 0) && styles.contentForSheet, step === 0 && styles.contentBottom]}>
+          <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+          <View style={[styles.header, step === 1 && { paddingTop: insets.top + 24, marginBottom: 24 }, step === 0 && styles.headerCentered]}>
+            <Image
+              source={require('../../assets/images/logoslogpur.png')}
+              style={[styles.headerLogo, { marginTop: 0 }]}
+              resizeMode="contain"
+              accessible
+              accessibilityLabel="Homie logo"
+            />
           </View>
+          </TouchableWithoutFeedback>
 
-          {/* Segmented toggle */}
-          <View
-            style={styles.segment}
-            onLayout={(e) => setSegWidth(e.nativeEvent.layout.width)}
-          >
-            {segWidth > 0 ? (
-              <Animated.View
-                style={[
-                  styles.segmentThumb,
-                  {
-                    width: segWidth / 2 - 4,
-                    transform: [
-                      {
-                        translateX: segAnim.interpolate({
-                          inputRange: [0, 1],
-                          outputRange: [2, segWidth / 2 + 2],
-                        }),
-                      },
-                    ],
-                  },
-                ]}
-              />
-            ) : null}
-            <TouchableOpacity
-              style={styles.segmentButton}
-              activeOpacity={0.8}
-              onPress={() => {
-                setMode('user');
-                Animated.timing(segAnim, {
-                  toValue: 0,
-                  duration: 260,
-                  easing: Easing.out(Easing.cubic),
-                  useNativeDriver: true,
-                }).start();
-              }}
-            >
-              <Text style={[styles.segmentText, mode === 'user' && styles.segmentTextActive]}>משתמש</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.segmentButton}
-              activeOpacity={0.8}
-              onPress={() => {
-                setMode('owner');
-                setAvatarUrl('');
-                Animated.timing(segAnim, {
-                  toValue: 1,
-                  duration: 260,
-                  easing: Easing.out(Easing.cubic),
-                  useNativeDriver: true,
-                }).start();
-              }}
-            >
-              <Text style={[styles.segmentText, mode === 'owner' && styles.segmentTextActive]}>בעל דירה</Text>
-            </TouchableOpacity>
-          </View>
-
-          {mode === 'user' ? (
-            <View style={styles.avatarContainer}>
-              <TouchableOpacity onPress={handlePickImage} activeOpacity={0.85}>
-                <View style={styles.avatarRing}>
-                  {avatarUrl ? (
-                    <Image source={{ uri: avatarUrl }} style={styles.avatarImage} />
-                  ) : (
-                    <View style={styles.avatarPlaceholder}>
-                      <Camera size={28} color="#6B7280" />
-                    </View>
-                  )}
-                  <View style={styles.avatarBadge}>
-                    <Edit3 size={14} color="#fff" />
-                  </View>
+          {step === 0 ? (
+            <View style={[styles.sheet, styles.sheetStep0]}>
+              <ScrollView
+                keyboardShouldPersistTaps="handled"
+                keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+                showsVerticalScrollIndicator={false}
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={{ paddingBottom: insets.bottom + 28 }}
+              >
+                <View style={styles.sheetHeader}>
+                  <Text style={styles.sheetTitle}>בואו נתחיל מהתחלה</Text>
+                  <Text style={styles.sheetIntro}>צרו חשבון חדש כדי למצוא שותף או לפרסם דירה.</Text>
                 </View>
-              </TouchableOpacity>
+                {/* Step 0 - choose account type */}
+                <View style={styles.stepChooser}>
+                  <Text style={styles.stepChooserLabel}>בחרו סוג משתמש</Text>
+                  <View style={styles.stepOptionsRow}>
+                    <TouchableOpacity
+                      activeOpacity={0.9}
+                      onPress={() => setMode('user')}
+                      style={[styles.optionCard, mode === 'user' && styles.optionCardActive]}
+                      disabled={isLoading}
+                    >
+                      {mode !== 'user' ? (
+                        <View pointerEvents="none" style={styles.glassWrap}>
+                          <BlurView style={styles.glassBlur} intensity={25} tint="light" />
+                          <View style={styles.glassTint} />
+                        </View>
+                      ) : null}
+                      <View style={styles.optionContentRow}>
+                        <View style={styles.optionTextWrap}>
+                          <Text style={[styles.optionTitle, mode === 'user' && styles.optionTitleActive]}>שוכר</Text>
+                          <Text style={[styles.optionSub, mode === 'user' && styles.optionSubActive]}>חיפוש שותפים/ות</Text>
+                        </View>
+                        {mode === 'user' ? (
+                          <View style={styles.optionCheckBadge}>
+                            <Check size={16} color="#FFFFFF" />
+                          </View>
+                        ) : <View style={{ width: 28 }} />}
+                      </View>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      activeOpacity={0.9}
+                      onPress={() => setMode('owner')}
+                      style={[styles.optionCard, mode === 'owner' && styles.optionCardActive]}
+                      disabled={isLoading}
+                    >
+                      {mode !== 'owner' ? (
+                        <View pointerEvents="none" style={styles.glassWrap}>
+                          <BlurView style={styles.glassBlur} intensity={25} tint="light" />
+                          <View style={styles.glassTint} />
+                        </View>
+                      ) : null}
+                      <View style={styles.optionContentRow}>
+                        <View style={styles.optionTextWrap}>
+                          <Text style={[styles.optionTitle, mode === 'owner' && styles.optionTitleActive]}>בעל דירה</Text>
+                          <Text style={[styles.optionSub, mode === 'owner' && styles.optionSubActive]}>פרסום דירה וחיפוש דיירים</Text>
+                        </View>
+                        {mode === 'owner' ? (
+                          <View style={styles.optionCheckBadge}>
+                            <Check size={16} color="#FFFFFF" />
+                          </View>
+                        ) : <View style={{ width: 28 }} />}
+                      </View>
+                    </TouchableOpacity>
+                  </View>
+                  <TouchableOpacity
+                    style={[styles.button, isLoading && styles.buttonDisabled]}
+                    onPress={() => setStep(1)}
+                    disabled={isLoading}
+                  >
+                    {isLoading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.buttonText}>המשך</Text>}
+                  </TouchableOpacity>
+                </View>
+              </ScrollView>
             </View>
           ) : null}
 
-          {error ? <Text style={styles.error}>{error}</Text> : null}
-
-          <View style={styles.form}>
-            <View style={styles.card}>
-              <TextInput
-                style={styles.input}
-                placeholder="שם מלא"
-                value={fullName}
-                onChangeText={setFullName}
-                editable={!isLoading}
-                placeholderTextColor="#9AA0A6"
-              />
-
-              <TextInput
-                style={styles.input}
-                placeholder="אימייל"
-                value={email}
-                onChangeText={setEmail}
-                autoCapitalize="none"
-                keyboardType="email-address"
-                editable={!isLoading}
-                placeholderTextColor="#9AA0A6"
-              />
-
-              {mode === 'user' ? (
-                <View style={styles.row}>
-                  <TextInput
-                    style={[styles.input, styles.inputHalf]}
-                    placeholder="טלפון"
-                    value={phone}
-                    onChangeText={setPhone}
-                    keyboardType="phone-pad"
-                    editable={!isLoading}
-                    placeholderTextColor="#9AA0A6"
-                  />
-                  <TextInput
-                    style={[styles.input, styles.inputHalf]}
-                    placeholder="גיל"
-                    value={age}
-                    onChangeText={setAge}
-                    keyboardType="number-pad"
-                    editable={!isLoading}
-                    placeholderTextColor="#9AA0A6"
-                  />
+          {/* Step 1 - form */}
+          {step === 1 ? (
+            <View style={[styles.sheet, styles.sheetLowered]}>
+              <ScrollView
+                keyboardShouldPersistTaps="handled"
+                keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+                showsVerticalScrollIndicator={false}
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={{ paddingBottom: insets.bottom + 28 }}
+              >
+                <View style={styles.sheetHeader}>
+                  <Text style={styles.sheetTitle}>
+                    {mode === 'user'
+                      ? (formStep === 1
+                        ? 'כמה פרטים כדי\nלהכיר אתכם טוב יותר'
+                        : formStep === 2
+                          ? 'תמונה טובה\nעושה הכל פשוט יותר'
+                          : formStep === 3
+                            ? 'רק עוד צעד קטן וסיימנו'
+                            : 'בוא נמצא לכם\nמקום שמתאים באמת')
+                      : (formStep === 0
+                        ? 'בוא נעלה את הדירה שלכם\nעל המפה'
+                        : 'נשאר רק צעד קטן')}
+                  </Text>
+                  {(mode === 'user' || (mode === 'owner' && (formStep === 0 || formStep === 1))) ? (
+                    <Text style={styles.sheetIntro}>
+                      {mode === 'user'
+                        ? (formStep === 1
+                          ? 'זה יעזור לנו להתאים לכם שותפים ודירות.'
+                          : formStep === 2
+                            ? 'זה עוזר לשותפים להכיר אתכם מהר יותר.'
+                            : formStep === 3
+                              ? 'ממלאים אימייל וסיסמה ויוצאים לדרך.'
+                              : 'צרו חשבון ומצאו שותף או דירה שמתאימים לכם')
+                        : (formStep === 0
+                          ? 'כמה פרטים קטנים ונתחיל בתהליך'
+                          : 'כמה פרטים אחרונים – ואתם מוכנים לפרסום.')}
+                    </Text>
+                  ) : null}
+                  {/* Step indicator is shown below the primary button; not in header */}
                 </View>
-              ) : (
-              <TextInput
-                style={styles.input}
-                placeholder="טלפון"
-                value={phone}
-                onChangeText={setPhone}
-                keyboardType="phone-pad"
-                editable={!isLoading}
-                placeholderTextColor="#9DA4AE"
-              />
-              )}
+                {/* Removed account type switch link per request */}
 
-              <TextInput
-                style={styles.input}
-                placeholder="עיר"
-                value={city}
-                onChangeText={(t) => { setCity(t); if (!t) setCitySuggestions([]); }}
-                editable={!isLoading}
-                placeholderTextColor="#9DA4AE"
-              />
-
-              {citySuggestions.length > 0 ? (
-                <View style={styles.suggestionsBox}>
-                  {citySuggestions.map((p) => (
-                    <TouchableOpacity
-                      key={p.placeId}
-                      style={styles.suggestionItem}
-                      onPress={() => {
-                        setCity(p.description);
-                        setCitySuggestions([]);
-                      }}
-                    >
-                      <Text style={styles.suggestionText}>{p.description}</Text>
-                    </TouchableOpacity>
-                  ))}
+            {formStep === 0 ? (
+              <>
+                {error ? <Text style={styles.error}>{error}</Text> : null}
+                <View style={styles.form}>
+                  <View style={styles.cardPlain}>
+                    <Text style={styles.label}>שם מלא</Text>
+                    <TextInput
+                      style={styles.input}
+                      placeholder="ישראל ישראלי"
+                      value={fullName}
+                      onChangeText={setFullName}
+                      editable={!isLoading}
+                      placeholderTextColor="#9DA4AE"
+                    />
+                    <Text style={styles.label}>טלפון</Text>
+                    <TextInput
+                      style={styles.input}
+                      placeholder="050-123-4567"
+                      value={phone}
+                      onChangeText={setPhone}
+                      keyboardType="phone-pad"
+                      editable={!isLoading}
+                      placeholderTextColor="#9DA4AE"
+                    />
+                    <Text style={styles.label}>עיר</Text>
+                    <TextInput
+                      style={styles.input}
+                      placeholder="תל אביב-יפו"
+                      value={city}
+                      onChangeText={(t) => { setCity(t); if (!t) setCitySuggestions([]); }}
+                      editable={!isLoading}
+                      placeholderTextColor="#9DA4AE"
+                    />
+                    {citySuggestions.length > 0 ? (
+                      <View style={styles.suggestionsBox}>
+                        {citySuggestions.map((p) => (
+                          <TouchableOpacity
+                            key={p.placeId}
+                            style={styles.suggestionItem}
+                            onPress={() => {
+                              setCity(p.description);
+                              setCitySuggestions([]);
+                            }}
+                          >
+                            <Text style={styles.suggestionText}>{p.description}</Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    ) : null}
+                  </View>
+                  <TouchableOpacity
+                    style={[styles.button, isLoading && styles.buttonDisabled]}
+                    onPress={handleNextFromBasic}
+                    disabled={isLoading}
+                  >
+                    {isLoading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.buttonText}>הבא</Text>}
+                  </TouchableOpacity>
+                  {formStep === 0 ? (
+                    <Text style={[styles.sheetSubtitle, { marginTop: 8, textAlign: 'center' }]}>
+                      {`שלב 1 מתוך ${mode === 'user' ? 4 : 2}`}
+                    </Text>
+                  ) : null}
                 </View>
-              ) : null}
-
-              {/* Owner fills apartment later on a dedicated screen */}
-
-              {mode === 'user' ? (
-                <>
-                  <View style={styles.row}>
+              </>
+            ) : mode === 'user' && formStep === 1 ? (
+              <>
+                {error ? <Text style={styles.error}>{error}</Text> : null}
+                <View style={styles.form}>
+                  <View style={styles.cardPlain}>
+                    <Text style={styles.label}>מגדר</Text>
                     <TouchableOpacity
-                      style={[
-                        styles.choiceButton,
-                        gender === 'female' && styles.choiceButtonActive,
-                      ]}
                       activeOpacity={0.85}
-                      onPress={() => setGender('female')}
+                      onPress={() => setIsGenderPickerOpen(true)}
+                      style={styles.selectInput}
                       disabled={isLoading}
                     >
-                      <Text
-                        style={[
-                          styles.choiceText,
-                          gender === 'female' && styles.choiceTextActive,
-                        ]}
-                      >
-                        נקבה
+                      <Text style={[styles.selectText, !gender && styles.selectTextPlaceholder]}>
+                        {gender === 'male' ? 'זכר' : gender === 'female' ? 'נקבה' : gender === 'other' ? 'אחר' : 'בחר/י מגדר'}
                       </Text>
                     </TouchableOpacity>
+
+                    <Text style={styles.label}>גיל</Text>
                     <TouchableOpacity
-                      style={[
-                        styles.choiceButton,
-                        gender === 'male' && styles.choiceButtonActive,
-                      ]}
                       activeOpacity={0.85}
-                      onPress={() => setGender('male')}
+                      onPress={() => setIsAgePickerOpen(true)}
+                      style={styles.selectInput}
                       disabled={isLoading}
                     >
-                      <Text
-                        style={[
-                          styles.choiceText,
-                          gender === 'male' && styles.choiceTextActive,
-                        ]}
-                      >
-                        זכר
+                      <Text style={[styles.selectText, !age && styles.selectTextPlaceholder]}>
+                        {age ? age : 'בחר/י גיל'}
                       </Text>
+                    </TouchableOpacity>
+
+                    <Text style={styles.label}>קצת עלייך</Text>
+                    <TextInput
+                      style={[styles.input, styles.inputMultiline]}
+                      placeholder="כמה מילים עלייך..."
+                      value={bio}
+                      onChangeText={setBio}
+                      multiline
+                      editable={!isLoading}
+                      placeholderTextColor="#9DA4AE"
+                    />
+                  </View>
+                  <View style={{ flexDirection: 'row', gap: 12, alignItems: 'center' }}>
+                    <TouchableOpacity
+                      style={[styles.button, isLoading && styles.buttonDisabled, { flex: 1 }]}
+                      onPress={handleNextFromProfile}
+                      disabled={isLoading}
+                    >
+                      {isLoading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.buttonText}>הבא</Text>}
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      accessibilityRole="button"
+                      accessibilityLabel="חזרה"
+                      onPress={() => setFormStep(0)}
+                      style={styles.iconButton}
+                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                      disabled={isLoading}
+                    >
+                      <ChevronRight size={28} color="#6B7280" />
                     </TouchableOpacity>
                   </View>
-                  <TextInput
-                    style={[styles.input, styles.inputMultiline]}
-                    placeholder="ביו"
-                    value={bio}
-                    onChangeText={setBio}
-                    multiline
-                    editable={!isLoading}
-                    placeholderTextColor="#9AA0A6"
-                  />
-                </>
-              ) : null}
-
-              <View style={styles.divider} />
-
-              <TextInput
-                style={styles.input}
-                placeholder="סיסמה"
-                value={password}
-                onChangeText={setPassword}
-                secureTextEntry
-                editable={!isLoading}
-                placeholderTextColor="#9AA0A6"
-              />
-
-              <TextInput
-                style={styles.input}
-                placeholder="אימות סיסמה"
-                value={confirmPassword}
-                onChangeText={setConfirmPassword}
-                secureTextEntry
-                editable={!isLoading}
-                placeholderTextColor="#9AA0A6"
-              />
+                  <Text style={[styles.sheetSubtitle, { marginTop: 8, textAlign: 'center' }]}>{`שלב 2 מתוך 4`}</Text>
+                </View>
+              </>
+            ) : mode === 'user' && formStep === 2 ? (
+              <>
+                {error ? <Text style={styles.error}>{error}</Text> : null}
+                <View style={styles.form}>
+                  <View style={styles.cardPlain}>
+                    <TouchableOpacity onPress={handlePickImage} activeOpacity={0.85} style={styles.avatarFrame}>
+                      <View style={styles.avatarContainer}>
+                        <View style={styles.avatarRing}>
+                          {avatarUrl ? (
+                            <Image source={{ uri: avatarUrl }} style={styles.avatarImage} />
+                          ) : (
+                            <View style={styles.avatarPlaceholder}>
+                              <Camera size={28} color="#9CA3AF" />
+                            </View>
+                          )}
+                          <View style={styles.avatarBadge}>
+                            <Pencil size={14} color="#fff" />
+                          </View>
+                        </View>
+                      </View>
+                    </TouchableOpacity>
+                  </View>
+                  <View style={{ flexDirection: 'row', gap: 12, alignItems: 'center' }}>
+                    <TouchableOpacity
+                      style={[styles.button, isLoading && styles.buttonDisabled, { flex: 1 }]}
+                      onPress={handleNextFromAvatar}
+                      disabled={isLoading}
+                    >
+                      {isLoading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.buttonText}>הבא</Text>}
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      accessibilityRole="button"
+                      accessibilityLabel="חזרה"
+                      onPress={() => setFormStep(1)}
+                      style={styles.iconButton}
+                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                      disabled={isLoading}
+                    >
+                      <ChevronRight size={28} color="#6B7280" />
+                    </TouchableOpacity>
+                  </View>
+                  <Text style={[styles.sheetSubtitle, { marginTop: 8, textAlign: 'center' }]}>{`שלב 3 מתוך 4`}</Text>
+                </View>
+              </>
+            ) : (
+              <>
+                {error ? <Text style={styles.error}>{error}</Text> : null}
+                <View style={styles.form}>
+                  <View style={styles.cardPlain}>
+                    <Text style={styles.label}>אימייל</Text>
+                    <TextInput
+                      style={styles.input}
+                      placeholder="name@example.com"
+                      value={email}
+                      onChangeText={setEmail}
+                      autoCapitalize="none"
+                      keyboardType="email-address"
+                      editable={!isLoading}
+                      placeholderTextColor="#9DA4AE"
+                    />
+                    <View style={styles.divider} />
+                    <Text style={styles.label}>סיסמה</Text>
+                    <View style={styles.inputWrapper}>
+                      <TextInput
+                        style={styles.input}
+                        placeholder="הקלד סיסמה"
+                        value={password}
+                        onChangeText={setPassword}
+                        secureTextEntry={!isPasswordVisible}
+                        editable={!isLoading}
+                        placeholderTextColor="#9DA4AE"
+                      />
+                      <TouchableOpacity
+                        accessibilityRole="button"
+                        accessibilityLabel={isPasswordVisible ? 'הסתר סיסמה' : 'הצג סיסמה'}
+                        onPress={() => setPasswordVisible((v) => !v)}
+                        style={styles.inputIconButton}
+                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                      >
+                        {isPasswordVisible ? <EyeOff color="#6B7280" /> : <Eye color="#6B7280" />}
+                      </TouchableOpacity>
+                    </View>
+                    <Text style={styles.label}>אימות סיסמה</Text>
+                    <View style={styles.inputWrapper}>
+                      <TextInput
+                        style={styles.input}
+                        placeholder="הקלד שוב את הסיסמה"
+                        value={confirmPassword}
+                        onChangeText={setConfirmPassword}
+                        secureTextEntry={!isConfirmPasswordVisible}
+                        editable={!isLoading}
+                        placeholderTextColor="#9DA4AE"
+                      />
+                      <TouchableOpacity
+                        accessibilityRole="button"
+                        accessibilityLabel={isConfirmPasswordVisible ? 'הסתר סיסמה' : 'הצג סיסמה'}
+                        onPress={() => setConfirmPasswordVisible((v) => !v)}
+                        style={styles.inputIconButton}
+                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                      >
+                        {isConfirmPasswordVisible ? <EyeOff color="#6B7280" /> : <Eye color="#6B7280" />}
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                  <View style={{ flexDirection: 'row', gap: 12, alignItems: 'center' }}>
+                    <TouchableOpacity
+                      style={[styles.button, isLoading && styles.buttonDisabled, { flex: 1 }]}
+                      onPress={handleRegister}
+                      disabled={isLoading}
+                    >
+                      {isLoading ? (
+                        <ActivityIndicator color="#FFF" />
+                      ) : (
+                        <Text style={styles.buttonText}>
+                          {mode === 'owner' ? 'ממשיכים' : 'יאללה, נכנסים'}
+                        </Text>
+                      )}
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      accessibilityRole="button"
+                      accessibilityLabel="חזרה"
+                      onPress={() => setFormStep(mode === 'user' ? 1 : 0)}
+                      style={styles.iconButton}
+                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                      disabled={isLoading}
+                    >
+                      <ChevronRight size={28} color="#6B7280" />
+                    </TouchableOpacity>
+                  </View>
+                  <Text style={[styles.sheetSubtitle, { marginTop: 8, textAlign: 'center' }]}>
+                    {mode === 'user' ? 'שלב 4 מתוך 4' : 'שלב 2 מתוך 2'}
+                  </Text>
+                </View>
+              </>
+            )}
+              </ScrollView>
             </View>
-
-            <TouchableOpacity
-              style={[styles.button, isLoading && styles.buttonDisabled]}
-              onPress={handleRegister}
-              disabled={isLoading}>
-              {isLoading ? (
-                <ActivityIndicator color="#FFF" />
-              ) : (
-                <Text style={styles.buttonText}>
-                  {mode === 'owner' ? 'המשך הרשמה' : 'הירשם'}
-                </Text>
-              )}
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.linkContainer}
-              onPress={() => router.replace('/auth/login')}
-              disabled={isLoading}>
-              <Text style={styles.linkText}>יש לך חשבון? התחבר כאן</Text>
-            </TouchableOpacity>
-          </View>
+          ) : null}
         </View>
-      </ScrollView>
+      </View>
+      {/* Gender picker modal */}
+      <Modal visible={isGenderPickerOpen} transparent animationType="fade" onRequestClose={() => setIsGenderPickerOpen(false)}>
+        <TouchableOpacity style={styles.modalBackdrop} activeOpacity={1} onPress={() => setIsGenderPickerOpen(false)}>
+          <View />
+        </TouchableOpacity>
+        <View style={styles.modalSheet}>
+          <Text style={styles.modalTitle}>בחר/י מגדר</Text>
+          <TouchableOpacity style={styles.optionItem} onPress={() => { setGender('male'); setIsGenderPickerOpen(false); }}>
+            <Text style={styles.optionText}>זכר</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.optionItem} onPress={() => { setGender('female'); setIsGenderPickerOpen(false); }}>
+            <Text style={styles.optionText}>נקבה</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.optionItem} onPress={() => { setGender('other'); setIsGenderPickerOpen(false); }}>
+            <Text style={styles.optionText}>אחר</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.optionItem, { marginTop: 6 }]} onPress={() => setIsGenderPickerOpen(false)}>
+            <Text style={[styles.optionText, { color: '#6B7280' }]}>ביטול</Text>
+          </TouchableOpacity>
+        </View>
+      </Modal>
+      {/* Age picker modal */}
+      <Modal visible={isAgePickerOpen} transparent animationType="fade" onRequestClose={() => setIsAgePickerOpen(false)}>
+        <TouchableOpacity style={styles.modalBackdrop} activeOpacity={1} onPress={() => setIsAgePickerOpen(false)}>
+          <View />
+        </TouchableOpacity>
+        <View style={styles.modalSheet}>
+          <Text style={styles.modalTitle}>בחר/י גיל</Text>
+          <ScrollView style={{ maxHeight: 320 }}>
+            {Array.from({ length: 65 - 18 + 1 }).map((_, idx) => {
+              const val = String(18 + idx);
+              return (
+                <TouchableOpacity key={val} style={styles.optionItem} onPress={() => { setAge(val); setIsAgePickerOpen(false); }}>
+                  <Text style={styles.optionText}>{val}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+          <TouchableOpacity style={[styles.optionItem, { marginTop: 6 }]} onPress={() => setIsAgePickerOpen(false)}>
+            <Text style={[styles.optionText, { color: '#6B7280' }]}>ביטול</Text>
+          </TouchableOpacity>
+        </View>
+      </Modal>
     </KeyboardAvoidingView>
   );
 }
@@ -472,7 +697,29 @@ export default function RegisterScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0F0F14',
+    backgroundColor: '#FFFFFF',
+  },
+  bgWrap: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 0,
+  },
+  bgBlobTop: {
+    position: 'absolute',
+    top: 60,
+    left: -80,
+    width: 260,
+    height: 260,
+    borderRadius: 130,
+    transform: [{ rotate: '15deg' }],
+  },
+  bgBlobBottom: {
+    position: 'absolute',
+    bottom: -100,
+    right: -80,
+    width: 320,
+    height: 320,
+    borderRadius: 160,
+    transform: [{ rotate: '-10deg' }],
   },
   scrollContent: {
     flexGrow: 1,
@@ -483,13 +730,47 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingVertical: 40,
   },
+  contentForSheet: {
+    paddingBottom: 0,
+  },
+  contentBottom: {
+    justifyContent: 'flex-end',
+    paddingBottom: 0,
+  },
   header: {
-    alignItems: 'flex-end',
+    alignItems: 'center',
     marginBottom: 32,
+  },
+  headerCentered: {
+    flex: 1,
+    justifyContent: 'center',
+    marginBottom: 0,
+  },
+  headerLogo: {
+    alignSelf: 'center',
+    width: 320,
+    height: 96,
+    marginTop: 8,
+    marginBottom: 8,
+  },
+  heroText: {
+    alignItems: 'center',
+    marginBottom: 12,
   },
   avatarContainer: {
     alignSelf: 'center',
     marginBottom: 16,
+  },
+  avatarFrame: {
+    borderWidth: 1.4,
+    borderColor: '#E5E7EB',
+    borderStyle: 'dashed',
+    borderRadius: 16,
+    padding: 16,
+    width: '100%',
+    aspectRatio: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   avatarRing: {
     width: 104,
@@ -502,9 +783,10 @@ const styles = StyleSheet.create({
     width: 96,
     height: 96,
     borderRadius: 48,
-    backgroundColor: '#17171F',
-    borderWidth: 1,
-    borderColor: '#2A2A37',
+    backgroundColor: '#F3F4F6',
+    borderWidth: 2,
+    borderColor: '#D1D5DB',
+    borderStyle: 'dashed',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -523,29 +805,72 @@ const styles = StyleSheet.create({
     backgroundColor: PRIMARY,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: '#FFFFFF',
+    borderWidth: 0,
   },
   title: {
     fontSize: 28,
     fontWeight: '700',
-    color: '#FFFFFF',
+    color: PRIMARY,
     marginTop: 16,
-    textAlign: 'right',
+    textAlign: 'center',
   },
   subtitle: {
     fontSize: 16,
-    color: '#9DA4AE',
+    color: PRIMARY,
     marginTop: 8,
-    textAlign: 'right',
+    textAlign: 'center',
+  },
+  sheet: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    paddingHorizontal: 40,
+    paddingTop: 24,
+    paddingBottom: 28,
+    marginHorizontal: -24,
+    marginTop: 0,
+    marginBottom: 0,
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  sheetLowered: {
+    marginTop: 56,
+  },
+  sheetStep0: {
+    flex: 0,
+    minHeight: '40%',
+  },
+  sheetHeader: {
+    alignItems: 'center',
+    marginBottom: 26,
+  },
+  sheetTitle: {
+    fontSize: 22,
+    fontWeight: '800',
+    color: PRIMARY,
+    textAlign: 'center',
+  },
+  sheetIntro: {
+    marginTop: 4,
+    fontSize: 14,
+    fontWeight: '400',
+    color: PRIMARY,
+    textAlign: 'center',
+  },
+  sheetSubtitle: {
+    marginTop: 4,
+    fontSize: 14,
+    color: PRIMARY,
+    textAlign: 'center',
   },
   form: {
-    gap: 16,
+    gap: 12,
   },
   card: {
-    backgroundColor: '#141420',
+    backgroundColor: 'rgba(255,255,255,0.18)',
     borderWidth: 1,
-    borderColor: '#2A2A37',
+    borderColor: '#E5E7EB',
     padding: 16,
     borderRadius: 16,
     gap: 12,
@@ -553,22 +878,61 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.08,
     shadowRadius: 8,
     shadowOffset: { width: 0, height: 4 },
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  cardPlain: {
+    gap: 12,
+  },
+  label: {
+    color: PRIMARY,
+    fontSize: 13,
+    fontWeight: '600',
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    paddingRight: 16,
+    marginBottom: 0,
   },
   input: {
-    backgroundColor: '#17171F',
+    backgroundColor: '#FFFFFF',
     paddingHorizontal: 16,
     paddingVertical: 14,
     borderRadius: 12,
     fontSize: 16,
     borderWidth: 1,
-    borderColor: '#2A2A37',
-    color: '#FFFFFF',
+    borderColor: '#E5E7EB',
+    color: '#111827',
     textAlign: 'right',
     writingDirection: 'rtl',
   },
   inputMultiline: {
     height: 96,
     textAlignVertical: 'top',
+  },
+  inputWrapper: {
+    position: 'relative',
+    justifyContent: 'center',
+  },
+  inputIconButton: {
+    position: 'absolute',
+    left: 12,
+    top: 12,
+  },
+  selectInput: {
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  selectText: {
+    color: '#111827',
+    fontSize: 16,
+    textAlign: 'right',
+  },
+  selectTextPlaceholder: {
+    color: '#9DA4AE',
   },
   row: {
     flexDirection: 'row',
@@ -580,7 +944,7 @@ const styles = StyleSheet.create({
   },
   divider: {
     height: 1,
-    backgroundColor: '#2A2A37',
+    backgroundColor: '#E5E7EB',
     marginVertical: 4,
   },
   button: {
@@ -598,11 +962,17 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
+  iconButton: {
+    paddingHorizontal: 8,
+    paddingVertical: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   choiceButton: {
     flex: 1,
-    backgroundColor: '#17171F',
+    backgroundColor: 'rgba(255,255,255,0.18)',
     borderWidth: 1,
-    borderColor: '#2A2A37',
+    borderColor: '#E5E7EB',
     paddingVertical: 12,
     borderRadius: 12,
     alignItems: 'center',
@@ -612,7 +982,7 @@ const styles = StyleSheet.create({
     borderColor: PRIMARY,
   },
   choiceText: {
-    color: '#9DA4AE',
+    color: '#111827',
     fontSize: 14,
     fontWeight: '600',
   },
@@ -627,6 +997,44 @@ const styles = StyleSheet.create({
     color: PRIMARY,
     fontSize: 14,
     textAlign: 'right',
+  },
+  modalBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.25)',
+  },
+  modalSheet: {
+    position: 'absolute',
+    left: 24,
+    right: 24,
+    top: '35%',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  modalTitle: {
+    textAlign: 'center',
+    color: PRIMARY,
+    fontSize: 16,
+    fontWeight: '700',
+    marginBottom: 8,
+  },
+  optionItem: {
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F3F4F6',
+  },
+  optionText: {
+    textAlign: 'center',
+    fontSize: 16,
+    color: '#111827',
+  },
+  backBtn: {
+    position: 'absolute',
+    left: 16,
+    zIndex: 50,
   },
   error: {
     backgroundColor: 'rgba(255,59,48,0.12)',
@@ -652,6 +1060,115 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     padding: 2,
     position: 'relative',
+  },
+  stepChooser: {
+    marginBottom: 16,
+  },
+  stepTitle: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '800',
+    textAlign: 'right',
+    marginBottom: 12,
+  },
+  stepOptionsRow: {
+    flexDirection: 'column',
+    gap: 12,
+    marginBottom: 12,
+  },
+  stepChooserLabel: {
+    color: PRIMARY,
+    fontSize: 13,
+    fontWeight: '700',
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    marginTop: 8,
+    marginBottom: 6,
+    paddingRight: 2,
+  },
+  step0Card: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    padding: 16,
+    paddingTop: 20,
+    gap: 8,
+    shadowColor: '#000',
+    shadowOpacity: 0.06,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 3,
+    marginBottom: 12,
+  },
+  optionCard: {
+    width: '100%',
+    backgroundColor: '#F9FAFB',
+    borderWidth: 1,
+    borderColor: '#9CA3AF',
+    borderRadius: 14,
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+    alignItems: 'stretch',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  optionCardActive: {
+    backgroundColor: '#F9FAFB',
+    borderColor: PRIMARY,
+  },
+  optionTitle: {
+    color: '#6B7280',
+    fontSize: 16,
+    fontWeight: '800',
+    textAlign: 'right',
+  },
+  optionTitleActive: {
+    color: PRIMARY,
+  },
+  optionSub: {
+    color: '#6B7280',
+    fontSize: 12,
+    marginTop: 4,
+    textAlign: 'right',
+  },
+  optionSubActive: {
+    color: PRIMARY,
+  },
+  optionContentRow: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    width: '100%',
+  },
+  optionTextWrap: {
+    flex: 1,
+    alignItems: 'flex-end',
+  },
+  optionCheckBadge: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: PRIMARY,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 6,
+  },
+  glassWrap: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: 14,
+    overflow: 'hidden',
+  },
+  glassBlur: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  glassTint: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(255,255,255,0.22)',
+  },
+  glassWrapSheet: {
+    ...StyleSheet.absoluteFillObject,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    overflow: 'hidden',
   },
   segmentThumb: {
     position: 'absolute',
@@ -681,21 +1198,26 @@ const styles = StyleSheet.create({
   },
   suggestionsBox: {
     marginTop: 6,
-    backgroundColor: '#17171F',
+    backgroundColor: '#FFFFFF',
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#2A2A37',
+    borderColor: '#E5E7EB',
     overflow: 'hidden',
   },
   suggestionItem: {
     paddingVertical: 10,
     paddingHorizontal: 12,
     borderBottomWidth: 1,
-    borderBottomColor: '#2A2A37',
+    borderBottomColor: '#E5E7EB',
   },
   suggestionText: {
-    color: '#E5E7EB',
+    color: '#111827',
     fontSize: 14,
     textAlign: 'right',
+  },
+  glassWrapCard: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: 16,
+    overflow: 'hidden',
   },
 });

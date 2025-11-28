@@ -14,11 +14,7 @@ function GlobalTopBarBase() {
     >
       <View
         {...(!isWeb ? { pointerEvents: 'box-none' as const } : {})}
-        style={[
-          styles.inner,
-          { paddingTop: Math.max(12, insets.top + 8), paddingBottom: 6 },
-          isWeb ? ({ pointerEvents: 'box-none' } as const) : undefined,
-        ]}
+        style={[styles.inner, { paddingTop: insets.top, paddingBottom: 0 }, isWeb ? ({ pointerEvents: 'box-none' } as const) : undefined]}
       >
         {/* Left: notifications */}
         <NotificationsButton style={{ left: 16 }} />
@@ -27,7 +23,7 @@ function GlobalTopBarBase() {
           {...(!isWeb ? { pointerEvents: 'none' as const } : {})}
           style={[
             styles.centerWrap,
-            { top: Math.max(12, insets.top + 8) },
+            { top: insets.top },
             isWeb ? ({ pointerEvents: 'none' } as const) : undefined,
           ]}
         >

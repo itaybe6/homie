@@ -15,7 +15,10 @@ export default function RootLayout() {
   const { setUser, setLoading } = useAuthStore();
   usePushNotifications();
   const pathname = usePathname();
-  const showTopBar = pathname !== '/auth/intro' && pathname !== '/auth/login';
+  const showTopBar =
+    pathname !== '/auth/intro' &&
+    pathname !== '/auth/login' &&
+    pathname !== '/auth/register';
 
   useEffect(() => {
     let isMounted = true;
