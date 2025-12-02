@@ -14,6 +14,8 @@ function GlobalTopBarBase() {
   const showMatchButton =
     p === '/(tabs)/home' ||
     p === '/home' ||
+    p.startsWith('/(tabs)/apartment/') ||
+    p.startsWith('/apartment/') ||
     p === '/(tabs)/profile' ||
     p === '/profile' ||
     p === '/(tabs)/partners' ||

@@ -83,6 +83,8 @@ export default function MatchRequestsScreen() {
     }
     try {
       setLoading(true);
+      // eslint-disable-next-line no-console
+      console.log('[match-requests] fetchAll start', { userId: user.id });
       // My active group ids (for incoming group-targeted matches)
       const { data: myMemberships } = await supabase
         .from('profile_group_members')
@@ -90,6 +92,8 @@ export default function MatchRequestsScreen() {
         .eq('user_id', user.id)
         .eq('status', 'ACTIVE');
       const myGroupIds = (myMemberships || []).map((r: any) => r.group_id as string);
+      // eslint-disable-next-line no-console
+      console.log('[match-requests] myGroupIds', myGroupIds);
 
       const [
         { data: mSent, error: mSErr },
@@ -105,8 +109,14 @@ export default function MatchRequestsScreen() {
       if (mSErr) throw mSErr;
       if (mRErr) throw mRErr;
       const mRecvGroup = (groupRecvResult as any)?.data || [];
+      // eslint-disable-next-line no-console
+      console.log('[match-requests] base queries', {
+        sentCount: (mSent || []).length,
+        recvCount: (mRecv || []).length,
+        recvGroupCount: (mRecvGroup || []).length,
+      });
 
-      const matchSent: UnifiedMatchItem[] = (mSent || [])
+      let matchSent: UnifiedMatchItem[] = (mSent || [])
         .filter((row: any) => mapMatchStatus(row.status) !== 'NOT_RELEVANT')
         .map((row: any) => ({
           id: row.id,
@@ -133,6 +143,8 @@ export default function MatchRequestsScreen() {
       const incomingSenderIds = Array.from(new Set((mRecv || []).map((r: any) => r.sender_id).filter(Boolean)));
       let senderToGroupId: Record<string, string> = {};
       if (incomingSenderIds.length) {
+        // eslint-disable-next-line no-console
+        console.log('[match-requests] enriching incoming senders', { incomingSenderIds });
         const { data: sMemberships } = await supabase
           .from('profile_group_members')
           .select('user_id, group_id')
@@ -144,6 +156,8 @@ export default function MatchRequestsScreen() {
           senderToGroupId[m.user_id] = m.group_id;
           senderGroupIds.add(m.group_id);
         });
+        // eslint-disable-next-line no-console
+        console.log('[match-requests] senderToGroupId map', senderToGroupId);
         if (senderGroupIds.size) {
           const { data: sGroupMembers } = await supabase
             .from('profile_group_members')
@@ -156,6 +170,8 @@ export default function MatchRequestsScreen() {
             if (!gm[m.group_id].includes(m.user_id)) gm[m.group_id].push(m.user_id);
           });
           setGroupMembersByGroupId((prev) => ({ ...prev, ...gm }));
+          // eslint-disable-next-line no-console
+          console.log('[match-requests] merged incoming sender group members', gm);
         }
         matchRecv = matchRecv.map((row: any) => ({
           ...row,
@@ -175,6 +191,66 @@ export default function MatchRequestsScreen() {
           created_at: row.created_at,
           _receiver_group_id: row.receiver_group_id,
         }));
+      // eslint-disable-next-line no-console
+      console.log('[match-requests] matchRecvFromGroups count', (matchRecvFromGroups || []).length);
+
+      // Enrich SENT matches where the recipient belongs to a merged profile (show recipient's group)
+      try {
+        const sentRecipientIds = Array.from(
+          new Set((mSent || []).map((r: any) => r?.receiver_id).filter(Boolean))
+        ) as string[];
+        if (sentRecipientIds.length) {
+          // eslint-disable-next-line no-console
+          console.log('[match-requests] enriching sent recipients', { sentRecipientIds });
+          const { data: rMemberships } = await supabase
+            .from('profile_group_members')
+            .select('user_id, group_id')
+            .eq('status', 'ACTIVE')
+            .in('user_id', sentRecipientIds);
+          const recvToGroupId: Record<string, string> = {};
+          const recvGroupIds = new Set<string>();
+          (rMemberships || []).forEach((m: any) => {
+            recvToGroupId[m.user_id] = m.group_id;
+            recvGroupIds.add(m.group_id);
+          });
+          // eslint-disable-next-line no-console
+          console.log('[match-requests] recvToGroupId map', recvToGroupId);
+          if (recvGroupIds.size) {
+            const { data: rGroupMembers } = await supabase
+              .from('profile_group_members')
+              .select('group_id, user_id')
+              .eq('status', 'ACTIVE')
+              .in('group_id', Array.from(recvGroupIds));
+            const gm: Record<string, string[]> = {};
+            (rGroupMembers || []).forEach((m: any) => {
+              if (!gm[m.group_id]) gm[m.group_id] = [];
+              if (!gm[m.group_id].includes(m.user_id)) gm[m.group_id].push(m.user_id);
+            });
+            // merge into global map so avatars are available
+            setGroupMembersByGroupId((prev) => {
+              const next = { ...prev };
+              Object.entries(gm).forEach(([gid, ids]) => {
+                if (!next[gid]) next[gid] = [];
+                ids.forEach((id) => {
+                  if (!next[gid].includes(id)) next[gid].push(id);
+                });
+              });
+              return next;
+            });
+            // eslint-disable-next-line no-console
+            console.log('[match-requests] merged recipient group members', gm);
+          }
+          // attach receiver group id to sent rows (for rendering)
+          matchSent = matchSent.map((row: any) => ({
+            ...row,
+            _receiver_group_id: row._receiver_group_id || recvToGroupId[row.recipient_id as string] || null,
+          }));
+          // eslint-disable-next-line no-console
+          console.log('[match-requests] matchSent after receiver group attach', matchSent.map((r) => ({ id: r.id, receiver_group: (r as any)?._receiver_group_id })));
+        }
+      } catch {
+        // ignore enrichment failures
+      }
 
       const sentUnified = [...matchSent].sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
       const recvUnifiedRaw = [...matchRecv, ...matchRecvFromGroups].sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
@@ -233,6 +309,12 @@ export default function MatchRequestsScreen() {
 
       setSent(normalizeSent as any);
       setReceived(normalizeRecv as any);
+      // eslint-disable-next-line no-console
+      console.log('[match-requests] normalized', {
+        sent: (normalizeSent || []).length,
+        recv: (normalizeRecv || []).length,
+        groupKeys: Object.keys(groupIdToMemberIds || {}),
+      });
 
       const userIds = Array.from(
         new Set<string>([
@@ -251,6 +333,8 @@ export default function MatchRequestsScreen() {
           map[u.id] = u;
         });
         setUsersById(map);
+        // eslint-disable-next-line no-console
+        console.log('[match-requests] users loaded', Object.keys(map).length);
       } else {
         setUsersById({});
       }
@@ -521,18 +605,63 @@ export default function MatchRequestsScreen() {
                       )}
                     </View>
                   </View>
-                  {!isGroupMatch && (
-                    <TouchableOpacity
-                      style={styles.avatarWrap}
-                      activeOpacity={0.85}
-                      onPress={() => {
-                        const id = incoming ? item.sender_id : item.recipient_id;
-                        if (id) router.push({ pathname: '/user/[id]', params: { id } });
-                      }}
-                    >
-                      <Image source={{ uri: (incoming ? usersById[item.sender_id]?.avatar_url : (item.recipient_id ? usersById[item.recipient_id]?.avatar_url : undefined)) || DEFAULT_AVATAR }} style={styles.avatarImg} />
-                    </TouchableOpacity>
-                  )}
+                  <TouchableOpacity
+                    style={styles.avatarWrap}
+                    activeOpacity={0.85}
+                    onPress={() => {
+                      const id = incoming ? item.sender_id : item.recipient_id;
+                      if (id) router.push({ pathname: '/user/[id]', params: { id } });
+                    }}
+                  >
+                    {(isGroupMatch && groupMembers.length) ? (
+                      (() => {
+                        const gm = groupMembers.slice(0, 4);
+                        if (gm.length === 1) {
+                          const m = gm[0];
+                          return (
+                            <Image
+                              source={{ uri: m?.avatar_url || DEFAULT_AVATAR }}
+                              style={{ width: '100%', height: '100%' }}
+                              resizeMode="cover"
+                            />
+                          );
+                        }
+                        if (gm.length === 2) {
+                          return (
+                            <View style={{ flex: 1, flexDirection: 'row' }}>
+                              {gm.map((m, idx) => (
+                                <View key={idx} style={{ width: '50%', height: '100%' }}>
+                                  <Image
+                                    source={{ uri: m?.avatar_url || DEFAULT_AVATAR }}
+                                    style={{ width: '100%', height: '100%' }}
+                                    resizeMode="cover"
+                                  />
+                                </View>
+                              ))}
+                            </View>
+                          );
+                        }
+                        return (
+                          <View style={{ flex: 1, flexDirection: 'row', flexWrap: 'wrap' }}>
+                            {gm.map((m, idx) => (
+                              <View key={idx} style={{ width: '50%', height: '50%' }}>
+                                <Image
+                                  source={{ uri: m?.avatar_url || DEFAULT_AVATAR }}
+                                  style={{ width: '100%', height: '100%' }}
+                                  resizeMode="cover"
+                                />
+                              </View>
+                            ))}
+                          </View>
+                        );
+                      })()
+                    ) : (
+                      <Image
+                        source={{ uri: (incoming ? usersById[item.sender_id]?.avatar_url : (item.recipient_id ? usersById[item.recipient_id]?.avatar_url : undefined)) || DEFAULT_AVATAR }}
+                        style={styles.avatarImg}
+                      />
+                    )}
+                  </TouchableOpacity>
                 </View>
               </View>
             );

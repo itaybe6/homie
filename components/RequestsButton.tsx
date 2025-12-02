@@ -24,20 +24,13 @@ function RequestsButtonBase({ style, badgeCount }: Props) {
         if (isMounted) setCount(0);
         return;
       }
-      // Count pending incoming apartment requests + pending incoming matches
-      const [{ count: c1 }, { count: c2 }] = await Promise.all([
-        supabase
-          .from('apartments_request')
-          .select('id', { count: 'exact', head: true })
-          .eq('recipient_id', user.id)
-          .eq('status', 'PENDING'),
-        supabase
-          .from('matches')
-          .select('id', { count: 'exact', head: true })
-          .eq('receiver_id', user.id)
-          .eq('status', 'PENDING'),
-      ]);
-      if (isMounted) setCount((c1 || 0) + (c2 || 0));
+      // Count only pending incoming apartment requests (matches moved to MatchRequestsButton)
+      const { count: c1 } = await supabase
+        .from('apartments_request')
+        .select('id', { count: 'exact', head: true })
+        .eq('recipient_id', user.id)
+        .eq('status', 'PENDING');
+      if (isMounted) setCount(c1 || 0);
     };
 
     fetchCount();
@@ -48,11 +41,6 @@ function RequestsButtonBase({ style, badgeCount }: Props) {
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'apartments_request', filter: user?.id ? `recipient_id=eq.${user.id}` : undefined },
-        () => fetchCount()
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'matches', filter: user?.id ? `receiver_id=eq.${user.id}` : undefined },
         () => fetchCount()
       )
       .subscribe();

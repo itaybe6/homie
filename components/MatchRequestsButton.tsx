@@ -1,8 +1,10 @@
-import { memo } from 'react';
-import { TouchableOpacity, StyleSheet, View, ViewStyle } from 'react-native';
+import { memo, useEffect, useState } from 'react';
+import { TouchableOpacity, StyleSheet, View, ViewStyle, Text } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { UserPlus2 } from 'lucide-react-native';
+import { supabase } from '@/lib/supabase';
+import { useAuthStore } from '@/stores/authStore';
 
 type Props = {
   style?: ViewStyle;
@@ -11,6 +13,40 @@ type Props = {
 function MatchRequestsButtonBase({ style }: Props) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const user = useAuthStore((s) => s.user);
+  const [count, setCount] = useState<number>(0);
+
+  useEffect(() => {
+    let isMounted = true;
+    const fetchCount = async () => {
+      if (!user?.id) {
+        if (isMounted) setCount(0);
+        return;
+      }
+      // Count pending incoming matches only
+      const { count: c } = await supabase
+        .from('matches')
+        .select('id', { count: 'exact', head: true })
+        .eq('receiver_id', user.id)
+        .eq('status', 'PENDING');
+      if (isMounted) setCount(c || 0);
+    };
+    fetchCount();
+
+    // Realtime updates for matches addressed to me
+    const channel = supabase
+      .channel(`match-requests-count:${user?.id || 'anon'}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'matches', filter: user?.id ? `receiver_id=eq.${user.id}` : undefined },
+        () => fetchCount()
+      )
+      .subscribe();
+    return () => {
+      isMounted = false;
+      supabase.removeChannel(channel);
+    };
+  }, [user?.id]);
 
   return (
     <View style={[styles.wrap, { marginTop: Math.max(6, insets.top + 2) }, style]}>
@@ -22,6 +58,11 @@ function MatchRequestsButtonBase({ style }: Props) {
         style={styles.btn}
       >
         <UserPlus2 size={18} color="#FFFFFF" />
+        {count > 0 ? (
+          <View style={styles.badge}>
+            <Text style={styles.badgeText}>{count > 99 ? '99+' : String(count)}</Text>
+          </View>
+        ) : null}
       </TouchableOpacity>
     </View>
   );
@@ -44,6 +85,25 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.16)',
+  },
+  badge: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    minWidth: 18,
+    height: 18,
+    paddingHorizontal: 4,
+    borderRadius: 9,
+    backgroundColor: 'rgba(124,92,255,0.85)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(15,15,20,0.8)',
+  },
+  badgeText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '800',
   },
 });
 
