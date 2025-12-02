@@ -1762,10 +1762,7 @@ const styles = StyleSheet.create({
     marginLeft: 8,
   },
 });
-<<<<<<< HEAD
 
 
 
 
-=======
->>>>>>> 4d0c47d42fb99bbe067ce53a7f8ca278d4f3c5e4

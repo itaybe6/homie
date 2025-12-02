@@ -365,7 +365,7 @@ export default function HomeScreen() {
                 {isNeighborhoodDropdownOpen && neighborhoodOptions.length > 0 ? (
                   <View style={styles.suggestionsBox}>
                     <TextInput
-                      style={styles.searchInput}
+                      style={styles.dropdownSearchInput}
                       placeholder="חפש שכונה..."
                       placeholderTextColor="#9DA4AE"
                       value={neighborhoodSearchQuery}
@@ -757,7 +757,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginLeft: 8,
   },
-  searchInput: {
+  dropdownSearchInput: {
     backgroundColor: '#1B1B28',
     paddingHorizontal: 12,
     paddingVertical: 10,
