@@ -85,6 +85,8 @@ export default function MatchRequestsScreen() {
       setLoading(true);
       // eslint-disable-next-line no-console
       console.log('[match-requests] fetchAll start', { userId: user.id });
+      // Local accumulator to avoid state write-read races inside a single fetch
+      const collectedGroupMembers: Record<string, string[]> = {};
       // My active group ids (for incoming group-targeted matches)
       const { data: myMemberships } = await supabase
         .from('profile_group_members')
@@ -169,7 +171,13 @@ export default function MatchRequestsScreen() {
             if (!gm[m.group_id]) gm[m.group_id] = [];
             if (!gm[m.group_id].includes(m.user_id)) gm[m.group_id].push(m.user_id);
           });
-          setGroupMembersByGroupId((prev) => ({ ...prev, ...gm }));
+          // accumulate locally; we'll merge once at the end of fetchAll
+          Object.entries(gm).forEach(([gid, ids]) => {
+            if (!collectedGroupMembers[gid]) collectedGroupMembers[gid] = [];
+            ids.forEach((id) => {
+              if (!collectedGroupMembers[gid].includes(id)) collectedGroupMembers[gid].push(id);
+            });
+          });
           // eslint-disable-next-line no-console
           console.log('[match-requests] merged incoming sender group members', gm);
         }
@@ -226,17 +234,13 @@ export default function MatchRequestsScreen() {
               if (!gm[m.group_id]) gm[m.group_id] = [];
               if (!gm[m.group_id].includes(m.user_id)) gm[m.group_id].push(m.user_id);
             });
-            // merge into global map so avatars are available
-            setGroupMembersByGroupId((prev) => {
-              const next = { ...prev };
-              Object.entries(gm).forEach(([gid, ids]) => {
-                if (!next[gid]) next[gid] = [];
-                ids.forEach((id) => {
-                  if (!next[gid].includes(id)) next[gid].push(id);
-                });
-              });
-              return next;
+          // accumulate locally; we'll merge once at the end of fetchAll
+          Object.entries(gm).forEach(([gid, ids]) => {
+            if (!collectedGroupMembers[gid]) collectedGroupMembers[gid] = [];
+            ids.forEach((id) => {
+              if (!collectedGroupMembers[gid].includes(id)) collectedGroupMembers[gid].push(id);
             });
+          });
             // eslint-disable-next-line no-console
             console.log('[match-requests] merged recipient group members', gm);
           }
@@ -274,8 +278,17 @@ export default function MatchRequestsScreen() {
           groupIdToMemberIds[m.group_id].push(m.user_id);
         });
       }
-      // merge earlier sender group members collected
+      // Merge previously-known state (from earlier fetches) to preserve cache
       Object.entries(groupMembersByGroupId).forEach(([gid, ids]) => {
+        if (!groupIdToMemberIds[gid]) groupIdToMemberIds[gid] = [];
+        ids.forEach((id) => {
+          if (!groupIdToMemberIds[gid].includes(id)) {
+            groupIdToMemberIds[gid].push(id);
+          }
+        });
+      });
+      // Merge newly collected members from this fetch cycle
+      Object.entries(collectedGroupMembers).forEach(([gid, ids]) => {
         if (!groupIdToMemberIds[gid]) groupIdToMemberIds[gid] = [];
         ids.forEach((id) => {
           if (!groupIdToMemberIds[gid].includes(id)) {
