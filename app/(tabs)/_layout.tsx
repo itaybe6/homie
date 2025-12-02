@@ -1,9 +1,79 @@
-import { Tabs } from 'expo-router';
+import { Tabs, useRouter, usePathname } from 'expo-router';
 import { Home, User, Users } from 'lucide-react-native';
 import { BlurView } from 'expo-blur';
-import { Platform, StyleSheet } from 'react-native';
+import { Platform, StyleSheet, Alert } from 'react-native';
+import { useEffect, useRef } from 'react';
+import { useAuthStore } from '@/stores/authStore';
+import { fetchUserSurvey } from '@/lib/survey';
 
 export default function TabLayout() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const { user } = useAuthStore();
+  const hasPromptedRef = useRef(false);
+  const prevUserIdRef = useRef<string | null>(null);
+  const isCheckingSurveyRef = useRef(false);
+
+  useEffect(() => {
+    // Admins should not see the regular tabs – redirect them into admin
+    if ((user as any)?.role === 'admin') {
+      router.replace('/admin' as any);
+      prevUserIdRef.current = user?.id ?? null;
+      hasPromptedRef.current = false;
+      isCheckingSurveyRef.current = false;
+      return;
+    }
+
+    if (!user) {
+      prevUserIdRef.current = null;
+      hasPromptedRef.current = false;
+      isCheckingSurveyRef.current = false;
+      return;
+    }
+
+    if (prevUserIdRef.current !== user.id) {
+      prevUserIdRef.current = user.id;
+      hasPromptedRef.current = false;
+      isCheckingSurveyRef.current = false;
+    }
+
+    if (hasPromptedRef.current || isCheckingSurveyRef.current) return;
+
+    const maybePromptSurvey = async () => {
+      isCheckingSurveyRef.current = true;
+      try {
+        const survey = await fetchUserSurvey(user.id);
+        const hasRow = !!survey;
+        const completed = !!survey?.is_completed;
+        // Do not prompt if currently on the survey screen
+        const isOnSurveyScreen =
+          typeof pathname === 'string' && pathname.includes('/onboarding/survey');
+        if ((!hasRow || !completed) && !isOnSurveyScreen) {
+          hasPromptedRef.current = true;
+          Alert.alert(
+            'שאלון העדפות',
+            'כדי שנמצא לך התאמות טובות, נשמח שתמלא/י את השאלון הקצר.',
+            [
+              { text: 'לא עכשיו', style: 'cancel' },
+              {
+                text: 'לשאלון',
+                onPress: () => router.push('/(tabs)/onboarding/survey'),
+              },
+            ],
+            { cancelable: true }
+          );
+        } else {
+          hasPromptedRef.current = true;
+        }
+      } catch {
+        // ignore failures silently
+      } finally {
+        isCheckingSurveyRef.current = false;
+      }
+    };
+    maybePromptSurvey();
+  }, [user, pathname]);
+
   return (
     <Tabs
       screenOptions={{
@@ -68,7 +138,9 @@ export default function TabLayout() {
       <Tabs.Screen name="apartment/[id]" options={{ href: null }} />
       <Tabs.Screen name="apartment/edit/[id]" options={{ href: null }} />
       <Tabs.Screen name="user/[id]" options={{ href: null }} />
+      <Tabs.Screen name="requests" options={{ href: null }} />
       <Tabs.Screen name="onboarding/survey" options={{ href: null }} />
+      <Tabs.Screen name="notifications" options={{ href: null }} />
     </Tabs>
   );
 }

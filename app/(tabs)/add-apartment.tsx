@@ -19,9 +19,10 @@ import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/authStore';
 import { useApartmentStore } from '@/stores/apartmentStore';
 import * as ImagePicker from 'expo-image-picker';
-import { autocompleteCities, autocompleteAddresses, autocompleteNeighborhoods, createSessionToken, PlacePrediction, getPlaceLocation } from '@/lib/googlePlaces';
-import { fetchNeighborhoodsForCity } from '@/lib/neighborhoods';
-import NotificationsButton from '@/components/NotificationsButton';
+import * as ImageManipulator from 'expo-image-manipulator';
+import { autocompleteAddresses, createSessionToken } from '@/lib/googlePlaces';
+import { getNeighborhoodsForCityName, searchCitiesWithNeighborhoods } from '@/lib/neighborhoods';
+
 
 export default function AddApartmentScreen() {
   const router = useRouter();
@@ -40,14 +41,17 @@ export default function AddApartmentScreen() {
   const [images, setImages] = useState<string[]>([]); // local URIs before upload
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
-  const [citySuggestions, setCitySuggestions] = useState<PlacePrediction[]>([]);
+  const [citySuggestions, setCitySuggestions] = useState<string[]>([]);
   const [sessionToken, setSessionToken] = useState<string>('');
-  const [cityPlaceId, setCityPlaceId] = useState<string | null>(null);
   const [addressSuggestions, setAddressSuggestions] = useState<string[]>([]);
-  const [neighborhoodSuggestions, setNeighborhoodSuggestions] = useState<string[]>([]);
   const [neighborhoodOptions, setNeighborhoodOptions] = useState<string[]>([]);
   const [isNeighborhoodOpen, setIsNeighborhoodOpen] = useState(false);
+  const [neighborhoodSearchQuery, setNeighborhoodSearchQuery] = useState('');
+  const [isLoadingNeighborhoods, setIsLoadingNeighborhoods] = useState(false);
   const [includeAsPartner, setIncludeAsPartner] = useState(false);
+  const [roommateCapacity, setRoommateCapacity] = useState<number | null>(null);
+  const [isRoommateDropdownOpen, setIsRoommateDropdownOpen] = useState(false);
+  const roommateCapacityOptions = [2, 3, 4, 5];
 
   useEffect(() => {
     setSessionToken(createSessionToken());
@@ -55,53 +59,57 @@ export default function AddApartmentScreen() {
 
   useEffect(() => {
     let active = true;
-    const run = async () => {
+    const run = () => {
       const q = city.trim();
-      if (!q || q.length < 2) { setCitySuggestions([]); return; }
-      const preds = await autocompleteCities(q, sessionToken);
-      if (active) setCitySuggestions(preds.slice(0, 8));
+      if (!q || q.length < 1) { setCitySuggestions([]); return; }
+      const names = searchCitiesWithNeighborhoods(q, 8);
+      if (active) setCitySuggestions(names);
     };
     run();
     return () => { active = false; };
-  }, [city, sessionToken]);
+  }, [city]);
 
-  // Load full neighborhoods list for selected city (dropdown)
+  // Load neighborhoods list for selected city from static data (dropdown)
   useEffect(() => {
     let cancelled = false;
-    const load = async () => {
-      if (!cityPlaceId) { setNeighborhoodOptions([]); return; }
-      const loc = await getPlaceLocation(cityPlaceId);
-      if (!loc) { setNeighborhoodOptions([]); return; }
-      const list = await fetchNeighborhoodsForCity({ lat: loc.lat, lng: loc.lng, radiusMeters: 25000 });
-      if (!cancelled) setNeighborhoodOptions(list);
+    const load = () => {
+      const key = (city || '').trim();
+      if (!key) {
+        setNeighborhoodOptions([]);
+        setIsLoadingNeighborhoods(false);
+        return;
+      }
+      setIsLoadingNeighborhoods(true);
+      try {
+        const list = getNeighborhoodsForCityName(key);
+        if (!cancelled) {
+          setNeighborhoodOptions(list);
+          setIsLoadingNeighborhoods(false);
+        }
+      } catch {
+        if (!cancelled) {
+          setNeighborhoodOptions([]);
+          setIsLoadingNeighborhoods(false);
+        }
+      }
     };
     load();
     return () => { cancelled = true; };
-  }, [cityPlaceId]);
+  }, [city]);
 
-  useEffect(() => {
-    let active = true;
-    const run = async () => {
-      const q = neighborhood.trim();
-      if (!q || q.length < 1) { setNeighborhoodSuggestions([]); return; }
-      const list = await autocompleteNeighborhoods(q, cityPlaceId, sessionToken, city);
-      if (active) setNeighborhoodSuggestions(list.slice(0, 10));
-    };
-    run();
-    return () => { active = false; };
-  }, [neighborhood, cityPlaceId, sessionToken, city]);
+  // Removed Google neighborhood autocomplete in favor of static dropdown search
 
   useEffect(() => {
     let active = true;
     const run = async () => {
       const q = address.trim();
       if (!q || q.length < 2) { setAddressSuggestions([]); return; }
-      const preds = await autocompleteAddresses(q, cityPlaceId, sessionToken, city);
+      const preds = await autocompleteAddresses(q, null, sessionToken, city);
       if (active) setAddressSuggestions(preds.slice(0, 8));
     };
     run();
     return () => { active = false; };
-  }, [address, cityPlaceId, sessionToken, city]);
+  }, [address, sessionToken, city]);
 
   const handleBack = () => {
     try {
@@ -150,19 +158,61 @@ export default function AddApartmentScreen() {
     setImages((prev) => prev.filter((_, i) => i !== idx));
   };
 
+  const normalizeImageForUpload = async (
+    sourceUri: string,
+  ): Promise<{ uri: string; ext: string; mime: string }> => {
+    const lowerUri = sourceUri.toLowerCase();
+    const match = lowerUri.match(/\.([a-z0-9]{1,5})(?:\?.*)?$/);
+    const rawExt = match ? match[1] : '';
+    const ext = rawExt === 'jpeg' ? 'jpg' : rawExt;
+    const isHeic = ext === 'heic' || ext === 'heif';
+
+    if (isHeic) {
+      try {
+        const converted = await ImageManipulator.manipulateAsync(
+          sourceUri,
+          [],
+          { compress: 0.9, format: ImageManipulator.SaveFormat.JPEG },
+        );
+        return { uri: converted.uri, ext: 'jpg', mime: 'image/jpeg' };
+      } catch (err) {
+        console.warn('Failed to convert HEIC image', err);
+        throw new Error('לא הצלחנו להמיר קובץ HEIC, נסה שמירה כ-JPEG');
+      }
+    }
+
+    if (ext === 'png') {
+      return { uri: sourceUri, ext: 'png', mime: 'image/png' };
+    }
+
+    if (ext === 'jpg') {
+      return { uri: sourceUri, ext: 'jpg', mime: 'image/jpeg' };
+    }
+
+    // Unknown extension (blob URIs, missing suffix, etc.) → convert to JPEG for safety
+    try {
+      const converted = await ImageManipulator.manipulateAsync(
+        sourceUri,
+        [],
+        { compress: 0.9, format: ImageManipulator.SaveFormat.JPEG },
+      );
+      return { uri: converted.uri, ext: 'jpg', mime: 'image/jpeg' };
+    } catch (err) {
+      console.warn('Failed to normalize image', err);
+      throw new Error('לא הצלחנו לעבד את התמונה, נסה פורמט JPG או PNG');
+    }
+  };
+
   const uploadImage = async (userId: string, uri: string): Promise<string> => {
-    // Try to infer extension safely (blob: URIs won't have one)
-    const match = uri.match(/\.([a-zA-Z0-9]{1,5})(?:\?.*)?$/);
-    const ext = match ? match[1].toLowerCase() : 'jpg';
-    const fileName = `${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
+    const normalized = await normalizeImageForUpload(uri);
+    const fileName = `${Date.now()}_${Math.random().toString(36).slice(2)}.${normalized.ext}`;
     const path = `apartments/${userId}/${fileName}`;
-    // On native, Response.blob/File may not exist; use arrayBuffer instead
-    const res = await fetch(uri);
+    const res = await fetch(normalized.uri);
     const arrayBuffer = await res.arrayBuffer();
     const { error: upErr } = await supabase
       .storage
       .from('apartment-images')
-      .upload(path, arrayBuffer, { upsert: true, contentType: `image/${ext === 'png' ? 'png' : 'jpeg'}` });
+      .upload(path, arrayBuffer, { upsert: true, contentType: normalized.mime });
     if (upErr) throw upErr;
     const { data } = supabase.storage.from('apartment-images').getPublicUrl(path);
     return data.publicUrl;
@@ -202,7 +252,8 @@ export default function AddApartmentScreen() {
       !city ||
       !price ||
       !bedrooms ||
-      !bathrooms
+      !bathrooms ||
+      roommateCapacity === null
     ) {
       setError('אנא מלא את כל השדות החובה');
       return;
@@ -211,6 +262,7 @@ export default function AddApartmentScreen() {
     const priceNum = parseFloat(price);
     const bedroomsNum = parseInt(bedrooms);
     const bathroomsNum = parseInt(bathrooms);
+    const roommatesNum = roommateCapacity as number;
 
     if (isNaN(priceNum) || priceNum <= 0) {
       setError('מחיר לא תקין');
@@ -227,8 +279,14 @@ export default function AddApartmentScreen() {
       return;
     }
 
+    if (!roommateCapacityOptions.includes(roommatesNum)) {
+      setError('בחירת כמות השותפים אינה תקפה');
+      return;
+    }
+
     setIsLoading(true);
     setError('');
+    setIsRoommateDropdownOpen(false);
 
     try {
       // Ensure user is authenticated
@@ -263,6 +321,7 @@ export default function AddApartmentScreen() {
           price: priceNum,
           bedrooms: bedroomsNum,
           bathrooms: bathroomsNum,
+          roommate_capacity: roommatesNum,
           image_urls: uploadedUrls.length ? uploadedUrls : null,
         })
         .select()
@@ -304,13 +363,14 @@ export default function AddApartmentScreen() {
     // room type removed
     setBedrooms('');
     setBathrooms('');
+    setRoommateCapacity(null);
+    setIsRoommateDropdownOpen(false);
     setImages([]);
     setError('');
   };
 
   return (
     <SafeAreaView style={styles.container}>
-      <NotificationsButton style={{ left: 16 }} />
       <KeyboardAvoidingView
         style={styles.keyboardAvoid}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
@@ -364,19 +424,19 @@ export default function AddApartmentScreen() {
                 style={styles.input}
                 placeholder="לדוגמה: תל אביב"
                 value={city}
-                onChangeText={(t) => { setCity(t); setCityPlaceId(null); }}
+                onChangeText={(t) => { setCity(t); }}
                 editable={!isLoading}
                 placeholderTextColor="#9AA0A6"
               />
               {citySuggestions.length > 0 ? (
                 <View style={styles.suggestionsBox}>
-                  {citySuggestions.map((p) => (
+                  {citySuggestions.map((name) => (
                     <TouchableOpacity
-                      key={p.placeId}
+                      key={name}
                       style={styles.suggestionItem}
-                      onPress={() => { setCity(p.description); setCityPlaceId(p.placeId); setCitySuggestions([]); }}
+                      onPress={() => { setCity(name); setCitySuggestions([]); }}
                     >
-                      <Text style={styles.suggestionText}>{p.description}</Text>
+                      <Text style={styles.suggestionText}>{name}</Text>
                     </TouchableOpacity>
                   ))}
                 </View>
@@ -385,41 +445,70 @@ export default function AddApartmentScreen() {
 
             
 
-            <View style={[styles.inputGroup, (isNeighborhoodOpen && neighborhoodOptions.length > 0) || neighborhoodSuggestions.length > 0 ? styles.inputGroupRaised : null]}>
+            <View style={[styles.inputGroup, isNeighborhoodOpen ? styles.inputGroupRaised : null]}>
               <Text style={styles.label}>שכונה</Text>
-              <TextInput
-                style={[styles.input, !city ? { opacity: 0.6 } : null]}
-                placeholder={city ? 'בחר שכונה' : 'בחר עיר קודם'}
-                value={neighborhood}
-                onChangeText={(t) => { setNeighborhood(t); setIsNeighborhoodOpen(true); }}
-                editable={!isLoading && !!city}
-                placeholderTextColor="#9AA0A6"
-                onFocus={() => setIsNeighborhoodOpen(true)}
-              />
+              <TouchableOpacity
+                style={[
+                  styles.input,
+                  styles.selectButton,
+                  !city ? { opacity: 0.6 } : null,
+                ]}
+                onPress={() => {
+                  if (city && !isLoadingNeighborhoods) {
+                    setIsNeighborhoodOpen(!isNeighborhoodOpen);
+                  }
+                }}
+                disabled={!city || isLoading}
+              >
+                <Text
+                  style={[
+                    styles.selectButtonText,
+                    !neighborhood && styles.selectButtonPlaceholder,
+                  ]}
+                >
+                  {neighborhood ||
+                    (isLoadingNeighborhoods
+                      ? 'טוען שכונות...'
+                      : neighborhoodOptions.length > 0
+                      ? 'בחר שכונה'
+                      : city
+                      ? 'אין שכונות זמינות'
+                      : 'בחר עיר קודם')}
+                </Text>
+                <Text style={styles.selectButtonArrow}>▼</Text>
+              </TouchableOpacity>
               {isNeighborhoodOpen && neighborhoodOptions.length > 0 ? (
                 <View style={styles.suggestionsBox}>
-                  {(neighborhood ? neighborhoodOptions.filter((n) => n.includes(neighborhood)) : neighborhoodOptions).slice(0, 50).map((name) => (
-                    <TouchableOpacity
-                      key={name}
-                      style={styles.suggestionItem}
-                      onPress={() => { setNeighborhood(name); setIsNeighborhoodOpen(false); }}
-                    >
-                      <Text style={styles.suggestionText}>{name}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              ) : null}
-              {neighborhoodSuggestions.length > 0 ? (
-                <View style={styles.suggestionsBox}>
-                  {neighborhoodSuggestions.map((name) => (
-                    <TouchableOpacity
-                      key={name}
-                      style={styles.suggestionItem}
-                      onPress={() => { setNeighborhood(name); setNeighborhoodSuggestions([]); setIsNeighborhoodOpen(false); }}
-                    >
-                      <Text style={styles.suggestionText}>{name}</Text>
-                    </TouchableOpacity>
-                  ))}
+                  <TextInput
+                    style={styles.searchInput}
+                    placeholder="חפש שכונה..."
+                    placeholderTextColor="#9AA0A6"
+                    value={neighborhoodSearchQuery}
+                    onChangeText={setNeighborhoodSearchQuery}
+                    autoFocus
+                  />
+                  <ScrollView style={styles.dropdownScroll} nestedScrollEnabled>
+                    {(neighborhoodSearchQuery
+                      ? neighborhoodOptions.filter((n) =>
+                          n.toLowerCase().includes(neighborhoodSearchQuery.toLowerCase())
+                        )
+                      : neighborhoodOptions
+                    )
+                      .slice(0, 100)
+                      .map((name) => (
+                        <TouchableOpacity
+                          key={name}
+                          style={styles.suggestionItem}
+                          onPress={() => {
+                            setNeighborhood(name);
+                            setIsNeighborhoodOpen(false);
+                            setNeighborhoodSearchQuery('');
+                          }}
+                        >
+                          <Text style={styles.suggestionText}>{name}</Text>
+                        </TouchableOpacity>
+                      ))}
+                  </ScrollView>
                 </View>
               ) : null}
             </View>
@@ -500,12 +589,52 @@ export default function AddApartmentScreen() {
               </View>
             </View>
 
+            <View style={[styles.inputGroup, isRoommateDropdownOpen ? styles.inputGroupRaised : null]}>
+              <Text style={styles.label}>
+                מתאים לכמות שותפים <Text style={styles.required}>*</Text>
+              </Text>
+              <TouchableOpacity
+                style={[styles.input, styles.selectButton]}
+                onPress={() => setIsRoommateDropdownOpen((prev) => !prev)}
+                disabled={isLoading}
+              >
+                <Text
+                  style={[
+                    styles.selectButtonText,
+                    roommateCapacity === null && styles.selectButtonPlaceholder,
+                  ]}
+                >
+                  {roommateCapacity !== null ? `${roommateCapacity} שותפים` : 'בחר מספר שותפים'}
+                </Text>
+                <Text style={styles.selectButtonArrow}>▼</Text>
+              </TouchableOpacity>
+              {isRoommateDropdownOpen ? (
+                <View style={styles.suggestionsBox}>
+                  {roommateCapacityOptions.map((value) => (
+                    <TouchableOpacity
+                      key={value}
+                      style={styles.suggestionItem}
+                      onPress={() => {
+                        setRoommateCapacity(value);
+                        setIsRoommateDropdownOpen(false);
+                      }}
+                    >
+                      <Text style={styles.suggestionText}>{`${value} שותפים`}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              ) : null}
+            </View>
+
             <View style={[styles.inputGroup, styles.switchRow]}>
-              <Text style={styles.label}>האם אתה שותף בדירה?</Text>
+              <Text style={[styles.label, styles.switchLabel]}>האם אתה שותף בדירה?</Text>
               <Switch
                 value={includeAsPartner}
                 onValueChange={setIncludeAsPartner}
                 disabled={isLoading}
+                trackColor={{ false: '#2A2A37', true: '#3FC1A9' }}
+                thumbColor="#FFFFFF"
+                ios_backgroundColor="#2A2A37"
               />
             </View>
 
@@ -678,13 +807,18 @@ const styles = StyleSheet.create({
   switchRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    justifyContent: 'flex-end',
+    gap: 12,
+  },
+  switchLabel: {
+    flex: 1,
+    textAlign: 'right',
   },
   halfWidth: {
     flex: 1,
   },
   button: {
-    backgroundColor: '#7C5CFF',
+    backgroundColor: '#4C1D95',
     paddingVertical: 16,
     borderRadius: 12,
     alignItems: 'center',
@@ -725,7 +859,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   addImagesBtn: {
-    backgroundColor: '#7C5CFF',
+    backgroundColor: '#4C1D95',
     paddingVertical: 10,
     paddingHorizontal: 14,
     borderRadius: 10,
@@ -788,5 +922,40 @@ const styles = StyleSheet.create({
   galleryPlaceholderText: {
     color: '#9DA4AE',
     fontSize: 13,
+  },
+  selectButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  selectButtonText: {
+    flex: 1,
+    color: '#FFFFFF',
+    fontSize: 16,
+  },
+  selectButtonPlaceholder: {
+    color: '#9AA0A6',
+  },
+  selectButtonArrow: {
+    color: '#9AA0A6',
+    fontSize: 12,
+    marginLeft: 8,
+  },
+  searchInput: {
+    backgroundColor: '#1B1B28',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 8,
+    fontSize: 14,
+    borderWidth: 1,
+    borderColor: '#2A2A37',
+    color: '#FFFFFF',
+    textAlign: 'right',
+    marginBottom: 8,
+    marginHorizontal: 8,
+    marginTop: 8,
+  },
+  dropdownScroll: {
+    maxHeight: 200,
   },
 });

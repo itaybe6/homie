@@ -5,31 +5,33 @@ import { Bell } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/authStore';
+import { useNotificationsStore } from '@/stores/notificationsStore';
 
 type Props = {
   style?: ViewStyle;
   badgeCount?: number;
 };
 
-function NotificationsButtonBase({ style, badgeCount = 0 }: Props) {
+function NotificationsButtonBase({ style, badgeCount }: Props) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const user = useAuthStore((s) => s.user);
-  const [count, setCount] = useState<number>(badgeCount || 0);
+  const unreadCount = useNotificationsStore((s) => s.unreadCount);
+  const setUnreadCount = useNotificationsStore((s) => s.setUnreadCount);
 
   useEffect(() => {
     let isMounted = true;
     const fetchCount = async () => {
       if (!user?.id) {
-        if (isMounted) setCount(0);
+        if (isMounted) setUnreadCount(0);
         return;
       }
       const { count: c } = await supabase
         .from('notifications')
         .select('id', { count: 'exact', head: true })
         .eq('recipient_id', user.id)
-        .eq('is_read', false);
-      if (isMounted) setCount(c || 0);
+        .or('is_read.is.null,is_read.eq.false');
+      if (isMounted) setUnreadCount(c || 0);
     };
 
     fetchCount();
@@ -50,7 +52,7 @@ function NotificationsButtonBase({ style, badgeCount = 0 }: Props) {
     };
   }, [user?.id]);
 
-  const shownCount = typeof badgeCount === 'number' && badgeCount >= 0 ? badgeCount : count;
+  const shownCount = typeof badgeCount === 'number' ? badgeCount : unreadCount;
   const shownLabel = shownCount > 99 ? '99+' : String(shownCount);
   return (
     <View style={[styles.wrap, { marginTop: Math.max(6, insets.top + 2) }, style]}>
@@ -58,7 +60,7 @@ function NotificationsButtonBase({ style, badgeCount = 0 }: Props) {
         accessibilityRole="button"
         accessibilityLabel="Notifications"
         activeOpacity={0.85}
-        onPress={() => router.push('/notifications')}
+        onPress={() => router.push('/(tabs)/notifications')}
         style={styles.btn}
       >
         <Bell size={18} color="#FFFFFF" />
@@ -98,7 +100,7 @@ const styles = StyleSheet.create({
     height: 18,
     paddingHorizontal: 4,
     borderRadius: 9,
-    backgroundColor: '#EF4444',
+    backgroundColor: 'rgba(239,68,68,0.75)',
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,

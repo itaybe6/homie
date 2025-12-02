@@ -2,16 +2,58 @@ export interface User {
   id: string;
   email: string;
   full_name: string;
-  role?: 'user' | 'owner';
+  role?: 'user' | 'owner' | 'admin';
   age?: number;
   phone?: string;
   city?: string;
   bio?: string;
+  gender?: 'male' | 'female';
   avatar_url?: string;
   image_urls?: string[]; // up to 6 additional images
   favorites?: string[]; // national IDs of favorited users
   created_at: string;
   updated_at: string;
+}
+
+// Merged profile (roommate group) types
+export type ProfileGroupStatus = 'PENDING' | 'ACTIVE' | 'CANCELLED' | 'ARCHIVED';
+
+export interface ProfileGroup {
+  id: string;
+  created_by: string;
+  status: ProfileGroupStatus;
+  name?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export type ProfileGroupMemberRole = 'owner' | 'member';
+export type ProfileGroupMemberStatus = 'ACTIVE' | 'LEFT' | 'REMOVED';
+
+export interface ProfileGroupMember {
+  group_id: string;
+  user_id: string;
+  role: ProfileGroupMemberRole;
+  status: ProfileGroupMemberStatus;
+  joined_at: string;
+}
+
+export type ProfileGroupInviteStatus =
+  | 'PENDING'
+  | 'ACCEPTED'
+  | 'DECLINED'
+  | 'CANCELLED'
+  | 'EXPIRED';
+
+export interface ProfileGroupInvite {
+  id: string;
+  group_id: string;
+  inviter_id: string;
+  invitee_id: string;
+  status: ProfileGroupInviteStatus;
+  created_at: string;
+  responded_at?: string;
+  expires_at?: string;
 }
 
 export interface Apartment {
@@ -26,7 +68,7 @@ export interface Apartment {
   room_type: string;
   bedrooms: number;
   bathrooms: number;
-  image_url?: string;
+  roommate_capacity?: number;
   image_urls?: string[]; // new: multiple images
   partner_ids?: string[]; // national IDs of roommates associated to the apartment
   created_at: string;
@@ -35,11 +77,13 @@ export interface Apartment {
 
 
 
+export type MatchStatus = 'PENDING' | 'APPROVED' | 'NOT_RELEVANT' | 'REJECTED';
+
 export interface Matches {
   id: string;
   sender_id: string;
   receiver_id: string;
-  approved: boolean;
+  status: MatchStatus;
   created_at: string;
   updated_at: string;
 }
@@ -54,12 +98,47 @@ export interface Notification {
   created_at: string;
 }
 
+export interface Request {
+  id: string;
+  sender_id: string;        // who initiated the request
+  recipient_id: string;     // who should act on the request
+  apartment_id?: string;    // optional: apartment this request relates to
+  type: 'JOIN_APT' | 'GENERAL'; // request type
+  status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED';
+  metadata?: any;           // free-form context
+  created_at: string;
+  updated_at: string;
+}
+
+// apartments_request table
+export type ApartmentRequestType = 'JOIN_APT' | 'GENERAL';
+export type ApartmentRequestStatus =
+  | 'PENDING'
+  | 'APPROVED'
+  | 'REJECTED'
+  | 'CANCELLED';
+
+export interface ApartmentRequest {
+  id: string;
+  sender_id: string;
+  recipient_id: string;
+  apartment_id?: string;
+  type: ApartmentRequestType;
+  status: ApartmentRequestStatus;
+  metadata?: any;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface UserSurveyResponse {
   id: number;
   user_id: string;
   is_completed?: boolean;
-
+  is_sublet?: boolean;
   occupation?: string;
+  student_year?: number; // if occupation === 'student', 1–8
+  works_from_home?: boolean; // if occupation === 'עובד'
+  keeps_kosher?: boolean; // does the user eat kosher only
   is_shomer_shabbat?: boolean;
   diet_type?: string;
   is_smoker?: boolean;
@@ -73,7 +152,8 @@ export interface UserSurveyResponse {
   home_vibe?: string;
   price_range?: number;
   bills_included?: boolean;
-  preferred_location?: string;
+  preferred_city?: string;
+  preferred_neighborhoods?: string[];
   floor_preference?: string;
   has_balcony?: boolean;
   has_elevator?: boolean;
@@ -82,15 +162,8 @@ export interface UserSurveyResponse {
   preferred_roommates?: number;
   pets_allowed?: boolean;
   with_broker?: boolean;
-  sublet_dates?: string;
-  sublet_pets_allowed?: boolean;
-  sublet_people_count?: number;
-  sublet_price?: number;
-  sublet_location?: string;
-  sublet_floor?: string;
-  sublet_balcony?: boolean;
-  sublet_elevator?: boolean;
-  sublet_master_room?: boolean;
+  sublet_month_from?: string; // format: YYYY-MM
+  sublet_month_to?: string;   // format: YYYY-MM
   preferred_age_range?: string;
   preferred_gender?: string;
   preferred_occupation?: string;

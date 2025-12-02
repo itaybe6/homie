@@ -33,6 +33,7 @@ import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/authStore';
 import { useApartmentStore } from '@/stores/apartmentStore';
 import { Apartment, User } from '@/types/database';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function ApartmentDetailsScreen() {
   const router = useRouter();
@@ -45,15 +46,17 @@ export default function ApartmentDetailsScreen() {
   const [members, setMembers] = useState<User[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [activeIdx, setActiveIdx] = useState(0);
-  const [failed, setFailed] = useState<Record<number, boolean>>({});
+  const [imageCandidateIndex, setImageCandidateIndex] = useState<Record<number, number>>({});
   const [isMembersOpen, setIsMembersOpen] = useState(false);
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [addCandidates, setAddCandidates] = useState<User[]>([]);
+  const [sharedGroups, setSharedGroups] = useState<{ id: string; members: Pick<User, 'id' | 'full_name' | 'avatar_url'>[] }[]>([]);
   const [isAdding, setIsAdding] = useState(false);
   const [addSearch, setAddSearch] = useState('');
   const [removingId, setRemovingId] = useState<string | null>(null);
   const [isRequestingJoin, setIsRequestingJoin] = useState(false);
   const [hasRequestedJoin, setHasRequestedJoin] = useState(false);
+  const [isAssignedAnywhere, setIsAssignedAnywhere] = useState<boolean | null>(null);
   const [confirmState, setConfirmState] = useState<{
     visible: boolean;
     title: string;
@@ -68,10 +71,41 @@ export default function ApartmentDetailsScreen() {
   });
   const galleryRef = useRef<ScrollView>(null);
   const screenWidth = Dimensions.get('window').width;
+  const insets = useSafeAreaInsets();
 
   useEffect(() => {
     fetchApartmentDetails();
   }, [id]);
+
+  useEffect(() => {
+    const checkAssigned = async () => {
+      try {
+        if (!user?.id) {
+          setIsAssignedAnywhere(false);
+          return;
+        }
+        const currentUserId = user.id;
+        const [{ data: own, error: ownErr }, { data: asPartner, error: partnerErr }] = await Promise.all([
+          supabase.from('apartments').select('id').eq('owner_id', currentUserId).limit(1),
+          supabase.from('apartments').select('id').contains('partner_ids', [currentUserId] as any).limit(1),
+        ]);
+        if (ownErr) throw ownErr;
+        if (partnerErr) throw partnerErr;
+        const assigned = !!((own && own.length > 0) || (asPartner && asPartner.length > 0));
+        setIsAssignedAnywhere(assigned);
+        
+      } catch (e) {
+        setIsAssignedAnywhere(false);
+        
+      }
+    };
+    checkAssigned();
+  }, [user?.id]);
+
+  useEffect(() => {
+    setImageCandidateIndex({});
+    setActiveIdx(0);
+  }, [apartment?.id]);
 
   const fetchApartmentDetails = async () => {
     try {
@@ -87,7 +121,6 @@ export default function ApartmentDetailsScreen() {
         router.back();
         return;
       }
-
       setApartment(aptData);
 
       const { data: ownerData, error: ownerError } = await supabase
@@ -99,8 +132,10 @@ export default function ApartmentDetailsScreen() {
       if (ownerError) throw ownerError;
       setOwner(ownerData);
 
-      const partnerIds = (aptData as any).partner_ids as string[] | undefined;
-      if (partnerIds && partnerIds.length > 0) {
+      
+
+      const partnerIds = normalizeIds((aptData as any).partner_ids);
+      if (partnerIds.length > 0) {
         const { data: usersData, error: usersError } = await supabase
           .from('users')
           .select('*')
@@ -125,6 +160,9 @@ export default function ApartmentDetailsScreen() {
         style: 'destructive',
         onPress: async () => {
           try {
+            const imageUrls = normalizeImages((apartment as any).image_urls);
+            await deleteApartmentImages(imageUrls);
+
             const { error } = await supabase
               .from('apartments')
               .delete()
@@ -144,7 +182,7 @@ export default function ApartmentDetailsScreen() {
   if (isLoading) {
     return (
       <View style={styles.centerContainer}>
-        <ActivityIndicator size="large" color="#7C5CFF" />
+        <ActivityIndicator size="large" color="#4C1D95" />
       </View>
     );
   }
@@ -153,11 +191,126 @@ export default function ApartmentDetailsScreen() {
     return null;
   }
 
-  const isOwner = user?.id === apartment.owner_id;
+  const isOwner = !!(
+    user?.id &&
+    String(user.id).toLowerCase() === String(apartment.owner_id || '').toLowerCase()
+  );
   const PLACEHOLDER =
     'https://images.pexels.com/photos/1457842/pexels-photo-1457842.jpeg';
 
   const normalizeImages = (value: any): string[] => {
+    if (!value) return [];
+    if (Array.isArray(value)) {
+      return (value as unknown[])
+        .map((v) => (typeof v === 'string' ? v.trim() : String(v || '').trim()))
+        .filter(Boolean);
+    }
+    if (typeof value === 'string') {
+      try {
+        const parsed = JSON.parse(value);
+        if (Array.isArray(parsed)) {
+          return parsed
+            .map((v) => (typeof v === 'string' ? v.trim() : String(v || '').trim()))
+            .filter(Boolean);
+        }
+      } catch {
+        try {
+          return value
+            .replace(/^\s*\{|\}\s*$/g, '')
+            .split(',')
+            .map((s: string) => s.replace(/^"+|"+$/g, '').trim())
+            .filter(Boolean);
+        } catch {
+          return [];
+        }
+      }
+    }
+    return [];
+  };
+
+  const extractStoragePathsFromUrls = (urls: string[]): string[] => {
+    const marker = '/apartment-images/';
+    const unique = new Set<string>();
+
+    urls.forEach((url) => {
+      if (!url) return;
+      try {
+        const decoded = decodeURIComponent(url);
+        const idx = decoded.indexOf(marker);
+        if (idx === -1) return;
+        const fragment = decoded.slice(idx + marker.length).split('?')[0];
+        const path = fragment.replace(/^public\//, '').trim();
+        if (path) unique.add(path);
+      } catch {
+        const fallbackIdx = url.indexOf(marker);
+        if (fallbackIdx === -1) return;
+        const fragment = url.slice(fallbackIdx + marker.length).split('?')[0];
+        const path = fragment.replace(/^public\//, '').trim();
+        if (path) unique.add(path);
+      }
+    });
+
+    return Array.from(unique);
+  };
+
+  const deleteApartmentImages = async (urls: string[]): Promise<void> => {
+    if (!urls?.length) return;
+    const paths = extractStoragePathsFromUrls(urls);
+    if (!paths.length) return;
+
+    const chunkSize = 30;
+    for (let i = 0; i < paths.length; i += chunkSize) {
+      const chunk = paths.slice(i, i + chunkSize);
+      try {
+        const { error } = await supabase.storage.from('apartment-images').remove(chunk);
+        if (error) {
+          console.error('Failed to remove apartment images chunk', error);
+        }
+      } catch (err) {
+        console.error('Failed to remove apartment images chunk', err);
+      }
+    }
+  };
+
+  const transformSupabaseImageUrl = (value: string): string => {
+    if (!value) return '';
+    const trimmed = value.trim();
+    if (!trimmed) return '';
+    if (trimmed.includes('/storage/v1/object/public/')) {
+      const [base, query] = trimmed.split('?');
+      const transformed = base.replace('/storage/v1/object/public/', '/storage/v1/render/image/public/');
+      const params: string[] = [];
+      if (query) params.push(query);
+      params.push('width=1200', 'quality=90', 'format=webp');
+      return `${transformed}?${params.join('&')}`;
+    }
+    return trimmed;
+  };
+
+  const galleryImages: string[][] = (() => {
+    const raw = normalizeImages((apartment as any).image_urls);
+    const candidates = raw.map((original) => {
+      const set = new Set<string>();
+      const transformed = transformSupabaseImageUrl(original);
+      [transformed, original, PLACEHOLDER].forEach((url) => {
+        const trimmed = (url || '').trim();
+        if (trimmed) set.add(trimmed);
+      });
+      return Array.from(set);
+    });
+    if (candidates.length === 0) {
+      return [[PLACEHOLDER]];
+    }
+    return candidates;
+  })();
+
+  const getImageForIndex = (idx: number): string => {
+    const candidates = galleryImages[idx] || [PLACEHOLDER];
+    const useIdx = imageCandidateIndex[idx] ?? 0;
+    return candidates[Math.min(useIdx, candidates.length - 1)] || PLACEHOLDER;
+  };
+
+  function normalizeIds(value: any): string[] {
     if (Array.isArray(value)) return value.filter(Boolean);
     if (typeof value === 'string') {
       try {
@@ -171,22 +324,66 @@ export default function ApartmentDetailsScreen() {
         .filter(Boolean);
     }
     return [];
-  };
+  }
 
-  const images: string[] = (() => {
-    const arr = normalizeImages((apartment as any).image_urls);
-    return arr.length ? arr : [PLACEHOLDER];
-  })();
-
-  const roommatesCount = members.length;
-  const roommatesNeeded = Math.max(
-    0,
-    (apartment.bedrooms || 0) - (roommatesCount + 1)
+  const currentPartnerIds: string[] = normalizeIds((apartment as any).partner_ids);
+  const roommatesCount = members.length; // number of partners (not including owner)
+  const partnerSlotsUsed = currentPartnerIds.length;
+  const totalRoommateCapacity =
+    typeof apartment.roommate_capacity === 'number' ? apartment.roommate_capacity : null;
+  const availableRoommateSlots =
+    totalRoommateCapacity !== null ? Math.max(0, totalRoommateCapacity - partnerSlotsUsed) : null;
+  const isMember = !!(
+    user?.id &&
+    currentPartnerIds.map((v) => String(v).toLowerCase()).includes(String(user.id).toLowerCase())
   );
-  const currentPartnerIds: string[] = Array.isArray((apartment as any).partner_ids)
-    ? ((apartment as any).partner_ids as string[])
-    : [];
-  const isMember = !!(user?.id && currentPartnerIds.includes(user.id));
+  
+
+  // Compute a human-friendly sender label: if user is part of an ACTIVE merged profile,
+  // show all member names joined by " • ", otherwise fallback to the user's full name.
+  const computeSenderLabel = async (userId: string): Promise<string> => {
+    try {
+      // Check active membership
+      const { data: membership } = await supabase
+        .from('profile_group_members')
+        .select('group_id')
+        .eq('user_id', userId)
+        .eq('status', 'ACTIVE')
+        .maybeSingle();
+      const groupId = (membership as any)?.group_id as string | undefined;
+      if (!groupId) {
+        const { data: me } = await supabase
+          .from('users')
+          .select('full_name')
+          .eq('id', userId)
+          .maybeSingle();
+        return ((me as any)?.full_name as string) || 'משתמש';
+      }
+      // Load members of the active group
+      const { data: memberRows } = await supabase
+        .from('profile_group_members')
+        .select('user_id')
+        .eq('group_id', groupId)
+        .eq('status', 'ACTIVE');
+      const ids = (memberRows || []).map((r: any) => r.user_id).filter(Boolean);
+      if (!ids.length) {
+        const { data: me } = await supabase
+          .from('users')
+          .select('full_name')
+          .eq('id', userId)
+          .maybeSingle();
+        return ((me as any)?.full_name as string) || 'משתמש';
+      }
+      const { data: usersRows } = await supabase
+        .from('users')
+        .select('full_name')
+        .in('id', ids);
+      const names = (usersRows || []).map((u: any) => u?.full_name).filter(Boolean);
+      return names.length ? names.join(' • ') : 'משתמש';
+    } catch {
+      return 'משתמש';
+    }
+  };
 
   const handleRequestJoin = async () => {
     try {
@@ -194,11 +391,17 @@ export default function ApartmentDetailsScreen() {
         Alert.alert('שגיאה', 'יש להתחבר כדי לבצע פעולה זו');
         return;
       }
-      if (isOwner || isMember) return;
+      if (isOwner || isMember) {
+        return;
+      }
+      if (isAssignedAnywhere) {
+        Alert.alert('שגיאה', 'את/ה כבר משויך/ת לדירה אחרת');
+        return;
+      }
 
       setIsRequestingJoin(true);
 
-      // Optional lightweight dedupe: check if a recent request was sent to the owner in the last day
+      // Optional dedupe for notifications only (still create a request either way)
       const yesterdayIso = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
       const { count: recentCount } = await supabase
         .from('notifications')
@@ -206,31 +409,20 @@ export default function ApartmentDetailsScreen() {
         .eq('sender_id', user.id)
         .eq('recipient_id', apartment.owner_id)
         .gte('created_at', yesterdayIso);
-      if ((recentCount || 0) > 0) {
-        setHasRequestedJoin(true);
-        Alert.alert('נשלח', 'כבר שלחת בקשה לאחרונה');
-        return;
-      }
+      const shouldSkipNotifications = (recentCount || 0) > 0;
 
       const recipients = Array.from(
         new Set<string>([apartment.owner_id, ...currentPartnerIds].filter((rid) => rid && rid !== user.id))
       );
+      
 
       if (recipients.length === 0) {
         Alert.alert('שגיאה', 'אין למי לשלוח בקשה כרגע');
         return;
       }
 
-      // Fetch sender name for nicer message
-      let senderName = 'משתמש';
-      try {
-        const { data: me } = await supabase
-          .from('users')
-          .select('full_name')
-          .eq('id', user.id)
-          .maybeSingle();
-        senderName = (me as any)?.full_name || senderName;
-      } catch {}
+      // Fetch sender label (merged profile if exists)
+      const senderName = await computeSenderLabel(user.id);
 
       const title = 'בקשה להצטרף כדייר';
       const description = `${senderName} מעוניין להצטרף לדירה: ${apartment.title} (${apartment.city})`;
@@ -241,13 +433,38 @@ export default function ApartmentDetailsScreen() {
         title,
         // Important: do NOT embed INVITE_APT metadata here to avoid showing an approve button for recipients
         description,
+        is_read: false,
       }));
 
-      const { error: insertErr } = await supabase.from('notifications').insert(rows);
-      if (insertErr) throw insertErr;
+      if (!shouldSkipNotifications) {
+        const { error: insertErr } = await supabase.from('notifications').insert(rows);
+        if (insertErr) throw insertErr;
+      }
+
+      // Also create request rows so user can track status
+      try {
+        const requestRows = recipients.map((rid) => ({
+          sender_id: user.id!,
+          recipient_id: rid,
+          apartment_id: apartment.id,
+          type: 'JOIN_APT',
+          status: 'PENDING',
+          metadata: null,
+        }));
+        const { error: reqErr } = await supabase
+          .from('apartments_request')
+          .insert(requestRows as any)
+          .select('id'); // force RLS check and return for debugging
+        if (reqErr) {
+          throw reqErr;
+        }
+      } catch (e: any) {
+        console.error('requests insert failed', e);
+        Alert.alert('אזהרה', e?.message || 'לא ניתן ליצור שורת בקשה כרגע');
+      }
 
       setHasRequestedJoin(true);
-      Alert.alert('נשלח', 'בקשתך נשלחה לבעל הדירה והשותפים');
+      Alert.alert('נשלח', shouldSkipNotifications ? 'נוצרה בקשה חדשה' : 'בקשתך נשלחה לבעל הדירה והשותפים');
     } catch (e: any) {
       console.error('request join failed', e);
       Alert.alert('שגיאה', e?.message || 'לא ניתן לשלוח בקשה כעת');
@@ -258,15 +475,38 @@ export default function ApartmentDetailsScreen() {
 
   const filteredCandidates = (() => {
     const q = (addSearch || '').trim().toLowerCase();
-    if (!q) return addCandidates;
-    return addCandidates.filter((u) => (u.full_name || '').toLowerCase().includes(q));
+    const excludeIds = new Set<string>([
+      apartment.owner_id,
+      ...normalizeIds((apartment as any).partner_ids),
+    ]);
+    const base = addCandidates.filter((u) => !excludeIds.has(u.id));
+    if (!q) return base;
+    return base.filter((u) => (u.full_name || '').toLowerCase().includes(q));
+  })();
+  const filteredSharedGroups = (() => {
+    const q = (addSearch || '').trim().toLowerCase();
+    const excludeIds = new Set<string>([
+      apartment.owner_id,
+      ...normalizeIds((apartment as any).partner_ids),
+    ]);
+    const base = sharedGroups
+      .map((g) => ({
+        ...g,
+        members: g.members.filter((m) => !excludeIds.has(m.id)),
+      }))
+      .filter((g) => g.members.length > 0);
+    if (!q) return base;
+    return base.filter((g) =>
+      g.members.some((m) => (m.full_name || '').toLowerCase().includes(q))
+    );
   })();
 
   const openAddPartnerModal = async () => {
     if (!apartment) return;
     try {
       setIsAdding(true);
-      const currentIds = new Set<string>([apartment.owner_id, ...(apartment.partner_ids || [])]);
+      const currentIds = new Set<string>([apartment.owner_id, ...normalizeIds((apartment as any).partner_ids)]);
+      // Load all users
       const { data, error } = await supabase
         .from('users')
         .select('*')
@@ -274,8 +514,76 @@ export default function ApartmentDetailsScreen() {
         .order('created_at', { ascending: false });
       if (error) throw error;
       const all = (data || []) as User[];
-      const candidates = all.filter((u) => !currentIds.has(u.id));
-      setAddCandidates(candidates);
+      // Exclude users who are already assigned to ANY apartment (owners or partners)
+      let assignedIds = new Set<string>();
+      try {
+        const { data: apts } = await supabase
+          .from('apartments')
+          .select('owner_id, partner_ids');
+        (apts || []).forEach((apt: any) => {
+          if (apt?.owner_id) assignedIds.add(apt.owner_id as string);
+          const pids: string[] = Array.isArray(apt?.partner_ids) ? (apt.partner_ids as string[]) : [];
+          pids.forEach((pid) => pid && assignedIds.add(pid));
+        });
+      } catch {}
+      // Build final candidates: not in current apartment and not assigned anywhere else
+      const candidates = all.filter((u) => !currentIds.has(u.id) && !assignedIds.has(u.id));
+
+      // Group candidates by ACTIVE profile groups (shared profiles)
+      let grouped: { id: string; members: Pick<User, 'id' | 'full_name' | 'avatar_url'>[] }[] = [];
+      try {
+        const candidateIds = candidates.map((u) => u.id);
+        if (candidateIds.length) {
+          const { data: memberships } = await supabase
+            .from('profile_group_members')
+            .select('group_id, user_id')
+            .in('user_id', candidateIds)
+            .eq('status', 'ACTIVE');
+          const groupToMemberIds: Record<string, string[]> = {};
+          (memberships || []).forEach((row: any) => {
+            if (!row.group_id || !row.user_id) return;
+            if (!groupToMemberIds[row.group_id]) groupToMemberIds[row.group_id] = [];
+            if (!groupToMemberIds[row.group_id].includes(row.user_id)) {
+              groupToMemberIds[row.group_id].push(row.user_id);
+            }
+          });
+          const groupedIds = Object.entries(groupToMemberIds)
+            .filter(([_, ids]) => (ids || []).length >= 2)
+            .map(([gid]) => gid);
+          if (groupedIds.length) {
+            const allMemberIds = groupedIds.flatMap((gid) => groupToMemberIds[gid]);
+            // Remove grouped members from individual candidates
+            const groupedMemberIdSet = new Set(allMemberIds);
+            const remainingCandidates = candidates.filter((u) => !groupedMemberIdSet.has(u.id));
+            setAddCandidates(remainingCandidates);
+            // Fetch minimal user data for grouped members
+            const { data: usersRows } = await supabase
+              .from('users')
+              .select('id, full_name, avatar_url')
+              .in('id', Array.from(groupedMemberIdSet));
+            const byId: Record<string, Pick<User, 'id' | 'full_name' | 'avatar_url'>> = {};
+            (usersRows || []).forEach((u: any) => {
+              if (u?.id) byId[u.id] = { id: u.id, full_name: u.full_name, avatar_url: u.avatar_url };
+            });
+            grouped = groupedIds.map((gid) => ({
+              id: gid,
+              members: (groupToMemberIds[gid] || [])
+                .map((uid) => byId[uid])
+                .filter(Boolean),
+            }));
+            setSharedGroups(grouped);
+          } else {
+            setAddCandidates(candidates);
+            setSharedGroups([]);
+          }
+        } else {
+          setAddCandidates(candidates);
+          setSharedGroups([]);
+        }
+      } catch {
+        setAddCandidates(candidates);
+        setSharedGroups([]);
+      }
       setIsAddOpen(true);
     } catch (e) {
       console.error('Failed to load candidates', e);
@@ -289,48 +597,96 @@ export default function ApartmentDetailsScreen() {
     if (!apartment || !user?.id) return;
     setIsAdding(true);
     try {
-      const currentPartnerIds = Array.isArray((apartment as any).partner_ids)
-        ? ((apartment as any).partner_ids as string[])
-        : [];
+      // Prevent duplicate immediate add; we now send an invite + create a request instead.
+      const currentPartnerIds = normalizeIds((apartment as any).partner_ids);
       if (currentPartnerIds.includes(partnerId)) {
         Alert.alert('שים לב', 'המשתמש כבר שותף בדירה');
         return;
       }
-      const newPartnerIds = Array.from(new Set([...(currentPartnerIds || []), partnerId]));
 
-      const { error: updateErr } = await supabase
-        .from('apartments')
-        .update({ partner_ids: newPartnerIds })
-        .eq('id', apartment.id);
-      if (updateErr) throw updateErr;
+      // Create a notification to the invitee with inviter's merged profile label (if exists)
+      const inviterName = await computeSenderLabel(user.id);
 
-      const { data: addedUser, error: addedErr } = await supabase
-        .from('users')
-        .select('*')
-        .eq('id', partnerId)
-        .maybeSingle();
-      if (addedErr) throw addedErr;
-      if (addedUser) {
-        setMembers((prev) => [...prev, addedUser as User]);
-      }
-
-      const title = 'התווספת כשותף לדירה';
-      const description = `${owner?.full_name || 'בעל הדירה'} הוסיף אותך כשותף לדירה: ${apartment.title} (${apartment.city})`;
+      const title = 'הזמנה להצטרף לדירה';
+      const description = `${inviterName} מזמין/ה אותך להיות שותף/ה בדירה${apartment.title ? `: ${apartment.title}` : ''}${apartment.city ? ` (${apartment.city})` : ''}`;
       const { error: notifErr } = await supabase.from('notifications').insert({
         sender_id: user.id,
         recipient_id: partnerId,
         title,
         description,
+        is_read: false,
       });
       if (notifErr) throw notifErr;
 
-      setApartment((prev) => (prev ? { ...prev, partner_ids: newPartnerIds } as Apartment : prev));
+      // Create an apartment request row (INVITE_APT) to be approved by the invitee
+      const { error: reqErr } = await supabase.from('apartments_request').insert({
+        sender_id: user.id,
+        recipient_id: partnerId,
+        apartment_id: apartment.id,
+        type: 'INVITE_APT',
+        status: 'PENDING',
+        metadata: null,
+      } as any);
+      if (reqErr) throw reqErr;
 
-      Alert.alert('הצלחה', 'שותף נוסף וההתראה נשלחה');
+      Alert.alert('נשלח', 'הזמנה נשלחה ונוצרה בקשה בעמוד הבקשות');
       setIsAddOpen(false);
     } catch (e: any) {
       console.error('Failed to add partner', e);
-      Alert.alert('שגיאה', e?.message || 'לא ניתן להוסיף את השותף');
+      Alert.alert('שגיאה', e?.message || 'לא ניתן לשלוח הזמנה כעת');
+    } finally {
+      setIsAdding(false);
+    }
+  };
+
+  // Invite an entire shared profile (group): fan-out a notification and request to each active member
+  const handleAddSharedGroup = async (groupId: string, memberIds: string[]) => {
+    if (!apartment || !user?.id) return;
+    setIsAdding(true);
+    try {
+      const currentPartnerIds = new Set<string>(normalizeIds((apartment as any).partner_ids));
+      const ownerId = String((apartment as any).owner_id || '');
+      const recipients = Array.from(
+        new Set<string>(
+          (memberIds || [])
+            .filter(Boolean)
+            .map((id) => String(id))
+            .filter((id) => id !== user.id && id !== ownerId && !currentPartnerIds.has(id))
+        )
+      );
+      if (recipients.length === 0) {
+        Alert.alert('שגיאה', 'אין למי לשלוח הזמנה בקבוצה זו');
+        return;
+      }
+      const inviterName = await computeSenderLabel(user.id);
+      const title = 'הזמנה להצטרף לדירה';
+      const description = `${inviterName} מזמין/ה אותך להיות שותף/ה בדירה${apartment.title ? `: ${apartment.title}` : ''}${apartment.city ? ` (${apartment.city})` : ''}`;
+      // Fan-out notifications
+      const notifRows = recipients.map((rid) => ({
+        sender_id: user.id!,
+        recipient_id: rid,
+        title,
+        description,
+        is_read: false,
+      }));
+      const { error: notifErr } = await supabase.from('notifications').insert(notifRows as any);
+      if (notifErr) throw notifErr;
+      // Fan-out requests (INVITE_APT)
+      const reqRows = recipients.map((rid) => ({
+        sender_id: user.id!,
+        recipient_id: rid,
+        apartment_id: apartment.id,
+        type: 'INVITE_APT',
+        status: 'PENDING',
+        metadata: { group_id: groupId } as any,
+      }));
+      const { error: reqErr } = await supabase.from('apartments_request').insert(reqRows as any);
+      if (reqErr) throw reqErr;
+      Alert.alert('נשלח', 'הזמנה נשלחה לכל חברי הפרופיל ונוצרו בקשות');
+      setIsAddOpen(false);
+    } catch (e: any) {
+      console.error('Failed to add shared group', e);
+      Alert.alert('שגיאה', e?.message || 'לא ניתן לשלוח הזמנה לקבוצה כעת');
     } finally {
       setIsAdding(false);
     }
@@ -341,18 +697,18 @@ export default function ApartmentDetailsScreen() {
       setConfirmState({
         visible: true,
         title: 'אישור הוספה',
-        message: `להוסיף את ${candidate.full_name} כשותף לדירה?`,
-        confirmLabel: 'הוסף',
+        message: `לשלוח הזמנה ל-${candidate.full_name} להצטרף כדייר?`,
+        confirmLabel: 'שלח הזמנה',
         cancelLabel: 'ביטול',
         onConfirm: () => handleAddPartner(candidate.id),
       });
     } else {
       Alert.alert(
         'אישור הוספה',
-        `להוסיף את ${candidate.full_name} כשותף לדירה?`,
+        `לשלוח הזמנה ל-${candidate.full_name} להצטרף כדייר?`,
         [
           { text: 'ביטול', style: 'cancel' },
-          { text: 'הוסף', onPress: () => handleAddPartner(candidate.id) },
+          { text: 'שלח הזמנה', onPress: () => handleAddPartner(candidate.id) },
         ]
       );
     }
@@ -366,9 +722,7 @@ export default function ApartmentDetailsScreen() {
     }
     setRemovingId(partnerId);
     try {
-      const currentPartnerIds = Array.isArray((apartment as any).partner_ids)
-        ? ((apartment as any).partner_ids as string[])
-        : [];
+      const currentPartnerIds = normalizeIds((apartment as any).partner_ids);
       const newPartnerIds = currentPartnerIds.filter((id) => id !== partnerId);
 
       const { error: updateErr } = await supabase
@@ -411,23 +765,47 @@ export default function ApartmentDetailsScreen() {
     }
   };
 
+  const scrollToSlide = (index: number) => {
+    if (!galleryRef.current) return;
+    const offset = index * screenWidth;
+    const scrollView: any = galleryRef.current;
+
+    if (typeof scrollView.scrollTo === 'function') {
+      scrollView.scrollTo({ x: offset, animated: Platform.OS !== 'web' });
+    }
+
+    if (Platform.OS === 'web') {
+      const webNode =
+        scrollView.getScrollableNode?.() ??
+        scrollView._scrollRef ??
+        scrollView.getInnerViewNode?.() ??
+        scrollView.getNativeScrollRef?.();
+
+      if (webNode) {
+        if (typeof webNode.scrollTo === 'function') {
+          webNode.scrollTo({ left: offset, behavior: 'smooth' });
+        } else {
+          webNode.scrollLeft = offset;
+        }
+      }
+    }
+
+    setActiveIdx(index);
+  };
+
   const goPrev = () => {
     if (activeIdx <= 0) return;
-    const next = activeIdx - 1;
-    galleryRef.current?.scrollTo({ x: next * screenWidth, animated: true });
-    setActiveIdx(next);
+    scrollToSlide(activeIdx - 1);
   };
 
   const goNext = () => {
-    if (activeIdx >= images.length - 1) return;
-    const next = activeIdx + 1;
-    galleryRef.current?.scrollTo({ x: next * screenWidth, animated: true });
-    setActiveIdx(next);
+    if (activeIdx >= galleryImages.length - 1) return;
+    scrollToSlide(activeIdx + 1);
   };
 
   return (
     <View style={styles.container}>
-      <ScrollView contentContainerStyle={{ paddingBottom: 16, paddingTop: 16 }}>
+      <ScrollView contentContainerStyle={{ paddingBottom: 400, paddingTop: 50 }}>
         {/* Owner actions pinned to top of the page */}
         {isOwner ? (
           <View style={styles.topActionsRow}>
@@ -461,9 +839,6 @@ export default function ApartmentDetailsScreen() {
               {apartment.city}
             </Text>
           </View>
-          <Text style={styles.subMeta}>
-            {apartment.bedrooms} חדרים · {roommatesNeeded} מחפשי שותף
-          </Text>
         </View>
         <View style={styles.galleryContainer}>
           <ScrollView
@@ -478,20 +853,30 @@ export default function ApartmentDetailsScreen() {
               setActiveIdx(idx);
             }}
           >
-            {images.map((uri, idx) => (
+            {galleryImages.map((_, idx) => {
+              const uri = getImageForIndex(idx);
+              return (
               <View key={`${uri}-${idx}`} style={[styles.slide, { width: screenWidth }]}>
                 <Image
-                  source={{ uri: failed[idx] ? PLACEHOLDER : uri }}
+                  source={{ uri }}
                   style={styles.image}
                   resizeMode="cover"
-                  onError={() => setFailed((f) => ({ ...f, [idx]: true }))}
+                  onError={() => {
+                    setImageCandidateIndex((prev) => {
+                      const candidates = galleryImages[idx] || [PLACEHOLDER];
+                      const current = prev[idx] ?? 0;
+                      const next = Math.min(current + 1, candidates.length - 1);
+                      if (next === current) return prev;
+                      return { ...prev, [idx]: next };
+                    });
+                  }}
                 />
                 <LinearGradient
                   colors={['transparent', 'rgba(15,15,20,0.6)', 'rgba(15,15,20,0.95)']}
                   style={styles.imageGradient}
                 />
               </View>
-            ))}
+            );})}
           </ScrollView>
 
           {/* Price overlay at bottom-left of the image */}
@@ -503,7 +888,16 @@ export default function ApartmentDetailsScreen() {
             </View>
           </View>
 
-          {images.length > 1 ? (
+          {availableRoommateSlots !== null ? (
+            <View style={styles.capacityOverlay}>
+              <Text style={styles.capacityOverlayValue}>
+                {partnerSlotsUsed}/{totalRoommateCapacity ?? 0}
+              </Text>
+              <Users size={18} color="#FFFFFF" />
+            </View>
+          ) : null}
+
+          {galleryImages.length > 1 ? (
             <>
               <TouchableOpacity onPress={goPrev} style={[styles.navBtn, styles.navBtnLeft]} activeOpacity={0.85}>
                 <ChevronLeft size={18} color="#FFFFFF" />
@@ -512,7 +906,7 @@ export default function ApartmentDetailsScreen() {
                 <ChevronRight size={18} color="#FFFFFF" />
               </TouchableOpacity>
               <View style={styles.dotsRow}>
-                {images.map((_, i) => (
+                {galleryImages.map((_, i) => (
                   <View key={`dot-${i}`} style={[styles.dot, i === activeIdx && styles.dotActive]} />
                 ))}
               </View>
@@ -565,17 +959,17 @@ export default function ApartmentDetailsScreen() {
         <View style={styles.content}>
           <View style={styles.detailsRow}>
             <View style={styles.detailBoxDark}>
-              <Bed size={20} color="#7C5CFF" />
+              <Bed size={20} color="#4C1D95" />
               <Text style={styles.detailValueDark}>{apartment.bedrooms}</Text>
               <Text style={styles.detailLabelDark}>חדרי שינה</Text>
             </View>
             <View style={styles.detailBoxDark}>
-              <Bath size={20} color="#7C5CFF" />
+              <Bath size={20} color="#4C1D95" />
               <Text style={styles.detailValueDark}>{apartment.bathrooms}</Text>
               <Text style={styles.detailLabelDark}>חדרי רחצה</Text>
             </View>
             <TouchableOpacity style={styles.detailBoxDark} onPress={() => setIsMembersOpen(true)} activeOpacity={0.9}>
-              <Users size={20} color="#7C5CFF" />
+              <Users size={20} color="#4C1D95" />
               <Text style={styles.detailValueDark}>{roommatesCount}</Text>
               <Text style={styles.detailLabelDark}>שותפים</Text>
             </TouchableOpacity>
@@ -601,8 +995,8 @@ export default function ApartmentDetailsScreen() {
       </ScrollView>
 
       {/* Join as roommate button (for non-owner, non-member viewers) */}
-      {!isOwner && !isMember ? (
-        <View style={styles.footer}>
+      {!isOwner && !isMember && isAssignedAnywhere === false ? (
+        <View style={[styles.footer, { bottom: (insets.bottom || 0) + 78 }]}>
           <TouchableOpacity
             activeOpacity={0.9}
             onPress={handleRequestJoin}
@@ -701,36 +1095,106 @@ export default function ApartmentDetailsScreen() {
             <ScrollView contentContainerStyle={styles.sheetContent}>
               {isAdding ? (
                 <View style={{ paddingVertical: 20, alignItems: 'center' }}>
-                  <ActivityIndicator size="small" color="#7C5CFF" />
+                  <ActivityIndicator size="small" color="#4C1D95" />
                 </View>
-              ) : filteredCandidates.length > 0 ? (
-                filteredCandidates.map((u) => (
-                  <TouchableOpacity
-                    key={u.id}
-                    style={styles.candidateRow}
-                    activeOpacity={0.9}
-                    onPress={() => confirmAddPartner(u)}
-                  >
-                    <View style={styles.candidateLeft}>
-                      <Image
-                        source={{ uri: (u as any).avatar_url || 'https://cdn-icons-png.flaticon.com/512/847/847969.png' }}
-                        style={styles.candidateAvatar}
-                      />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.candidateName} numberOfLines={1}>{u.full_name}</Text>
-                      <View style={styles.candidateBadges}>
-                        <View style={styles.candidateBadge}><Text style={styles.candidateBadgeText}>זמין</Text></View>
-                        <View style={styles.candidateBadge}><Text style={styles.candidateBadgeText}>מתאים</Text></View>
+              ) : (
+                <>
+                  {filteredSharedGroups.length > 0 ? (
+                    <View style={{ marginBottom: 12 }}>
+                      <Text style={styles.sectionHeading}>פרופיל משותף</Text>
+                      <View style={{ gap: 8, marginTop: 8 }}>
+                        {filteredSharedGroups.map((g) => {
+                          const names = g.members.map((m) => m.full_name || 'משתמש').join(' • ');
+                          const first = g.members[0];
+                          const second = g.members[1];
+                          const third = g.members[2];
+                          return (
+                            <TouchableOpacity
+                              key={`shared-group-${g.id}`}
+                              style={styles.candidateRow}
+                              activeOpacity={0.9}
+                              onPress={() =>
+                                setConfirmState({
+                                  visible: true,
+                                  title: 'שליחת הזמנה לקבוצה',
+                                  message: `לשלוח הזמנה לפרופיל המשותף (${names}) להצטרף כדיירים?`,
+                                  confirmLabel: 'שלח הזמנה',
+                                  cancelLabel: 'ביטול',
+                                  onConfirm: () =>
+                                    handleAddSharedGroup(
+                                      g.id,
+                                      (g.members || []).map((m) => m.id).filter(Boolean) as string[]
+                                    ),
+                                })
+                              }
+                            >
+                              <View style={styles.groupAvatarLeft}>
+                                <View style={styles.groupAvatarStack}>
+                                  {third ? (
+                                    <Image
+                                      source={{ uri: (third as any).avatar_url || 'https://cdn-icons-png.flaticon.com/512/847/847969.png' }}
+                                      style={styles.groupAvatarSm}
+                                    />
+                                  ) : null}
+                                  {second ? (
+                                    <Image
+                                      source={{ uri: (second as any).avatar_url || 'https://cdn-icons-png.flaticon.com/512/847/847969.png' }}
+                                      style={styles.groupAvatarMd}
+                                    />
+                                  ) : null}
+                                  {first ? (
+                                    <Image
+                                      source={{ uri: (first as any).avatar_url || 'https://cdn-icons-png.flaticon.com/512/847/847969.png' }}
+                                      style={styles.groupAvatarLg}
+                                    />
+                                  ) : null}
+                                </View>
+                              </View>
+                              <View style={{ flex: 1 }}>
+                                <Text style={styles.candidateName} numberOfLines={1}>{names}</Text>
+                                <View style={styles.candidateBadges}>
+                                  <View style={styles.candidateBadge}><Text style={styles.candidateBadgeText}>פרופיל משותף</Text></View>
+                                </View>
+                              </View>
+                              <View style={styles.candidateRight}>
+                                <UserPlus size={16} color="#A78BFA" />
+                              </View>
+                            </TouchableOpacity>
+                          );
+                        })}
                       </View>
                     </View>
-                    <View style={styles.candidateRight}>
-                      <UserPlus size={16} color="#A78BFA" />
-                    </View>
-                  </TouchableOpacity>
-                ))
-              ) : (
-                <Text style={styles.emptyMembers}>לא נמצאו תוצאות</Text>
+                  ) : null}
+                  {filteredCandidates.length > 0 ? (
+                    filteredCandidates.map((u) => (
+                      <TouchableOpacity
+                        key={u.id}
+                        style={styles.candidateRow}
+                        activeOpacity={0.9}
+                        onPress={() => confirmAddPartner(u)}
+                      >
+                        <View style={styles.candidateLeft}>
+                          <Image
+                            source={{ uri: (u as any).avatar_url || 'https://cdn-icons-png.flaticon.com/512/847/847969.png' }}
+                            style={styles.candidateAvatar}
+                          />
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.candidateName} numberOfLines={1}>{u.full_name}</Text>
+                          <View style={styles.candidateBadges}>
+                            <View style={styles.candidateBadge}><Text style={styles.candidateBadgeText}>זמין</Text></View>
+                            <View style={styles.candidateBadge}><Text style={styles.candidateBadgeText}>מתאים</Text></View>
+                          </View>
+                        </View>
+                        <View style={styles.candidateRight}>
+                          <UserPlus size={16} color="#A78BFA" />
+                        </View>
+                      </TouchableOpacity>
+                    ))
+                  ) : (
+                    <Text style={styles.emptyMembers}>לא נמצאו תוצאות</Text>
+                  )}
+                </>
               )}
             </ScrollView>
           </View>
@@ -920,7 +1384,7 @@ const styles = StyleSheet.create({
   },
   topActionsRow: {
     paddingHorizontal: 16,
-    marginTop: 12,
+    marginTop: 0,
     marginBottom: 8,
     flexDirection: 'row',
     justifyContent: 'flex-end',
@@ -1026,6 +1490,26 @@ const styles = StyleSheet.create({
     gap: 12,
     marginBottom: 16,
   },
+  capacityOverlay: {
+    position: 'absolute',
+    right: 16,
+    bottom: 12,
+    zIndex: 6,
+    backgroundColor: 'rgba(20,20,32,0.92)',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(124,92,255,0.35)',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 8,
+  },
+  capacityOverlayValue: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '800',
+  },
   detailBoxDark: {
     flex: 1,
     backgroundColor: '#17171F',
@@ -1080,7 +1564,7 @@ const styles = StyleSheet.create({
   },
   joinBtn: {
     flex: 1,
-    backgroundColor: '#7C5CFF',
+    backgroundColor: 'transparent',
     paddingVertical: 14,
     borderRadius: 12,
     alignItems: 'center',
@@ -1089,7 +1573,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(124,92,255,0.45)',
   },
   joinBtnDisabled: {
-    backgroundColor: 'rgba(124,92,255,0.45)',
+    backgroundColor: 'transparent',
     borderColor: 'rgba(124,92,255,0.25)',
   },
   joinBtnText: {
@@ -1098,12 +1582,16 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
   footer: {
-    padding: 16,
-    borderTopWidth: 1,
-    borderTopColor: '#1F2030',
-    backgroundColor: '#0F0F14',
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    padding: 0,
+    backgroundColor: 'transparent',
     flexDirection: 'row',
     gap: 12,
+    // bottom offset is applied inline to respect safe area
+    zIndex: 100,
+    elevation: 8,
   },
   // deprecated old bottom action buttons kept for potential reuse
   editButton: {
@@ -1155,6 +1643,12 @@ const styles = StyleSheet.create({
     color: '#C9CDD6',
     fontSize: 13,
     fontWeight: '700',
+  },
+  sectionHeading: {
+    color: '#C9CDD6',
+    fontSize: 13,
+    fontWeight: '700',
+    textAlign: 'right',
   },
   closeBtn: {
     width: 32,
@@ -1252,6 +1746,41 @@ const styles = StyleSheet.create({
     color: '#C9CDD6',
     fontSize: 11,
     fontWeight: '700',
+  },
+  groupAvatarLeft: {
+    width: 76,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  groupAvatarStack: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+  },
+  groupAvatarLg: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    borderWidth: 2,
+    borderColor: 'rgba(15,15,20,0.9)',
+    backgroundColor: '#1F1F29',
+  },
+  groupAvatarMd: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    marginLeft: -8,
+    borderWidth: 2,
+    borderColor: 'rgba(15,15,20,0.9)',
+    backgroundColor: '#1F1F29',
+  },
+  groupAvatarSm: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    marginLeft: -8,
+    borderWidth: 2,
+    borderColor: 'rgba(15,15,20,0.9)',
+    backgroundColor: '#1F1F29',
   },
   avatarLarge: {
     width: 48,

@@ -1,31 +1,42 @@
 import { useEffect } from 'react';
 import { I18nManager, Platform, View } from 'react-native';
-import { Stack } from 'expo-router';
+import { Stack, usePathname } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useFrameworkReady } from '@/hooks/useFrameworkReady';
 import { authService } from '@/lib/auth';
 import { useAuthStore } from '@/stores/authStore';
+import * as Notifications from 'expo-notifications';
+import { usePushNotifications } from '@/hooks/usePushNotifications';
+import GlobalTopBar from '@/components/GlobalTopBar';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 export default function RootLayout() {
   useFrameworkReady();
   const { setUser, setLoading } = useAuthStore();
+  usePushNotifications();
+  const pathname = usePathname();
+  const showTopBar =
+    pathname !== '/auth/intro' &&
+    pathname !== '/auth/login' &&
+    pathname !== '/auth/register';
 
   useEffect(() => {
     let isMounted = true;
 
-    // Ensure RTL on native devices (Hebrew)
-    (async () => {
-      try {
-        if (Platform.OS !== 'web' && !I18nManager.isRTL) {
-          I18nManager.allowRTL(true);
-          I18nManager.swapLeftAndRightInRTL(true);
-          I18nManager.forceRTL(true);
-          // Note: a manual app restart may be required on some devices
-        }
-      } catch {
-        // ignore
-      }
-    })();
+    // Show notifications in foreground as alerts with sound/badge
+    try {
+      Notifications.setNotificationHandler({
+        handleNotification: async () => ({
+          shouldShowAlert: true,
+          shouldPlaySound: true,
+          shouldSetBadge: true,
+        }),
+      });
+    } catch {
+      // ignore
+    }
+
+    // I18nManager-based RTL enforcement removed to avoid native reload issues.
 
     // Ensure RTL on web (Hebrew)
     if (Platform.OS === 'web' && typeof document !== 'undefined') {
@@ -51,7 +62,7 @@ export default function RootLayout() {
         const currentUser = await authService.getCurrentUser();
         if (!isMounted) return;
         if (currentUser) {
-          setUser({ id: currentUser.id, email: currentUser.email! });
+          setUser({ id: currentUser.id, email: currentUser.email!, role: (currentUser as any).role });
         }
       } catch {
         // ignore
@@ -72,11 +83,13 @@ export default function RootLayout() {
   }, [setUser, setLoading]);
 
   return (
-    <View style={{ flex: 1, writingDirection: 'rtl', direction: 'rtl' }}>
+    <GestureHandlerRootView style={{ flex: 1, writingDirection: 'rtl' }}>
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="+not-found" />
       </Stack>
+      {/* Global transparent top bar: notifications (left), Homie (center), requests (right) */}
+      {showTopBar && <GlobalTopBar />}
       <StatusBar style="auto" />
-    </View>
+    </GestureHandlerRootView>
   );
 }

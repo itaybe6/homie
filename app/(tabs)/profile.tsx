@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -11,18 +11,20 @@ import {
   SafeAreaView,
   Image,
   Platform,
+  Modal,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { LogOut, Edit, Save, X, Plus, MapPin } from 'lucide-react-native';
+import { LogOut, Edit, Save, X, Plus, MapPin, Inbox, Trash2, Settings } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
 import { supabase } from '@/lib/supabase';
 import { authService } from '@/lib/auth';
 import { useAuthStore } from '@/stores/authStore';
 import { useApartmentStore } from '@/stores/apartmentStore';
-import { User, Apartment } from '@/types/database';
-import NotificationsButton from '@/components/NotificationsButton';
+import { User, Apartment, UserSurveyResponse } from '@/types/database';
+
 
 export default function ProfileScreen() {
   const router = useRouter();
@@ -35,7 +37,15 @@ export default function ProfileScreen() {
   const [isLoading, setIsLoading] = useState(true);
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [aptMembers, setAptMembers] = useState<Record<string, User[]>>({});
+  const [viewerIndex, setViewerIndex] = useState<number | null>(null);
+  const [isDeletingImage, setIsDeletingImage] = useState(false);
+  const [isAddingImage, setIsAddingImage] = useState(false);
+  const [sharedGroups, setSharedGroups] = useState<
+    { id: string; name?: string | null; members: Pick<User, 'id' | 'full_name' | 'avatar_url'>[] }[]
+  >([]);
+  const [surveyResponse, setSurveyResponse] = useState<UserSurveyResponse | null>(null);
 
   const [fullName, setFullName] = useState('');
   const [age, setAge] = useState('');
@@ -46,6 +56,35 @@ export default function ProfileScreen() {
     fetchProfile();
   }, [user]);
 
+  // Re-fetch when the screen regains focus (after approvals/merges)
+  useFocusEffect(
+    (React as any).useCallback(() => {
+      fetchProfile();
+      return () => {};
+    }, [user?.id])
+  );
+
+  // Subscribe to realtime membership changes for the current user and refresh
+  useEffect(() => {
+    if (!user?.id) return;
+    try {
+      const channel = supabase
+        .channel(`profile-${user.id}-group-memberships`)
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'profile_group_members', filter: `user_id=eq.${user.id}` },
+          () => {
+            fetchProfile();
+          }
+        )
+        .subscribe();
+      return () => {
+        try { supabase.removeChannel(channel); } catch {}
+      };
+    } catch {
+      // ignore
+    }
+  }, [user?.id]);
   const getApartmentPrimaryImage = (apartment: Apartment): string => {
     const PLACEHOLDER = 'https://images.pexels.com/photos/1457842/pexels-photo-1457842.jpeg';
     const anyValue: any = (apartment as any).image_urls;
@@ -69,11 +108,122 @@ export default function ProfileScreen() {
     return PLACEHOLDER;
   };
 
+  const getObjectPathFromPublicUrl = (publicUrl: string): string | null => {
+    if (!publicUrl) return null;
+    const marker = '/object/public/user-images/';
+    const idx = publicUrl.indexOf(marker);
+    if (idx === -1) return null;
+    return publicUrl.substring(idx + marker.length);
+  };
+
+  const formatYesNo = (value?: boolean | null): string => {
+    if (value === undefined || value === null) return '';
+    return value ? 'כן' : 'לא';
+  };
+
+  const formatMonthLabel = (value?: string | null): string => {
+    if (!value) return '';
+    const [year, month] = value.split('-');
+    if (year && month) {
+      const yearNum = parseInt(year, 10);
+      const monthNum = parseInt(month, 10) - 1;
+      if (!Number.isNaN(yearNum) && !Number.isNaN(monthNum)) {
+        const date = new Date(yearNum, monthNum, 1);
+        if (!Number.isNaN(date.getTime())) {
+          try {
+            return date.toLocaleDateString('he-IL', { month: 'short', year: 'numeric' });
+          } catch {
+            return `${month}/${year.slice(-2)}`;
+          }
+        }
+      }
+    }
+    return value;
+  };
+
+  const formatCurrency = (value?: number | null): string => {
+    if (typeof value !== 'number' || Number.isNaN(value)) return '';
+    try {
+      return new Intl.NumberFormat('he-IL', {
+        style: 'currency',
+        currency: 'ILS',
+        maximumFractionDigits: 0,
+      }).format(value);
+    } catch {
+      return `₪${value}`;
+    }
+  };
+
+  const normalizeNeighborhoods = (value: any): string => {
+    if (!value) return '';
+    if (Array.isArray(value)) {
+      return value.filter(Boolean).join(' • ');
+    }
+    if (typeof value === 'string') {
+      try {
+        const parsed = JSON.parse(value);
+        if (Array.isArray(parsed)) {
+          return parsed.filter(Boolean).join(' • ');
+        }
+      } catch {
+        // fall through to cleanup
+      }
+      return value
+        .replace(/[{}\[\]"]/g, ' ')
+        .split(',')
+        .map((segment) => segment.trim())
+        .filter(Boolean)
+        .join(' • ');
+    }
+    return '';
+  };
+
+  const removeImageAt = async (idx: number) => {
+    try {
+      if (!user?.id || !profile?.image_urls) return;
+      const url = profile.image_urls[idx];
+      if (!url) return;
+
+      const shouldProceed = await new Promise<boolean>((resolve) => {
+        Alert.alert('מחיקת תמונה', 'למחוק את התמונה הזו?', [
+          { text: 'ביטול', style: 'cancel', onPress: () => resolve(false) },
+          { text: 'מחק', style: 'destructive', onPress: () => resolve(true) },
+        ]);
+      });
+      if (!shouldProceed) return;
+
+      setIsDeletingImage(true);
+      const next = profile.image_urls.filter((_, i) => i !== idx);
+      const { error: updateErr } = await supabase
+        .from('users')
+        .update({ image_urls: next, updated_at: new Date().toISOString() })
+        .eq('id', user.id);
+      if (updateErr) throw updateErr;
+
+      setProfile((prev) => (prev ? { ...prev, image_urls: next } as any : prev));
+      setViewerIndex(null);
+
+      try {
+        const objectPath = getObjectPathFromPublicUrl(url);
+        if (objectPath) {
+          await supabase.storage.from('user-images').remove([objectPath]);
+        }
+      } catch {}
+    } catch (e: any) {
+      Alert.alert('שגיאה', e?.message || 'לא ניתן למחוק את התמונה');
+    } finally {
+      setIsDeletingImage(false);
+    }
+  };
+
   const fetchProfile = async () => {
     if (!user) {
+      setSurveyResponse(null);
       setIsLoading(false);
       return;
     }
+
+    setSurveyResponse(null);
 
     try {
       const { data: profileData, error: profileError } = await supabase
@@ -90,19 +240,46 @@ export default function ProfileScreen() {
         setBio(profileData.bio || '');
       }
 
-      const { data: aptData, error: aptError } = await supabase
-        .from('apartments')
-        .select('*')
-        .eq('owner_id', user.id);
+      let latestSurvey: UserSurveyResponse | null = null;
+      try {
+        const { data: surveyRows, error: surveyError } = await supabase
+          .from('user_survey_responses')
+          .select('*')
+          .eq('user_id', user.id)
+          .order('updated_at', { ascending: false })
+          .limit(1);
+        if (surveyError) throw surveyError;
+        latestSurvey = (surveyRows && surveyRows[0]) || null;
+      } catch (surveyErr) {
+        console.error('Error fetching survey response:', surveyErr);
+      }
+      setSurveyResponse(latestSurvey);
 
-      if (aptError) throw aptError;
-      setUserApartments(aptData || []);
+      const [{ data: ownedApts, error: ownedError }, { data: partnerApts, error: partnerError }] =
+        await Promise.all([
+          supabase.from('apartments').select('*').eq('owner_id', user.id),
+          supabase.from('apartments').select('*').contains('partner_ids', [user.id]),
+        ]);
+
+      if (ownedError) throw ownedError;
+      if (partnerError) throw partnerError;
+
+      const mergedById: Record<string, Apartment> = {};
+      (ownedApts || []).forEach((apt: any) => {
+        mergedById[apt.id] = apt;
+      });
+      (partnerApts || []).forEach((apt: any) => {
+        mergedById[apt.id] = apt;
+      });
+
+      const mergedApts = Object.values(mergedById) as Apartment[];
+      setUserApartments(mergedApts);
 
       // Load roommates (partners) avatars per apartment
       const membersMap: Record<string, User[]> = {};
       await Promise.all(
-        (aptData || []).map(async (apt) => {
-          const ids = (apt as any).partner_ids as string[] | undefined;
+        mergedApts.map(async (apt: any) => {
+          const ids = apt.partner_ids as string[] | undefined;
           if (ids && ids.length > 0) {
             const { data: usersData, error: usersError } = await supabase
               .from('users')
@@ -115,6 +292,50 @@ export default function ProfileScreen() {
         })
       );
       setAptMembers(membersMap);
+
+      // Load shared profile groups (compact view)
+      try {
+        const { data: membershipRows, error: membershipError } = await supabase
+          .from('profile_group_members')
+          .select('group_id')
+          .eq('user_id', user.id)
+          .eq('status', 'ACTIVE');
+        if (membershipError) throw membershipError;
+        const groupIds = (membershipRows || []).map((r: any) => r.group_id).filter(Boolean);
+        if (!groupIds.length) {
+          setSharedGroups([]);
+        } else {
+          const results: { id: string; name?: string | null; members: Pick<User, 'id' | 'full_name' | 'avatar_url'>[] }[] = [];
+          for (const gid of groupIds) {
+            const { data: groupRow } = await supabase
+              .from('profile_groups')
+              .select('id,name,status')
+              .eq('id', gid)
+              .eq('status', 'ACTIVE')
+              .maybeSingle();
+            if (!groupRow) continue;
+            const { data: memberRows } = await supabase
+              .from('profile_group_members')
+              .select('user_id')
+              .eq('group_id', gid)
+              .eq('status', 'ACTIVE');
+            const memberIds = (memberRows || []).map((m: any) => m.user_id).filter(Boolean);
+            if (!memberIds.length) continue;
+            const { data: usersRows } = await supabase
+              .from('users')
+              .select('id, full_name, avatar_url')
+              .in('id', memberIds);
+            results.push({
+              id: gid,
+              name: (groupRow as any)?.name,
+              members: ((usersRows || []) as any[]).filter(Boolean) as any,
+            });
+          }
+          setSharedGroups(results);
+        }
+      } catch {
+        setSharedGroups([]);
+      }
     } catch (error) {
       console.error('Error fetching profile:', error);
     } finally {
@@ -202,6 +423,40 @@ export default function ProfileScreen() {
     }
   };
 
+  const handleDeleteProfile = async () => {
+    if (!user) return;
+    try {
+      if (Platform.OS === 'web') {
+        const confirmed = typeof confirm === 'function' ? confirm('האם אתה בטוח/ה שברצונך למחוק את הפרופיל? פעולה זו אינה ניתנת לשחזור.') : true;
+        if (!confirmed) return;
+      } else {
+        const shouldProceed = await new Promise<boolean>((resolve) => {
+          Alert.alert('מחיקת פרופיל', 'האם אתה בטוח/ה שברצונך למחוק את הפרופיל? פעולה זו אינה ניתנת לשחזור.', [
+            { text: 'ביטול', style: 'cancel', onPress: () => resolve(false) },
+            { text: 'מחק', style: 'destructive', onPress: () => resolve(true) },
+          ]);
+        });
+        if (!shouldProceed) return;
+      }
+
+      setIsDeleting(true);
+      const { error: deleteError } = await supabase.from('users').delete().eq('id', user.id);
+      if (deleteError) throw deleteError;
+
+      try {
+        await authService.signOut();
+      } catch {
+        // ignore sign out failure after deletion; we'll still clear local state
+      }
+      setUser(null);
+      router.replace('/auth/login');
+    } catch (e: any) {
+      Alert.alert('שגיאה', e?.message || 'לא ניתן למחוק את הפרופיל כעת');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   const pickAndUploadAvatar = async () => {
     try {
       const perms = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -252,71 +507,172 @@ export default function ProfileScreen() {
     }
   };
 
-  const pickAndUploadExtraPhotos = async () => {
+  // moved extra-photos upload to edit profile screen
+  const addGalleryImage = async () => {
     try {
-      if (!user) return;
-
-      const current = (profile?.image_urls ?? []).filter(Boolean);
-      const remaining = Math.max(0, 6 - current.length);
-      if (remaining <= 0) {
-        Alert.alert('מגבלה', 'ניתן לשמור עד 6 תמונות נוספות');
-        return;
-      }
-
       const perms = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!perms.granted) {
-        Alert.alert('הרשאה נדרשת', 'יש לאפשר גישה לגלריה כדי להעלות תמונות');
+        Alert.alert('הרשאה נדרשת', 'יש לאפשר גישה לגלריה כדי להעלות תמונה');
         return;
       }
 
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: false,
-        allowsMultipleSelection: true,
-        selectionLimit: remaining,
+        allowsEditing: true,
+        aspect: [1, 1],
         quality: 0.9,
-      } as any);
+      });
 
-      if ((result as any).canceled || !(result as any).assets?.length) return;
+      if (result.canceled || !result.assets?.length || !user || !profile) return;
 
-      setIsSaving(true);
-      const newUrls: string[] = [];
-      for (const asset of (result as any).assets) {
-        const response = await fetch(asset.uri);
-        const arrayBuffer = await response.arrayBuffer();
-        const fileExt = (asset.fileName || 'image.jpg').split('.').pop() || 'jpg';
-        const fileName = `${user.id}-${Date.now()}-${Math.random().toString(36).slice(2)}.${fileExt}`;
-        const filePath = `users/${user.id}/gallery/${fileName}`;
-        const filePayload: any = arrayBuffer as any;
+      setIsAddingImage(true);
+      const asset = result.assets[0];
+      const response = await fetch(asset.uri);
+      const arrayBuffer = await response.arrayBuffer();
+      const fileExt = (asset.fileName || 'photo.jpg').split('.').pop() || 'jpg';
+      const fileName = `${user.id}-${Date.now()}.${fileExt}`;
+      const filePath = `users/${user.id}/gallery/${fileName}`;
+      const filePayload: any = arrayBuffer as any;
 
-        const { error: upErr } = await supabase.storage
-          .from('user-images')
-          .upload(filePath, filePayload, { contentType: 'image/jpeg', upsert: true });
-        if (upErr) throw upErr;
-        const { data } = supabase.storage.from('user-images').getPublicUrl(filePath);
-        newUrls.push(data.publicUrl);
-      }
+      const { error: uploadError } = await supabase.storage
+        .from('user-images')
+        .upload(filePath, filePayload, { contentType: 'image/jpeg', upsert: true });
+      if (uploadError) throw uploadError;
 
-      const merged = [...current, ...newUrls].slice(0, 6);
-      const { error: updateErr } = await supabase
+      const { data } = supabase.storage.from('user-images').getPublicUrl(filePath);
+      const publicUrl = data.publicUrl;
+
+      const next = [...(profile.image_urls || []), publicUrl];
+      const { error: updateError } = await supabase
         .from('users')
-        .update({ image_urls: merged, updated_at: new Date().toISOString() })
+        .update({ image_urls: next, updated_at: new Date().toISOString() })
         .eq('id', user.id);
-      if (updateErr) throw updateErr;
+      if (updateError) throw updateError;
 
-      setProfile((prev) => (prev ? { ...prev, image_urls: merged } as any : prev));
-      Alert.alert('הצלחה', 'התמונות נוספו');
+      setProfile((prev) => (prev ? { ...prev, image_urls: next } as any : prev));
     } catch (e: any) {
-      Alert.alert('שגיאה', e.message || 'לא ניתן להעלות תמונות');
+      Alert.alert('שגיאה', e?.message || 'לא ניתן להוסיף תמונה');
     } finally {
-      setIsSaving(false);
+      setIsAddingImage(false);
     }
   };
+
+  const surveyHighlights = useMemo(() => {
+    if (!surveyResponse) return [];
+    const highlights: { label: string; value: string }[] = [];
+    const push = (label: string, raw?: string) => {
+      if (!raw) return;
+      const trimmed = raw.trim();
+      if (!trimmed) return;
+      highlights.push({ label, value: trimmed });
+    };
+
+    push('עיר מועדפת', surveyResponse.preferred_city || undefined);
+    if (typeof surveyResponse.price_range === 'number') {
+      const formatted = formatCurrency(surveyResponse.price_range);
+      push('תקציב חודשי', formatted);
+    }
+    push('כניסה מתוכננת', formatMonthLabel(surveyResponse.move_in_month));
+    push('וייב יומיומי', surveyResponse.lifestyle || surveyResponse.home_vibe || undefined);
+    if (surveyResponse.is_sublet) {
+      highlights.push({ label: 'סאבלט', value: 'כן' });
+    }
+
+    return highlights.slice(0, 4);
+  }, [surveyResponse]);
+
+  const surveyItems = useMemo(() => {
+    if (!surveyResponse) return [];
+    const items: { label: string; value: string }[] = [];
+
+    const add = (label: string, raw?: string | number | null) => {
+      if (raw === undefined || raw === null) return;
+      const value =
+        typeof raw === 'string'
+          ? raw.trim()
+          : typeof raw === 'number' && Number.isFinite(raw)
+            ? `${raw}`
+            : '';
+      if (!value) return;
+      items.push({ label, value });
+    };
+
+    const addBool = (label: string, raw?: boolean | null) => {
+      const formatted = formatYesNo(raw);
+      if (!formatted) return;
+      items.push({ label, value: formatted });
+    };
+
+    add('עיסוק', surveyResponse.occupation);
+    if (typeof surveyResponse.student_year === 'number' && surveyResponse.student_year > 0) {
+      add('שנת לימודים', `שנה ${surveyResponse.student_year}`);
+    }
+    addBool('עבודה מהבית', surveyResponse.works_from_home);
+    addBool('שומר/ת כשרות', surveyResponse.keeps_kosher);
+    addBool('שומר/ת שבת', surveyResponse.is_shomer_shabbat);
+    add('תזונה', surveyResponse.diet_type);
+    addBool('מעשן/ת', surveyResponse.is_smoker);
+    add('מצב זוגי', surveyResponse.relationship_status);
+    addBool('חיית מחמד בבית', surveyResponse.has_pet);
+    if (typeof surveyResponse.cleanliness_importance === 'number') {
+      add('חשיבות ניקיון', `${surveyResponse.cleanliness_importance}/5`);
+    }
+    add('תדירות ניקיון', surveyResponse.cleaning_frequency);
+    add('העדפת אירוח', surveyResponse.hosting_preference);
+    add('סטייל בישול', surveyResponse.cooking_style);
+    add('וייב בבית', surveyResponse.home_vibe);
+    addBool('תת-השכרה', surveyResponse.is_sublet);
+    if (surveyResponse.sublet_month_from || surveyResponse.sublet_month_to) {
+      const period = [formatMonthLabel(surveyResponse.sublet_month_from), formatMonthLabel(surveyResponse.sublet_month_to)]
+        .filter(Boolean)
+        .join(' → ');
+      add('טווח סאבלט', period);
+    }
+    if (typeof surveyResponse.price_range === 'number') {
+      add('תקציב שכירות', formatCurrency(surveyResponse.price_range));
+    }
+    addBool('חשבונות כלולים', surveyResponse.bills_included);
+    add('עיר מועדפת', surveyResponse.preferred_city);
+    const neighborhoodsJoined = normalizeNeighborhoods((surveyResponse.preferred_neighborhoods as unknown) ?? null);
+    if (neighborhoodsJoined) {
+      add('שכונות מועדפות', neighborhoodsJoined);
+    }
+    add('קומה מועדפת', surveyResponse.floor_preference);
+    addBool('מרפסת', surveyResponse.has_balcony);
+    addBool('מעלית', surveyResponse.has_elevator);
+    addBool('חדר מאסטר', surveyResponse.wants_master_room);
+    add('חודש כניסה', formatMonthLabel(surveyResponse.move_in_month));
+    if (typeof surveyResponse.preferred_roommates === 'number') {
+      add('מספר שותפים מועדף', `${surveyResponse.preferred_roommates}`);
+    }
+    addBool('חיות מורשות', surveyResponse.pets_allowed);
+    addBool('עם מתווך', surveyResponse.with_broker);
+    add('טווח גילאים רצוי', surveyResponse.preferred_age_range);
+    add('מגדר שותפים', surveyResponse.preferred_gender);
+    add('עיסוק שותפים', surveyResponse.preferred_occupation);
+    add('שותפים ושבת', surveyResponse.partner_shabbat_preference);
+    add('שותפים ותזונה', surveyResponse.partner_diet_preference);
+    add('שותפים ועישון', surveyResponse.partner_smoking_preference);
+    add('שותפים וחיות', surveyResponse.partner_pets_preference);
+
+    return items;
+  }, [surveyResponse]);
+
+  const surveyStatusLabel = surveyResponse
+    ? surveyResponse.is_completed
+      ? 'הסקר הושלם'
+      : 'בטיוטה'
+    : 'טרם מולא';
+  const surveyStatusStyle = surveyResponse
+    ? surveyResponse.is_completed
+      ? styles.surveyBadgeSuccess
+      : styles.surveyBadgePending
+    : styles.surveyBadgeMuted;
 
   if (isLoading) {
     return (
       <View style={styles.centerContainer}>
-        <ActivityIndicator size="large" color="#7C5CFF" />
+        <ActivityIndicator size="large" color="#4C1D95" />
       </View>
     );
   }
@@ -324,7 +680,6 @@ export default function ProfileScreen() {
   if (!user) {
     return (
       <SafeAreaView style={styles.container}>
-        <NotificationsButton style={{ left: 16 }} />
         <View style={{ padding: 16, alignItems: 'center', gap: 12 }}>
           <Text style={{ color: '#FFFFFF', fontSize: 18, fontWeight: '800' }}>לא מחובר/ת</Text>
           <Text style={{ color: '#9DA4AE', textAlign: 'center' }}>
@@ -332,7 +687,7 @@ export default function ProfileScreen() {
           </Text>
           <TouchableOpacity
             onPress={() => router.push('/auth/login')}
-            style={{ backgroundColor: '#7C5CFF', paddingHorizontal: 18, paddingVertical: 12, borderRadius: 10 }}>
+            style={{ backgroundColor: '#4C1D95', paddingHorizontal: 18, paddingVertical: 12, borderRadius: 10 }}>
             <Text style={{ color: '#0F0F14', fontWeight: '800' }}>כניסה / הרשמה</Text>
           </TouchableOpacity>
         </View>
@@ -342,8 +697,14 @@ export default function ProfileScreen() {
 
   return (
       <SafeAreaView style={styles.container}>
-        <NotificationsButton style={{ left: 16 }} />
-        <ScrollView contentContainerStyle={[styles.scrollContent, { paddingBottom: Math.max(220, 120 + insets.bottom) }]}>
+        <ScrollView contentContainerStyle={[
+          styles.scrollContent,
+          {
+            // add top spacer so the global top bar won't overlap the photo
+            paddingTop: 60,
+            paddingBottom: Math.max(220, 120 + insets.bottom),
+          },
+        ]}>
 
         {!isEditing ? (
           <View style={styles.profileCard}>
@@ -361,9 +722,19 @@ export default function ProfileScreen() {
                 style={styles.photoBottomGradient}
               />
 
-              <TouchableOpacity style={styles.addPhotoBtn} onPress={pickAndUploadAvatar} activeOpacity={0.9} disabled={isSaving}>
-                <Plus size={20} color="#0F0F14" />
+              <TouchableOpacity
+                style={styles.settingsBtn}
+                onPress={() => router.push('/profile/settings')}
+                activeOpacity={0.9}
+              >
+                <Settings size={18} color="#FFFFFF" />
               </TouchableOpacity>
+
+              {!profile?.avatar_url ? (
+                <TouchableOpacity style={styles.addPhotoBtn} onPress={pickAndUploadAvatar} activeOpacity={0.9} disabled={isSaving}>
+                  <Plus size={20} color="#0F0F14" />
+                </TouchableOpacity>
+              ) : null}
             </View>
 
             <View style={styles.infoPanel}>
@@ -376,42 +747,9 @@ export default function ProfileScreen() {
                 <Text style={styles.bioText}>{profile.bio}</Text>
               ) : null}
 
-              <TouchableOpacity
-                style={styles.editProfileBtn}
-                onPress={() => router.push('/profile/edit')}
-                activeOpacity={0.9}
-              >
-                <Edit size={18} color="#0F0F14" />
-                <Text style={styles.editProfileBtnText}>עריכת פרופיל</Text>
-              </TouchableOpacity>
+              {/* per design, action buttons moved to settings screen */}
 
-              <TouchableOpacity
-                style={[styles.editProfileBtn, { backgroundColor: '#34D399', alignSelf: 'flex-end', marginTop: 10 }]}
-                onPress={() => router.push('/(tabs)/onboarding/survey')}
-                activeOpacity={0.9}
-              >
-                <MapPin size={18} color="#0F0F14" />
-                <Text style={styles.editProfileBtnText}>מילוי שאלון העדפות</Text>
-              </TouchableOpacity>
-
-              <View style={styles.galleryActionsRow}>
-                <TouchableOpacity style={[styles.galleryAddBtn, isSaving && { opacity: 0.6 }]} onPress={pickAndUploadExtraPhotos} disabled={isSaving}>
-                  <Text style={styles.galleryAddBtnText}>הוסף תמונות נוספות (עד 6)</Text>
-                </TouchableOpacity>
-                {!!profile?.image_urls?.length && (
-                  <Text style={styles.galleryCountText}>{profile.image_urls.length}/6</Text>
-                )}
-              </View>
-
-              {profile?.image_urls?.length ? (
-                <View style={styles.galleryGrid}>
-                  {profile.image_urls.map((url, idx) => (
-                    <View key={url + idx} style={[styles.galleryItem, (idx % 7 === 0) && styles.galleryItemTall]}>
-                      <Image source={{ uri: url }} style={styles.galleryImg} />
-                    </View>
-                  ))}
-                </View>
-              ) : null}
+              {/* gallery grid moved to its own section below */}
             </View>
           </View>
         ) : (
@@ -462,6 +800,74 @@ export default function ProfileScreen() {
           </View>
         )}
 
+        {/* Shared profile (if any) */}
+        {sharedGroups.length > 0 && (
+          <View style={styles.sectionDark}>
+            <Text style={styles.sectionTitleDark}>
+              {sharedGroups.length > 1 ? 'פרופילים משותפים' : 'פרופיל משותף'}
+            </Text>
+            {sharedGroups.map((g) => (
+              <View key={g.id} style={styles.sharedCard}>
+                <View style={styles.sharedAvatarsRow}>
+                  {g.members.map((m) => (
+                    <View key={m.id} style={styles.sharedAvatarWrap}>
+                      <Image
+                        source={{ uri: m.avatar_url || 'https://cdn-icons-png.flaticon.com/512/847/847969.png' }}
+                        style={styles.sharedAvatar}
+                      />
+                    </View>
+                  ))}
+                </View>
+                <Text style={styles.sharedMembersLine} numberOfLines={2}>
+                  {g.members.map((m) => m.full_name || 'חבר').join(' • ')}
+                </Text>
+              </View>
+            ))}
+          </View>
+        )}
+
+        {/* Gallery section */}
+        <View style={styles.sectionDark}>
+          <View style={styles.galleryHeaderRow}>
+            <Text style={styles.galleryHeaderTitle}>הגלריה שלי</Text>
+            <TouchableOpacity
+              style={[styles.galleryAddBtn, isAddingImage ? styles.galleryAddBtnDisabled : null]}
+              onPress={isAddingImage ? undefined : addGalleryImage}
+              activeOpacity={0.9}
+            >
+              {isAddingImage ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <Plus size={16} color="#FFFFFF" />
+              )}
+            </TouchableOpacity>
+          </View>
+          <View style={styles.galleryCard}>
+            {profile?.image_urls?.length ? (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.galleryRow}
+              >
+                {profile.image_urls.map((url, idx) => {
+                  return (
+                    <TouchableOpacity
+                      key={url + idx}
+                      style={styles.galleryItem}
+                      activeOpacity={0.9}
+                      onPress={() => setViewerIndex(idx)}
+                    >
+                      <Image source={{ uri: url }} style={styles.galleryImg} />
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            ) : (
+              <Text style={styles.galleryEmptyText}>אין תמונות בגלריה</Text>
+            )}
+          </View>
+        </View>
+
         {userApartments.length > 0 && (
           <View style={styles.sectionDark}>
             <Text style={styles.sectionTitleDark}>הדירות שלי</Text>
@@ -498,12 +904,100 @@ export default function ProfileScreen() {
           </View>
         )}
 
-        <TouchableOpacity style={styles.signOutButtonDark} onPress={handleSignOut}>
-          <LogOut size={20} color="#FCA5A5" />
-          <Text style={styles.signOutTextDark}>התנתק</Text>
-        </TouchableOpacity>
+        <View style={styles.sectionDark}>
+          <LinearGradient
+            colors={['rgba(124,92,255,0.28)', 'rgba(60,49,120,0.32)', 'rgba(15,15,20,0.92)']}
+            start={{ x: 1, y: 0 }}
+            end={{ x: 0, y: 1 }}
+            style={styles.surveyCard}
+          >
+            <View style={styles.surveyHeaderRow}>
+              <Text style={styles.surveyTitle}>סיכום הסקר שלי</Text>
+              <View style={[styles.surveyBadge, surveyStatusStyle]}>
+                <Text style={styles.surveyBadgeText}>{surveyStatusLabel}</Text>
+              </View>
+            </View>
+
+            {!!surveyHighlights.length && (
+              <View style={styles.surveyHighlightsRow}>
+                {surveyHighlights.map((item) => (
+                  <View key={`${item.label}-${item.value}`} style={styles.surveyHighlightPill}>
+                    <Text style={styles.surveyHighlightLabel}>{item.label}</Text>
+                    <Text style={styles.surveyHighlightValue}>{item.value}</Text>
+                  </View>
+                ))}
+              </View>
+            )}
+
+            {surveyResponse ? (
+              surveyItems.length ? (
+                <View style={styles.surveyGrid}>
+                  {surveyItems.map((item) => (
+                    <View key={`${item.label}-${item.value}`} style={styles.surveyCell}>
+                      <Text style={styles.surveyCellLabel}>{item.label}</Text>
+                      <Text style={styles.surveyCellValue}>{item.value}</Text>
+                    </View>
+                  ))}
+                </View>
+              ) : (
+                <View style={styles.surveyEmptyState}>
+                  <Text style={styles.surveyEmptyText}>
+                    סקר ההעדפות הושלם אך אין עדיין נתונים להצגה.
+                  </Text>
+                </View>
+              )
+            ) : (
+              <View style={styles.surveyEmptyState}>
+                <Text style={styles.surveyEmptyText}>
+                  ברגע שתמלא/י את סקר ההעדפות נציג כאן את ההתאמות האישיות שלך.
+                </Text>
+              </View>
+            )}
+          </LinearGradient>
+        </View>
+
+        {/* moved logout and delete actions to /profile/settings */}
       </ScrollView>
-      {isSaving && (
+      {viewerIndex !== null && (
+        <Modal
+          visible
+          transparent
+          animationType="fade"
+          onRequestClose={() => setViewerIndex(null)}
+        >
+          <View style={styles.viewerOverlay}>
+            <TouchableOpacity
+              style={[styles.viewerCloseBtn, { top: 36 + insets.top }]}
+              onPress={() => setViewerIndex(null)}
+              activeOpacity={0.9}
+            >
+              <X size={18} color="#E5E7EB" />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.viewerDeleteBtn, { top: 36 + insets.top }]}
+              onPress={() => {
+                if (viewerIndex !== null) removeImageAt(viewerIndex);
+              }}
+              disabled={isDeletingImage}
+              activeOpacity={0.9}
+            >
+              {isDeletingImage ? (
+                <ActivityIndicator size="small" color="#F87171" />
+              ) : (
+                <Trash2 size={18} color="#F87171" />
+              )}
+            </TouchableOpacity>
+            {viewerIndex !== null && (
+              <Image
+                source={{ uri: profile?.image_urls?.[viewerIndex] || '' }}
+                style={styles.viewerImage}
+                resizeMode="contain"
+              />
+            )}
+          </View>
+        </Modal>
+      )}
+      {(isSaving || isAddingImage) && (
         <View style={styles.fullScreenLoader}>
           <ActivityIndicator size="large" color="#FFFFFF" />
         </View>
@@ -597,6 +1091,59 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  settingsBtn: {
+    position: 'absolute',
+    right: 16,
+    top: 16,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
+  },
+  viewerOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.95)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  viewerImage: {
+    width: '92%',
+    height: '70%',
+    borderRadius: 12,
+    backgroundColor: '#0F0F14',
+  },
+  viewerDeleteBtn: {
+    position: 'absolute',
+    right: 16,
+    top: 16,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(248,113,113,0.2)',
+    borderWidth: 1,
+    borderColor: 'rgba(248,113,113,0.35)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 2,
+  },
+  viewerCloseBtn: {
+    position: 'absolute',
+    left: 16,
+    top: 16,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 2,
+  },
   matchBadgeWrap: {
     // removed (badge no longer displayed)
   },
@@ -680,35 +1227,65 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
 
-  galleryActionsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginTop: 12,
-  },
-  galleryAddBtn: {
-    backgroundColor: '#7C5CFF',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 10,
-  },
-  galleryAddBtnText: {
-    color: '#0F0F14',
-    fontWeight: '800',
-  },
-  galleryCountText: {
-    color: '#9DA4AE',
-    fontWeight: '700',
-  },
+  // actions for gallery moved to edit screen
   galleryGrid: {
     marginTop: 12,
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 10,
   },
+  galleryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 4,
+  },
+  galleryHeaderRow: {
+    marginTop: 8,
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  galleryCard: {
+    backgroundColor: '#15151C',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
+    borderRadius: 16,
+    padding: 12,
+    marginTop: 8,
+  },
+  galleryHeaderTitle: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  galleryAddBtn: {
+    backgroundColor: 'rgba(255,255,255,0.10)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.28)',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 44,
+    shadowColor: '#000000',
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+  },
+  galleryAddBtnDisabled: {
+    opacity: 0.75,
+  },
+  galleryEmptyText: {
+    color: '#9DA4AE',
+    fontSize: 14,
+    textAlign: 'center',
+    paddingVertical: 16,
+  },
   galleryItem: {
-    width: '31%',
-    aspectRatio: 1,
+    width: 130,
+    height: 160,
     borderRadius: 18,
     overflow: 'hidden',
     backgroundColor: '#1B1C27',
@@ -748,7 +1325,7 @@ const styles = StyleSheet.create({
     padding: 8,
   },
   saveButton: {
-    backgroundColor: '#7C5CFF',
+    backgroundColor: '#4C1D95',
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 10,
@@ -787,6 +1364,148 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '800',
     marginBottom: 10,
+  },
+  surveyCard: {
+    borderRadius: 20,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    overflow: 'hidden',
+  },
+  surveyHeaderRow: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  surveyTitle: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  surveyBadge: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderColor: 'rgba(255,255,255,0.2)',
+  },
+  surveyBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  surveyBadgeSuccess: {
+    backgroundColor: 'rgba(34,197,94,0.18)',
+    borderColor: 'rgba(34,197,94,0.45)',
+  },
+  surveyBadgePending: {
+    backgroundColor: 'rgba(250,204,21,0.16)',
+    borderColor: 'rgba(250,204,21,0.4)',
+  },
+  surveyBadgeMuted: {
+    backgroundColor: 'rgba(148,163,184,0.14)',
+    borderColor: 'rgba(148,163,184,0.32)',
+  },
+  surveyHighlightsRow: {
+    flexDirection: 'row-reverse',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginBottom: 12,
+  },
+  surveyHighlightPill: {
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    width: '48%',
+  },
+  surveyHighlightLabel: {
+    color: '#9DA4AE',
+    fontSize: 12,
+    marginBottom: 2,
+    textAlign: 'right',
+    fontWeight: '600',
+  },
+  surveyHighlightValue: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '800',
+    textAlign: 'right',
+  },
+  surveyGrid: {
+    flexDirection: 'row-reverse',
+    flexWrap: 'wrap',
+    gap: 12,
+  },
+  surveyCell: {
+    backgroundColor: 'rgba(15,15,20,0.6)',
+    borderRadius: 16,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.05)',
+    width: '48%',
+  },
+  surveyCellLabel: {
+    color: '#9DA4AE',
+    fontSize: 12,
+    marginBottom: 6,
+    textAlign: 'right',
+    fontWeight: '600',
+  },
+  surveyCellValue: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '800',
+    textAlign: 'right',
+    lineHeight: 20,
+  },
+  surveyEmptyState: {
+    paddingVertical: 18,
+    paddingHorizontal: 4,
+    gap: 8,
+  },
+  surveyEmptyText: {
+    color: '#D1D5DB',
+    fontSize: 14,
+    lineHeight: 20,
+    textAlign: 'right',
+  },
+  sharedCard: {
+    backgroundColor: '#15151C',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
+    borderRadius: 16,
+    padding: 12,
+    marginTop: 4,
+    alignItems: 'center',
+  },
+  sharedAvatarsRow: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 6,
+  },
+  sharedAvatarWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    borderWidth: 2,
+    borderColor: '#0F0F14',
+    overflow: 'hidden',
+    backgroundColor: '#1F1F29',
+  },
+  sharedAvatar: {
+    width: '100%',
+    height: '100%',
+  },
+  sharedMembersLine: {
+    color: '#C7CBD1',
+    fontSize: 13,
+    textAlign: 'center',
   },
   apartmentRow: {
     backgroundColor: '#15151C',
@@ -852,10 +1571,17 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     fontSize: 13,
   },
-  editProfileBtn: {
+  actionButtonsRow: {
     marginTop: 10,
-    alignSelf: 'flex-end',
-    backgroundColor: '#7C5CFF',
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 8,
+  },
+  editProfileBtn: {
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
     paddingHorizontal: 14,
     paddingVertical: 10,
     borderRadius: 12,
@@ -864,28 +1590,11 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   editProfileBtnText: {
-    color: '#0F0F14',
+    color: '#FFFFFF',
     fontWeight: '900',
     fontSize: 14,
   },
-  signOutButtonDark: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    backgroundColor: '#15151C',
-    paddingVertical: 16,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: 'rgba(252,165,165,0.3)',
-    marginHorizontal: 16,
-    marginTop: 12,
-  },
-  signOutTextDark: {
-    color: '#FCA5A5',
-    fontSize: 16,
-    fontWeight: '700',
-  },
+  // removed sign out & delete button styles (moved to settings)
 
   bottomActions: {
     position: 'absolute',

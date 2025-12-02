@@ -19,6 +19,8 @@ import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/authStore';
 import { useApartmentStore } from '@/stores/apartmentStore';
 import { Apartment } from '@/types/database';
+import { ArrowLeft } from 'lucide-react-native';
+import * as ImageManipulator from 'expo-image-manipulator';
 
 type ImageItem = { uri: string; isLocal: boolean };
 
@@ -39,6 +41,8 @@ export default function EditApartmentScreen() {
   const [bedrooms, setBedrooms] = useState('');
   const [bathrooms, setBathrooms] = useState('');
   const [images, setImages] = useState<ImageItem[]>([]);
+	const [members, setMembers] = useState<any[]>([]);
+	const [removingId, setRemovingId] = useState<string | null>(null);
 
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -62,6 +66,50 @@ export default function EditApartmentScreen() {
         .filter(Boolean);
     }
     return [];
+  };
+
+  const normalizeImageForUpload = async (
+    sourceUri: string,
+  ): Promise<{ uri: string; ext: string; mime: string }> => {
+    const lowerUri = sourceUri.toLowerCase();
+    const match = lowerUri.match(/\.([a-z0-9]{1,5})(?:\?.*)?$/);
+    const rawExt = match ? match[1] : '';
+    const ext = rawExt === 'jpeg' ? 'jpg' : rawExt;
+    const isHeic = ext === 'heic' || ext === 'heif';
+
+    if (isHeic) {
+      try {
+        const converted = await ImageManipulator.manipulateAsync(
+          sourceUri,
+          [],
+          { compress: 0.9, format: ImageManipulator.SaveFormat.JPEG },
+        );
+        return { uri: converted.uri, ext: 'jpg', mime: 'image/jpeg' };
+      } catch (err) {
+        console.warn('Failed to convert HEIC image', err);
+        throw new Error('לא הצלחנו להמיר קובץ HEIC, שמור כ-JPG/PNG ונסה שוב');
+      }
+    }
+
+    if (ext === 'png') {
+      return { uri: sourceUri, ext: 'png', mime: 'image/png' };
+    }
+
+    if (ext === 'jpg') {
+      return { uri: sourceUri, ext: 'jpg', mime: 'image/jpeg' };
+    }
+
+    try {
+      const converted = await ImageManipulator.manipulateAsync(
+        sourceUri,
+        [],
+        { compress: 0.9, format: ImageManipulator.SaveFormat.JPEG },
+      );
+      return { uri: converted.uri, ext: 'jpg', mime: 'image/jpeg' };
+    } catch (err) {
+      console.warn('Failed to normalize image', err);
+      throw new Error('לא הצלחנו לעבד את התמונה, נסה פורמט JPG או PNG');
+    }
   };
 
   const load = async () => {
@@ -97,6 +145,20 @@ export default function EditApartmentScreen() {
 
       const existing = normalizeImages((apt as any).image_urls);
       setImages(existing.map((u) => ({ uri: u, isLocal: false })));
+
+			// Load current partners
+			const partnerIds = (apt as any)?.partner_ids as string[] | undefined;
+			if (partnerIds && partnerIds.length > 0) {
+				const { data: usersData, error: usersErr } = await supabase
+					.from('users')
+					.select('id, full_name, avatar_url')
+					.in('id', partnerIds);
+				if (!usersErr) {
+					setMembers(usersData || []);
+				}
+			} else {
+				setMembers([]);
+			}
     } catch (e: any) {
       setError(e.message || 'טעינת הדירה נכשלה');
     } finally {
@@ -139,16 +201,15 @@ export default function EditApartmentScreen() {
   };
 
   const uploadImage = async (userId: string, uri: string): Promise<string> => {
-    const match = uri.match(/\.([a-zA-Z0-9]{1,5})(?:\?.*)?$/);
-    const ext = match ? match[1].toLowerCase() : 'jpg';
-    const fileName = `${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
+    const normalized = await normalizeImageForUpload(uri);
+    const fileName = `${Date.now()}_${Math.random().toString(36).slice(2)}.${normalized.ext}`;
     const path = `apartments/${userId}/${fileName}`;
-    const res = await fetch(uri);
+    const res = await fetch(normalized.uri);
     const arrayBuffer = await res.arrayBuffer();
     const { error: upErr } = await supabase
       .storage
       .from('apartment-images')
-      .upload(path, arrayBuffer, { upsert: true, contentType: `image/${ext === 'png' ? 'png' : 'jpeg'}` });
+      .upload(path, arrayBuffer, { upsert: true, contentType: normalized.mime });
     if (upErr) throw upErr;
     const { data } = supabase.storage.from('apartment-images').getPublicUrl(path);
     return data.publicUrl;
@@ -227,6 +288,33 @@ export default function EditApartmentScreen() {
     }
   };
 
+	const handleRemovePartner = async (partnerId: string) => {
+		if (!apartment) return;
+		if (partnerId === apartment.owner_id) {
+			Alert.alert('שגיאה', 'לא ניתן להסיר את בעל הדירה');
+			return;
+		}
+		setRemovingId(partnerId);
+		try {
+			const currentPartnerIds: string[] = Array.isArray((apartment as any).partner_ids)
+				? ((apartment as any).partner_ids as string[])
+				: [];
+			const newPartnerIds = currentPartnerIds.filter((id) => id !== partnerId);
+			const { error: updateErr } = await supabase
+				.from('apartments')
+				.update({ partner_ids: newPartnerIds })
+				.eq('id', apartment.id);
+			if (updateErr) throw updateErr;
+
+			setMembers((prev) => prev.filter((m) => m.id !== partnerId));
+			setApartment((prev) => (prev ? ({ ...(prev as any), partner_ids: newPartnerIds } as Apartment) : prev));
+		} catch (e: any) {
+			Alert.alert('שגיאה', e?.message || 'לא ניתן להסיר את השותף');
+		} finally {
+			setRemovingId(null);
+		}
+	};
+
   const handleCancel = () => {
     if (apartment) {
       router.replace(`/apartment/${apartment.id}`);
@@ -238,7 +326,7 @@ export default function EditApartmentScreen() {
   if (isLoading) {
     return (
       <View style={styles.centerContainer}>
-        <ActivityIndicator size="large" color="#7C5CFF" />
+        <ActivityIndicator size="large" color="#4C1D95" />
       </View>
     );
   }
@@ -248,10 +336,10 @@ export default function EditApartmentScreen() {
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
         <ScrollView contentContainerStyle={styles.scrollContent}>
           <View style={styles.headerRow}>
-            <Text style={styles.title}>עריכת דירה</Text>
-            <TouchableOpacity style={styles.backBtn} onPress={handleCancel} disabled={isSaving}>
-              <Text style={styles.backBtnText}>חזור</Text>
-            </TouchableOpacity>
+						<View />
+						<TouchableOpacity style={styles.backBtn} onPress={handleCancel} disabled={isSaving} activeOpacity={0.85}>
+							<ArrowLeft size={18} color="#FFFFFF" />
+						</TouchableOpacity>
           </View>
 
           {error ? <Text style={styles.error}>{error}</Text> : null}
@@ -386,6 +474,35 @@ export default function EditApartmentScreen() {
                 )}
               </View>
 
+						{/* Partners management */}
+						<View style={styles.inputGroup}>
+							<Text style={styles.label}>שותפים בדירה</Text>
+							{(members || []).length ? (
+								<View style={{ gap: 10 }}>
+									{members.map((m) => (
+										<View key={m.id} style={{ flexDirection: 'row-reverse', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#17171F', borderWidth: 1, borderColor: '#2A2A37', borderRadius: 10, padding: 10 }}>
+											<View style={{ flexDirection: 'row-reverse', alignItems: 'center', gap: 10 }}>
+												<Image source={{ uri: m.avatar_url || 'https://cdn-icons-png.flaticon.com/512/847/847969.png' }} style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: '#1F1F29' }} />
+												<Text style={{ color: '#FFFFFF', fontSize: 14, fontWeight: '800' }} numberOfLines={1}>
+													{m.full_name || 'משתמש'}
+												</Text>
+											</View>
+											<TouchableOpacity
+												style={[styles.removeBtn, (removingId === m.id || m.id === apartment?.owner_id) && { opacity: 0.6 }]}
+												disabled={removingId === m.id || m.id === apartment?.owner_id || isSaving}
+												activeOpacity={0.85}
+												onPress={() => handleRemovePartner(m.id)}
+											>
+												<Text style={styles.removeBtnText}>{removingId === m.id ? 'מסיר...' : 'הסר'}</Text>
+											</TouchableOpacity>
+										</View>
+									))}
+								</View>
+							) : (
+								<Text style={styles.galleryHint}>אין שותפים משויכים</Text>
+							)}
+						</View>
+
               <TouchableOpacity
                 style={[styles.button, isSaving && styles.buttonDisabled]}
                 onPress={handleSave}
@@ -429,22 +546,11 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: 16,
   },
-  title: {
-    fontSize: 22,
-    fontWeight: '800',
-    color: '#FFFFFF',
-    textAlign: 'right',
-  },
   backBtn: {
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderRadius: 10,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-  },
-  backBtnText: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '700',
+		backgroundColor: 'rgba(255,255,255,0.08)',
+		borderRadius: 10,
+		paddingVertical: 8,
+		paddingHorizontal: 10,
   },
   card: {
     backgroundColor: '#141420',
@@ -493,7 +599,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   button: {
-    backgroundColor: '#7C5CFF',
+    backgroundColor: '#4C1D95',
     paddingVertical: 16,
     borderRadius: 12,
     alignItems: 'center',
@@ -534,7 +640,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   addImagesBtn: {
-    backgroundColor: '#7C5CFF',
+    backgroundColor: '#4C1D95',
     paddingVertical: 10,
     paddingHorizontal: 14,
     borderRadius: 10,
@@ -598,6 +704,19 @@ const styles = StyleSheet.create({
     color: '#9DA4AE',
     fontSize: 13,
   },
+	removeBtn: {
+		backgroundColor: 'transparent',
+		borderWidth: 1,
+		borderColor: 'rgba(248,113,113,0.45)',
+		paddingHorizontal: 12,
+		paddingVertical: 8,
+		borderRadius: 10,
+	},
+	removeBtnText: {
+		color: '#F87171',
+		fontSize: 13,
+		fontWeight: '800',
+	},
 });
 
 

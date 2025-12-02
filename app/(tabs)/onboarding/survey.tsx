@@ -10,24 +10,27 @@ import {
   ActivityIndicator,
   Alert,
   Platform,
+  Modal,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { Check, ChevronRight } from 'lucide-react-native';
+import { Check, ChevronRight, ArrowLeft } from 'lucide-react-native';
 import { useAuthStore } from '@/stores/authStore';
 import { UserSurveyResponse } from '@/types/database';
 import { fetchUserSurvey, upsertUserSurvey } from '@/lib/survey';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
+import { getNeighborhoodsForCityName, searchCitiesWithNeighborhoods } from '@/lib/neighborhoods';
 
 type SurveyState = Partial<UserSurveyResponse>;
 
 const steps = [
   { key: 'about', title: 'עליך' },
   { key: 'apartment', title: 'על הדירה שאני מחפש' },
-  { key: 'sublet', title: 'אם מדובר בסאבלט' },
   { key: 'partner', title: 'השותפ/ה שאני מחפש' },
 ] as const;
 
 const lifestyleOptions = ['רגוע', 'פעיל', 'ספונטני', 'ביתי', 'חברתי'];
-const dietOptions = ['רגיל', 'צמחוני', 'טבעוני', 'כשר'];
+const dietOptions = ['ללא הגבלה', 'צמחוני', 'טבעוני'];
 const relationOptions = ['רווק/ה', 'בזוגיות'];
 const cleaningFrequencyOptions = ['פעם בשבוע', 'פעמיים בשבוע', 'פעם בשבועיים', 'כאשר צריך'];
 const hostingOptions = ['פעם בשבוע', 'לפעמים', 'כמה שיותר'];
@@ -39,16 +42,23 @@ const occupationPrefOptions = ['סטודנט', 'עובד', 'לא משנה'];
 const partnerShabbatPrefOptions = ['אין בעיה', 'מעדיפ/ה שלא'];
 const partnerDietPrefOptions = ['אין בעיה', 'מעדיפ/ה שלא טבעוני', 'כשר בלבד'];
 const partnerSmokingPrefOptions = ['אין בעיה', 'מעדיפ/ה שלא'];
-const yesNo = ['כן', 'לא'] as const;
+const studentYearOptions = ['שנה א׳', 'שנה ב׳', 'שנה ג׳', 'שנה ד׳', 'שנה ה׳', 'שנה ו׳', 'שנה ז׳'];
+const roommateCountOptions = ['1', '2', '3', '4'];
 
 export default function SurveyScreen() {
   const router = useRouter();
   const { user } = useAuthStore();
+  const insets = useSafeAreaInsets();
+  const tabBarHeight = useBottomTabBarHeight();
 
   const [currentStep, setCurrentStep] = useState(0);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [state, setState] = useState<SurveyState>({});
+  const [cityQuery, setCityQuery] = useState('');
+  const [citySuggestions, setCitySuggestions] = useState<string[]>([]);
+  const [neighborhoodOptions, setNeighborhoodOptions] = useState<string[]>([]);
+  const [neighborhoodSearch, setNeighborhoodSearch] = useState('');
 
   useEffect(() => {
     (async () => {
@@ -56,9 +66,14 @@ export default function SurveyScreen() {
         if (!user) return;
         const existing = await fetchUserSurvey(user.id);
         if (existing) {
-          setState(existing);
+          const hydrated = hydrateSurvey(existing);
+          setState(hydrated);
+          setCityQuery(hydrated.preferred_city || '');
+          setNeighborhoodSearch('');
         } else {
           setState({ is_completed: false });
+          setCityQuery('');
+          setNeighborhoodSearch('');
         }
       } catch (e) {
         // eslint-disable-next-line no-console
@@ -69,10 +84,79 @@ export default function SurveyScreen() {
     })();
   }, [user]);
 
-  const progress = useMemo(() => (currentStep + 1) / steps.length, [currentStep]);
+  useEffect(() => {
+    let cancelled = false;
+    const run = () => {
+      const query = cityQuery.trim();
+      if (!query || query.length < 2) {
+        if (!cancelled) setCitySuggestions([]);
+        return;
+      }
+      const names = searchCitiesWithNeighborhoods(query, 8);
+      if (!cancelled) setCitySuggestions(names);
+    };
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, [cityQuery, state.preferred_city]);
 
-  const setField = <K extends keyof SurveyState>(key: K, value: SurveyState[K]) => {
-    setState((prev) => ({ ...prev, [key]: value }));
+  useEffect(() => {
+    let cancelled = false;
+    const load = () => {
+      const name = (state.preferred_city || '').trim();
+      if (!name) {
+        if (!cancelled) setNeighborhoodOptions([]);
+        return;
+      }
+      try {
+        const list = getNeighborhoodsForCityName(name);
+        if (!cancelled) setNeighborhoodOptions(list);
+      } catch {
+        if (!cancelled) setNeighborhoodOptions([]);
+      }
+    };
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [state.preferred_city]);
+
+  // Removed Google place id resolution (local-only cities)
+
+  const progress = useMemo(() => (currentStep + 1) / steps.length, [currentStep]);
+  const filteredNeighborhoods = useMemo(() => {
+    if (!neighborhoodSearch.trim()) return neighborhoodOptions;
+    const query = neighborhoodSearch.trim();
+    return neighborhoodOptions.filter((opt) => opt.includes(query));
+  }, [neighborhoodOptions, neighborhoodSearch]);
+  const moveInMonthOptions = useMemo(() => generateUpcomingMonths(18), []);
+  const moveInMonthSelectOptions = useMemo(() => {
+    const arr = [...moveInMonthOptions];
+    if (state.move_in_month && !arr.includes(state.move_in_month)) {
+      arr.unshift(state.move_in_month);
+    }
+    return arr;
+  }, [moveInMonthOptions, state.move_in_month]);
+
+  // Age select options (computed at top-level to keep hooks order stable)
+  const minAgeSelectOptions = useMemo(() => generateNumberRange(18, 40), []);
+  const maxAgeSelectOptions = useMemo(() => {
+    const min = (state as any).preferred_age_min;
+    const start = typeof min === 'number' ? min + 1 : 19;
+    return generateNumberRange(start, 60);
+  }, [(state as any).preferred_age_min]);
+
+  useEffect(() => {
+    const min = (state as any).preferred_age_min;
+    const max = (state as any).preferred_age_max;
+    if (typeof min === 'number' && typeof max === 'number' && max <= min) {
+      setState((prev) => ({ ...(prev as any), preferred_age_max: Math.min(min + 1, 60) } as any));
+    }
+  }, [(state as any).preferred_age_min]);
+
+  const setField = (key: keyof SurveyState, value: any) => {
+    setState((prev) => ({ ...prev, [key]: value } as any));
   };
 
   const handleNext = () => {
@@ -90,10 +174,27 @@ export default function SurveyScreen() {
     try {
       setSaving(true);
       const payload = normalizePayload(user.id, state);
+      // eslint-disable-next-line no-console
+      console.log('[survey] submit payload', {
+        userId: user.id,
+        is_sublet: payload.is_sublet ?? null,
+        sublet_month_from: (payload as any).sublet_month_from ?? null,
+        sublet_month_to: (payload as any).sublet_month_to ?? null,
+        hasNeighborhoods: Array.isArray((payload as any).preferred_neighborhoods)
+          ? (payload as any).preferred_neighborhoods?.length
+          : null,
+      });
       await upsertUserSurvey(payload);
       Alert.alert('נשמר', 'השאלון נשמר בהצלחה');
       router.back();
     } catch (e: any) {
+      // eslint-disable-next-line no-console
+      console.error('[survey] submit error', {
+        message: e?.message,
+        code: e?.code,
+        details: e?.details,
+        hint: e?.hint,
+      });
       Alert.alert('שגיאה', e?.message || 'לא ניתן לשמור כעת');
     } finally {
       setSaving(false);
@@ -103,12 +204,10 @@ export default function SurveyScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <View style={styles.headerTopRow}>
-          <TouchableOpacity onPress={handleExit} style={styles.backBtn} accessibilityLabel="חזור">
-            <ChevronRight size={18} color="#0F0F14" />
-            <Text style={styles.backBtnText}>חזור</Text>
-          </TouchableOpacity>
-        </View>
+        <View style={styles.headerTopRow} />
+        <TouchableOpacity onPress={handleExit} style={styles.backBtn} accessibilityLabel="חזור">
+          <ArrowLeft size={18} color="#FFFFFF" />
+        </TouchableOpacity>
         <Text style={styles.headerTitle}>שאלון העדפות</Text>
         <Text style={styles.headerSubtitle}>{steps[currentStep].title}</Text>
         <View style={styles.progressTrack}>
@@ -129,25 +228,50 @@ export default function SurveyScreen() {
                     options={['סטודנט', 'עובד']}
                     value={normalizeToTextChoice(state.occupation, ['סטודנט', 'עובד'])}
                     onChange={(v) => {
-                      setField('occupation', v || null);
+                      setState((prev) => {
+                        const next: SurveyState = { ...prev, occupation: v || undefined };
+                        if (v !== 'סטודנט') next.student_year = undefined;
+                        if (v !== 'עובד') next.works_from_home = undefined;
+                        return next;
+                      });
                     }}
                   />
                   {state.occupation === 'סטודנט' && (
-                    <LabeledInput
-                      label="שנה בתואר (אופציונלי)"
-                      value={extractDetailFromOccupation(state.occupation) || ''}
-                      placeholder="לדוגמה: שנה ב׳"
-                      onChangeText={(txt) => setField('occupation', txt ? `סטודנט - ${txt}` : 'סטודנט')}
+                    <ChipSelect
+                      label="שנה בתואר"
+                      options={studentYearOptions}
+                      value={
+                        state.student_year && state.student_year >= 1 && state.student_year <= 7
+                          ? studentYearOptions[state.student_year - 1]
+                          : null
+                      }
+                      onChange={(label) => {
+                        if (!label) {
+                          setField('student_year', undefined);
+                          return;
+                        }
+                        const index = studentYearOptions.indexOf(label);
+                        setField('student_year', index >= 0 ? (index + 1) : undefined);
+                      }}
                     />
                   )}
                   {state.occupation === 'עובד' && (
                     <ChipSelect
                       label="עובד מהבית?"
                       options={['כן', 'לא']}
-                      value={null}
+                      value={
+                        state.works_from_home === undefined
+                          ? null
+                          : state.works_from_home
+                          ? 'כן'
+                          : 'לא'
+                      }
                       onChange={(v) => {
-                        if (v === 'כן') setField('occupation', 'עובד - מהבית');
-                        else setField('occupation', 'עובד');
+                        if (!v) {
+                          setField('works_from_home', undefined);
+                          return;
+                        }
+                        setField('works_from_home', v === 'כן');
                       }}
                     />
                   )}
@@ -164,6 +288,24 @@ export default function SurveyScreen() {
                     options={dietOptions}
                     value={state.diet_type || null}
                     onChange={(v) => setField('diet_type', v || null)}
+                  />
+                  <ChipSelect
+                    label="אוכל כשר"
+                    options={['כשר', 'לא כשר']}
+                    value={
+                      state.keeps_kosher === undefined
+                        ? null
+                        : state.keeps_kosher
+                        ? 'כשר'
+                        : 'לא כשר'
+                    }
+                    onChange={(v) => {
+                      if (!v) {
+                        setField('keeps_kosher', undefined);
+                        return;
+                      }
+                      setField('keeps_kosher', v === 'כשר');
+                    }}
                   />
                   <ToggleRow
                     label="מעשן?"
@@ -236,12 +378,67 @@ export default function SurveyScreen() {
                     value={state.bills_included === undefined ? null : state.bills_included ? 'כלול' : 'לא כלול'}
                     onChange={(v) => setField('bills_included', v === 'כלול')}
                   />
-                  <LabeledInput
-                    label="מיקום רצוי (שכונה/עיר)"
-                    value={state.preferred_location || ''}
-                    placeholder="לדוגמה: לב תל אביב"
-                    onChangeText={(txt) => setField('preferred_location', txt)}
-                  />
+                  <View style={{ gap: 12 }}>
+                    <View style={{ gap: 8 }}>
+                      <Text style={styles.label}>עיר מועדפת</Text>
+                      <TextInput
+                        style={styles.input}
+                        placeholder="לדוגמה: תל אביב"
+                        placeholderTextColor="#6B7280"
+                        value={cityQuery}
+                        onChangeText={(txt) => {
+                          setCityQuery(txt);
+                          setNeighborhoodSearch('');
+                          setField('preferred_city', txt ? txt : undefined);
+                          setField('preferred_neighborhoods', undefined);
+                        }}
+                      />
+                      {citySuggestions.length > 0 ? (
+                        <View style={styles.suggestionsBox}>
+                          {citySuggestions.map((name, idx) => (
+                            <TouchableOpacity
+                              key={name}
+                              style={[
+                                styles.suggestionItem,
+                                idx === citySuggestions.length - 1 ? styles.suggestionItemLast : null,
+                              ]}
+                              onPress={() => {
+                                setCityQuery(name);
+                                setCitySuggestions([]);
+                                setNeighborhoodSearch('');
+                                setField('preferred_city', name);
+                                setField('preferred_neighborhoods', []);
+                              }}
+                            >
+                              <Text style={styles.suggestionText}>{name}</Text>
+                            </TouchableOpacity>
+                          ))}
+                        </View>
+                      ) : null}
+                    </View>
+                    {state.preferred_city ? (
+                      <View style={{ gap: 8 }}>
+                        <Text style={styles.label}>שכונות מועדפות</Text>
+                        {neighborhoodOptions.length ? (
+                          <MultiChipSelect
+                            options={filteredNeighborhoods}
+                            values={state.preferred_neighborhoods || []}
+                            onToggle={(option, isActive) => {
+                              setState((prev) => {
+                                const current = prev.preferred_neighborhoods || [];
+                                const set = new Set(current);
+                                if (isActive) set.add(option);
+                                else set.delete(option);
+                                return { ...prev, preferred_neighborhoods: Array.from(set) };
+                              });
+                            }}
+                          />
+                        ) : (
+                          <Text style={styles.helperText}>בחר עיר מהרשימה כדי לראות שכונות זמינות.</Text>
+                        )}
+                      </View>
+                    ) : null}
+                  </View>
                   <ChipSelect
                     label="קומה"
                     options={floorOptions}
@@ -251,18 +448,50 @@ export default function SurveyScreen() {
                   <ToggleRow label="מרפסת / גינה" value={!!state.has_balcony} onToggle={(v) => setField('has_balcony', v)} />
                   <ToggleRow label="מעלית" value={!!state.has_elevator} onToggle={(v) => setField('has_elevator', v)} />
                   <ToggleRow label="חדר מאסטר (שירותים צמודים)" value={!!state.wants_master_room} onToggle={(v) => setField('wants_master_room', v)} />
-                  <LabeledInput
-                    label="חודש כניסה"
-                    value={state.move_in_month || ''}
-                    placeholder="לדוגמה: ספטמבר"
-                    onChangeText={(txt) => setField('move_in_month', txt)}
+                  <ToggleRow
+                    label="האם מדובר בסאבלט?"
+                    value={!!state.is_sublet}
+                    onToggle={(v) =>
+                      setState((prev) => {
+                        const next: SurveyState = { ...prev, is_sublet: v };
+                        if (!v) {
+                          next.sublet_month_from = undefined;
+                          next.sublet_month_to = undefined;
+                        }
+                        return next;
+                      })
+                    }
                   />
-                  <LabeledInput
+                  {state.is_sublet ? (
+                    <View style={{ gap: 12 }}>
+                      <LabeledInput
+                        label="חודש התחלה (YYYY-MM)"
+                        value={state.sublet_month_from || ''}
+                        placeholder="לדוגמה: 2025-07"
+                        onChangeText={(txt) => setField('sublet_month_from', txt)}
+                      />
+                      <LabeledInput
+                        label="חודש סיום (YYYY-MM)"
+                        value={state.sublet_month_to || ''}
+                        placeholder="לדוגמה: 2025-09"
+                        onChangeText={(txt) => setField('sublet_month_to', txt)}
+                      />
+                    </View>
+                  ) : (
+                    <SelectInput
+                      label="תאריך כניסה (חודש ושנה)"
+                      options={moveInMonthSelectOptions}
+                      value={state.move_in_month || null}
+                      placeholder="בחר חודש ושנה"
+                      onChange={(option) => setField('move_in_month', option || undefined)}
+                    />
+                  )}
+                  <SelectInput
                     label="כמה שותפים נראה לי מתאים?"
-                    keyboardType="numeric"
-                    value={state.preferred_roommates?.toString() || ''}
-                    placeholder="לדוגמה: 2"
-                    onChangeText={(txt) => setField('preferred_roommates', toIntOrNull(txt))}
+                    options={roommateCountOptions}
+                    value={state.preferred_roommates ? String(state.preferred_roommates) : null}
+                    placeholder="בחר מספר שותפים"
+                    onChange={(v) => setField('preferred_roommates', v ? parseInt(v, 10) : undefined)}
                   />
                   <ToggleRow label="אפשר להביא בעלי חיים?" value={!!state.pets_allowed} onToggle={(v) => setField('pets_allowed', v)} />
                   <ChipSelect
@@ -279,61 +508,41 @@ export default function SurveyScreen() {
 
             {currentStep === 2 && (
               <View style={styles.stepCard}>
-                <Section title="סאבלט (במידה ורלוונטי)">
-                  <LabeledInput
-                    label="תאריכים מדויקים"
-                    value={state.sublet_dates || ''}
-                    placeholder="לדוגמה: 01/07–30/09"
-                    onChangeText={(txt) => setField('sublet_dates', txt)}
-                  />
-                  <ChipSelect
-                    label="אפשר להביא בעלי חיים?"
-                    options={yesNo as unknown as string[]}
-                    value={state.sublet_pets_allowed === undefined ? null : state.sublet_pets_allowed ? 'כן' : 'לא'}
-                    onChange={(v) => setField('sublet_pets_allowed', v === 'כן')}
-                  />
-                  <LabeledInput
-                    label="לכמה אנשים זה מתאים"
-                    keyboardType="numeric"
-                    value={state.sublet_people_count?.toString() || ''}
-                    placeholder="לדוגמה: 2"
-                    onChangeText={(txt) => setField('sublet_people_count', toIntOrNull(txt))}
-                  />
-                  <LabeledInput
-                    label="מחיר (₪)"
-                    keyboardType="numeric"
-                    value={state.sublet_price?.toString() || ''}
-                    placeholder="לדוגמה: 6000"
-                    onChangeText={(txt) => setField('sublet_price', toNumberOrNull(txt))}
-                  />
-                  <LabeledInput
-                    label="מיקום (שכונה/עיר)"
-                    value={state.sublet_location || ''}
-                    placeholder="לדוגמה: מרכז העיר"
-                    onChangeText={(txt) => setField('sublet_location', txt)}
-                  />
-                  <LabeledInput
-                    label="קומה"
-                    value={state.sublet_floor || ''}
-                    placeholder="לדוגמה: ביניים"
-                    onChangeText={(txt) => setField('sublet_floor', txt)}
-                  />
-                  <ToggleRow label="מרפסת / גינה" value={!!state.sublet_balcony} onToggle={(v) => setField('sublet_balcony', v)} />
-                  <ToggleRow label="מעלית" value={!!state.sublet_elevator} onToggle={(v) => setField('sublet_elevator', v)} />
-                  <ToggleRow label="חדר מאסטר" value={!!state.sublet_master_room} onToggle={(v) => setField('sublet_master_room', v)} />
-                </Section>
-              </View>
-            )}
-
-            {currentStep === 3 && (
-              <View style={styles.stepCard}>
                 <Section title="מאפייני השותפ/ה">
-                  <LabeledInput
-                    label="טווח גילאים מועדף"
-                    value={state.preferred_age_range || ''}
-                    placeholder="לדוגמה: 22–30"
-                    onChangeText={(txt) => setField('preferred_age_range', txt)}
-                  />
+                  <View style={{ gap: 10 }}>
+                    <SelectInput
+                      label="גיל מינימלי"
+                      options={minAgeSelectOptions}
+                      value={
+                        (state as any).preferred_age_min !== undefined && (state as any).preferred_age_min !== null
+                          ? String((state as any).preferred_age_min)
+                          : null
+                      }
+                      placeholder="בחר גיל"
+                      onChange={(v) =>
+                        setState((prev) => ({
+                          ...(prev as any),
+                          preferred_age_min: v ? parseInt(v, 10) : undefined,
+                        } as any))
+                      }
+                    />
+                    <SelectInput
+                      label="גיל מקסימלי"
+                      options={maxAgeSelectOptions}
+                      value={
+                        (state as any).preferred_age_max !== undefined && (state as any).preferred_age_max !== null
+                          ? String((state as any).preferred_age_max)
+                          : null
+                      }
+                      placeholder="בחר גיל"
+                      onChange={(v) =>
+                        setState((prev) => ({
+                          ...(prev as any),
+                          preferred_age_max: v ? parseInt(v, 10) : undefined,
+                        } as any))
+                      }
+                    />
+                  </View>
                   <ChipSelect
                     label="מין מועדף"
                     options={genderPrefOptions}
@@ -375,9 +584,11 @@ export default function SurveyScreen() {
                 </Section>
               </View>
             )}
-          </ScrollView>
 
-          <View style={styles.footer}>
+            <View style={[
+              styles.footer,
+              { marginBottom: Math.max(12, Math.ceil(tabBarHeight + insets.bottom)) }
+            ]}>
             <View style={styles.footerRow}>
               <TouchableOpacity
                 onPress={handleBack}
@@ -402,7 +613,8 @@ export default function SurveyScreen() {
                 </TouchableOpacity>
               )}
             </View>
-          </View>
+            </View>
+          </ScrollView>
         </>
       )}
     </SafeAreaView>
@@ -413,12 +625,16 @@ function normalizePayload(userId: string, s: SurveyState) {
   const payload: any = {
     user_id: userId,
     is_completed: true,
+    is_sublet: s.is_sublet ?? false,
     occupation: s.occupation ?? null,
-    is_shomer_shabbat: s.is_shomer_shabbat ?? null,
+    student_year: s.student_year ?? null,
+    works_from_home: s.occupation === 'עובד' ? (s.works_from_home ?? false) : null,
+    keeps_kosher: s.keeps_kosher ?? false,
+    is_shomer_shabbat: s.is_shomer_shabbat ?? false,
     diet_type: s.diet_type ?? null,
-    is_smoker: s.is_smoker ?? null,
+    is_smoker: s.is_smoker ?? false,
     relationship_status: s.relationship_status ?? null,
-    has_pet: s.has_pet ?? null,
+    has_pet: s.has_pet ?? false,
     lifestyle: s.lifestyle ?? null,
     cleanliness_importance: s.cleanliness_importance ?? null,
     cleaning_frequency: s.cleaning_frequency ?? null,
@@ -427,25 +643,27 @@ function normalizePayload(userId: string, s: SurveyState) {
     home_vibe: s.home_vibe ?? null,
     price_range: s.price_range ?? null,
     bills_included: s.bills_included ?? null,
-    preferred_location: s.preferred_location ?? null,
+    preferred_city: s.preferred_city ?? null,
+    preferred_neighborhoods:
+      s.preferred_neighborhoods && s.preferred_neighborhoods.length > 0 ? s.preferred_neighborhoods : null,
     floor_preference: s.floor_preference ?? null,
-    has_balcony: s.has_balcony ?? null,
-    has_elevator: s.has_elevator ?? null,
-    wants_master_room: s.wants_master_room ?? null,
+    has_balcony: s.has_balcony ?? false,
+    has_elevator: s.has_elevator ?? false,
+    wants_master_room: s.wants_master_room ?? false,
     move_in_month: s.move_in_month ?? null,
     preferred_roommates: s.preferred_roommates ?? null,
-    pets_allowed: s.pets_allowed ?? null,
+    pets_allowed: s.pets_allowed ?? false,
     with_broker: s.with_broker ?? null,
-    sublet_dates: s.sublet_dates ?? null,
-    sublet_pets_allowed: s.sublet_pets_allowed ?? null,
-    sublet_people_count: s.sublet_people_count ?? null,
-    sublet_price: s.sublet_price ?? null,
-    sublet_location: s.sublet_location ?? null,
-    sublet_floor: s.sublet_floor ?? null,
-    sublet_balcony: s.sublet_balcony ?? null,
-    sublet_elevator: s.sublet_elevator ?? null,
-    sublet_master_room: s.sublet_master_room ?? null,
-    preferred_age_range: s.preferred_age_range ?? null,
+    sublet_month_from: s.is_sublet ? (s.sublet_month_from ?? null) : null,
+    sublet_month_to: s.is_sublet ? (s.sublet_month_to ?? null) : null,
+    preferred_age_min:
+      (s as any).preferred_age_min !== undefined && (s as any).preferred_age_min !== null
+        ? (s as any).preferred_age_min
+        : null,
+    preferred_age_max:
+      (s as any).preferred_age_max !== undefined && (s as any).preferred_age_max !== null
+        ? (s as any).preferred_age_max
+        : null,
     preferred_gender: s.preferred_gender ?? null,
     preferred_occupation: s.preferred_occupation ?? null,
     partner_shabbat_preference: s.partner_shabbat_preference ?? null,
@@ -453,6 +671,16 @@ function normalizePayload(userId: string, s: SurveyState) {
     partner_smoking_preference: s.partner_smoking_preference ?? null,
     partner_pets_preference: s.partner_pets_preference ?? null,
   };
+  // Ensure sanity: if both ages exist and min > max, swap them
+  if (
+    payload.preferred_age_min !== null &&
+    payload.preferred_age_max !== null &&
+    payload.preferred_age_min > payload.preferred_age_max
+  ) {
+    const tmp = payload.preferred_age_min;
+    payload.preferred_age_min = payload.preferred_age_max;
+    payload.preferred_age_max = tmp;
+  }
   return payload;
 }
 
@@ -472,6 +700,76 @@ function extractDetailFromOccupation(value?: string | null): string | null {
   if (!value) return null;
   const parts = value.split('-').map((s) => s.trim());
   return parts.length > 1 ? parts.slice(1).join(' - ') : null;
+}
+
+function generateUpcomingMonths(count = 12): string[] {
+  const monthNames = [
+    'ינואר',
+    'פברואר',
+    'מרץ',
+    'אפריל',
+    'מאי',
+    'יוני',
+    'יולי',
+    'אוגוסט',
+    'ספטמבר',
+    'אוקטובר',
+    'נובמבר',
+    'דצמבר',
+  ];
+  const now = new Date();
+  const list: string[] = [];
+  for (let i = 0; i < count; i++) {
+    const current = new Date(now.getFullYear(), now.getMonth() + i, 1);
+    const label = `${monthNames[current.getMonth()]} ${current.getFullYear()}`;
+    list.push(label);
+  }
+  return list;
+}
+
+function generateNumberRange(start: number, end: number): string[] {
+  const arr: string[] = [];
+  for (let i = start; i <= end; i++) {
+    arr.push(String(i));
+  }
+  return arr;
+}
+
+function hydrateSurvey(existing: UserSurveyResponse): SurveyState {
+  const next: SurveyState = { ...existing };
+
+  if (existing.occupation) {
+    if (existing.occupation.startsWith('סטודנט')) {
+      next.occupation = 'סטודנט';
+      if (!existing.student_year) {
+        const detail = extractDetailFromOccupation(existing.occupation);
+        if (detail) {
+          const idx = studentYearOptions.indexOf(detail);
+          if (idx >= 0) {
+            next.student_year = idx + 1;
+          }
+        }
+      }
+    } else if (existing.occupation === 'עובד - מהבית') {
+      next.occupation = 'עובד';
+      next.works_from_home = true;
+    }
+  }
+
+  if (existing.works_from_home !== undefined) {
+    next.works_from_home = existing.works_from_home;
+  }
+  if (existing.keeps_kosher !== undefined) {
+    next.keeps_kosher = existing.keeps_kosher;
+  } else if (existing.diet_type === 'כשר') {
+    next.keeps_kosher = true;
+    next.diet_type = undefined;
+  }
+  if (existing.preferred_neighborhoods) {
+    next.preferred_neighborhoods = [...existing.preferred_neighborhoods];
+  }
+
+  return next;
 }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
@@ -515,11 +813,72 @@ function LabeledInput({
   );
 }
 
+function SelectInput({
+  label,
+  value,
+  options,
+  placeholder,
+  onChange,
+}: {
+  label: string;
+  value: string | null;
+  options: string[];
+  placeholder?: string;
+  onChange: (v: string | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <View style={{ gap: 8 }}>
+      <Text style={styles.label}>{label}</Text>
+      <TouchableOpacity
+        style={styles.input}
+        activeOpacity={0.9}
+        onPress={() => setOpen(true)}
+        accessibilityLabel={label}
+      >
+        <Text style={value ? styles.selectText : styles.selectPlaceholder}>
+          {value || placeholder || 'בחר'}
+        </Text>
+      </TouchableOpacity>
+      <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
+        <View style={styles.pickerOverlay}>
+          <View style={styles.pickerSheet}>
+            <Text style={styles.pickerTitle}>{label}</Text>
+            <ScrollView contentContainerStyle={{ paddingVertical: 8 }}>
+              {options.map((opt) => {
+                const active = value === opt;
+                return (
+                  <TouchableOpacity
+                    key={opt}
+                    style={[styles.pickerOption, active ? styles.pickerOptionActive : null]}
+                    onPress={() => {
+                      onChange(opt);
+                      setOpen(false);
+                    }}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={[styles.pickerOptionText, active ? styles.pickerOptionTextActive : null]}>
+                      {opt}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+            <TouchableOpacity style={styles.pickerCancel} onPress={() => setOpen(false)}>
+              <Text style={styles.pickerCancelText}>סגור</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+    </View>
+  );
+}
+
 function ToggleRow({ label, value, onToggle }: { label: string; value: boolean; onToggle: (v: boolean) => void }) {
   return (
     <View style={styles.toggleRow}>
       <Text style={styles.label}>{label}</Text>
-      <View style={{ flexDirection: 'row-reverse', gap: 8 }}>
+      <View style={styles.toggleOptions}>
         <TouchableOpacity
           style={[styles.toggleBtn, value ? styles.toggleActive : null]}
           onPress={() => onToggle(true)}
@@ -570,6 +929,53 @@ function ChipSelect({
   );
 }
 
+function MultiChipSelect({
+  label,
+  options,
+  values,
+  onToggle,
+}: {
+  label?: string;
+  options: string[];
+  values: string[];
+  onToggle: (option: string, isActive: boolean) => void;
+}) {
+  const uniqueOptions = useMemo(() => {
+    const arr = [...options];
+    const selected = values || [];
+    for (const sel of selected) {
+      if (!arr.includes(sel)) arr.push(sel);
+    }
+    return arr;
+  }, [options, values]);
+
+  const selectedSet = useMemo(() => new Set(values || []), [values]);
+
+  return (
+    <View style={{ gap: 8 }}>
+      {!!label && <Text style={styles.label}>{label}</Text>}
+      {uniqueOptions.length > 0 ? (
+        <View style={styles.chipsWrap}>
+          {uniqueOptions.map((opt) => {
+            const active = selectedSet.has(opt);
+            return (
+              <TouchableOpacity
+                key={opt}
+                style={[styles.chip, active ? styles.chipActive : null]}
+                onPress={() => onToggle(opt, !active)}
+              >
+                <Text style={[styles.chipText, active ? styles.chipTextActive : null]}>{opt}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      ) : (
+        <Text style={styles.helperText}>לא נמצאו שכונות תואמות.</Text>
+      )}
+    </View>
+  );
+}
+
 function Scale5({ value, onChange }: { value: number; onChange: (v: number) => void }) {
   return (
     <View style={styles.scaleRow}>
@@ -589,10 +995,11 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#0F0F14',
+    writingDirection: 'rtl',
   },
   header: {
     paddingHorizontal: 16,
-    paddingTop: 10,
+    paddingTop: 52,
     paddingBottom: 8,
   },
   headerTopRow: {
@@ -601,14 +1008,17 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   backBtn: {
-    flexDirection: 'row-reverse',
+    position: 'absolute',
+    left: 16,
+    top: 52,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     alignItems: 'center',
-    gap: 6,
-    backgroundColor: '#E5E7EB',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 999,
-    alignSelf: 'flex-start',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
   },
   backBtnText: {
     color: '#0F0F14',
@@ -648,7 +1058,7 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     padding: 16,
-    paddingBottom: 140,
+    paddingBottom: 24,
   },
   stepCard: {
     backgroundColor: '#15151C',
@@ -685,10 +1095,14 @@ const styles = StyleSheet.create({
     textAlign: Platform.select({ ios: 'right', android: 'right', default: 'right' }) as any,
   },
   toggleRow: {
-    flexDirection: 'row-reverse',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    flexDirection: 'column',
+    alignItems: 'flex-end',
     gap: 12,
+  },
+  toggleOptions: {
+    flexDirection: 'row',
+    gap: 8,
+    writingDirection: 'rtl',
   },
   toggleBtn: {
     flexDirection: 'row-reverse',
@@ -712,10 +1126,17 @@ const styles = StyleSheet.create({
   toggleTextActive: {
     color: '#0F0F14',
   },
+  helperText: {
+    color: '#9DA4AE',
+    fontSize: 13,
+    textAlign: 'right',
+  },
   chipsWrap: {
-    flexDirection: 'row-reverse',
+    flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
+    justifyContent: 'flex-start',
+    writingDirection: 'rtl',
   },
   chip: {
     backgroundColor: '#1E1F2A',
@@ -726,7 +1147,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
   },
   chipActive: {
-    backgroundColor: '#7C5CFF',
+    backgroundColor: '#4C1D95',
     borderColor: 'rgba(124,92,255,0.8)',
   },
   chipText: {
@@ -736,6 +1157,98 @@ const styles = StyleSheet.create({
   },
   chipTextActive: {
     color: '#0F0F14',
+  },
+  selectText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    textAlign: Platform.select({ ios: 'right', android: 'right', default: 'right' }) as any,
+  },
+  selectPlaceholder: {
+    color: '#6B7280',
+    fontSize: 16,
+    textAlign: Platform.select({ ios: 'right', android: 'right', default: 'right' }) as any,
+  },
+  pickerOverlay: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+  },
+  pickerSheet: {
+    width: '100%',
+    maxHeight: '80%',
+    backgroundColor: '#15151C',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 12,
+    padding: 12,
+  },
+  pickerTitle: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '800',
+    textAlign: 'center',
+    marginBottom: 6,
+  },
+  pickerOption: {
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.06)',
+  },
+  pickerOptionActive: {
+    backgroundColor: 'rgba(124,92,255,0.12)',
+  },
+  pickerOptionText: {
+    color: '#E5E7EB',
+    fontSize: 16,
+    textAlign: 'right',
+    fontWeight: '700',
+  },
+  pickerOptionTextActive: {
+    color: '#A78BFA',
+  },
+  pickerCancel: {
+    marginTop: 8,
+    alignSelf: 'center',
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
+  },
+  pickerCancelText: {
+    color: '#E5E7EB',
+    fontWeight: '800',
+  },
+  suggestionsBox: {
+    marginTop: 4,
+    backgroundColor: '#1E1F2A',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    overflow: 'hidden',
+  },
+  suggestionItem: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.06)',
+  },
+  suggestionItemLast: {
+    borderBottomWidth: 0,
+  },
+  suggestionText: {
+    color: '#E5E7EB',
+    fontSize: 14,
+    fontWeight: '700',
+    textAlign: 'right',
   },
   scaleRow: {
     flexDirection: 'row-reverse',
@@ -765,10 +1278,6 @@ const styles = StyleSheet.create({
     color: '#0F0F14',
   },
   footer: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
     padding: 16,
     backgroundColor: 'rgba(15,15,20,0.9)',
     borderTopWidth: 1,
@@ -802,7 +1311,7 @@ const styles = StyleSheet.create({
     color: '#9DA4AE',
   },
   primaryBtn: {
-    backgroundColor: '#7C5CFF',
+    backgroundColor: '#4C1D95',
     paddingHorizontal: 18,
     paddingVertical: 12,
     borderRadius: 12,

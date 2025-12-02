@@ -12,19 +12,24 @@ import {
   Image,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { ArrowRight, Bell } from 'lucide-react-native';
+import { Bell } from 'lucide-react-native';
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/authStore';
 import { Notification } from '@/types/database';
+import { computeGroupAwareLabel } from '@/lib/group';
+import { useNotificationsStore } from '@/stores/notificationsStore';
 
 export default function NotificationsScreen() {
   const router = useRouter();
   const user = useAuthStore((s) => s.user);
+  const setUnreadCount = useNotificationsStore((s) => s.setUnreadCount);
   const [items, setItems] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
   const [sendersById, setSendersById] = useState<Record<string, { id: string; full_name?: string; avatar_url?: string }>>({});
+  const [senderGroupIdByUserId, setSenderGroupIdByUserId] = useState<Record<string, string>>({});
+  const [groupMembersByGroupId, setGroupMembersByGroupId] = useState<Record<string, string[]>>({});
   const DEFAULT_AVATAR = 'https://cdn-icons-png.flaticon.com/512/847/847969.png';
   const [apartmentsById, setApartmentsById] = useState<Record<string, { id: string; title?: string; city?: string; image_url?: string; image_urls?: string[] }>>({});
   const APT_PLACEHOLDER = 'https://images.pexels.com/photos/1457842/pexels-photo-1457842.jpeg';
@@ -37,10 +42,35 @@ export default function NotificationsScreen() {
     if (!user?.id) { setLoading(false); return; }
     try {
       setLoading(true);
+      // Determine whether the user is part of an ACTIVE group and, if so, collect all ACTIVE member ids
+      let recipientIds: string[] = [user.id];
+      try {
+        const { data: myMemberships } = await supabase
+          .from('profile_group_members')
+          .select('group_id')
+          .eq('user_id', user.id)
+          .eq('status', 'ACTIVE');
+        const myGroupIds = (myMemberships || [])
+          .map((r: any) => r?.group_id)
+          .filter(Boolean);
+        if (myGroupIds.length > 0) {
+          const { data: membersRows } = await supabase
+            .from('profile_group_members')
+            .select('user_id')
+            .eq('status', 'ACTIVE')
+            .in('group_id', myGroupIds as any);
+          const memberIds = (membersRows || []).map((r: any) => r.user_id).filter(Boolean);
+          if (memberIds.length > 0) {
+            recipientIds = Array.from(new Set(memberIds));
+          }
+        }
+      } catch {}
+
+      // Fetch notifications for the determined recipient set
       const { data, error } = await supabase
         .from('notifications')
         .select('*')
-        .eq('recipient_id', user.id)
+        .in('recipient_id', recipientIds as any)
         .order('created_at', { ascending: false });
       if (error) throw error;
       const notifications = ((data || []) as Notification[]);
@@ -54,18 +84,60 @@ export default function NotificationsScreen() {
             .filter((id): id is string => typeof id === 'string' && id.length > 0)
         )
       );
+      let initialUsersMap: Record<string, { id: string; full_name?: string; avatar_url?: string }> = {};
       if (uniqueSenderIds.length > 0) {
         const { data: usersData, error: usersErr } = await supabase
           .from('users')
           .select('id, full_name, avatar_url')
           .in('id', uniqueSenderIds);
         if (usersErr) throw usersErr;
-        const map: Record<string, { id: string; full_name?: string; avatar_url?: string }> = {};
-        (usersData || []).forEach((u: any) => { map[u.id] = u; });
-        setSendersById(map);
-      } else {
-        setSendersById({});
+        (usersData || []).forEach((u: any) => { initialUsersMap[u.id] = u; });
       }
+
+      // Find if any sender belongs to an ACTIVE merged profile (group)
+      let senderToGroup: Record<string, string> = {};
+      let groupIdToMemberIds: Record<string, string[]> = {};
+      if (uniqueSenderIds.length > 0) {
+        const { data: memberships } = await supabase
+          .from('profile_group_members')
+          .select('user_id, group_id')
+          .eq('status', 'ACTIVE')
+          .in('user_id', uniqueSenderIds);
+        const sendersWithGroups = (memberships || []) as any[];
+        senderToGroup = {};
+        const groupIds = new Set<string>();
+        sendersWithGroups.forEach((m) => {
+          senderToGroup[m.user_id] = m.group_id;
+          groupIds.add(m.group_id);
+        });
+        if (groupIds.size > 0) {
+          const { data: groupMembers } = await supabase
+            .from('profile_group_members')
+            .select('group_id, user_id')
+            .eq('status', 'ACTIVE')
+            .in('group_id', Array.from(groupIds));
+          groupIdToMemberIds = {};
+          (groupMembers || []).forEach((m: any) => {
+            if (!groupIdToMemberIds[m.group_id]) groupIdToMemberIds[m.group_id] = [];
+            groupIdToMemberIds[m.group_id].push(m.user_id);
+          });
+        }
+      }
+
+      // Ensure user profiles are loaded for group members too (for grid and names)
+      const extraUserIds = Array.from(new Set(Object.values(groupIdToMemberIds).flat())).filter(
+        (id) => !initialUsersMap[id]
+      );
+      if (extraUserIds.length > 0) {
+        const { data: extraUsers } = await supabase
+          .from('users')
+          .select('id, full_name, avatar_url')
+          .in('id', extraUserIds);
+        (extraUsers || []).forEach((u: any) => { initialUsersMap[u.id] = u; });
+      }
+      setSendersById(initialUsersMap);
+      setSenderGroupIdByUserId(senderToGroup);
+      setGroupMembersByGroupId(groupIdToMemberIds);
 
       // Fetch apartments referenced by notifications (using embedded metadata)
       const aptIds = Array.from(
@@ -92,8 +164,9 @@ export default function NotificationsScreen() {
       await supabase
         .from('notifications')
         .update({ is_read: true })
-        .eq('recipient_id', user.id)
-        .eq('is_read', false);
+        .eq('recipient_id', user.id);
+      // Optimistically zero the global unread badge immediately
+      setUnreadCount(0);
     } catch (e) {
       console.error('Failed to load notifications', e);
       setItems([]);
@@ -106,6 +179,11 @@ export default function NotificationsScreen() {
     setRefreshing(true);
     await fetchNotifications();
     setRefreshing(false);
+  };
+
+  const isPartnerRequestNotification = (n: Notification): boolean => {
+    const t = (n?.title || '').trim();
+    return t.includes('בקשת שותפות חדשה');
   };
 
   const extractInviteApartmentId = (description: string): string | null => {
@@ -174,14 +252,9 @@ export default function NotificationsScreen() {
 
       // Notify original sender that the invite was approved
       try {
-        const { data: me } = await supabase
-          .from('users')
-          .select('full_name')
-          .eq('id', user.id)
-          .maybeSingle();
-        const approverName = (me as any)?.full_name || 'משתמש';
+        const approverName = await computeGroupAwareLabel(user.id);
         const backTitle = 'שותף אישר להצטרף';
-        const backDesc = `${approverName} אישר להצטרף לדירה${(apt as any)?.title ? `: ${(apt as any).title}` : ''}${(apt as any)?.city ? ` (${(apt as any).city})` : ''}\n---\nAPPROVED_APT:${apartmentId}\nSTATUS:APPROVED`;
+        const backDesc = `${approverName} אישר/ה להצטרף לדירה${(apt as any)?.title ? `: ${(apt as any).title}` : ''}${(apt as any)?.city ? ` (${(apt as any).city})` : ''}\n---\nAPPROVED_APT:${apartmentId}\nSTATUS:APPROVED`;
         await supabase.from('notifications').insert({
           sender_id: user.id,
           recipient_id: notification.sender_id,
@@ -203,23 +276,21 @@ export default function NotificationsScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.iconBtn} activeOpacity={0.85}>
-          <ArrowRight size={18} color="#FFFFFF" />
-        </TouchableOpacity>
+        <View style={styles.iconBtnPlaceholder} />
         <Text style={styles.headerTitle}>התראות</Text>
         <View style={styles.iconBtnPlaceholder} />
       </View>
 
       {loading ? (
         <View style={styles.centerContainer}>
-          <ActivityIndicator size="large" color="#7C5CFF" />
+          <ActivityIndicator size="large" color="#4C1D95" />
         </View>
       ) : (
         <FlatList
           data={items}
           keyExtractor={(item) => item.id}
           refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#7C5CFF" />
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#4C1D95" />
           }
           contentContainerStyle={[
             styles.listContent,
@@ -241,6 +312,10 @@ export default function NotificationsScreen() {
             const aptImage = apt
               ? (Array.isArray(apt.image_urls) && apt.image_urls.length ? apt.image_urls[0] : APT_PLACEHOLDER)
               : null;
+            const senderGroupId = senderGroupIdByUserId[item.sender_id];
+            const isPartnerRequest = isPartnerRequestNotification(item);
+            const groupMemberIds = senderGroupId ? (groupMembersByGroupId[senderGroupId] || []) : [];
+            const groupMembers = groupMemberIds.map((id) => sendersById[id]).filter(Boolean);
             return (
               <View style={styles.rowRtl}>
                 <TouchableOpacity
@@ -249,6 +324,15 @@ export default function NotificationsScreen() {
                   onPress={() => {
                     if (aptId) {
                       router.push({ pathname: '/apartment/[id]', params: { id: aptId } });
+                    } else if (isPartnerRequestNotification(item)) {
+                      router.push({
+                        pathname: '/(tabs)/requests',
+                        params: {
+                          tab: 'incoming',
+                          kind: 'MATCH',
+                          status: 'PENDING',
+                        },
+                      });
                     }
                   }}
                 >
@@ -257,12 +341,53 @@ export default function NotificationsScreen() {
                       <View style={styles.thumbWrap}>
                         <Image source={{ uri: aptImage }} style={styles.thumbImg} />
                       </View>
+                    ) : senderGroupId && groupMembers.length ? (
+                      (() => {
+                        const gridMembers = groupMembers.slice(0, 4);
+                        if (gridMembers.length === 1) {
+                          return (
+                            <View style={styles.thumbWrap}>
+                              <Image
+                                source={{ uri: gridMembers[0]?.avatar_url || DEFAULT_AVATAR }}
+                                style={{ width: '100%', height: '100%' }}
+                                resizeMode="cover"
+                              />
+                            </View>
+                          );
+                        }
+                        const isThree = gridMembers.length === 3;
+                        const rows = isThree ? 1 : Math.ceil(gridMembers.length / 2);
+                        const cellHeightPct = rows === 1 ? '100%' : (`${100 / rows}%` as any);
+                        const cellWidthPct = isThree ? '33.3333%' : '50%';
+                        return (
+                          <View style={styles.thumbWrap}>
+                            <View style={{ flex: 1, flexDirection: 'row', flexWrap: 'wrap' }}>
+                              {gridMembers.map((gm: any, idx: number) => (
+                                <View key={idx} style={{ width: cellWidthPct, height: cellHeightPct, padding: 1 }}>
+                                  <Image
+                                    source={{ uri: gm?.avatar_url || DEFAULT_AVATAR }}
+                                    style={{ width: '100%', height: '100%' }}
+                                    resizeMode="cover"
+                                  />
+                                </View>
+                              ))}
+                            </View>
+                          </View>
+                        );
+                      })()
                     ) : null}
-                    <View style={styles.bubbleTextArea}>
+                  <View style={styles.bubbleTextArea}>
                       <Text style={styles.cardTitle} numberOfLines={1}>{item.title}</Text>
-                      {!!sender?.full_name && (
+                    {senderGroupId && groupMembers.length
+                      ? (
+                        <Text style={styles.senderName} numberOfLines={1}>
+                          {groupMembers.map((gm: any) => gm?.full_name).filter(Boolean).join(' • ')}
+                        </Text>
+                      )
+                      : (!!sender?.full_name ? (
                         <Text style={styles.senderName} numberOfLines={1}>{sender.full_name}</Text>
-                      )}
+                      ) : null)
+                    }
                       <Text style={styles.cardDesc} numberOfLines={2}>{displayDescription(item.description)}</Text>
                       <Text style={styles.cardMeta}>
                         {new Date(item.created_at).toLocaleString()}
@@ -298,10 +423,53 @@ export default function NotificationsScreen() {
                 >
                   <View style={styles.avatarShadow} />
                   <View style={styles.avatarWrap}>
-                    <Image
-                      source={{ uri: sender?.avatar_url || DEFAULT_AVATAR }}
-                      style={styles.avatarImg}
-                    />
+                    {senderGroupId && groupMembers.length ? (
+                      (() => {
+                        const gm = groupMembers.slice(0, 4);
+                        if (gm.length === 1) {
+                          return (
+                            <Image
+                              source={{ uri: gm[0]?.avatar_url || DEFAULT_AVATAR }}
+                              style={{ width: '100%', height: '100%' }}
+                              resizeMode="cover"
+                            />
+                          );
+                        }
+                        if (gm.length === 2) {
+                          return (
+                            <View style={{ flex: 1, flexDirection: 'row' }}>
+                              {gm.map((m: any, idx: number) => (
+                                <View key={idx} style={{ width: '50%', height: '100%' }}>
+                                  <Image
+                                    source={{ uri: m?.avatar_url || DEFAULT_AVATAR }}
+                                    style={{ width: '100%', height: '100%' }}
+                                    resizeMode="cover"
+                                  />
+                                </View>
+                              ))}
+                            </View>
+                          );
+                        }
+                        return (
+                          <View style={{ flex: 1, flexDirection: 'row', flexWrap: 'wrap' }}>
+                            {gm.map((m: any, idx: number) => (
+                              <View key={idx} style={{ width: '50%', height: '50%' }}>
+                                <Image
+                                  source={{ uri: m?.avatar_url || DEFAULT_AVATAR }}
+                                  style={{ width: '100%', height: '100%' }}
+                                  resizeMode="cover"
+                                />
+                              </View>
+                            ))}
+                          </View>
+                        );
+                      })()
+                    ) : (
+                      <Image
+                        source={{ uri: sender?.avatar_url || DEFAULT_AVATAR }}
+                        style={styles.avatarImg}
+                      />
+                    )}
                   </View>
                 </TouchableOpacity>
               </View>

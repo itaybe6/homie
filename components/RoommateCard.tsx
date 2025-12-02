@@ -1,92 +1,126 @@
-import { View, Text, StyleSheet, TouchableOpacity, Image } from 'react-native';
+import React, { memo, useEffect, useState } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, Image, ViewStyle } from 'react-native';
 import { Heart, X, MapPin } from 'lucide-react-native';
 import { User } from '@/types/database';
+import { supabase } from '@/lib/supabase';
+import { useRouter } from 'expo-router';
 
-interface RoommateCardProps {
+type RoommateCardProps = {
   user: User;
-  onLike?: (user: User) => void;
-  onPass?: (user: User) => void;
+  onLike: (user: User) => void;
+  onPass: (user: User) => void;
   onOpen?: (user: User) => void;
-}
+  style?: ViewStyle;
+  matchPercent?: number | null;
+};
 
-const DEFAULT_AVATAR =
-  'https://cdn-icons-png.flaticon.com/512/847/847969.png';
+function RoommateCardBase({ user, onLike, onPass, onOpen, style, matchPercent }: RoommateCardProps) {
+  const DEFAULT_AVATAR = 'https://cdn-icons-png.flaticon.com/512/847/847969.png';
+  const router = useRouter();
+  type ProfileApartment = {
+    id: string;
+    title?: string | null;
+    city?: string | null;
+    image_urls?: any;
+  };
+  const [apartments, setApartments] = useState<ProfileApartment[]>([]);
+  const [failedThumbs, setFailedThumbs] = useState<Record<string, boolean>>({});
 
-function computeMatchPercent(id: string | undefined, seedText: string | undefined) {
-  const base = `${id || ''}:${seedText || ''}`;
-  let hash = 0;
-  for (let i = 0; i < base.length; i++) {
-    hash = (hash * 31 + base.charCodeAt(i)) >>> 0;
-  }
-  // Stable range 68-95
-  return 68 + (hash % 28);
-}
+  const normalizeImageUrls = (value: unknown): string[] => {
+    if (!value) return [];
+    if (Array.isArray(value)) {
+      return (value as unknown[])
+        .filter((u) => typeof u === 'string' && !!(u as string).trim()) as string[];
+    }
+    if (typeof value === 'string') {
+      try {
+        const parsed = JSON.parse(value);
+        if (Array.isArray(parsed)) {
+          return parsed.filter((u: any) => typeof u === 'string' && !!u.trim());
+        }
+      } catch {
+        try {
+          const cleaned = value.replace(/^\s*\{|\}\s*$/g, '');
+          if (!cleaned) return [];
+          return cleaned
+            .split(',')
+            .map((s) => s.replace(/^"+|"+$/g, '').trim())
+            .filter(Boolean);
+        } catch {
+          return [];
+        }
+      }
+    }
+    return [];
+  };
 
-function buildReasons(user: User): string[] {
-  const reasons: string[] = [];
-  if (user.age && user.age >= 20 && user.age <= 35) reasons.push('טווח גילאים דומה');
-  if ((user.bio || '').toLowerCase().includes('לילה')) reasons.push('אוהבי לילה');
-  if ((user.bio || '').toLowerCase().includes('נקי')) reasons.push('אוהבים נקיון');
-  if (reasons.length < 3) reasons.push('תקציב דומה');
-  if (reasons.length < 3) reasons.push('תחביבים משותפים');
-  return reasons.slice(0, 3);
-}
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!user?.id) {
+        if (!cancelled) setApartments([]);
+        return;
+      }
+      try {
+        const [owned, partner] = await Promise.all([
+          supabase
+            .from('apartments')
+            .select('id, title, city, image_urls')
+            .eq('owner_id', user.id),
+          supabase
+            .from('apartments')
+            .select('id, title, city, image_urls')
+            .contains('partner_ids', [user.id] as any),
+        ]);
+        const merged = [...(owned.data || []), ...(partner.data || [])] as ProfileApartment[];
+        const uniq: Record<string, ProfileApartment> = {};
+        merged.forEach((a) => {
+          if (a?.id) uniq[a.id] = a;
+        });
+        if (!cancelled) setApartments(Object.values(uniq));
+      } catch {
+        if (!cancelled) setApartments([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id]);
 
-export default function RoommateCard({
-  user,
-  onLike,
-  onPass,
-  onOpen,
-}: RoommateCardProps) {
-  const match = computeMatchPercent(user.id, user.bio || user.full_name);
-  const reasons = buildReasons(user);
+  const formattedMatch = matchPercent === null || matchPercent === undefined ? '--%' : `${matchPercent}%`;
 
   return (
-    <TouchableOpacity style={styles.card} activeOpacity={0.9} onPress={() => onOpen?.(user)}>
-      <View style={styles.imageWrap}>
-        <Image
-          source={{ uri: user.avatar_url || DEFAULT_AVATAR }}
-          style={styles.image}
-        />
-
-        <View style={styles.matchBadge}>
-          <Text style={styles.matchText}>{match}%</Text>
-        </View>
-
-        <View style={styles.reasonsBox}>
-          <Text style={styles.reasonsTitle}>למה זה מתאים?</Text>
-          <View style={styles.reasonsChips}>
-            {reasons.map((r) => (
-              <View key={r} style={styles.reasonChip}>
-                <Text style={styles.reasonText}>{r}</Text>
-              </View>
-            ))}
+    <View style={[styles.card, style]}>
+      <TouchableOpacity activeOpacity={0.9} onPress={() => onOpen?.(user)}>
+        <View style={styles.imageWrap}>
+          <Image
+            source={{ uri: user.avatar_url || DEFAULT_AVATAR }}
+            style={styles.image}
+            resizeMode="cover"
+          />
+          <View style={styles.matchBadge}>
+            <Text style={styles.matchBadgeValue}>{formattedMatch}</Text>
+            <Text style={styles.matchBadgeLabel}>התאמה</Text>
           </View>
         </View>
-      </View>
+      </TouchableOpacity>
 
       <View style={styles.content}>
         <View style={styles.headerRow}>
           <Text style={styles.name} numberOfLines={1}>
-            {user.full_name}
-            {user.age ? `, ${user.age}` : ''}
+            {user.full_name}{user.age ? `, ${user.age}` : ''}
           </Text>
-        </View>
-
-        <View style={styles.locationRow}>
-          <MapPin size={16} color="#9DA4AE" />
-          <Text style={styles.locationText}>מיקום לא זמין</Text>
-        </View>
-
-        <View style={styles.badgesRow}>
-          {['מקצועי/ת', 'נקי/ה', 'אוהב/ת לילה'].map((b) => (
-            <View key={b} style={styles.badge}>
-              <Text style={styles.badgeText}>{b}</Text>
+          {!!user.city ? (
+            <View style={styles.cityRow}>
+              <MapPin size={14} color="#C9CDD6" />
+              <Text style={styles.city} numberOfLines={1}>
+                {user.city}
+              </Text>
             </View>
-          ))}
+          ) : null}
         </View>
 
-        {user.bio ? (
+        {!!user.bio ? (
           <Text style={styles.bio} numberOfLines={3}>
             {user.bio}
           </Text>
@@ -96,24 +130,70 @@ export default function RoommateCard({
           <TouchableOpacity
             activeOpacity={0.9}
             style={[styles.circleBtn, styles.passBtn]}
-            onPress={() => onPass?.(user)}
+            onPress={() => onPass(user)}
           >
             <X size={22} color="#F43F5E" />
           </TouchableOpacity>
-
           <TouchableOpacity
             activeOpacity={0.9}
             style={[styles.circleBtn, styles.likeBtn]}
-            onPress={() => onLike?.(user)}
+            onPress={() => onLike(user)}
           >
             <Heart size={22} color="#22C55E" />
           </TouchableOpacity>
-
         </View>
+
+        {apartments.length ? (
+          <View style={styles.aptSection}>
+            <Text style={styles.aptSectionTitle}>
+              הדירה של {user.full_name?.split(' ')?.[0] || 'המשתמש/ת'}
+            </Text>
+            {apartments.map((apt) => {
+              const imgs = normalizeImageUrls(apt.image_urls);
+              const PLACEHOLDER = 'https://images.pexels.com/photos/1457842/pexels-photo-1457842.jpeg';
+              const firstImg = imgs?.length ? imgs[0] : PLACEHOLDER;
+              return (
+                <TouchableOpacity
+                  key={apt.id}
+                  style={styles.aptCard}
+                  activeOpacity={0.9}
+                  onPress={() => router.push({ pathname: '/apartment/[id]', params: { id: apt.id } })}
+                >
+                  <View style={styles.aptThumbWrap}>
+                    <Image
+                      source={{ uri: failedThumbs[apt.id] ? PLACEHOLDER : firstImg }}
+                      style={styles.aptThumbImg}
+                      resizeMode="cover"
+                      onError={() =>
+                        setFailedThumbs((s) => (s[apt.id] ? s : { ...s, [apt.id]: true }))
+                      }
+                    />
+                  </View>
+                  <View style={styles.aptInfo}>
+                    <Text style={styles.aptTitle} numberOfLines={1}>
+                      {apt.title || 'דירה'}
+                    </Text>
+                    {!!apt.city ? (
+                      <View style={styles.aptMetaRow}>
+                        <MapPin size={14} color="#C9CDD6" />
+                        <Text style={styles.aptMeta} numberOfLines={1}>
+                          {apt.city}
+                        </Text>
+                      </View>
+                    ) : null}
+                  </View>
+                 
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        ) : null}
       </View>
-    </TouchableOpacity>
+    </View>
   );
 }
+
+export default memo(RoommateCardBase);
 
 const styles = StyleSheet.create({
   card: {
@@ -125,120 +205,76 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.06)',
   },
   imageWrap: {
-    position: 'relative',
+    width: '100%',
+    height: 260,
     backgroundColor: '#22232E',
+    position: 'relative',
   },
   image: {
     width: '100%',
-    height: 280,
+    height: '100%',
   },
   matchBadge: {
     position: 'absolute',
-    top: 14,
-    right: 14,
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: 'rgba(15,15,20,0.7)',
-    borderWidth: 2,
-    borderColor: 'rgba(124,92,255,0.8)',
+    top: 16,
+    right: 16,
+    width: 72,
+    height: 72,
+    borderRadius: 36,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  matchText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '900',
-  },
-  reasonsBox: {
-    position: 'absolute',
-    bottom: 14,
-    right: 14,
-    left: 14,
-    padding: 12,
-    borderRadius: 14,
-    backgroundColor: 'rgba(15,15,20,0.55)',
+    backgroundColor: 'rgba(15,15,20,0.78)',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
+    borderColor: 'rgba(124,92,255,0.35)',
+    zIndex: 2,
   },
-  reasonsTitle: {
+  matchBadgeValue: {
     color: '#FFFFFF',
-    fontSize: 14,
+    fontSize: 20,
     fontWeight: '800',
-    marginBottom: 8,
-    textAlign: 'right',
   },
-  reasonsChips: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  reasonChip: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    backgroundColor: '#1F1F29',
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)',
-  },
-  reasonText: {
-    color: '#E6E9F0',
+  matchBadgeLabel: {
+    color: '#C9CDD6',
     fontSize: 12,
     fontWeight: '600',
+    marginTop: 2,
   },
   content: {
-    padding: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
   },
   headerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-end',
   },
   name: {
     color: '#FFFFFF',
-    fontSize: 24,
+    fontSize: 18,
     fontWeight: '900',
-    marginBottom: 8,
+    textAlign: 'right',
   },
-  locationRow: {
+  cityRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    marginBottom: 10,
+    gap: 6 as any,
+    marginTop: 6,
+    alignSelf: 'flex-end',
   },
-  locationText: {
-    color: '#9DA4AE',
-    fontSize: 14,
-  },
-  badgesRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginBottom: 10,
-  },
-  badge: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    backgroundColor: '#1F1F29',
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)',
-  },
-  badgeText: {
-    color: '#E5E7EB',
-    fontSize: 12,
-    fontWeight: '700',
+  city: {
+    color: '#C9CDD6',
+    fontSize: 13,
   },
   bio: {
     color: '#C7CBD1',
     fontSize: 14,
     lineHeight: 20,
-    marginBottom: 12,
     textAlign: 'right',
+    marginTop: 10,
   },
   actionsRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    marginTop: 12,
   },
   circleBtn: {
     width: 58,
@@ -247,7 +283,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 2,
-    // Buttons sit at opposite sides; no side margin needed
   },
   passBtn: {
     borderColor: 'rgba(244,63,94,0.6)',
@@ -257,20 +292,79 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(34,197,94,0.6)',
     backgroundColor: 'rgba(34,197,94,0.08)',
   },
-  messageBtn: {
+  aptSection: {
+    marginTop: 14,
+    gap: 8 as any,
+    direction: 'rtl',
+    writingDirection: 'rtl',
+  },
+  aptSectionTitle: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '800',
+    textAlign: 'right',
+    alignSelf: 'flex-end',
+  },
+  aptCard: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 12 as any,
+    padding: 12,
+    borderRadius: 16,
+    backgroundColor: '#15151C',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    shadowColor: '#000000',
+    shadowOpacity: 0.15,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 6 },
+  },
+  aptThumbWrap: {
+    width: 92,
+    height: 92,
+    borderRadius: 14,
+    overflow: 'hidden',
+    backgroundColor: '#1F1F29',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  aptThumbImg: {
+    width: '100%',
+    height: '100%',
+  },
+  aptInfo: {
+    flex: 1,
+    alignItems: 'flex-end',
+    direction: 'rtl',
+    writingDirection: 'rtl',
+  },
+  aptTitle: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '900',
+    textAlign: 'right',
+  },
+  aptMetaRow: {
+    marginTop: 4,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 16,
-    height: 44,
-    borderRadius: 12,
-    backgroundColor: '#A78BFA',
+    gap: 6 as any,
+    alignSelf: 'flex-end',
   },
-  messageText: {
-    color: '#0F0F14',
-    fontSize: 14,
+  aptMeta: {
+    color: '#C9CDD6',
+    fontSize: 12,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
+  aptCta: {
+    color: '#4C1D95',
+    fontSize: 13,
     fontWeight: '800',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: 'rgba(124,92,255,0.35)',
   },
 });
-
-
