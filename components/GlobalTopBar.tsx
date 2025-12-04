@@ -5,6 +5,7 @@ import { usePathname } from 'expo-router';
 import NotificationsButton from '@/components/NotificationsButton';
 import RequestsButton from '@/components/RequestsButton';
 import MatchRequestsButton from '@/components/MatchRequestsButton';
+import GroupRequestsButton from '@/components/GroupRequestsButton';
 
 function GlobalTopBarBase() {
   const insets = useSafeAreaInsets();
@@ -26,6 +27,7 @@ function GlobalTopBarBase() {
     p === '/requests' ||
     p.startsWith('/(tabs)/user/') ||
     p.startsWith('/user/');
+  const showGroupButton = showMatchButton;
   return (
     <View
       {...(!isWeb ? { pointerEvents: 'box-none' as const } : {})}
@@ -55,6 +57,7 @@ function GlobalTopBarBase() {
         {/* Right: requests */}
         <RequestsButton style={{ right: 16 }} />
         {showMatchButton ? <MatchRequestsButton style={{ right: 60 }} /> : null}
+        {showGroupButton ? <GroupRequestsButton style={{ right: 104 }} /> : null}
       </View>
     </View>
   );
