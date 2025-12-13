@@ -6,6 +6,7 @@ import {
   View,
   ActivityIndicator,
   ScrollView,
+  RefreshControl,
   TouchableOpacity,
   Modal,
   TextInput,
@@ -125,6 +126,7 @@ export default function PartnersScreen() {
   const [isLoading, setIsLoading] = useState(true);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [showFilters, setShowFilters] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [gender, setGender] = useState<'any' | 'male' | 'female'>('any');
   const [ageMin, setAgeMin] = useState<number>(20);
   const [ageMax, setAgeMax] = useState<number>(40);
@@ -345,6 +347,11 @@ export default function PartnersScreen() {
         members = (mRows || []).map((r: any) => ({ group_id: r.group_id, user_id: r.user_id }));
       }
 
+      // Groups that include the current user (used for interaction filtering and query scoping)
+      const groupIdsWithCurrentUser = new Set(
+        (authId ? members.filter((m) => m.user_id === authId) : []).map((m) => m.group_id)
+      );
+
 
       const groupUserIds = Array.from(new Set(members.map((m) => m.user_id)));
       let groupUsersById: Record<string, User> = {};
@@ -432,12 +439,23 @@ export default function PartnersScreen() {
       // Only show merged profiles (groups)
       // Also include single users not in active groups, filtered, and not already interacted with
 
-      let matchRows: { id: string; sender_id: string; receiver_id: string | null; receiver_group_id?: string | null }[] = [];
+      let matchRows: { id: string; sender_id: string; receiver_id: string | null; receiver_group_id?: string | null; sender_group_id?: string | null }[] = [];
       if (authId) {
+        // Include interactions that involve me directly OR any of my groups
+        const myGroupIds = Array.from(groupIdsWithCurrentUser);
+        const inList = myGroupIds.length ? `(${myGroupIds.join(',')})` : '';
+        const orParts = [
+          `sender_id.eq.${authId}`,
+          `receiver_id.eq.${authId}`,
+        ];
+        if (myGroupIds.length) {
+          orParts.push(`receiver_group_id.in.${inList}`);
+          orParts.push(`sender_group_id.in.${inList}`);
+        }
         const { data: matchesData, error: matchesError } = await supabase
           .from('matches')
-          .select('id, sender_id, receiver_id, receiver_group_id')
-          .or(`sender_id.eq.${authId},receiver_id.eq.${authId}`);
+          .select('id, sender_id, receiver_id, receiver_group_id, sender_group_id')
+          .or(orParts.join(','));
         if (matchesError) throw matchesError;
         matchRows = matchesData || [];
       }
@@ -447,11 +465,24 @@ export default function PartnersScreen() {
       const interactedGroupIds = new Set<string>();
       if (authId) {
         matchRows.forEach((row) => {
-          const otherId =
-            row.sender_id === authId ? row.receiver_id : row.receiver_id === authId ? row.sender_id : null;
-          if (otherId) interacted.add(otherId);
-          if (row.sender_id === authId && row.receiver_group_id) {
-            interactedGroupIds.add(row.receiver_group_id);
+          // User <-> User interactions
+          if (row.sender_id === authId && row.receiver_id) interacted.add(row.receiver_id);
+          if (row.receiver_id === authId) interacted.add(row.sender_id);
+          // User -> Group interactions (I sent to a group)
+          if (row.sender_id === authId && row.receiver_group_id) interactedGroupIds.add(row.receiver_group_id);
+          // Group -> User interactions (a group sent to me, or to my group)
+          if (row.receiver_id === authId && row.sender_group_id) interactedGroupIds.add(row.sender_group_id);
+          // Any interaction involving my groups: exclude the other side (single user) too
+          const myGroupIds = new Set(
+            members
+              .filter((m) => m.user_id === authId)
+              .map((m) => m.group_id)
+          );
+          if (row.receiver_group_id && myGroupIds.has(row.receiver_group_id) && row.sender_id) {
+            interacted.add(row.sender_id);
+          }
+          if (row.sender_group_id && myGroupIds.has(row.sender_group_id) && row.receiver_id) {
+            interacted.add(row.receiver_id);
           }
         });
       }
@@ -460,9 +491,7 @@ export default function PartnersScreen() {
       const memberIdsInActiveGroups = new Set(members.map((m) => m.user_id));
 
       // Exclude members who share a group with the current user (so you don't see your own group-mates as singles)
-      const groupIdsWithCurrentUser = new Set(
-        members.filter((m) => m.user_id === authId).map((m) => m.group_id)
-      );
+      // already computed above as groupIdsWithCurrentUser
       const memberIdsInUsersOwnGroups = new Set(
         members
           .filter((m) => groupIdsWithCurrentUser.has(m.group_id))
@@ -531,6 +560,12 @@ export default function PartnersScreen() {
     }
   };
 
+  const onRefresh = async () => {
+    setIsRefreshing(true);
+    await fetchUsersAndGroups();
+    setIsRefreshing(false);
+  };
+
   const slideTo = (nextIndex: number, direction: 'next' | 'prev') => {
     if (nextIndex < 0 || nextIndex >= items.length) return;
     const outTarget = direction === 'next' ? -screenWidth : screenWidth;
@@ -564,6 +599,17 @@ export default function PartnersScreen() {
         Alert.alert('שגיאה', 'יש להתחבר כדי לבצע פעולה זו');
         return;
       }
+      // If the sender is part of a merged profile, capture the sender_group_id once
+      let senderGroupId: string | null = null;
+      try {
+        const { data: myGroup } = await supabase
+          .from('profile_group_members')
+          .select('group_id')
+          .eq('user_id', currentUser.id)
+          .eq('status', 'ACTIVE')
+          .maybeSingle();
+        senderGroupId = (myGroup as any)?.group_id || null;
+      } catch {}
       // prevent duplicate request rows
       const { data: existing, error: existingErr } = await supabase
         .from('matches')
@@ -585,22 +631,14 @@ export default function PartnersScreen() {
       const { error: insertErr } = await supabase.from('matches').insert({
         sender_id: currentUser.id,
         receiver_id: likedUser.id,
+        sender_group_id: senderGroupId,
         status: 'PENDING',
       } as any);
       if (insertErr) throw insertErr;
 
       // optional: also notify the recipient
       // If sender is part of a merged profile, reflect that in the content
-      let senderIsMerged = false;
-      try {
-        const { data: myGroup } = await supabase
-          .from('profile_group_members')
-          .select('group_id')
-          .eq('user_id', currentUser.id)
-          .eq('status', 'ACTIVE')
-          .maybeSingle();
-        senderIsMerged = !!myGroup?.group_id;
-      } catch {}
+      const senderIsMerged = !!senderGroupId;
       const notifTitle = senderIsMerged ? 'בקשת שותפות מפרופיל משותף' : 'בקשת שותפות חדשה';
       const senderLabel = await computeGroupAwareLabel(currentUser.id);
       const notifDesc = `${senderLabel} מעוניין/ת להיות שותף/ה שלך.`;
@@ -611,7 +649,6 @@ export default function PartnersScreen() {
         description: notifDesc,
       });
 
-      Alert.alert('נשלח', 'נוצרה בקשת שותפות ונשלחה הודעה למשתמש');
       goNext();
     } catch (e: any) {
       console.error('like failed', e);
@@ -628,6 +665,17 @@ export default function PartnersScreen() {
       return;
     }
     try {
+      // Determine sender group once to persist it
+      let senderGroupId: string | null = null;
+      try {
+        const { data: myGroup } = await supabase
+          .from('profile_group_members')
+          .select('group_id')
+          .eq('user_id', currentUser.id)
+          .eq('status', 'ACTIVE')
+          .maybeSingle();
+        senderGroupId = (myGroup as any)?.group_id || null;
+      } catch {}
       const { data: existing, error: existingErr } = await supabase
         .from('matches')
         .select('id')
@@ -639,18 +687,21 @@ export default function PartnersScreen() {
       }
 
       if (existing?.id) {
+        const updatePayload: any = {
+          status: 'NOT_RELEVANT',
+          updated_at: new Date().toISOString(),
+        };
+        if (senderGroupId) updatePayload.sender_group_id = senderGroupId;
         const { error: updateErr } = await supabase
           .from('matches')
-          .update({
-            status: 'NOT_RELEVANT',
-            updated_at: new Date().toISOString(),
-          })
+          .update(updatePayload)
           .eq('id', existing.id);
         if (updateErr) throw updateErr;
       } else {
         const { error: insertErr } = await supabase.from('matches').insert({
           sender_id: currentUser.id,
           receiver_id: user.id,
+          sender_group_id: senderGroupId,
           status: 'NOT_RELEVANT',
         } as any);
         if (insertErr) throw insertErr;
@@ -787,6 +838,9 @@ export default function PartnersScreen() {
       <ScrollView
         contentContainerStyle={[styles.listContent, { paddingBottom: 140 + insets.bottom }]}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} tintColor="#4C1D95" />
+        }
       >
         {items.length === 0 ? (
           <View style={styles.emptyContainer}>

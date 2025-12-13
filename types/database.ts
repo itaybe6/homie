@@ -77,12 +77,17 @@ export interface Apartment {
 
 
 
-export type MatchStatus = 'PENDING' | 'APPROVED' | 'NOT_RELEVANT' | 'REJECTED';
+export type MatchStatus = 'PENDING' | 'APPROVED' | 'NOT_RELEVANT' | 'REJECTED' | 'CANCELLED';
 
 export interface Matches {
   id: string;
   sender_id: string;
   receiver_id: string;
+  // Optional group association fields:
+  // - receiver_group_id: request was targeted at a group
+  // - sender_group_id: request was sent by a user who is part of a group
+  receiver_group_id?: string | null;
+  sender_group_id?: string | null;
   status: MatchStatus;
   created_at: string;
   updated_at: string;

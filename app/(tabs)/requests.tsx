@@ -352,8 +352,13 @@ export default function RequestsScreen() {
         _sender_group_id: row.group_id, // inviter's group
       }));
 
-      const sentUnified = [...aptSent, ...matchSent, ...groupSent].sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
-      const recvUnifiedRaw = [...aptRecv, ...matchRecv, ...matchRecvFromGroups, ...groupRecv].sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
+      // Exclude MATCH kind from the Requests screen (moved to dedicated Match Requests screen)
+      const sentUnified = [...aptSent, ...matchSent, ...groupSent]
+        .filter((i) => i.kind !== 'MATCH')
+        .sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
+      const recvUnifiedRaw = [...aptRecv, ...matchRecv, ...matchRecvFromGroups, ...groupRecv]
+        .filter((i) => i.kind !== 'MATCH')
+        .sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
 
       // Normalize display user for group-targeted matches:
       // For any item with _receiver_group_id, choose a representative member so recipient_id is a real user id.
@@ -1892,14 +1897,7 @@ export default function RequestsScreen() {
             <UserPlus size={16} color={kindFilter === 'APT_INVITE' ? '#FFFFFF' : '#C9CDD6'} />
             <Text style={[styles.segmentText, kindFilter === 'APT_INVITE' && styles.segmentTextActive]}>הזמנות לדירה</Text>
           </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.segmentBtn, kindFilter === 'MATCH' && styles.segmentBtnActive]}
-            onPress={() => setKindFilter('MATCH')}
-            activeOpacity={0.9}
-          >
-            <Users size={16} color={kindFilter === 'MATCH' ? '#FFFFFF' : '#C9CDD6'} />
-            <Text style={[styles.segmentText, kindFilter === 'MATCH' && styles.segmentTextActive]}>שותפים</Text>
-          </TouchableOpacity>
+          {/* Removed MATCH filter button (moved to Match Requests screen) */}
           <TouchableOpacity
             style={[styles.segmentBtn, kindFilter === 'GROUP' && styles.segmentBtnActive]}
             onPress={() => setKindFilter('GROUP')}
