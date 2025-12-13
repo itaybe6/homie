@@ -18,14 +18,13 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 // Animated wrapper for VirtualizedList/FlatList to support native onScroll
 const AnimatedFlatList = Animated.createAnimatedComponent(FlatList as any);
 import { useRouter } from 'expo-router';
-import { Search, SlidersHorizontal, X, Plus, Map } from 'lucide-react-native';
+import { Search, SlidersHorizontal, X, Map } from 'lucide-react-native';
 import { getNeighborhoodsForCityName, searchCitiesWithNeighborhoods } from '@/lib/neighborhoods';
 import { supabase } from '@/lib/supabase';
 import { useApartmentStore } from '@/stores/apartmentStore';
 import { useAuthStore } from '@/stores/authStore';
 import { Apartment } from '@/types/database';
 import ApartmentCard from '@/components/ApartmentCard';
-import FloatingTabBar from '@/components/FloatingTabBar';
 import FilterChipsBar, { defaultFilterChips, selectedFiltersFromIds } from '@/components/FilterChipsBar';
 
 
@@ -319,13 +318,13 @@ export default function HomeScreen() {
 
         <AnimatedFlatList
           data={filteredApartments}
-          renderItem={({ item }) => (
+          renderItem={({ item }: { item: Apartment }) => (
             <ApartmentCard
               apartment={item}
               onPress={() => handleApartmentPress(item)}
             />
           )}
-          keyExtractor={(item) => item.id}
+          keyExtractor={(item: Apartment) => item.id}
           contentContainerStyle={styles.listContent}
           ListHeaderComponent={renderListHeader}
           onScroll={Animated.event(
@@ -352,9 +351,6 @@ export default function HomeScreen() {
           }
         />
       </View>
-
-      {/* Floating bottom pill menu for the Apartments screen */}
-      <FloatingTabBar active="home" />
 
       {/* Filter Modal */}
       <Modal visible={isFilterOpen} animationType="slide" transparent onRequestClose={() => setIsFilterOpen(false)}>
@@ -574,7 +570,7 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: 'transparent',
+    backgroundColor: '#FFFFFF',
   },
   pageBody: {
     flex: 1,
@@ -871,13 +867,8 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginLeft: 8,
   },
-<<<<<<< HEAD
-  searchInput: {
-    backgroundColor: '#FFFFFF',
-=======
   dropdownSearchInput: {
-    backgroundColor: '#1B1B28',
->>>>>>> df2fbd96553d7c5c3f488d399fe9ec14b3cb8687
+    backgroundColor: '#FFFFFF',
     paddingHorizontal: 12,
     paddingVertical: 10,
     borderRadius: 8,

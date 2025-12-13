@@ -2,12 +2,12 @@ import React, { useMemo, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Dimensions, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, usePathname } from 'expo-router';
- import { Home, Users, User, Plus } from 'lucide-react-native';
+import { Home, Users, User, Plus } from 'lucide-react-native';
 
 type TabKey = 'home' | 'partners' | 'profile';
 
 interface FloatingTabBarProps {
-  active?: TabKey;
+  active?: TabKey | 'none';
 }
 
 export default function FloatingTabBar({ active }: FloatingTabBarProps) {
@@ -15,8 +15,9 @@ export default function FloatingTabBar({ active }: FloatingTabBarProps) {
   const router = useRouter();
   const pathname = usePathname();
 
-  const current: TabKey = useMemo(() => {
-    if (active) return active;
+  const current: TabKey | 'none' = useMemo(() => {
+    if (active === 'none') return 'none';
+    if (active) return active as TabKey;
     if (pathname?.includes('/partners')) return 'partners';
     if (pathname?.includes('/profile')) return 'profile';
     return 'home';
@@ -36,7 +37,7 @@ export default function FloatingTabBar({ active }: FloatingTabBarProps) {
   const segmentWidth = (pillWidth - horizontalPadding * 2) / 3;
 
   const activeIndexVisual =
-    current === 'home' ? 0 : current === 'partners' ? 1 : 2; // left→right positions with row-reverse
+    current === 'home' ? 0 : current === 'partners' ? 1 : current === 'profile' ? 2 : 0; // left→right positions
   const MARGIN = 8;
   const [pillMeasuredWidth, setPillMeasuredWidth] = useState<number>(pillWidth);
   const [itemLayouts, setItemLayouts] = useState<Record<TabKey, { x: number; width: number }>>({} as any);
@@ -44,21 +45,27 @@ export default function FloatingTabBar({ active }: FloatingTabBarProps) {
   const fallbackActiveWidth = Math.max(44, Math.min(desiredActiveWidth, segmentWidth + 12));
   const activeHeight = 62;
   const activeTop = Math.round((82 - activeHeight) / 2);
-  const activeKey: TabKey = current;
-  const targetLayout = itemLayouts[activeKey];
-  const computedActiveWidth = targetLayout
-    ? Math.max(44, Math.min(Math.round(targetLayout.width * 1.03), segmentWidth + 12))
-    : fallbackActiveWidth;
+  const activeKey: TabKey | null = current === 'none' ? null : (current as TabKey);
+  const targetLayout = activeKey ? itemLayouts[activeKey] : undefined;
+  const computedActiveWidth =
+    current === 'none'
+      ? 0
+      : targetLayout
+      ? Math.max(44, Math.min(Math.round(targetLayout.width * 1.03), segmentWidth + 12))
+      : fallbackActiveWidth;
   // Nudge slightly left to visually center with icon+label (RTL spacing tends to pull right)
   const CENTER_BIAS = -6;
-  const computedLeft = targetLayout
-    ? Math.round(targetLayout.x + targetLayout.width / 2 - computedActiveWidth / 2)
-    : Math.round(horizontalPadding + activeIndexVisual * segmentWidth + (segmentWidth - computedActiveWidth) / 2);
+  const computedLeft =
+    current === 'none'
+      ? 0
+      : targetLayout
+      ? Math.round(targetLayout.x + targetLayout.width / 2 - computedActiveWidth / 2)
+      : Math.round(horizontalPadding + activeIndexVisual * segmentWidth + (segmentWidth - computedActiveWidth) / 2);
   const clampedLeft = Math.max(
     MARGIN + horizontalPadding,
     Math.min(computedLeft + CENTER_BIAS, pillMeasuredWidth - horizontalPadding - computedActiveWidth - MARGIN)
   );
-  const activeLeft = clampedLeft + groupLeft; // absolute, but we will use clampedLeft inside the pill
+  const activeLeft = clampedLeft + groupLeft;
   const activeWidth = computedActiveWidth;
 
   const go = (key: TabKey) => {
@@ -103,19 +110,21 @@ export default function FloatingTabBar({ active }: FloatingTabBarProps) {
           }}
         >
         {/* Purple mini-pill behind the active tab */}
-        <View
-          pointerEvents="none"
-          style={[
-            styles.activeTrack,
-            {
-               left: clampedLeft,
-              top: activeTop,
-              width: activeWidth,
-              height: activeHeight,
-              borderRadius: Math.round(activeHeight / 2),
-            },
-          ]}
-        />
+        {current !== 'none' ? (
+          <View
+            pointerEvents="none"
+            style={[
+              styles.activeTrack,
+              {
+                left: clampedLeft,
+                top: activeTop,
+                width: activeWidth,
+                height: activeHeight,
+                borderRadius: Math.round(activeHeight / 2),
+              },
+            ]}
+          />
+        ) : null}
           <TouchableOpacity
             style={styles.item}
             onPress={() => go('profile')}

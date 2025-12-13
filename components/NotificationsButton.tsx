@@ -63,7 +63,7 @@ function NotificationsButtonBase({ style, badgeCount }: Props) {
         onPress={() => router.push('/(tabs)/notifications')}
         style={styles.btn}
       >
-        <Bell size={22} color="#1F2937" />
+        <Bell size={22} color="#8B5CF6" />
         {/* Icon color updated to dark grey for visibility on white header */}
         {shownCount > 0 ? (
           <View style={styles.badge}>

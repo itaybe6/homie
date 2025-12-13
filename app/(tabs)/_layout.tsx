@@ -1,6 +1,6 @@
 import { Tabs, useRouter, usePathname } from 'expo-router';
-import { Home, User, Users } from 'lucide-react-native';
-import { Platform, StyleSheet, Alert, View, Text, Dimensions } from 'react-native';
+import Ionicons from '@expo/vector-icons/Ionicons';
+import { StyleSheet, Alert } from 'react-native';
 import { useEffect, useRef } from 'react';
 import { useAuthStore } from '@/stores/authStore';
 import { fetchUserSurvey } from '@/lib/survey';
@@ -75,138 +75,77 @@ export default function TabLayout() {
     maybePromptSurvey();
   }, [user, pathname]);
 
-  const { width: screenWidth } = Dimensions.get('window');
-  // Numeric pill width + explicit left for perfect centering (no stretch)
-  const pillWidth = Math.min(
-    Math.max(Math.round(screenWidth * 0.88), 280),
-    Math.min(420, screenWidth - 32)
-  );
-  const pillLeft = Math.round((screenWidth - pillWidth) / 2);
-
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarShowLabel: false,
+        tabBarShowLabel: true,
         tabBarHideOnKeyboard: true,
-        tabBarActiveTintColor: '#FFFFFF',
+        tabBarActiveTintColor: '#4C1D95',
         tabBarInactiveTintColor: '#6B7280',
-        // sceneContainerStyle intentionally omitted to satisfy type constraints
-        tabBarStyle: { display: 'none' },
-        // Compact items; do not stretch
-        tabBarItemStyle: ((): any => {
-          const itemStyle = {
-            flex: 1,
-            alignItems: 'center',
-            justifyContent: 'center',
-          };
-          // eslint-disable-next-line no-console
-          console.log('tabBarItemStyle =>', itemStyle);
-          return itemStyle;
-        })(),
-        // No tabBarBackground — background handled inside tabBarStyle to avoid stretch
-        tabBarLabelStyle: {
-          fontSize: 12,
-          fontWeight: '600',
-          marginBottom: Platform.OS === 'ios' ? 0 : 2,
-        },
+        tabBarStyle: {
+          backgroundColor: '#FFFFFF',
+          borderTopColor: '#E5E7EB',
+          borderTopWidth: StyleSheet.hairlineWidth,
+          height: Math.max(56, 56 + insets.bottom),
+          paddingBottom: Math.max(6, insets.bottom),
+          paddingTop: 6,
+          // subtle top shadow to separate from content
+          shadowColor: '#000000',
+          shadowOpacity: 0.08,
+          shadowRadius: 12,
+          shadowOffset: { width: 0, height: -2 },
+          elevation: 10,
+        } as any,
+        tabBarLabelStyle: { fontSize: 12, fontWeight: '600' },
       }}>
-      <Tabs.Screen
-        name="profile"
-        options={{
-          title: 'פרופיל',
-          tabBarIcon: ({ focused, color }) => (
-            <TabPill focused={focused} label="פרופיל">
-              <User size={20} color={focused ? '#FFFFFF' : color} />
-            </TabPill>
-          ),
-        }}
-      />
       <Tabs.Screen
         name="home"
         options={{
-          title: 'דירות',
-          tabBarIcon: ({ focused, color }) => (
-            <TabPill focused={focused} label="דירות">
-              <Home size={20} color={focused ? '#FFFFFF' : color} />
-            </TabPill>
-          ),
+          tabBarLabel: 'דירות',
+          tabBarIcon: ({ color }) => <Ionicons name="home" size={24} color={color} />,
         }}
       />
       <Tabs.Screen
         name="partners"
         options={{
-          title: 'שותפים',
-          tabBarIcon: ({ focused, color }) => (
-            <TabPill focused={focused} label="שותפים">
-              <Users size={20} color={focused ? '#FFFFFF' : color} />
-            </TabPill>
-          ),
+          tabBarLabel: 'שותפים',
+          tabBarIcon: ({ color }) => <Ionicons name="people" size={24} color={color} />,
         }}
       />
-      <Tabs.Screen name="add-apartment" options={{ href: null }} />
+      <Tabs.Screen
+        name="add-apartment"
+        options={{
+          tabBarLabel: 'הוספת דירה',
+          tabBarIcon: ({ color }) => <Ionicons name="add" size={28} color={color} />,
+        }}
+      />
+      <Tabs.Screen
+        name="likes"
+        options={{
+          tabBarLabel: 'אהבתי',
+          tabBarIcon: ({ color }) => <Ionicons name="heart" size={24} color={color} />,
+        }}
+      />
+      <Tabs.Screen
+        name="profile"
+        options={{
+          tabBarLabel: 'פרופיל',
+          tabBarIcon: ({ color }) => <Ionicons name="person" size={24} color={color} />,
+        }}
+      />
       {/* Hide nested detail routes from the tab bar */}
       <Tabs.Screen name="apartment/[id]" options={{ href: null }} />
       <Tabs.Screen name="apartment/edit/[id]" options={{ href: null }} />
       <Tabs.Screen name="user/[id]" options={{ href: null }} />
+      <Tabs.Screen name="group-requests" options={{ href: null }} />
       <Tabs.Screen name="requests" options={{ href: null }} />
       <Tabs.Screen name="match-requests" options={{ href: null }} />
+      <Tabs.Screen name="profile/settings" options={{ href: null }} />
       <Tabs.Screen name="onboarding/survey" options={{ href: null }} />
       <Tabs.Screen name="notifications" options={{ href: null }} />
     </Tabs>
   );
 }
 
-function TabPill({ focused, label, children }: { focused: boolean; label: string; children: React.ReactNode }) {
-  return (
-    <View
-      style={[
-        stylesTab.pill,
-        focused ? stylesTab.pillActive : stylesTab.pillInactive,
-      ]}
-    >
-      <View style={stylesTab.iconWrap}>{children}</View>
-      <Text style={[stylesTab.label, focused ? stylesTab.labelActive : stylesTab.labelInactive]} numberOfLines={1} ellipsizeMode="tail">
-        {label}
-      </Text>
-    </View>
-  );
-}
-
-const stylesTab = StyleSheet.create({
-  pill: {
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 6,
-    paddingVertical: 6,
-    borderRadius: 22,
-    gap: 4,
-  },
-  pillInactive: {
-    backgroundColor: 'transparent',
-  },
-  pillActive: {
-    backgroundColor: '#8B5CF6',
-    shadowColor: '#000',
-    shadowOpacity: 0.12,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 2,
-  },
-  iconWrap: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 3,
-  },
-  label: {
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  labelInactive: {
-    color: '#6B7280',
-  },
-  labelActive: {
-    color: '#FFFFFF',
-  },
-});
+// Removed custom TabPill. Using standard bottom tab bar with icons and labels.

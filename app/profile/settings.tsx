@@ -1,24 +1,28 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
-  SafeAreaView,
   Alert,
   ActivityIndicator,
   Platform,
   Image,
   Modal,
   ScrollView,
+  TextInput,
+  Animated,
+  Easing,
 } from 'react-native';
+import KeyboardAwareScrollView from 'react-native-keyboard-aware-scroll-view/lib/KeyboardAwareScrollView';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { ArrowLeft, Edit, FileText, LogOut, Trash2, ChevronLeft, Pencil, Inbox, MapPin, UserPlus2, X, Home } from 'lucide-react-native';
+import { Edit, FileText, LogOut, Trash2, ChevronLeft, Pencil, Inbox, MapPin, UserPlus2, X, Home, Plus, User as UserIcon, Mail, Phone, Hash, Calendar } from 'lucide-react-native';
 import { useAuthStore } from '@/stores/authStore';
 import { authService } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
 import { Apartment, User } from '@/types/database';
-import { fetchUserSurvey } from '@/lib/survey';
+import { fetchUserSurvey, upsertUserSurvey } from '@/lib/survey';
 import * as ImagePicker from 'expo-image-picker';
 
 export default function ProfileSettingsScreen() {
@@ -43,6 +47,175 @@ export default function ProfileSettingsScreen() {
   const [aptOwner, setAptOwner] = useState<User | null>(null);
   const [aptMembers, setAptMembers] = useState<User[]>([]);
   const [isLeavingApartment, setIsLeavingApartment] = useState(false);
+  // Edit profile bottom sheet state
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editFullName, setEditFullName] = useState('');
+  const [editAge, setEditAge] = useState('');
+  const [editBio, setEditBio] = useState('');
+  const [editEmail, setEditEmail] = useState('');
+  const [editPhone, setEditPhone] = useState('');
+  const [editCity, setEditCity] = useState('');
+  const [editSaving, setEditSaving] = useState(false);
+  const [editImages, setEditImages] = useState<string[]>([]);
+  const [editUpdatingImages, setEditUpdatingImages] = useState(false);
+  // Animation values for edit sheet
+  const sheetTranslateY = useRef(new Animated.Value(600)).current;
+  const backdropOpacity = useRef(new Animated.Value(0)).current;
+  // Terms modal state + animations
+  const [showTermsModal, setShowTermsModal] = useState(false);
+  const termsTranslateY = useRef(new Animated.Value(600)).current;
+  const termsBackdropOpacity = useRef(new Animated.Value(0)).current;
+  // Survey modal
+  const [showSurveyModal, setShowSurveyModal] = useState(false);
+  const surveyTranslateY = useRef(new Animated.Value(600)).current;
+  const surveyBackdropOpacity = useRef(new Animated.Value(0)).current;
+  const [surveyCity, setSurveyCity] = useState('');
+  const [surveyPrice, setSurveyPrice] = useState('');
+  const [surveyMoveIn, setSurveyMoveIn] = useState(''); // YYYY-MM
+  const [surveyIsSublet, setSurveyIsSublet] = useState(false);
+  const [surveySaving, setSurveySaving] = useState(false);
+  // Extra survey fields
+  const [surveyNeighborhoods, setSurveyNeighborhoods] = useState('');
+  const [surveyRoommates, setSurveyRoommates] = useState('');
+  const [surveyBillsIncluded, setSurveyBillsIncluded] = useState(false);
+  const [surveyHasBalcony, setSurveyHasBalcony] = useState(false);
+  const [surveyHasElevator, setSurveyHasElevator] = useState(false);
+  const [surveyWantsMasterRoom, setSurveyWantsMasterRoom] = useState(false);
+  const [surveyWorksFromHome, setSurveyWorksFromHome] = useState(false);
+  const [surveyKeepsKosher, setSurveyKeepsKosher] = useState(false);
+  const [surveyIsShomerShabbat, setSurveyIsShomerShabbat] = useState(false);
+  const [surveyIsSmoker, setSurveyIsSmoker] = useState(false);
+  const [surveyHasPet, setSurveyHasPet] = useState(false);
+  const [surveyHomeVibe, setSurveyHomeVibe] = useState('');
+  const [surveyOccupation, setSurveyOccupation] = useState('');
+  const [surveyRelationshipStatus, setSurveyRelationshipStatus] = useState('');
+  const [surveyCleanlinessImportance, setSurveyCleanlinessImportance] = useState<number | null>(null);
+  const [surveyCleaningFrequency, setSurveyCleaningFrequency] = useState('');
+  const [surveyHostingPreference, setSurveyHostingPreference] = useState('');
+  const [surveyCookingStyle, setSurveyCookingStyle] = useState('');
+  const [surveyPreferredAgeRange, setSurveyPreferredAgeRange] = useState('');
+  const [surveyPreferredGender, setSurveyPreferredGender] = useState('');
+  const [surveyPreferredOccupation, setSurveyPreferredOccupation] = useState('');
+
+  const openEditAnimations = () => {
+    try {
+      Animated.parallel([
+        Animated.timing(sheetTranslateY, { toValue: 0, duration: 260, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+        Animated.timing(backdropOpacity, { toValue: 1, duration: 200, easing: Easing.out(Easing.quad), useNativeDriver: true }),
+      ]).start();
+    } catch {}
+  };
+
+  const closeEditAnimations = (onDone?: () => void) => {
+    try {
+      Animated.parallel([
+        Animated.timing(sheetTranslateY, { toValue: 600, duration: 220, easing: Easing.in(Easing.cubic), useNativeDriver: true }),
+        Animated.timing(backdropOpacity, { toValue: 0, duration: 180, easing: Easing.in(Easing.quad), useNativeDriver: true }),
+      ]).start(({ finished }) => {
+        if (finished && onDone) onDone();
+      });
+    } catch {
+      if (onDone) onDone();
+    }
+  };
+  const openTermsAnimations = () => {
+    try {
+      Animated.parallel([
+        Animated.timing(termsTranslateY, { toValue: 0, duration: 260, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+        Animated.timing(termsBackdropOpacity, { toValue: 1, duration: 200, easing: Easing.out(Easing.quad), useNativeDriver: true }),
+      ]).start();
+    } catch {}
+  };
+  const closeTermsAnimations = (onDone?: () => void) => {
+    try {
+      Animated.parallel([
+        Animated.timing(termsTranslateY, { toValue: 600, duration: 220, easing: Easing.in(Easing.cubic), useNativeDriver: true }),
+        Animated.timing(termsBackdropOpacity, { toValue: 0, duration: 180, easing: Easing.in(Easing.quad), useNativeDriver: true }),
+      ]).start(({ finished }) => {
+        if (finished && onDone) onDone();
+      });
+    } catch {
+      if (onDone) onDone();
+    }
+  };
+  const openSurveyAnimations = () => {
+    try {
+      Animated.parallel([
+        Animated.timing(surveyTranslateY, { toValue: 0, duration: 260, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+        Animated.timing(surveyBackdropOpacity, { toValue: 1, duration: 200, easing: Easing.out(Easing.quad), useNativeDriver: true }),
+      ]).start();
+    } catch {}
+  };
+  const closeSurveyAnimations = (onDone?: () => void) => {
+    try {
+      Animated.parallel([
+        Animated.timing(surveyTranslateY, { toValue: 600, duration: 220, easing: Easing.in(Easing.cubic), useNativeDriver: true }),
+        Animated.timing(surveyBackdropOpacity, { toValue: 0, duration: 180, easing: Easing.in(Easing.quad), useNativeDriver: true }),
+      ]).start(({ finished }) => {
+        if (finished && onDone) onDone();
+      });
+    } catch {
+      if (onDone) onDone();
+    }
+  };
+
+  // Helper: choose apartment primary image (first from image_urls or fallback to image_url)
+  const getApartmentPrimaryImage = (apt: any): string => {
+    const PLACEHOLDER = 'https://images.pexels.com/photos/1457842/pexels-photo-1457842.jpeg';
+    if (!apt) return PLACEHOLDER;
+    const anyValue: any = apt.image_urls;
+    if (Array.isArray(anyValue) && anyValue[0]) return anyValue[0] as string;
+    if (typeof anyValue === 'string') {
+      try {
+        const parsed = JSON.parse(anyValue);
+        if (Array.isArray(parsed) && parsed[0]) return parsed[0] as string;
+      } catch {
+        try {
+          const asArray = anyValue
+            .replace(/^{|}$/g, '')
+            .split(',')
+            .map((s: string) => s.replace(/^"+|"+$/g, '').trim())
+            .filter(Boolean);
+          if (asArray[0]) return asArray[0] as string;
+        } catch {}
+      }
+    }
+    if (apt.image_url) return apt.image_url;
+    return PLACEHOLDER;
+  };
+  useEffect(() => {
+    if (showEditModal) {
+      // reset starting positions before animating in
+      sheetTranslateY.setValue(600);
+      backdropOpacity.setValue(0);
+      openEditAnimations();
+    } else {
+      // ensure values reset if modal was closed
+      sheetTranslateY.setValue(600);
+      backdropOpacity.setValue(0);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showEditModal]);
+  useEffect(() => {
+    if (showTermsModal) {
+      termsTranslateY.setValue(600);
+      termsBackdropOpacity.setValue(0);
+      openTermsAnimations();
+    } else {
+      termsTranslateY.setValue(600);
+      termsBackdropOpacity.setValue(0);
+    }
+  }, [showTermsModal]);
+  useEffect(() => {
+    if (showSurveyModal) {
+      surveyTranslateY.setValue(600);
+      surveyBackdropOpacity.setValue(0);
+      openSurveyAnimations();
+    } else {
+      surveyTranslateY.setValue(600);
+      surveyBackdropOpacity.setValue(0);
+    }
+  }, [showSurveyModal]);
 
   useEffect(() => {
     (async () => {
@@ -517,13 +690,8 @@ export default function ProfileSettingsScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView edges={['top']} style={styles.container}>
       <View style={styles.topSpacer} />
-      <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
-          <ArrowLeft size={20} color="#FFFFFF" />
-        </TouchableOpacity>
-      </View>
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.profileCard}>
@@ -542,9 +710,9 @@ export default function ProfileSettingsScreen() {
               activeOpacity={0.9}
             >
               {isUploadingAvatar ? (
-                <ActivityIndicator size="small" color="#0F0F14" />
+                <ActivityIndicator size="small" color="#FFFFFF" />
               ) : (
-                <Pencil size={14} color="#0F0F14" />
+                <Pencil size={14} color="#FFFFFF" />
               )}
             </TouchableOpacity>
           </View>
@@ -567,17 +735,29 @@ export default function ProfileSettingsScreen() {
         <View style={styles.groupCard}>
           <TouchableOpacity
             style={styles.groupItem}
-            onPress={() => router.push('/profile/edit')}
+            onPress={() => {
+              if (profile) {
+                setEditFullName(profile.full_name || '');
+                setEditAge(profile.age ? String(profile.age) : '');
+                setEditBio(profile.bio || '');
+                setEditEmail((profile as any).email || '');
+                setEditPhone((profile as any).phone || '');
+                setEditCity((profile as any).city || '');
+                const imgs = Array.isArray((profile as any).image_urls) ? ((profile as any).image_urls as string[]).filter(Boolean) : [];
+                setEditImages(imgs);
+              }
+              setShowEditModal(true);
+            }}
             activeOpacity={0.9}
           >
             <View style={styles.itemIcon}>
-              <Edit size={18} color="#E5E7EB" />
+              <Edit size={18} color="#4C1D95" />
             </View>
             <View style={styles.itemTextWrap}>
               <Text style={styles.groupItemTitle}>עריכת פרופיל</Text>
               <Text style={styles.groupItemSub}>עדכון פרטים ותמונות</Text>
             </View>
-            <ChevronLeft size={18} color="#9DA4AE" />
+            <ChevronLeft size={18} color="#4C1D95" />
           </TouchableOpacity>
 
           <View style={styles.divider} />
@@ -587,6 +767,9 @@ export default function ProfileSettingsScreen() {
             onPress={() => setShowAptModal(true)}
             activeOpacity={0.9}
           >
+            <View style={styles.itemIcon}>
+              <Home size={18} color="#4C1D95" />
+            </View>
             <View style={styles.itemTextWrap}>
               <Text style={styles.groupItemTitle}>הדירה שלי</Text>
               <Text style={styles.groupItemSub}>צפייה ויציאה מהדירה</Text>
@@ -604,13 +787,13 @@ export default function ProfileSettingsScreen() {
                 activeOpacity={0.9}
               >
                 <View style={styles.itemIcon}>
-                  <UserPlus2 size={18} color="#E5E7EB" />
+                  <UserPlus2 size={18} color="#4C1D95" />
                 </View>
                 <View style={styles.itemTextWrap}>
                   <Text style={styles.groupItemTitle}>פרופילים משותפים</Text>
                   <Text style={styles.groupItemSub}>צפייה בפרופילים המשותפים שלך</Text>
                 </View>
-                <ChevronLeft size={18} color="#9DA4AE" />
+                <ChevronLeft size={18} color="#4C1D95" />
               </TouchableOpacity>
 
               <View style={styles.divider} />
@@ -619,28 +802,48 @@ export default function ProfileSettingsScreen() {
 
           <TouchableOpacity
             style={styles.groupItem}
-            onPress={() => router.push('/terms')}
+            onPress={() => setShowTermsModal(true)}
             activeOpacity={0.9}
           >
             <View style={styles.itemIcon}>
-              <FileText size={18} color="#E5E7EB" />
+              <FileText size={18} color="#4C1D95" />
             </View>
             <View style={styles.itemTextWrap}>
               <Text style={styles.groupItemTitle}>תנאי שימוש</Text>
               <Text style={styles.groupItemSub}>קריאת התקנון והמדיניות</Text>
             </View>
-            <ChevronLeft size={18} color="#9DA4AE" />
+            <ChevronLeft size={18} color="#4C1D95" />
           </TouchableOpacity>
 
           <View style={styles.divider} />
 
           <TouchableOpacity
             style={styles.groupItem}
-            onPress={() => router.push('/(tabs)/onboarding/survey')}
+            onPress={async () => {
+              try {
+                if (!user?.id) { setShowSurveyModal(true); return; }
+                const existing = await fetchUserSurvey(user.id);
+                setSurveyCity((existing as any)?.preferred_city || '');
+                setSurveyPrice(
+                  typeof (existing as any)?.price_range === 'number'
+                    ? String((existing as any).price_range)
+                    : ''
+                );
+                setSurveyMoveIn((existing as any)?.move_in_month || '');
+                setSurveyIsSublet(!!(existing as any)?.is_sublet);
+              } catch {
+                setSurveyCity('');
+                setSurveyPrice('');
+                setSurveyMoveIn('');
+                setSurveyIsSublet(false);
+              } finally {
+                setShowSurveyModal(true);
+              }
+            }}
             activeOpacity={0.9}
           >
             <View style={styles.itemIcon}>
-              <MapPin size={18} color="#E5E7EB" />
+              <MapPin size={18} color="#4C1D95" />
             </View>
             <View style={styles.itemTextWrap}>
               <Text style={styles.groupItemTitle}>
@@ -650,7 +853,7 @@ export default function ProfileSettingsScreen() {
                 {surveyCompleted ? 'עדכון העדפות התאמה' : 'כמה שאלות קצרות להיכרות'}
               </Text>
             </View>
-            <ChevronLeft size={18} color="#9DA4AE" />
+            <ChevronLeft size={18} color="#4C1D95" />
           </TouchableOpacity>
 
           <View style={styles.divider} />
@@ -661,13 +864,13 @@ export default function ProfileSettingsScreen() {
             activeOpacity={0.9}
           >
             <View style={styles.itemIcon}>
-              <Inbox size={18} color="#E5E7EB" />
+              <Inbox size={18} color="#4C1D95" />
             </View>
             <View style={styles.itemTextWrap}>
               <Text style={styles.groupItemTitle}>בקשות</Text>
               <Text style={styles.groupItemSub}>צפייה וניהול בקשות</Text>
             </View>
-            <ChevronLeft size={18} color="#9DA4AE" />
+            <ChevronLeft size={18} color="#4C1D95" />
           </TouchableOpacity>
         </View>
 
@@ -680,9 +883,9 @@ export default function ProfileSettingsScreen() {
           >
             <View style={[styles.itemIcon, styles.dangerIcon]}>
               {isSigningOut ? (
-                <ActivityIndicator size="small" color="#FCA5A5" />
+                <ActivityIndicator size="small" color="#F87171" />
               ) : (
-                <LogOut size={18} color="#FCA5A5" />
+                <LogOut size={18} color="#F87171" />
               )}
             </View>
             <View style={styles.itemTextWrap}>
@@ -691,7 +894,7 @@ export default function ProfileSettingsScreen() {
               </Text>
               <Text style={styles.groupItemSub}>יציאה מהחשבון</Text>
             </View>
-            <ChevronLeft size={18} color="#9DA4AE" />
+            <ChevronLeft size={18} color="#4C1D95" />
           </TouchableOpacity>
 
           <View style={styles.divider} />
@@ -714,7 +917,7 @@ export default function ProfileSettingsScreen() {
               </Text>
               <Text style={styles.groupItemSub}>פעולה בלתי ניתנת לשחזור</Text>
             </View>
-            <ChevronLeft size={18} color="#9DA4AE" />
+            <ChevronLeft size={18} color="#4C1D95" />
           </TouchableOpacity>
         </View>
       </ScrollView>
@@ -726,7 +929,7 @@ export default function ProfileSettingsScreen() {
               <View style={styles.sheetHeader}>
                 <Text style={styles.sheetTitle}>הדירה שלי</Text>
                 <TouchableOpacity style={styles.sheetClose} onPress={() => setShowAptModal(false)}>
-                  <X size={18} color="#E5E7EB" />
+                  <X size={18} color="#4C1D95" />
                 </TouchableOpacity>
               </View>
               {aptLoading ? (
@@ -738,33 +941,33 @@ export default function ProfileSettingsScreen() {
               ) : (
                 <ScrollView contentContainerStyle={{ paddingBottom: 8 }}>
                   <View style={styles.aptCard}>
-                    {!!(myApartment as any).image_url && (
-                      <Image source={{ uri: (myApartment as any).image_url as any }} style={styles.aptCover} />
-                    )}
-                    <Text style={styles.aptTitle} numberOfLines={1}>
-                      {(myApartment as any).title}
-                    </Text>
-                    <Text style={styles.aptSub} numberOfLines={1}>
-                      {(myApartment as any).city} • {(myApartment as any).price?.toLocaleString?.() || (myApartment as any).price}₪
-                    </Text>
-                    <View style={styles.sharedAvatarsRow}>
-                      {aptOwner ? (
-                        <View style={styles.sharedAvatarWrap}>
-                          <Image
-                            source={{ uri: aptOwner.avatar_url || 'https://cdn-icons-png.flaticon.com/512/847/847969.png' }}
-                            style={styles.sharedAvatar}
-                          />
-                        </View>
-                      ) : null}
-                      {aptMembers.map((m) => (
-                        <View key={m.id} style={styles.sharedAvatarWrap}>
-                          <Image
-                            source={{ uri: m.avatar_url || 'https://cdn-icons-png.flaticon.com/512/847/847969.png' }}
-                            style={styles.sharedAvatar}
-                          />
-                        </View>
-                      ))}
-                    </View>
+                    <TouchableOpacity
+                      style={styles.aptRowCompact}
+                      activeOpacity={0.9}
+                      onPress={() => {
+                        try {
+                          setShowAptModal(false);
+                          const id = (myApartment as any)?.id;
+                          if (id) router.push({ pathname: '/apartment/[id]', params: { id } });
+                        } catch {}
+                      }}
+                    >
+                      <Image
+                        source={{ uri: getApartmentPrimaryImage(myApartment as any) }}
+                        style={styles.aptThumbSmall}
+                      />
+                      <View style={styles.aptMetaWrap}>
+                        <Text style={styles.aptMetaTitle} numberOfLines={1}>
+                          {(myApartment as any).title || 'דירה'}
+                        </Text>
+                        <Text style={styles.aptMetaLine} numberOfLines={1}>
+                          {(myApartment as any).address || (myApartment as any).city || ''}
+                        </Text>
+                        <Text style={styles.aptMetaPrice} numberOfLines={1}>
+                          {(myApartment as any).price?.toLocaleString?.() || (myApartment as any).price}₪
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
                     {user?.id &&
                     Array.isArray((myApartment as any).partner_ids) &&
                     (myApartment as any).partner_ids.includes(user.id) &&
@@ -775,10 +978,10 @@ export default function ProfileSettingsScreen() {
                         activeOpacity={0.9}
                       >
                         {isLeavingApartment ? (
-                          <ActivityIndicator size="small" color="#F87171" />
+                          <ActivityIndicator size="small" color="#4C1D95" />
                         ) : (
                           <>
-                            <LogOut size={16} color="#F87171" />
+                            <LogOut size={16} color="#4C1D95" />
                             <Text style={styles.sharedLeaveBtnText}>צא/י מהדירה</Text>
                           </>
                         )}
@@ -791,6 +994,384 @@ export default function ProfileSettingsScreen() {
           </View>
         </Modal>
       )}
+      {/* Survey bottom sheet */}
+      {showSurveyModal && (
+        <Modal
+          visible
+          transparent
+          animationType="none"
+          onRequestClose={() => {
+            closeSurveyAnimations(() => setShowSurveyModal(false));
+          }}
+        >
+          <Animated.View style={[styles.overlayBottom, { opacity: surveyBackdropOpacity }]}>
+            <Animated.View style={[styles.bottomSheet, { transform: [{ translateY: surveyTranslateY }] }]}>
+              <View style={styles.sheetHeader}>
+                <View style={styles.handleBar} />
+                <Text style={styles.sheetTitle}>שאלון העדפות</Text>
+                <TouchableOpacity
+                  style={styles.sheetClose}
+                  onPress={() => {
+                    closeSurveyAnimations(() => setShowSurveyModal(false));
+                  }}
+                >
+                  <X size={18} color="#4C1D95" />
+                </TouchableOpacity>
+              </View>
+              <KeyboardAwareScrollView
+                contentContainerStyle={styles.editForm}
+                keyboardOpeningTime={0}
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator={false}
+              >
+                <View style={styles.editCard}>
+                  {/* Section: מגורים */}
+                  <Text style={styles.subsectionTitle}>מגורים</Text>
+                  <View style={styles.fieldGroup}>
+                    <View style={styles.labelRow}>
+                      <MapPin size={16} color="#4C1D95" />
+                      <Text style={styles.fieldLabel}>עיר מועדפת</Text>
+                    </View>
+                    <TextInput
+                      style={styles.fieldInput}
+                      value={surveyCity}
+                      onChangeText={setSurveyCity}
+                      placeholder="לדוגמה: תל אביב-יפו"
+                    />
+                  </View>
+                  <View style={styles.fieldGroup}>
+                    <View style={styles.labelRow}>
+                      <FileText size={16} color="#4C1D95" />
+                      <Text style={styles.fieldLabel}>שכונות מועדפות (מופרד בפסיקים)</Text>
+                    </View>
+                    <TextInput
+                      style={styles.fieldInput}
+                      value={surveyNeighborhoods}
+                      onChangeText={setSurveyNeighborhoods}
+                      placeholder="לב תל אביב, נווה צדק"
+                    />
+                  </View>
+                  <View style={styles.fieldGroup}>
+                    <View style={styles.labelRow}>
+                      <Hash size={16} color="#4C1D95" />
+                      <Text style={styles.fieldLabel}>תקציב חודשי (₪)</Text>
+                    </View>
+                    <TextInput
+                      style={styles.fieldInput}
+                      value={surveyPrice}
+                      onChangeText={(t) => setSurveyPrice(t.replace(/[^0-9]/g, ''))}
+                      keyboardType="number-pad"
+                      placeholder="ללא"
+                    />
+                  </View>
+                  <View style={styles.fieldGroup}>
+                    <View style={styles.labelRow}>
+                      <Calendar size={16} color="#4C1D95" />
+                      <Text style={styles.fieldLabel}>חודש כניסה (YYYY-MM)</Text>
+                    </View>
+                    <TextInput
+                      style={styles.fieldInput}
+                      value={surveyMoveIn}
+                      onChangeText={setSurveyMoveIn}
+                      placeholder="2026-01"
+                    />
+                  </View>
+                  <View style={styles.fieldGroup}>
+                    <View style={styles.labelRow}>
+                      <FileText size={16} color="#4C1D95" />
+                      <Text style={styles.fieldLabel}>סאבלט</Text>
+                    </View>
+                    <View style={{ flexDirection: 'row-reverse', alignItems: 'center', gap: 10 }}>
+                      <TouchableOpacity
+                        style={[
+                          styles.chipToggle,
+                          surveyIsSublet && styles.chipToggleActive,
+                        ]}
+                        onPress={() => setSurveyIsSublet(true)}
+                        activeOpacity={0.9}
+                      >
+                        <Text style={[styles.chipToggleText, surveyIsSublet && styles.chipToggleTextActive]}>כן</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[
+                          styles.chipToggle,
+                          !surveyIsSublet && styles.chipToggleActive,
+                        ]}
+                        onPress={() => setSurveyIsSublet(false)}
+                        activeOpacity={0.9}
+                      >
+                        <Text style={[styles.chipToggleText, !surveyIsSublet && styles.chipToggleTextActive]}>לא</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                  <View style={styles.fieldRow}>
+                    <View style={styles.fieldHalf}>
+                      <View style={styles.labelRow}>
+                        <FileText size={16} color="#4C1D95" />
+                        <Text style={styles.fieldLabel}>עם מרפסת</Text>
+                      </View>
+                      <View style={{ flexDirection: 'row-reverse', gap: 10 }}>
+                        <TouchableOpacity style={[styles.chipToggle, surveyHasBalcony && styles.chipToggleActive]} onPress={() => setSurveyHasBalcony(true)}><Text style={[styles.chipToggleText, surveyHasBalcony && styles.chipToggleTextActive]}>כן</Text></TouchableOpacity>
+                        <TouchableOpacity style={[styles.chipToggle, !surveyHasBalcony && styles.chipToggleActive]} onPress={() => setSurveyHasBalcony(false)}><Text style={[styles.chipToggleText, !surveyHasBalcony && styles.chipToggleTextActive]}>לא</Text></TouchableOpacity>
+                      </View>
+                    </View>
+                    <View style={styles.fieldHalf}>
+                      <View style={styles.labelRow}>
+                        <FileText size={16} color="#4C1D95" />
+                        <Text style={styles.fieldLabel}>מעלית</Text>
+                      </View>
+                      <View style={{ flexDirection: 'row-reverse', gap: 10 }}>
+                        <TouchableOpacity style={[styles.chipToggle, surveyHasElevator && styles.chipToggleActive]} onPress={() => setSurveyHasElevator(true)}><Text style={[styles.chipToggleText, surveyHasElevator && styles.chipToggleTextActive]}>כן</Text></TouchableOpacity>
+                        <TouchableOpacity style={[styles.chipToggle, !surveyHasElevator && styles.chipToggleActive]} onPress={() => setSurveyHasElevator(false)}><Text style={[styles.chipToggleText, !surveyHasElevator && styles.chipToggleTextActive]}>לא</Text></TouchableOpacity>
+                      </View>
+                    </View>
+                  </View>
+                  <View style={styles.fieldRow}>
+                    <View style={styles.fieldHalf}>
+                      <View style={styles.labelRow}>
+                        <FileText size={16} color="#4C1D95" />
+                        <Text style={styles.fieldLabel}>חדר מאסטר</Text>
+                      </View>
+                      <View style={{ flexDirection: 'row-reverse', gap: 10 }}>
+                        <TouchableOpacity style={[styles.chipToggle, surveyWantsMasterRoom && styles.chipToggleActive]} onPress={() => setSurveyWantsMasterRoom(true)}><Text style={[styles.chipToggleText, surveyWantsMasterRoom && styles.chipToggleTextActive]}>כן</Text></TouchableOpacity>
+                        <TouchableOpacity style={[styles.chipToggle, !surveyWantsMasterRoom && styles.chipToggleActive]} onPress={() => setSurveyWantsMasterRoom(false)}><Text style={[styles.chipToggleText, !surveyWantsMasterRoom && styles.chipToggleTextActive]}>לא</Text></TouchableOpacity>
+                      </View>
+                    </View>
+                    <View style={styles.fieldHalf}>
+                      <View style={styles.labelRow}>
+                        <FileText size={16} color="#4C1D95" />
+                        <Text style={styles.fieldLabel}>חשבונות כלולים</Text>
+                      </View>
+                      <View style={{ flexDirection: 'row-reverse', gap: 10 }}>
+                        <TouchableOpacity style={[styles.chipToggle, surveyBillsIncluded && styles.chipToggleActive]} onPress={() => setSurveyBillsIncluded(true)}><Text style={[styles.chipToggleText, surveyBillsIncluded && styles.chipToggleTextActive]}>כן</Text></TouchableOpacity>
+                        <TouchableOpacity style={[styles.chipToggle, !surveyBillsIncluded && styles.chipToggleActive]} onPress={() => setSurveyBillsIncluded(false)}><Text style={[styles.chipToggleText, !surveyBillsIncluded && styles.chipToggleTextActive]}>לא</Text></TouchableOpacity>
+                      </View>
+                    </View>
+                  </View>
+                  <View style={styles.sectionDivider} />
+                  {/* Section: חיים בבית */}
+                  <Text style={styles.subsectionTitle}>חיים בבית</Text>
+                  <View style={styles.fieldRow}>
+                    <View style={styles.fieldHalf}>
+                      <View style={styles.labelRow}>
+                        <FileText size={16} color="#4C1D95" />
+                        <Text style={styles.fieldLabel}>עבודה מהבית</Text>
+                      </View>
+                      <View style={{ flexDirection: 'row-reverse', gap: 10 }}>
+                        <TouchableOpacity style={[styles.chipToggle, surveyWorksFromHome && styles.chipToggleActive]} onPress={() => setSurveyWorksFromHome(true)}><Text style={[styles.chipToggleText, surveyWorksFromHome && styles.chipToggleTextActive]}>כן</Text></TouchableOpacity>
+                        <TouchableOpacity style={[styles.chipToggle, !surveyWorksFromHome && styles.chipToggleActive]} onPress={() => setSurveyWorksFromHome(false)}><Text style={[styles.chipToggleText, !surveyWorksFromHome && styles.chipToggleTextActive]}>לא</Text></TouchableOpacity>
+                      </View>
+                    </View>
+                    <View style={styles.fieldHalf}>
+                      <View style={styles.labelRow}>
+                        <FileText size={16} color="#4C1D95" />
+                        <Text style={styles.fieldLabel}>שומר/ת כשרות</Text>
+                      </View>
+                      <View style={{ flexDirection: 'row-reverse', gap: 10 }}>
+                        <TouchableOpacity style={[styles.chipToggle, surveyKeepsKosher && styles.chipToggleActive]} onPress={() => setSurveyKeepsKosher(true)}><Text style={[styles.chipToggleText, surveyKeepsKosher && styles.chipToggleTextActive]}>כן</Text></TouchableOpacity>
+                        <TouchableOpacity style={[styles.chipToggle, !surveyKeepsKosher && styles.chipToggleActive]} onPress={() => setSurveyKeepsKosher(false)}><Text style={[styles.chipToggleText, !surveyKeepsKosher && styles.chipToggleTextActive]}>לא</Text></TouchableOpacity>
+                      </View>
+                    </View>
+                  </View>
+                  <View style={styles.fieldRow}>
+                    <View style={styles.fieldHalf}>
+                      <View style={styles.labelRow}>
+                        <FileText size={16} color="#4C1D95" />
+                        <Text style={styles.fieldLabel}>שומר/ת שבת</Text>
+                      </View>
+                      <View style={{ flexDirection: 'row-reverse', gap: 10 }}>
+                        <TouchableOpacity style={[styles.chipToggle, surveyIsShomerShabbat && styles.chipToggleActive]} onPress={() => setSurveyIsShomerShabbat(true)}><Text style={[styles.chipToggleText, surveyIsShomerShabbat && styles.chipToggleTextActive]}>כן</Text></TouchableOpacity>
+                        <TouchableOpacity style={[styles.chipToggle, !surveyIsShomerShabbat && styles.chipToggleActive]} onPress={() => setSurveyIsShomerShabbat(false)}><Text style={[styles.chipToggleText, !surveyIsShomerShabbat && styles.chipToggleTextActive]}>לא</Text></TouchableOpacity>
+                      </View>
+                    </View>
+                    <View style={styles.fieldHalf}>
+                      <View style={styles.labelRow}>
+                        <FileText size={16} color="#4C1D95" />
+                        <Text style={styles.fieldLabel}>מעשן/ת</Text>
+                      </View>
+                      <View style={{ flexDirection: 'row-reverse', gap: 10 }}>
+                        <TouchableOpacity style={[styles.chipToggle, surveyIsSmoker && styles.chipToggleActive]} onPress={() => setSurveyIsSmoker(true)}><Text style={[styles.chipToggleText, surveyIsSmoker && styles.chipToggleTextActive]}>כן</Text></TouchableOpacity>
+                        <TouchableOpacity style={[styles.chipToggle, !surveyIsSmoker && styles.chipToggleActive]} onPress={() => setSurveyIsSmoker(false)}><Text style={[styles.chipToggleText, !surveyIsSmoker && styles.chipToggleTextActive]}>לא</Text></TouchableOpacity>
+                      </View>
+                    </View>
+                  </View>
+                  <View style={styles.fieldRow}>
+                    <View style={styles.fieldHalf}>
+                      <View style={styles.labelRow}>
+                        <FileText size={16} color="#4C1D95" />
+                        <Text style={styles.fieldLabel}>חיית מחמד בבית</Text>
+                      </View>
+                      <View style={{ flexDirection: 'row-reverse', gap: 10 }}>
+                        <TouchableOpacity style={[styles.chipToggle, surveyHasPet && styles.chipToggleActive]} onPress={() => setSurveyHasPet(true)}><Text style={[styles.chipToggleText, surveyHasPet && styles.chipToggleTextActive]}>כן</Text></TouchableOpacity>
+                        <TouchableOpacity style={[styles.chipToggle, !surveyHasPet && styles.chipToggleActive]} onPress={() => setSurveyHasPet(false)}><Text style={[styles.chipToggleText, !surveyHasPet && styles.chipToggleTextActive]}>לא</Text></TouchableOpacity>
+                      </View>
+                    </View>
+                    <View style={styles.fieldHalf}>
+                      <View style={styles.labelRow}>
+                        <FileText size={16} color="#4C1D95" />
+                        <Text style={styles.fieldLabel}>וייב בבית</Text>
+                      </View>
+                      <TextInput style={styles.fieldInput} value={surveyHomeVibe} onChangeText={setSurveyHomeVibe} placeholder="רגוע/חברתי..." />
+                    </View>
+                  </View>
+                  <View style={styles.fieldRow}>
+                    <View style={styles.fieldHalf}>
+                      <View style={styles.labelRow}>
+                        <FileText size={16} color="#4C1D95" />
+                        <Text style={styles.fieldLabel}>חשיבות ניקיון (1‑5)</Text>
+                      </View>
+                      <View style={{ flexDirection: 'row-reverse', gap: 8 }}>
+                        {[1,2,3,4,5].map(n => (
+                          <TouchableOpacity key={`clean-${n}`} style={[styles.chipToggle, surveyCleanlinessImportance === n && styles.chipToggleActive]} onPress={() => setSurveyCleanlinessImportance(n as any)}><Text style={[styles.chipToggleText, surveyCleanlinessImportance === n && styles.chipToggleTextActive]}>{n}</Text></TouchableOpacity>
+                        ))}
+                      </View>
+                    </View>
+                    <View style={styles.fieldHalf}>
+                      <View style={styles.labelRow}>
+                        <FileText size={16} color="#4C1D95" />
+                        <Text style={styles.fieldLabel}>תדירות ניקיון</Text>
+                      </View>
+                      <TextInput style={styles.fieldInput} value={surveyCleaningFrequency} onChangeText={setSurveyCleaningFrequency} placeholder="שבועי/דו‑שבועי..." />
+                    </View>
+                  </View>
+                  <View style={styles.fieldRow}>
+                    <View style={styles.fieldHalf}>
+                      <View style={styles.labelRow}>
+                        <FileText size={16} color="#4C1D95" />
+                        <Text style={styles.fieldLabel}>העדפת אירוח</Text>
+                      </View>
+                      <TextInput style={styles.fieldInput} value={surveyHostingPreference} onChangeText={setSurveyHostingPreference} placeholder="לעיתים/תדיר/מעט..." />
+                    </View>
+                    <View style={styles.fieldHalf}>
+                      <View style={styles.labelRow}>
+                        <FileText size={16} color="#4C1D95" />
+                        <Text style={styles.fieldLabel}>סטייל בישול</Text>
+                      </View>
+                      <TextInput style={styles.fieldInput} value={surveyCookingStyle} onChangeText={setSurveyCookingStyle} placeholder="ביתי/פשוט/גורמה..." />
+                    </View>
+                  </View>
+                  <View style={styles.sectionDivider} />
+                  {/* Section: שותפים מועדפים */}
+                  <Text style={styles.subsectionTitle}>שותפים מועדפים</Text>
+                  <View style={styles.fieldGroup}>
+                    <View style={styles.labelRow}>
+                      <UserIcon size={16} color="#4C1D95" />
+                      <Text style={styles.fieldLabel}>מספר שותפים מועדף</Text>
+                    </View>
+                    <TextInput
+                      style={styles.fieldInput}
+                      value={surveyRoommates}
+                      onChangeText={(t) => setSurveyRoommates(t.replace(/[^0-9]/g, ''))}
+                      keyboardType="number-pad"
+                      placeholder="לדוגמה: 2"
+                    />
+                  </View>
+                  <View style={styles.fieldRow}>
+                    <View style={styles.fieldHalf}>
+                      <View style={styles.labelRow}>
+                        <FileText size={16} color="#4C1D95" />
+                        <Text style={styles.fieldLabel}>טווח גילאים רצוי</Text>
+                      </View>
+                      <TextInput style={styles.fieldInput} value={surveyPreferredAgeRange} onChangeText={setSurveyPreferredAgeRange} placeholder="23‑30" />
+                    </View>
+                    <View style={styles.fieldHalf}>
+                      <View style={styles.labelRow}>
+                        <FileText size={16} color="#4C1D95" />
+                        <Text style={styles.fieldLabel}>מגדר שותפים</Text>
+                      </View>
+                      <TextInput style={styles.fieldInput} value={surveyPreferredGender} onChangeText={setSurveyPreferredGender} placeholder="לא משנה/ז/נ/מעורב" />
+                    </View>
+                  </View>
+                  <View style={styles.fieldRow}>
+                    <View style={styles.fieldHalf}>
+                      <View style={styles.labelRow}>
+                        <FileText size={16} color="#4C1D95" />
+                        <Text style={styles.fieldLabel}>עיסוק שותפים</Text>
+                      </View>
+                      <TextInput style={styles.fieldInput} value={surveyPreferredOccupation} onChangeText={setSurveyPreferredOccupation} placeholder="סטודנטים/הייטק..." />
+                    </View>
+                    <View style={styles.fieldHalf}>
+                      <View style={styles.labelRow}>
+                        <FileText size={16} color="#4C1D95" />
+                        <Text style={styles.fieldLabel}>עיסוק</Text>
+                      </View>
+                      <TextInput style={styles.fieldInput} value={surveyOccupation} onChangeText={setSurveyOccupation} placeholder="עבודתך כיום" />
+                    </View>
+                  </View>
+                  <View style={styles.fieldGroup}>
+                    <View style={styles.labelRow}>
+                      <FileText size={16} color="#4C1D95" />
+                      <Text style={styles.fieldLabel}>מצב זוגי</Text>
+                    </View>
+                    <TextInput style={styles.fieldInput} value={surveyRelationshipStatus} onChangeText={setSurveyRelationshipStatus} placeholder="רווק/נשוי/בקשר..." />
+                  </View>
+
+                  <View style={styles.editActionsRow}>
+                    <TouchableOpacity
+                      style={[styles.clearBtn]}
+                      onPress={() => setShowSurveyModal(false)}
+                      disabled={surveySaving}
+                      activeOpacity={0.9}
+                    >
+                      <Text style={styles.clearText}>ביטול</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.applyBtn, surveySaving && { opacity: 0.7 }]}
+                      onPress={async () => {
+                        try {
+                          if (!user?.id) return;
+                          setSurveySaving(true);
+                          const priceNum = surveyPrice ? parseInt(surveyPrice) : null;
+                          await upsertUserSurvey({
+                            user_id: user.id,
+                            preferred_city: surveyCity || null,
+                            price_range: (priceNum as any) || null,
+                            move_in_month: surveyMoveIn || null,
+                            is_sublet: surveyIsSublet || false,
+                            preferred_neighborhoods: surveyNeighborhoods || null,
+                            preferred_roommates: surveyRoommates ? parseInt(surveyRoommates) : null,
+                            bills_included: surveyBillsIncluded || false,
+                            has_balcony: surveyHasBalcony || false,
+                            has_elevator: surveyHasElevator || false,
+                            wants_master_room: surveyWantsMasterRoom || false,
+                            works_from_home: surveyWorksFromHome || false,
+                            keeps_kosher: surveyKeepsKosher || false,
+                            is_shomer_shabbat: surveyIsShomerShabbat || false,
+                            is_smoker: surveyIsSmoker || false,
+                            has_pet: surveyHasPet || false,
+                            home_vibe: surveyHomeVibe || null,
+                            occupation: surveyOccupation || null,
+                            relationship_status: surveyRelationshipStatus || null,
+                            cleanliness_importance: surveyCleanlinessImportance as any,
+                            cleaning_frequency: surveyCleaningFrequency || null,
+                            hosting_preference: surveyHostingPreference || null,
+                            cooking_style: surveyCookingStyle || null,
+                            preferred_age_range: surveyPreferredAgeRange || null,
+                            preferred_gender: surveyPreferredGender || null,
+                            preferred_occupation: surveyPreferredOccupation || null,
+                            is_completed: true,
+                          } as any);
+                          Alert.alert('הצלחה', 'שאלון ההעדפות נשמר');
+                          setShowSurveyModal(false);
+                          setSurveyCompleted(true);
+                        } catch (e: any) {
+                          Alert.alert('שגיאה', e?.message || 'לא ניתן לשמור את השאלון');
+                        } finally {
+                          setSurveySaving(false);
+                        }
+                      }}
+                      disabled={surveySaving}
+                      activeOpacity={0.9}
+                    >
+                      <Text style={styles.applyText}>{surveySaving ? 'שומר...' : 'שמור'}</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              </KeyboardAwareScrollView>
+            </Animated.View>
+          </Animated.View>
+        </Modal>
+      )}
       {/* Shared profiles modal */}
       {showSharedModal && (
         <Modal visible transparent animationType="fade" onRequestClose={() => setShowSharedModal(false)}>
@@ -799,7 +1380,7 @@ export default function ProfileSettingsScreen() {
               <View style={styles.sheetHeader}>
                 <Text style={styles.sheetTitle}>פרופילים משותפים</Text>
                 <TouchableOpacity style={styles.sheetClose} onPress={() => setShowSharedModal(false)}>
-                  <X size={18} color="#E5E7EB" />
+                  <X size={18} color="#4C1D95" />
                 </TouchableOpacity>
               </View>
 
@@ -823,10 +1404,10 @@ export default function ProfileSettingsScreen() {
                           activeOpacity={0.9}
                         >
                           {leavingGroupId === g.id ? (
-                            <ActivityIndicator size="small" color="#F87171" />
+                            <ActivityIndicator size="small" color="#4C1D95" />
                           ) : (
                             <>
-                              <LogOut size={16} color="#F87171" />
+                              <LogOut size={16} color="#4C1D95" />
                               <Text style={styles.sharedLeaveBtnText}>עזוב/י קבוצה</Text>
                             </>
                           )}
@@ -853,6 +1434,316 @@ export default function ProfileSettingsScreen() {
           </View>
         </Modal>
       )}
+      {/* Edit profile bottom sheet */}
+      {showEditModal && (
+        <Modal
+          visible
+          transparent
+          animationType="none"
+          onRequestClose={() => {
+            closeEditAnimations(() => setShowEditModal(false));
+          }}
+        >
+          <Animated.View style={[styles.overlayBottom, { opacity: backdropOpacity }]}>
+            <Animated.View style={[styles.bottomSheet, { transform: [{ translateY: sheetTranslateY }] }]}>
+              <View style={styles.sheetHeader}>
+                <View style={styles.handleBar} />
+                <Text style={styles.sheetTitle}>עריכת פרופיל</Text>
+                <TouchableOpacity
+                  style={styles.sheetClose}
+                  onPress={() => {
+                    closeEditAnimations(() => setShowEditModal(false));
+                  }}
+                >
+                  <X size={18} color="#4C1D95" />
+                </TouchableOpacity>
+              </View>
+              <KeyboardAwareScrollView
+                contentContainerStyle={styles.editForm}
+                showsVerticalScrollIndicator={false}
+                keyboardOpeningTime={0}
+                keyboardShouldPersistTaps="handled"
+              >
+                <View style={styles.editCard}>
+                <View style={styles.fieldGroup}>
+                  <View style={styles.labelRow}>
+                    <UserIcon size={16} color="#4C1D95" />
+                    <Text style={styles.fieldLabel}>שם מלא</Text>
+                  </View>
+                  <TextInput style={styles.fieldInput} value={editFullName} onChangeText={setEditFullName} editable={!editSaving} />
+                </View>
+                <View style={styles.fieldRow}>
+                  <View style={styles.fieldHalf}>
+                    <View style={styles.labelRow}>
+                      <Hash size={16} color="#4C1D95" />
+                      <Text style={styles.fieldLabel}>גיל</Text>
+                    </View>
+                    <TextInput
+                      style={styles.fieldInput}
+                      value={editAge}
+                      onChangeText={setEditAge}
+                      keyboardType="numeric"
+                      placeholder="לא חובה"
+                      editable={!editSaving}
+                    />
+                  </View>
+                  <View style={styles.fieldHalf}>
+                    <View style={styles.labelRow}>
+                      <MapPin size={16} color="#4C1D95" />
+                      <Text style={styles.fieldLabel}>עיר</Text>
+                    </View>
+                    <TextInput
+                      style={styles.fieldInput}
+                      value={editCity}
+                      onChangeText={setEditCity}
+                      editable={!editSaving}
+                      placeholder="לדוגמה: תל אביב-יפו"
+                    />
+                  </View>
+                </View>
+                <View style={styles.fieldGroup}>
+                  <View style={styles.labelRow}>
+                    <Mail size={16} color="#4C1D95" />
+                    <Text style={styles.fieldLabel}>אימייל</Text>
+                  </View>
+                  <TextInput
+                    style={styles.fieldInput}
+                    value={editEmail}
+                    onChangeText={setEditEmail}
+                    keyboardType="email-address"
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    editable={!editSaving}
+                  />
+                </View>
+                <View style={styles.fieldGroup}>
+                  <View style={styles.labelRow}>
+                    <Phone size={16} color="#4C1D95" />
+                    <Text style={styles.fieldLabel}>טלפון</Text>
+                  </View>
+                  <TextInput
+                    style={styles.fieldInput}
+                    value={editPhone}
+                    onChangeText={setEditPhone}
+                    keyboardType="phone-pad"
+                    placeholder="05X-XXXXXXX"
+                    editable={!editSaving}
+                  />
+                </View>
+                <View style={styles.fieldGroup}>
+                  <View style={styles.labelRow}>
+                    <FileText size={16} color="#4C1D95" />
+                    <Text style={styles.fieldLabel}>אודות</Text>
+                  </View>
+                  <TextInput
+                    style={[styles.fieldInput, styles.fieldTextArea]}
+                    value={editBio}
+                    onChangeText={setEditBio}
+                    multiline
+                    numberOfLines={4}
+                    placeholder="ספר/י קצת על עצמך..."
+                    editable={!editSaving}
+                  />
+                </View>
+
+                {/* Photos section */}
+                <View style={{ gap: 6 }}>
+                  <View style={styles.subsectionHeader}>
+                    <Text style={styles.subsectionTitle}>תמונות</Text>
+                    <Text style={styles.subsectionHint}>{editImages.length}/6</Text>
+                  </View>
+                  <View style={styles.galleryGridLight}>
+                    {/* Existing images */}
+                    {editImages.map((url, idx) => (
+                      <View key={url + idx} style={styles.galleryItemLight}>
+                        <Image source={{ uri: url }} style={styles.galleryImg} />
+                        <TouchableOpacity
+                          onPress={async () => {
+                            try {
+                              if (!user?.id) return;
+                              const removing = editImages[idx];
+                              if (!removing) return;
+                              const confirm = Platform.OS === 'web'
+                                ? (typeof confirm === 'function' ? (confirm as any)('למחוק את התמונה הזו?') : true)
+                                : await new Promise<boolean>((resolve) => {
+                                    Alert.alert('מחיקת תמונה', 'למחוק את התמונה הזו?', [
+                                      { text: 'ביטול', style: 'cancel', onPress: () => resolve(false) },
+                                      { text: 'מחק', style: 'destructive', onPress: () => resolve(true) },
+                                    ]);
+                                  });
+                              if (!confirm) return;
+                              setEditUpdatingImages(true);
+                              const next = editImages.filter((_, i) => i !== idx);
+                              const { error: updateErr } = await supabase
+                                .from('users')
+                                .update({ image_urls: next, updated_at: new Date().toISOString() })
+                                .eq('id', user.id);
+                              if (updateErr) throw updateErr;
+                              setEditImages(next);
+                            } catch (e: any) {
+                              Alert.alert('שגיאה', e?.message || 'לא ניתן למחוק את התמונה');
+                            } finally {
+                              setEditUpdatingImages(false);
+                            }
+                          }}
+                          style={styles.removeLightBtn}
+                          disabled={editUpdatingImages}
+                          activeOpacity={0.85}
+                        >
+                          <Trash2 size={16} color="#F87171" />
+                        </TouchableOpacity>
+                      </View>
+                    ))}
+                {/* Add tile – placed last so it appears left of images in RTL */}
+                {editImages.length < 6 && (
+                  <TouchableOpacity
+                    style={styles.galleryAddTile}
+                    onPress={async () => {
+                      try {
+                        if (!user?.id) return;
+                        const current = editImages.filter(Boolean);
+                        const remaining = Math.max(0, 6 - current.length);
+                        const perms = await ImagePicker.requestMediaLibraryPermissionsAsync();
+                        if (!perms.granted) { Alert.alert('הרשאה נדרשת', 'יש לאפשר גישה לגלריה כדי להעלות תמונות'); return; }
+                        const result: any = await ImagePicker.launchImageLibraryAsync({
+                          mediaTypes: ImagePicker.MediaTypeOptions.Images,
+                          allowsEditing: false,
+                          allowsMultipleSelection: true,
+                          selectionLimit: remaining,
+                          quality: 0.9,
+                        } as any);
+                        if (result.canceled || !result.assets?.length) return;
+                        setEditUpdatingImages(true);
+                        const newUrls: string[] = [];
+                        for (const asset of result.assets) {
+                          const response = await fetch(asset.uri);
+                          const arrayBuffer = await response.arrayBuffer();
+                          const fileExt = (asset.fileName || 'image.jpg').split('.').pop() || 'jpg';
+                          const fileName = `${user.id}-${Date.now()}-${Math.random().toString(36).slice(2)}.${fileExt}`;
+                          const filePath = `users/${user.id}/gallery/${fileName}`;
+                          const filePayload: any = arrayBuffer as any;
+                          const { error: upErr } = await supabase.storage
+                            .from('user-images')
+                            .upload(filePath, filePayload, { contentType: 'image/jpeg', upsert: true });
+                          if (upErr) throw upErr;
+                          const { data } = supabase.storage.from('user-images').getPublicUrl(filePath);
+                          newUrls.push(data.publicUrl);
+                        }
+                        const merged = [...current, ...newUrls].slice(0, 6);
+                        const { error: updateErr } = await supabase
+                          .from('users')
+                          .update({ image_urls: merged, updated_at: new Date().toISOString() })
+                          .eq('id', user.id);
+                        if (updateErr) throw updateErr;
+                        setEditImages(merged);
+                        Alert.alert('הצלחה', 'התמונות נוספו');
+                      } catch (e: any) {
+                        Alert.alert('שגיאה', e?.message || 'לא ניתן להעלות תמונות');
+                      } finally {
+                        setEditUpdatingImages(false);
+                      }
+                    }}
+                    activeOpacity={0.9}
+                    disabled={editUpdatingImages || editSaving}
+                  >
+                    <Plus size={18} color="#4C1D95" />
+                    <Text style={styles.galleryAddTileText}>הוסף</Text>
+                  </TouchableOpacity>
+                )}
+                  </View>
+                </View>
+
+                <View style={styles.editActionsRow}>
+                  <TouchableOpacity
+                    style={[styles.clearBtn]}
+                    onPress={() => setShowEditModal(false)}
+                    disabled={editSaving}
+                    activeOpacity={0.9}
+                  >
+                    <Text style={styles.clearText}>ביטול</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.applyBtn, editSaving && { opacity: 0.7 }]}
+                    onPress={async () => {
+                      try {
+                        if (!user?.id) return;
+                        if (!editFullName.trim()) { Alert.alert('שגיאה', 'שם מלא הוא שדה חובה'); return; }
+                        const ageNum = editAge ? parseInt(editAge) : null;
+                        if (editAge && (isNaN(ageNum!) || ageNum! <= 0)) { Alert.alert('שגיאה', 'גיל לא תקין'); return; }
+                        setEditSaving(true);
+                        const { error } = await supabase
+                          .from('users')
+                          .update({
+                            full_name: editFullName,
+                            age: ageNum,
+                            bio: editBio || null,
+                            email: editEmail || null,
+                            phone: editPhone || null,
+                            city: editCity || null,
+                            image_urls: editImages,
+                            updated_at: new Date().toISOString(),
+                          })
+                          .eq('id', user.id);
+                        if (error) throw error;
+                        Alert.alert('הצלחה', 'הפרופיל עודכן');
+                        // refresh local profile view
+                        try {
+                          const { data } = await supabase.from('users').select('*').eq('id', user.id).maybeSingle();
+                          setProfile((data as any) || null);
+                        } catch {}
+                        setShowEditModal(false);
+                      } catch (e: any) {
+                        Alert.alert('שגיאה', e?.message || 'לא ניתן לשמור');
+                      } finally {
+                        setEditSaving(false);
+                      }
+                    }}
+                    disabled={editSaving}
+                    activeOpacity={0.9}
+                  >
+                    {editSaving ? <ActivityIndicator size="small" color="#FFFFFF" /> : <Text style={styles.applyText}>שמור</Text>}
+                  </TouchableOpacity>
+                </View>
+                </View>
+              </KeyboardAwareScrollView>
+            </Animated.View>
+          </Animated.View>
+        </Modal>
+      )}
+      {/* Terms bottom sheet */}
+      {showTermsModal && (
+        <Modal
+          visible
+          transparent
+          animationType="none"
+          onRequestClose={() => {
+            closeTermsAnimations(() => setShowTermsModal(false));
+          }}
+        >
+          <Animated.View style={[styles.overlayBottom, { opacity: termsBackdropOpacity }]}>
+            <Animated.View style={[styles.bottomSheet, { transform: [{ translateY: termsTranslateY }] }]}>
+              <View style={styles.sheetHeader}>
+                <View style={styles.handleBar} />
+                <Text style={styles.sheetTitle}>תנאי שימוש</Text>
+                <TouchableOpacity
+                  style={styles.sheetClose}
+                  onPress={() => {
+                    closeTermsAnimations(() => setShowTermsModal(false));
+                  }}
+                >
+                  <X size={18} color="#4C1D95" />
+                </TouchableOpacity>
+              </View>
+              <ScrollView contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 16, paddingTop: 8 }}>
+                <Text style={{ color: '#111827', fontSize: 15, lineHeight: 22, textAlign: 'right' }}>
+                  ברוך/ה הבא/ה! זהו עמוד תנאי השימוש של האפליקציה. התוכן המשפטי המלא יופיע כאן.
+                  בינתיים, זהו תוכן דמה כדי לאפשר ניווט תקין במסכים. אנא פנה/י למפתח/ת להוספת נוסח מלא.
+                </Text>
+              </ScrollView>
+            </Animated.View>
+          </Animated.View>
+        </Modal>
+      )}
     </SafeAreaView>
   );
 }
@@ -860,7 +1751,8 @@ export default function ProfileSettingsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0F0F14',
+    backgroundColor: '#FFFFFF',
+    writingDirection: 'rtl',
   },
   header: {
     paddingHorizontal: 16,
@@ -878,7 +1770,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   title: {
-    color: '#FFFFFF',
+    color: '#111827',
     fontSize: 18,
     fontWeight: '800',
   },
@@ -890,17 +1782,17 @@ const styles = StyleSheet.create({
     paddingTop: 24,
   },
   profileCard: {
-    backgroundColor: '#15151C',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 0,
+    borderColor: 'transparent',
     borderRadius: 24,
     padding: 18,
     alignItems: 'center',
     marginBottom: 16,
     shadowColor: '#000000',
-    shadowOpacity: 0.18,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.08,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 6 },
   },
   avatarWrap: {
     position: 'relative',
@@ -910,7 +1802,7 @@ const styles = StyleSheet.create({
     width: 88,
     height: 88,
     borderRadius: 44,
-    backgroundColor: '#1F1F29',
+    backgroundColor: '#F3F4F6',
   },
   avatarEditBtn: {
     position: 'absolute',
@@ -919,28 +1811,29 @@ const styles = StyleSheet.create({
     width: 28,
     height: 28,
     borderRadius: 14,
-    backgroundColor: '#A78BFA',
+    backgroundColor: '#4C1D95',
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 2,
-    borderColor: '#0F0F14',
+    borderColor: '#FFFFFF',
   },
   profileName: {
-    color: '#FFFFFF',
+    color: '#111827',
     fontSize: 22,
     fontWeight: '900',
     marginBottom: 2,
   },
   profileSub: {
-    color: '#9DA4AE',
+    color: '#6B7280',
     fontSize: 13,
   },
   sectionTitle: {
-    color: '#FFFFFF',
+    color: '#111827',
     fontSize: 16,
     fontWeight: '800',
     marginTop: 8,
     marginBottom: 8,
+    textAlign: 'right',
   },
   overlay: {
     position: 'absolute',
@@ -948,27 +1841,163 @@ const styles = StyleSheet.create({
     right: 0,
     top: 0,
     bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.55)',
+    backgroundColor: 'rgba(0,0,0,0.4)',
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 16,
   },
+  overlayBottom: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    justifyContent: 'flex-end',
+    alignItems: 'stretch',
+  },
   sheet: {
     width: '100%',
     maxHeight: '80%',
-    backgroundColor: '#15151C',
+    backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
+    borderColor: '#E5E7EB',
     borderRadius: 18,
     padding: 12,
+  },
+  bottomSheet: {
+    width: '100%',
+    maxHeight: '88%',
+    backgroundColor: '#FAFAFA',
+    borderTopLeftRadius: 22,
+    borderTopRightRadius: 22,
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderBottomWidth: 0,
+    borderColor: '#E5E7EB',
+    paddingTop: 12,
+    paddingBottom: 0,
+    paddingHorizontal: 14,
+  },
+  editForm: {
+    paddingHorizontal: 0,
+    paddingTop: 16,
+    paddingBottom: 0,
+    gap: 12,
+  },
+  editCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 0,
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    borderWidth: 0,
+    borderColor: 'transparent',
+    padding: 14,
+    paddingBottom: 20,
+    gap: 12,
+    shadowColor: '#000000',
+    shadowOpacity: 0.04,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
+  },
+  fieldGroup: {
+    gap: 8,
+  },
+  fieldRow: {
+    flexDirection: 'row-reverse',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  fieldHalf: {
+    flex: 1,
+    gap: 8,
+  },
+  fieldLabel: {
+    color: '#111827',
+    fontSize: 13,
+    fontWeight: '700',
+    textAlign: 'right',
+  },
+  labelRow: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 6,
+  },
+  fieldInput: {
+    backgroundColor: '#FAFAFA',
+    borderRadius: 12,
+    borderWidth: 0,
+    borderColor: 'transparent',
+    paddingHorizontal: 14,
+    paddingVertical: 16,
+    color: '#111827',
+    textAlign: 'right',
+    // No shadow – blend with sheet background
+    shadowColor: 'transparent',
+    shadowOpacity: 0,
+    shadowRadius: 0,
+    shadowOffset: { width: 0, height: 0 },
+    ...(Platform.OS === 'android' ? { elevation: 0 } : {}),
+  },
+  fieldTextArea: {
+    minHeight: 100,
+    textAlignVertical: 'top',
+  },
+  editActionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingTop: 8,
+    gap: 12,
+    marginBottom: 8,
+  },
+  clearBtn: {
+    flex: 1,
+    height: 48,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'transparent',
+  },
+  clearText: {
+    color: '#6B7280',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  applyBtn: {
+    flex: 2,
+    height: 48,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#4C1D95',
+  },
+  applyText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '800',
   },
   sheetHeader: {
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 4,
   },
+  handleBar: {
+    width: 44,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: '#E5E7EB',
+    marginBottom: 8,
+    alignSelf: 'center',
+  },
   sheetTitle: {
-    color: '#FFFFFF',
+    color: '#111827',
     fontSize: 16,
     fontWeight: '800',
   },
@@ -979,19 +2008,30 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: 'transparent',
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.18)',
+    borderWidth: 0,
+    borderColor: 'transparent',
+  },
+  sheetClosePurple: {
+    position: 'absolute',
+    left: 6,
+    top: 0,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#4C1D95',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   sharedGroupCard: {
     marginTop: 12,
     padding: 14,
     borderRadius: 16,
-    backgroundColor: '#17171F',
+    backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
+    borderColor: '#E5E7EB',
     alignItems: 'center',
   },
   sharedCardTopRow: {
@@ -1002,7 +2042,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   sharedGroupTitle: {
-    color: '#FFFFFF',
+    color: '#111827',
     fontSize: 15,
     fontWeight: '800',
   },
@@ -1017,21 +2057,21 @@ const styles = StyleSheet.create({
     height: 44,
     borderRadius: 22,
     borderWidth: 2,
-    borderColor: '#0F0F14',
+    borderColor: '#FFFFFF',
     overflow: 'hidden',
-    backgroundColor: '#1F1F29',
+    backgroundColor: '#F3F4F6',
   },
   sharedAvatar: {
     width: '100%',
     height: '100%',
   },
   sharedMembersLine: {
-    color: '#C7CBD1',
+    color: '#6B7280',
     fontSize: 13,
     textAlign: 'center',
   },
   sharedEmptyText: {
-    color: '#9DA4AE',
+    color: '#6B7280',
     fontSize: 14,
     textAlign: 'center',
     paddingVertical: 12,
@@ -1056,35 +2096,71 @@ const styles = StyleSheet.create({
     marginTop: 8,
     padding: 14,
     borderRadius: 16,
-    backgroundColor: '#17171F',
+    backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
+    borderColor: '#E5E7EB',
     alignItems: 'center',
   },
   aptCover: {
     width: '100%',
     height: 140,
     borderRadius: 12,
-    backgroundColor: '#1F1F29',
+    backgroundColor: '#F3F4F6',
     marginBottom: 10,
   },
+  aptRowCompact: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 12,
+    width: '100%',
+    marginBottom: 8,
+  },
+  aptThumbSmall: {
+    width: 72,
+    height: 72,
+    borderRadius: 12,
+    backgroundColor: '#F3F4F6',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  aptMetaWrap: {
+    flex: 1,
+    gap: 4,
+  },
+  aptMetaTitle: {
+    color: '#111827',
+    fontSize: 16,
+    fontWeight: '800',
+    textAlign: 'right',
+  },
+  aptMetaLine: {
+    color: '#6B7280',
+    fontSize: 13,
+    textAlign: 'right',
+  },
+  aptMetaPrice: {
+    color: '#111827',
+    fontSize: 14,
+    fontWeight: '900',
+    textAlign: 'right',
+  },
   aptTitle: {
-    color: '#FFFFFF',
+    color: '#111827',
     fontSize: 16,
     fontWeight: '900',
     textAlign: 'center',
   },
   aptSub: {
-    color: '#C7CBD1',
+    color: '#6B7280',
     fontSize: 13,
     textAlign: 'center',
     marginTop: 4,
     marginBottom: 6,
   },
   groupCard: {
-    backgroundColor: '#15151C',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 0,
+    borderColor: 'transparent',
     borderRadius: 18,
     overflow: 'hidden',
     marginBottom: 16,
@@ -1103,30 +2179,152 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   dangerIcon: {
-    backgroundColor: 'rgba(248,113,113,0.12)',
+    backgroundColor: 'rgba(248,113,113,0.10)',
   },
   itemTextWrap: {
     flex: 1,
     gap: 2,
   },
   groupItemTitle: {
-    color: '#E5E7EB',
+    color: '#111827',
     fontSize: 15,
     fontWeight: '800',
     textAlign: 'right',
   },
   groupItemSub: {
-    color: '#9DA4AE',
+    color: '#6B7280',
     fontSize: 12,
     textAlign: 'right',
   },
   divider: {
     height: 1,
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    backgroundColor: '#E5E7EB',
     marginHorizontal: 14,
   },
   dangerText: {
     color: '#F87171',
+  },
+  // Light gallery styles for edit sheet
+  subsectionHeader: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 2,
+  },
+  subsectionTitle: {
+    color: '#111827',
+    fontSize: 14,
+    fontWeight: '800',
+    textAlign: 'right',
+  },
+  sectionDivider: {
+    height: 1,
+    backgroundColor: '#E5E7EB',
+    marginVertical: 12,
+  },
+  subsectionHint: {
+    color: '#6B7280',
+    fontSize: 12,
+  },
+  galleryActionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 4,
+  },
+  galleryAddLightBtn: {
+    backgroundColor: '#4C1D95',
+    borderWidth: 0,
+    borderColor: 'transparent',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  galleryAddLightBtnText: {
+    color: '#FFFFFF',
+    fontWeight: '800',
+  },
+  galleryCountText: {
+    color: '#6B7280',
+    fontWeight: '700',
+  },
+  galleryGridLight: {
+    marginTop: 12,
+    flexDirection: 'row-reverse',
+    flexWrap: 'wrap',
+    gap: 10,
+    justifyContent: 'flex-start',
+  },
+  galleryAddTile: {
+    width: '31%',
+    aspectRatio: 1,
+    borderRadius: 18,
+    borderWidth: 2,
+    borderStyle: 'dashed',
+    borderColor: '#A78BFA',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F9FAFB',
+  },
+  galleryAddTileText: {
+    marginTop: 6,
+    color: '#4C1D95',
+    fontWeight: '800',
+    fontSize: 12,
+  },
+  galleryItemLight: {
+    width: '31%',
+    aspectRatio: 1,
+    borderRadius: 18,
+    overflow: 'hidden',
+    backgroundColor: '#F3F4F6',
+    position: 'relative',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    shadowColor: '#000000',
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+  },
+  galleryImg: {
+    width: '100%',
+    height: '100%',
+  },
+  removeLightBtn: {
+    position: 'absolute',
+    top: 8,
+    left: 8,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  chipToggle: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    backgroundColor: '#FFFFFF',
+  },
+  chipToggleActive: {
+    borderColor: '#4C1D95',
+    backgroundColor: '#EFEAFE',
+  },
+  chipToggleText: {
+    color: '#6B7280',
+    fontWeight: '700',
+    fontSize: 13,
+  },
+  chipToggleTextActive: {
+    color: '#4C1D95',
   },
 });
 

@@ -10,15 +10,21 @@ import {
   TouchableOpacity,
   Modal,
   TextInput,
-  Animated,
   Dimensions,
-  Easing,
   Alert,
   Image,
 } from 'react-native';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withSpring,
+  withTiming,
+  runOnJS,
+} from 'react-native-reanimated';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { SlidersHorizontal, ChevronLeft, ChevronRight, Heart, X, MapPin } from 'lucide-react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
-import FloatingTabBar from '@/components/FloatingTabBar';
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/authStore';
 import { User, UserSurveyResponse } from '@/types/database';
@@ -138,7 +144,46 @@ export default function PartnersScreen() {
   const [matchScores, setMatchScores] = useState<Record<string, number | null>>({});
 
   const screenWidth = Dimensions.get('window').width;
-  const translateX = useRef(new Animated.Value(0)).current;
+  const translateX = useSharedValue(0);
+  const headerOffset = insets.top + 52 + -40;
+
+  const onSwipe = (type: 'like' | 'pass') => {
+    const item = items[currentIndex];
+    if (!item) return;
+    if (type === 'like') {
+      if (item.type === 'user') handleLike((item as any).user, { skipSlide: true });
+      else handleGroupLike((item as any).groupId, (item as any).users, { skipSlide: true });
+    } else {
+      if (item.type === 'user') handlePass((item as any).user, { skipSlide: true });
+      else handleGroupPass((item as any).groupId, (item as any).users, { skipSlide: true });
+    }
+    setCurrentIndex((i) => Math.min(i + 1, items.length - 1));
+    translateX.value = 0;
+  };
+
+  const swipeGesture = Gesture.Pan()
+    .onChange((e) => {
+      translateX.value = e.translationX;
+    })
+    .onEnd(() => {
+      'worklet';
+      const threshold = 120;
+      if (translateX.value > threshold) {
+        translateX.value = withTiming(screenWidth + 200, { duration: 180 }, (finished) => {
+          if (finished) runOnJS(onSwipe)('like');
+        });
+      } else if (translateX.value < -threshold) {
+        translateX.value = withTiming(-screenWidth - 200, { duration: 180 }, (finished) => {
+          if (finished) runOnJS(onSwipe)('pass');
+        });
+      } else {
+        translateX.value = withSpring(0, { damping: 18, stiffness: 180 });
+      }
+    });
+
+  const cardAnimatedStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: translateX.value }],
+  }));
 
   useEffect(() => {
     fetchUsersAndGroups();
@@ -248,7 +293,7 @@ export default function PartnersScreen() {
       }
 
       if (currentUser) {
-        userMap[authId] = currentUser;
+        userMap[authId] = currentUser as unknown as User;
       }
       const myCompat = buildCompatSurvey(userMap[authId], mySurvey);
 
@@ -545,7 +590,7 @@ export default function PartnersScreen() {
         }
       });
       if (currentUser?.id) {
-        userMap[currentUser.id] = currentUser;
+        userMap[currentUser.id] = currentUser as unknown as User;
       }
       const candidateIds = Array.from(candidateIdSet);
       const newMatchScores = await computeMatchPercentages(candidateIds, userMap);
@@ -569,27 +614,19 @@ export default function PartnersScreen() {
   const slideTo = (nextIndex: number, direction: 'next' | 'prev') => {
     if (nextIndex < 0 || nextIndex >= items.length) return;
     const outTarget = direction === 'next' ? -screenWidth : screenWidth;
-    Animated.timing(translateX, {
-      toValue: outTarget,
-      duration: 220,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: true,
-    }).start(() => {
-      setCurrentIndex(nextIndex);
-      translateX.setValue(direction === 'next' ? screenWidth : -screenWidth);
-      Animated.spring(translateX, {
-        toValue: 0,
-        useNativeDriver: true,
-        friction: 8,
-        tension: 50,
-      }).start();
+    translateX.value = withTiming(outTarget, { duration: 220 }, (finished) => {
+      if (finished) {
+        runOnJS(setCurrentIndex)(nextIndex);
+        translateX.value = direction === 'next' ? screenWidth : -screenWidth;
+        translateX.value = withSpring(0, { damping: 18, stiffness: 160 });
+      }
     });
   };
 
   const goNext = () => slideTo(currentIndex + 1, 'next');
   const goPrev = () => slideTo(currentIndex - 1, 'prev');
 
-  const handleLike = async (likedUser: User) => {
+  const handleLike = async (likedUser: User, opts?: { skipSlide?: boolean }) => {
     if (currentUser?.id && likedUser.id === currentUser.id) {
       goNext();
       return;
@@ -649,13 +686,15 @@ export default function PartnersScreen() {
         description: notifDesc,
       });
 
-      goNext();
+      if (!opts?.skipSlide) {
+        goNext();
+      }
     } catch (e: any) {
       console.error('like failed', e);
       Alert.alert('שגיאה', e?.message || 'לא ניתן לשלוח בקשה');
     }
   };
-  const handlePass = async (user: User) => {
+  const handlePass = async (user: User, opts?: { skipSlide?: boolean }) => {
     if (!currentUser?.id) {
       Alert.alert('שגיאה', 'יש להתחבר כדי לבצע פעולה זו');
       return;
@@ -710,12 +749,14 @@ export default function PartnersScreen() {
       console.error('pass failed', e);
       Alert.alert('שגיאה', e?.message || 'לא ניתן לסמן כלא רלוונטי');
     } finally {
-      goNext();
+      if (!opts?.skipSlide) {
+        goNext();
+      }
     }
   };
   // Removed favorite action per request
 
-  const handleGroupLike = async (groupId: string, groupUsers: User[]) => {
+  const handleGroupLike = async (groupId: string, groupUsers: User[], opts?: { skipSlide?: boolean }) => {
     try {
       if (!currentUser?.id) {
         Alert.alert('שגיאה', 'יש להתחבר כדי לבצע פעולה זו');
@@ -770,14 +811,16 @@ export default function PartnersScreen() {
         }));
         await supabase.from('notifications').insert(notifications as any);
       }
-      goNext();
+      if (!opts?.skipSlide) {
+        goNext();
+      }
     } catch (e: any) {
       console.error('group like failed', e);
       Alert.alert('שגיאה', e?.message || 'לא ניתן לשלוח בקשות לקבוצה');
     }
   };
 
-  const handleGroupPass = async (groupId: string, groupUsers: User[]) => {
+  const handleGroupPass = async (groupId: string, groupUsers: User[], opts?: { skipSlide?: boolean }) => {
     try {
       if (!currentUser?.id) {
         Alert.alert('שגיאה', 'יש להתחבר כדי לבצע פעולה זו');
@@ -810,20 +853,22 @@ export default function PartnersScreen() {
       console.error('group pass failed', e);
       Alert.alert('שגיאה', e?.message || 'לא ניתן לסמן קבוצה כלא רלוונטית');
     } finally {
-      goNext();
+      if (!opts?.skipSlide) {
+        goNext();
+      }
     }
   };
   if (isLoading) {
     return (
       <View style={styles.centerContainer}>
-        <ActivityIndicator size="large" color="#4C1D95" />
+        <ActivityIndicator size="large" color="#111827" />
       </View>
     );
   }
 
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.topBar}>
+      <View style={[styles.topBar, { top: insets.top + 8 }]}>
         <View style={styles.actionsRow}>
           <TouchableOpacity
             activeOpacity={0.8}
@@ -836,10 +881,10 @@ export default function PartnersScreen() {
       </View>
 
       <ScrollView
-        contentContainerStyle={[styles.listContent, { paddingBottom: 140 + insets.bottom }]}
+        contentContainerStyle={[styles.listContent, { paddingTop: headerOffset, paddingBottom: 140 + insets.bottom }]}
         showsVerticalScrollIndicator={false}
         refreshControl={
-          <RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} tintColor="#4C1D95" />
+          <RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} tintColor="#111827" />
         }
       >
         {items.length === 0 ? (
@@ -849,26 +894,13 @@ export default function PartnersScreen() {
           </View>
         ) : (
           <View>
-            <Animated.View
-              style={[
-                styles.animatedCard,
-                {
-                  transform: [
-                    { translateX },
-                    {
-                      scale: translateX.interpolate({
-                        inputRange: [-screenWidth, 0, screenWidth],
-                        outputRange: [0.96, 1, 0.96],
-                      }),
-                    },
-                  ],
-                  opacity: translateX.interpolate({
-                    inputRange: [-screenWidth, 0, screenWidth],
-                    outputRange: [0.85, 1, 0.85],
-                  }),
-                },
-              ]}
-            >
+            <GestureDetector gesture={swipeGesture}>
+              <Animated.View
+                style={[
+                  styles.animatedCard,
+                  cardAnimatedStyle,
+                ]}
+              >
               {items[currentIndex].type === 'user' ? (
                 <RoommateCard
                   user={(items[currentIndex] as any).user}
@@ -904,7 +936,8 @@ export default function PartnersScreen() {
                   }
                 />
               )}
-            </Animated.View>
+              </Animated.View>
+            </GestureDetector>
 
             <View style={styles.arrowRow}>
               <TouchableOpacity
@@ -931,9 +964,6 @@ export default function PartnersScreen() {
           </View>
         )}
       </ScrollView>
-
-      {/* Floating bottom pill menu for partners */}
-      <FloatingTabBar active="partners" />
 
       {showFilters ? (
         <Modal
@@ -1155,21 +1185,20 @@ export default function PartnersScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0F0F14',
+    backgroundColor: '#FFFFFF',
   },
   centerContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#0F0F14',
+    backgroundColor: '#FFFFFF',
   },
   topBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    zIndex: 20,
     paddingHorizontal: 16,
-    paddingTop: 52,
-    paddingBottom: 8,
   },
   brandRow: {
     flexDirection: 'row',
@@ -1309,7 +1338,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.06)',
   },
   chipActive: {
-    backgroundColor: '#4C1D95',
+    backgroundColor: '#2A2A37',
     borderColor: 'rgba(255,255,255,0.15)',
   },
   chipText: {
@@ -1361,7 +1390,7 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   applyBtn: {
-    backgroundColor: '#A78BFA',
+    backgroundColor: '#22C55E',
     marginLeft: 8,
   },
   resetText: {
@@ -1407,7 +1436,7 @@ function GroupCard({
       <View style={groupStyles.gridWrap}>
         {displayUsers.map((u, idx) => {
           const rows = isOneRowLayout ? 1 : Math.ceil(displayUsers.length / 2);
-          const cellHeight = rows === 1 ? 240 : 120;
+          const cellHeight = rows === 1 ? 440 : 220;
           const isLastWithExtra = idx === displayUsers.length - 1 && extra > 0;
           const matchPercent = matchScores?.[u.id] ?? null;
           return (
@@ -1430,6 +1459,27 @@ function GroupCard({
                   <Text style={groupStyles.matchBadgeValue}>{formatMatchPercent(matchPercent)}</Text>
                   <Text style={groupStyles.matchBadgeLabel}>התאמה</Text>
                 </View>
+                <View style={groupStyles.cellBottomOverlay}>
+                  <LinearGradient
+                    colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.55)']}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 0, y: 1 }}
+                    style={groupStyles.cellBottomOverlayGradient}
+                  />
+                  <View style={groupStyles.cellBottomOverlayContent}>
+                    {!!u.full_name ? (
+                      <Text style={groupStyles.cellOverlayName} numberOfLines={1}>
+                        {u.full_name}
+                      </Text>
+                    ) : null}
+                    {!!u.age ? <Text style={groupStyles.cellOverlayAge}>{u.age}</Text> : null}
+                    {!!u.bio ? (
+                      <Text style={groupStyles.cellOverlayBio} numberOfLines={1}>
+                        {u.bio}
+                      </Text>
+                    ) : null}
+                  </View>
+                </View>
                 {isLastWithExtra ? (
                   <View style={groupStyles.extraOverlay}>
                     <Text style={groupStyles.extraOverlayText}>+{extra}</Text>
@@ -1441,115 +1491,35 @@ function GroupCard({
         })}
       </View>
 
-      <View style={groupStyles.membersSection}>
-        {users.map((u) => (
-          <TouchableOpacity
-            key={u.id}
-            activeOpacity={0.9}
-            onPress={() => onOpen(u.id)}
-            style={groupStyles.memberRow}
-          >
-            <View style={groupStyles.memberAvatarWrap}>
-              <Image source={{ uri: u.avatar_url || DEFAULT_AVATAR }} style={groupStyles.memberAvatar} />
-              <View style={[groupStyles.matchBadge, groupStyles.matchBadgeSmall]}>
-                <Text style={groupStyles.matchBadgeValueSmall}>{formatMatchPercent(matchScores?.[u.id])}</Text>
-              </View>
-            </View>
-            <View style={groupStyles.memberInfo}>
-              <Text style={groupStyles.memberNameAge} numberOfLines={1}>
-                {u.full_name}{u.age ? `, ${u.age}` : ''}
-              </Text>
-              {!!u.city && (
-                <View style={groupStyles.memberCityRow}>
-                  <MapPin size={14} color="#C9CDD6" />
-                  <Text style={groupStyles.memberCityText}>{u.city}</Text>
-                </View>
-              )}
-              {u.bio ? (
-                <Text style={groupStyles.memberBio} numberOfLines={3}>
-                  {u.bio}
-                </Text>
-              ) : null}
-            </View>
-          </TouchableOpacity>
-        ))}
-      </View>
+      {/* Summary under grid removed — details shown on image overlay */}
 
-      {apartment && (
-        <View style={groupStyles.apartmentSection}>
-          <Text style={groupStyles.apartmentTitle}>הדירה שלהם</Text>
-          <TouchableOpacity
-            activeOpacity={0.9}
-            onPress={() => onOpenApartment(apartment.id)}
-            style={groupStyles.apartmentCardContainer}
-          >
-            <View style={groupStyles.apartmentCardCompact}>
-              <Image
-                source={{ uri: apartment.image_url || 'https://images.pexels.com/photos/1457842/pexels-photo-1457842.jpeg' }}
-                style={groupStyles.apartmentImage}
-              />
-              <View style={groupStyles.apartmentDetails}>
-                <Text style={groupStyles.apartmentCardTitle} numberOfLines={1}>
-                  {apartment.title}
-                </Text>
-                <View style={groupStyles.apartmentLocation}>
-                  <MapPin size={14} color="#9DA4AE" />
-                  <Text style={groupStyles.apartmentLocationText}>{apartment.city}</Text>
-                </View>
-                <View style={groupStyles.apartmentPrice}>
-                  <Text style={groupStyles.apartmentPriceAmount}>₪{apartment.price}</Text>
-                  <Text style={groupStyles.apartmentPriceUnit}>/חודש</Text>
-                </View>
-              </View>
-            </View>
-          </TouchableOpacity>
-        </View>
-      )}
-
-      <View style={{ paddingHorizontal: 16, paddingBottom: 12 }}>
-        <View style={groupStyles.actionsRow}>
-          <TouchableOpacity
-            activeOpacity={0.9}
-            style={[groupStyles.circleBtn, groupStyles.passBtn]}
-            onPress={() => onPass(groupId, users)}
-          >
-            <X size={22} color="#F43F5E" />
-          </TouchableOpacity>
-          <TouchableOpacity
-            activeOpacity={0.9}
-            style={[groupStyles.circleBtn, groupStyles.likeBtn]}
-            onPress={() => onLike(groupId, users)}
-          >
-            <Heart size={22} color="#22C55E" />
-          </TouchableOpacity>
-        </View>
-      </View>
+      {/* Bottom action buttons removed — swipe to like/pass */}
     </View>
   );
 }
 
 const groupStyles = StyleSheet.create({
   card: {
-    backgroundColor: '#17171F',
+    backgroundColor: '#FAFAFA',
     borderRadius: 20,
     overflow: 'hidden',
     marginBottom: 18,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)',
+    borderColor: '#E5E7EB',
   },
   gridWrap: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    backgroundColor: '#22232E',
+    backgroundColor: '#FFFFFF',
     borderBottomWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)',
+    borderColor: '#E5E7EB',
   },
   cell: {
     width: '50%',
     position: 'relative',
     borderRightWidth: 1,
     borderBottomWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)',
+    borderColor: '#E5E7EB',
   },
   cellImageWrap: {
     width: '100%',
@@ -1559,6 +1529,43 @@ const groupStyles = StyleSheet.create({
   cellImage: {
     width: '100%',
     height: '100%',
+  },
+  cellBottomOverlay: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: 72,
+  },
+  cellBottomOverlayGradient: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  cellBottomOverlayContent: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    alignItems: 'flex-end',
+  },
+  cellOverlayName: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '800',
+    textAlign: 'right',
+  },
+  cellOverlayAge: {
+    color: '#E5E7EB',
+    fontSize: 12,
+    marginTop: 1,
+    textAlign: 'right',
+  },
+  cellOverlayBio: {
+    color: '#E5E7EB',
+    fontSize: 12,
+    marginTop: 2,
+    textAlign: 'right',
   },
   matchBadge: {
     position: 'absolute',
@@ -1624,7 +1631,7 @@ const groupStyles = StyleSheet.create({
     gap: 12 as any,
     paddingVertical: 10,
     borderTopWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)',
+    borderColor: '#E5E7EB',
   },
   memberAvatarWrap: {
     width: 60,
@@ -1636,13 +1643,13 @@ const groupStyles = StyleSheet.create({
     width: 60,
     height: 60,
     borderRadius: 12,
-    backgroundColor: '#1F1F29',
+    backgroundColor: '#F3F4F6',
   },
   memberInfo: {
     flex: 1,
   },
   memberNameAge: {
-    color: '#FFFFFF',
+    color: '#111827',
     fontSize: 16,
     fontWeight: '800',
     marginBottom: 4,
@@ -1656,11 +1663,11 @@ const groupStyles = StyleSheet.create({
     marginBottom: 6,
   },
   memberCityText: {
-    color: '#C9CDD6',
+    color: '#111827',
     fontSize: 13,
   },
   memberBio: {
-    color: '#C7CBD1',
+    color: '#111827',
     fontSize: 13,
     lineHeight: 18,
     textAlign: 'right',
@@ -1691,11 +1698,11 @@ const groupStyles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderTopWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)',
-    backgroundColor: '#1A1A24',
+    borderColor: '#E5E7EB',
+    backgroundColor: '#FFFFFF',
   },
   apartmentTitle: {
-    color: '#FFFFFF',
+    color: '#111827',
     fontSize: 16,
     fontWeight: '800',
     marginBottom: 12,
@@ -1706,16 +1713,16 @@ const groupStyles = StyleSheet.create({
   },
   apartmentCardCompact: {
     flexDirection: 'row-reverse',
-    backgroundColor: '#22232E',
+    backgroundColor: '#FFFFFF',
     borderRadius: 12,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)',
+    borderColor: '#E5E7EB',
   },
   apartmentImage: {
     width: 120,
     height: 100,
-    backgroundColor: '#2A2B36',
+    backgroundColor: '#F3F4F6',
   },
   apartmentDetails: {
     flex: 1,
@@ -1723,7 +1730,7 @@ const groupStyles = StyleSheet.create({
     justifyContent: 'center',
   },
   apartmentCardTitle: {
-    color: '#FFFFFF',
+    color: '#111827',
     fontSize: 15,
     fontWeight: '700',
     marginBottom: 6,
@@ -1736,7 +1743,7 @@ const groupStyles = StyleSheet.create({
     marginBottom: 6,
   },
   apartmentLocationText: {
-    color: '#9DA4AE',
+    color: '#111827',
     fontSize: 13,
     textAlign: 'right',
   },

@@ -62,7 +62,7 @@ function RequestsButtonBase({ style, badgeCount }: Props) {
         onPress={() => router.push('/requests')}
         style={styles.btn}
       >
-        <Inbox size={22} color="#1F2937" />
+        <Inbox size={22} color="#8B5CF6" />
         {shownCount > 0 ? (
           <View style={styles.badge}>
             <Text style={styles.badgeText}>{shownLabel}</Text>

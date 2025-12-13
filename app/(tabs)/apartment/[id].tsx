@@ -1097,7 +1097,14 @@ export default function ApartmentDetailsScreen() {
                     {people.map((p, idx) => {
                       const meta = typeof p.age === 'number' ? `${p.role} • ${p.age}` : p.role;
                       return (
-                        <View key={`person-${p.id}-${idx}`} style={styles.personCard}>
+                        <TouchableOpacity
+                          key={`person-${p.id}-${idx}`}
+                          style={styles.personCard}
+                          activeOpacity={0.9}
+                          onPress={() => {
+                            router.push({ pathname: '/user/[id]', params: { id: p.id } });
+                          }}
+                        >
                           <View style={styles.personAvatarWrap}>
                             <Image
                               source={{ uri: p.avatar || 'https://cdn-icons-png.flaticon.com/512/847/847969.png' }}
@@ -1108,7 +1115,7 @@ export default function ApartmentDetailsScreen() {
                             {p.name}
                           </Text>
                           <Text style={styles.personMeta}>{meta}</Text>
-                        </View>
+                        </TouchableOpacity>
                       );
                     })}
                   </View>
@@ -1479,7 +1486,7 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#0F0F14',
+    backgroundColor: '#FFFFFF',
   },
   galleryContainer: {
     position: 'relative',

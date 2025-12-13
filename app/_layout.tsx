@@ -15,12 +15,8 @@ export default function RootLayout() {
   const { setUser, setLoading } = useAuthStore();
   usePushNotifications();
   const pathname = usePathname();
-  const isApartmentDetails = pathname?.includes('/apartment/');
-  const showTopBar =
-    pathname !== '/auth/intro' &&
-    pathname !== '/auth/login' &&
-    pathname !== '/auth/register' &&
-    !isApartmentDetails;
+  const hideGlobalTopBar = typeof pathname === 'string' && pathname.includes('/apartment/');
+  
 
   useEffect(() => {
     let isMounted = true;
@@ -89,8 +85,8 @@ export default function RootLayout() {
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="+not-found" />
       </Stack>
-      {/* Global transparent top bar: notifications (left), Homie (center), requests (right) */}
-      {showTopBar && <GlobalTopBar />}
+      {/* Global white top bar: notifications (left), Homie (center), requests (right) */}
+      {!hideGlobalTopBar && <GlobalTopBar />}
       <StatusBar style="auto" />
     </GestureHandlerRootView>
   );
