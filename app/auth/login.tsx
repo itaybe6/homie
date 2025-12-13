@@ -16,7 +16,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Eye, EyeOff, ArrowLeft } from 'lucide-react-native';
 // Removed vector icon for Google since it is single-color; using multicolor image instead
 import LavaLamp from '../../components/LavaLamp';
-import KeyboardAwareScrollView from 'react-native-keyboard-aware-scroll-view/lib/KeyboardAwareScrollView';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 
 const ACCENT_PURPLE = '#4C1D95'; // deeper purple
 const SHEET_TOP_OFFSET = 72;
