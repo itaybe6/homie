@@ -13,9 +13,13 @@ import {
   TextInput,
   Platform,
 } from 'react-native';
+import { BackHandler } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
+import { StatusBar } from 'expo-status-bar';
+import { PinchGestureHandler, State } from 'react-native-gesture-handler';
 import {
   ArrowLeft,
+  ArrowRight,
   MapPin,
   Bed,
   Bath,
@@ -27,6 +31,15 @@ import {
   X,
   UserPlus,
   Search,
+  Heart,
+  Share2,
+  MessageCircle,
+  Wifi,
+  Snowflake,
+  WashingMachine,
+  Utensils,
+  Tv,
+  Home,
 } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { supabase } from '@/lib/supabase';
@@ -72,10 +85,27 @@ export default function ApartmentDetailsScreen() {
   const galleryRef = useRef<ScrollView>(null);
   const screenWidth = Dimensions.get('window').width;
   const insets = useSafeAreaInsets();
+  const [isViewerOpen, setViewerOpen] = useState(false);
+  const [viewerIndex, setViewerIndex] = useState(0);
 
   useEffect(() => {
     fetchApartmentDetails();
   }, [id]);
+
+  // Ensure Android hardware back returns to previous screen (or Home), and
+  // closes the fullscreen viewer first if open.
+  useEffect(() => {
+    const onBack = () => {
+      if (isViewerOpen) {
+        setViewerOpen(false);
+        return true;
+      }
+      router.replace('/(tabs)/home');
+      return true;
+    };
+    const sub = BackHandler.addEventListener('hardwareBackPress', onBack);
+    return () => sub.remove();
+  }, [isViewerOpen, router]);
 
   useEffect(() => {
     const checkAssigned = async () => {
@@ -805,41 +835,11 @@ export default function ApartmentDetailsScreen() {
 
   return (
     <View style={styles.container}>
-      <ScrollView contentContainerStyle={{ paddingBottom: 400, paddingTop: 50 }}>
+      {isOwner ? <StatusBar translucent backgroundColor="transparent" style="light" /> : null}
+      <ScrollView contentContainerStyle={{ paddingBottom: 220, paddingTop: 0, backgroundColor: '#FAFAFA' }}>
         {/* Owner actions pinned to top of the page */}
-        {isOwner ? (
-          <View style={styles.topActionsRow}>
-            <TouchableOpacity
-              style={styles.actionBtn}
-              onPress={() => router.push({ pathname: '/apartment/edit/[id]', params: { id: apartment.id } })}
-              activeOpacity={0.9}
-            >
-              <Pencil size={16} color="#FFFFFF" />
-              <Text style={styles.actionBtnText}>עריכה</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.actionBtnDanger}
-              onPress={handleDeleteApartment}
-              activeOpacity={0.9}
-            >
-              <Trash2 size={16} color="#F87171" />
-              <Text style={styles.actionBtnDangerText}>מחק</Text>
-            </TouchableOpacity>
-          </View>
-        ) : null}
+        {null}
 
-        <View style={styles.topHeader}>
-          <Text style={styles.heroTitle} numberOfLines={2}>
-            {apartment.title}
-          </Text>
-          <View style={styles.heroLocation}>
-            <MapPin size={16} color="#C9CDD6" />
-            <Text style={styles.heroLocationText} numberOfLines={1}>
-              {apartment.neighborhood ? `${apartment.neighborhood}, ` : ''}
-              {apartment.city}
-            </Text>
-          </View>
-        </View>
         <View style={styles.galleryContainer}>
           <ScrollView
             ref={galleryRef}
@@ -857,11 +857,18 @@ export default function ApartmentDetailsScreen() {
               const uri = getImageForIndex(idx);
               return (
               <View key={`${uri}-${idx}`} style={[styles.slide, { width: screenWidth }]}>
-                <Image
-                  source={{ uri }}
-                  style={styles.image}
-                  resizeMode="cover"
-                  onError={() => {
+                <TouchableOpacity
+                  activeOpacity={1}
+                  onPress={() => {
+                    setViewerIndex(idx);
+                    setViewerOpen(true);
+                  }}
+                >
+                  <Image
+                    source={{ uri }}
+                    style={styles.image}
+                    resizeMode="cover"
+                    onError={() => {
                     setImageCandidateIndex((prev) => {
                       const candidates = galleryImages[idx] || [PLACEHOLDER];
                       const current = prev[idx] ?? 0;
@@ -869,130 +876,274 @@ export default function ApartmentDetailsScreen() {
                       if (next === current) return prev;
                       return { ...prev, [idx]: next };
                     });
-                  }}
-                />
-                <LinearGradient
-                  colors={['transparent', 'rgba(15,15,20,0.6)', 'rgba(15,15,20,0.95)']}
-                  style={styles.imageGradient}
-                />
+                    }}
+                  />
+                </TouchableOpacity>
+                {/* top overlay controls */}
+                <View style={[styles.topControlsRow, isOwner ? { top: 70 } : null]}>
+                  <View style={styles.leftControls}>
+                    <TouchableOpacity style={styles.circleBtnLight} activeOpacity={0.9}>
+                      <Heart size={18} color="#111827" />
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.circleBtnLight} activeOpacity={0.9}>
+                      <Share2 size={18} color="#111827" />
+                    </TouchableOpacity>
+                    {isOwner ? (
+                      <TouchableOpacity
+                        style={styles.circleBtnLight}
+                        activeOpacity={0.9}
+                        onPress={() => router.push({ pathname: '/apartment/edit/[id]', params: { id: apartment.id } })}
+                      >
+                        <Pencil size={18} color="#111827" />
+                      </TouchableOpacity>
+                    ) : null}
+                    {isOwner ? (
+                      <TouchableOpacity
+                        style={styles.circleBtnLight}
+                        activeOpacity={0.9}
+                        onPress={handleDeleteApartment}
+                      >
+                        <Trash2 size={18} color="#111827" />
+                      </TouchableOpacity>
+                    ) : null}
+                  </View>
+                  <TouchableOpacity
+                    style={styles.circleBtnLight}
+                    onPress={() => {
+                      router.replace('/(tabs)/home');
+                    }}
+                    activeOpacity={0.9}
+                  >
+                    <ArrowRight size={18} color="#111827" />
+                  </TouchableOpacity>
+                </View>
               </View>
             );})}
           </ScrollView>
 
-          {/* Price overlay at bottom-left of the image */}
-          <View style={styles.priceOverlay}>
-            <View style={styles.pricePill}>
-              <Text style={styles.currencyText}>₪</Text>
-              <Text style={styles.priceText}>{apartment.price}</Text>
-              <Text style={styles.priceUnitDark}>/חודש</Text>
-            </View>
-          </View>
-
-          {availableRoommateSlots !== null ? (
-            <View style={styles.capacityOverlay}>
-              <Text style={styles.capacityOverlayValue}>
-                {partnerSlotsUsed}/{totalRoommateCapacity ?? 0}
-              </Text>
-              <Users size={18} color="#FFFFFF" />
-            </View>
-          ) : null}
-
           {galleryImages.length > 1 ? (
-            <>
-              <TouchableOpacity onPress={goPrev} style={[styles.navBtn, styles.navBtnLeft]} activeOpacity={0.85}>
-                <ChevronLeft size={18} color="#FFFFFF" />
-              </TouchableOpacity>
-              <TouchableOpacity onPress={goNext} style={[styles.navBtn, styles.navBtnRight]} activeOpacity={0.85}>
-                <ChevronRight size={18} color="#FFFFFF" />
-              </TouchableOpacity>
-              <View style={styles.dotsRow}>
+            <View style={styles.dotsWrap} pointerEvents="none">
+              <View style={styles.dotsPill}>
                 {galleryImages.map((_, i) => (
-                  <View key={`dot-${i}`} style={[styles.dot, i === activeIdx && styles.dotActive]} />
+                  <View key={`dot-${i}`} style={[styles.dotLight, i === activeIdx && styles.dotActiveLight]} />
                 ))}
               </View>
-            </>
+            </View>
           ) : null}
-
-          <TouchableOpacity
-            style={styles.backButton}
-            onPress={() => router.replace('/(tabs)/home')}>
-            <ArrowLeft size={22} color="#FFFFFF" />
-          </TouchableOpacity>
-
-          <View style={styles.avatarStack}>
-            {members.slice(0, 5).map((m, idx) => (
-              <TouchableOpacity
-                key={m.id}
-                onPress={() => router.push({ pathname: '/user/[id]', params: { id: m.id } })}
-                activeOpacity={0.9}
-              >
-                <Image
-                  source={{
-                    uri:
-                      (m as any).avatar_url ||
-                      'https://cdn-icons-png.flaticon.com/512/847/847969.png',
-                  }}
-                  style={[styles.avatar, idx > 0 ? { marginLeft: -10 } : null]}
-                />
-              </TouchableOpacity>
-            ))}
-            {members.length > 5 ? (
-              <View style={[styles.avatar, styles.moreAvatar]}>
-                <Text style={styles.moreAvatarText}>+{members.length - 5}</Text>
-              </View>
-            ) : null}
-            {isOwner ? (
-              <TouchableOpacity
-                onPress={openAddPartnerModal}
-                activeOpacity={0.9}
-                style={styles.addAvatar}
-              >
-                <UserPlus size={16} color="#FFFFFF" />
-              </TouchableOpacity>
-            ) : null}
-          </View>
-
-          {/* owner actions above the roommates avatars */}
-          {null}
         </View>
 
+        {/* Title and location directly under image */}
+        <View style={styles.topHeader}>
+          <Text style={styles.heroTitle} numberOfLines={2}>
+            {apartment.title}
+          </Text>
+          <View style={styles.heroLocation}>
+            <MapPin size={16} color="#8B5CF6" />
+            <Text style={styles.heroLocationText} numberOfLines={1} allowFontScaling={false}>
+              {apartment.neighborhood ? `${apartment.neighborhood}, ` : ''}
+              {apartment.city}
+            </Text>
+          </View>
+        </View>
+
+
+
         <View style={styles.content}>
-          <View style={styles.detailsRow}>
-            <View style={styles.detailBoxDark}>
-              <Bed size={20} color="#4C1D95" />
-              <Text style={styles.detailValueDark}>{apartment.bedrooms}</Text>
-              <Text style={styles.detailLabelDark}>חדרי שינה</Text>
+          {/* light stats row */}
+          <View style={styles.statsRowLight}>
+            <View style={styles.statLight}>
+              <View style={styles.statIconCircle}>
+                <Bed size={22} color="#8B5CF6" />
+              </View>
+              <View style={styles.statLabelRow}>
+                <Text style={styles.statNumber}>{apartment.bedrooms}</Text>
+                <Text style={styles.statLabel}>חדרים</Text>
+              </View>
             </View>
-            <View style={styles.detailBoxDark}>
-              <Bath size={20} color="#4C1D95" />
-              <Text style={styles.detailValueDark}>{apartment.bathrooms}</Text>
-              <Text style={styles.detailLabelDark}>חדרי רחצה</Text>
+            <View style={styles.statLight}>
+              <View style={styles.statIconCircle}>
+                <Users size={22} color="#8B5CF6" />
+              </View>
+              <View style={styles.statLabelRow}>
+                <Text style={styles.statNumber}>{totalRoommateCapacity ?? 0}</Text>
+                <Text style={styles.statLabel}>שותפים</Text>
+              </View>
             </View>
-            <TouchableOpacity style={styles.detailBoxDark} onPress={() => setIsMembersOpen(true)} activeOpacity={0.9}>
-              <Users size={20} color="#4C1D95" />
-              <Text style={styles.detailValueDark}>{roommatesCount}</Text>
-              <Text style={styles.detailLabelDark}>שותפים</Text>
+            <View style={styles.statLight}>
+              <View style={styles.statIconCircle}>
+                <Bath size={22} color="#8B5CF6" />
+              </View>
+              <View style={styles.statLabelRow}>
+                <Text style={styles.statNumber}>{apartment.bathrooms}</Text>
+                <Text style={styles.statLabel}>מקלחות</Text>
+              </View>
+            </View>
+          </View>
+
+          {/* host card */}
+          <View style={styles.hostCard}>
+            {/* Right: avatar */}
+            <View style={styles.hostAvatarWrap}>
+              <Image
+                source={{
+                  uri:
+                    (owner as any)?.avatar_url ||
+                    'https://cdn-icons-png.flaticon.com/512/847/847969.png',
+                }}
+                style={styles.hostAvatar}
+              />
+            </View>
+            {/* Middle: labels */}
+            <View style={{ flex: 1, alignItems: 'flex-end' }}>
+              <Text style={styles.hostTitle}>בעל הדירה</Text>
+              <Text style={styles.hostSub} numberOfLines={1}>{owner?.full_name || 'בעל הדירה'}</Text>
+            </View>
+            {/* Left: message button */}
+            <TouchableOpacity
+              onPress={() => Alert.alert('הודעה', 'פתיחת הודעה בקרוב')}
+              activeOpacity={0.9}
+              style={styles.messageBtn}
+            >
+              <MessageCircle size={18} color="#0B1220" />
             </TouchableOpacity>
           </View>
 
+          {/* price card moved to floating overlay at bottom */}
+
           {apartment.description ? (
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>תיאור</Text>
-              <Text style={styles.descriptionDark}>{apartment.description}</Text>
+              <Text style={styles.sectionTitle}>תיאור הנכס</Text>
+              <Text style={styles.descriptionLight}>{apartment.description}</Text>
             </View>
           ) : null}
 
-          {owner ? (
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>בעל הדירה</Text>
-              <View style={styles.ownerCardDark}>
-                <Text style={styles.ownerNameDark}>{owner.full_name}</Text>
-                <Text style={styles.ownerEmailDark}>{owner.email}</Text>
-              </View>
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>מה יש בדירה?</Text>
+            <View style={styles.featuresGrid}>
+              {[
+                { label: 'אינטרנט אלחוטי', Icon: Wifi },
+                { label: 'מיזוג אוויר', Icon: Snowflake },
+                { label: 'מכונת כביסה', Icon: WashingMachine },
+                { label: 'טלוויזיה', Icon: Tv },
+                { label: 'מטבח מאובזר', Icon: Utensils },
+                { label: 'מרפסת', Icon: Home },
+              ].map(({ label, Icon }, idx) => (
+                <View key={`feat-${idx}`} style={styles.featureLine}>
+                  <Icon size={18} color="#6B7280" style={{ marginLeft: 6 }} />
+                  <Text style={styles.featureText}>{label}</Text>
+                </View>
+              ))}
             </View>
-          ) : null}
+            <TouchableOpacity activeOpacity={0.9} style={styles.showAllBtn}>
+              <Text style={styles.showAllText}>הצג את כל 24 השירותים</Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>המיקום</Text>
+            <View style={styles.mapCard}>
+              <View style={styles.mapDot} />
+            </View>
+            <Text style={styles.mapTitle}>
+              {apartment.neighborhood ? `${apartment.neighborhood}, ${apartment.city}` : apartment.city}
+            </Text>
+            <Text style={styles.mapCaption}>
+              שכונה צעירה ותוססת, מלאה בבתי קפה, ברים וגלריות אמנות.
+            </Text>
+          </View>
+
+
+          {/* Household section */}
+          {(() => {
+            const rawPeople = [
+              owner
+                ? {
+                    id: (owner as any).id,
+                    name: (owner as any).full_name || 'בעל הדירה',
+                    avatar: (owner as any).avatar_url,
+                    role: 'בעל דירה' as const,
+                    age: (owner as any).age as number | undefined,
+                  }
+                : null,
+              ...members.map((m) => ({
+                id: m.id,
+                name: (m as any).full_name || 'שותף',
+                avatar: (m as any).avatar_url,
+                role: 'שותף' as const,
+                age: (m as any).age as number | undefined,
+              })),
+            ].filter(Boolean) as Array<{
+              id: string;
+              name: string;
+              avatar?: string;
+              role: 'שותף' | 'בעל דירה';
+              age?: number;
+            }>;
+
+            // Deduplicate by id (owner first if duplicated)
+            const seenIds = new Set<string>();
+            const people = rawPeople.filter((p) => {
+              if (seenIds.has(p.id)) return false;
+              seenIds.add(p.id);
+              return true;
+            });
+
+            if (!people.length) return null;
+            return (
+              <>
+                <View style={styles.section}>
+                  <Text style={styles.sectionTitle}>מי בבית?</Text>
+                  <View style={styles.peopleGrid}>
+                    {people.map((p, idx) => {
+                      const meta = typeof p.age === 'number' ? `${p.role} • ${p.age}` : p.role;
+                      return (
+                        <View key={`person-${p.id}-${idx}`} style={styles.personCard}>
+                          <View style={styles.personAvatarWrap}>
+                            <Image
+                              source={{ uri: p.avatar || 'https://cdn-icons-png.flaticon.com/512/847/847969.png' }}
+                              style={styles.personAvatar}
+                            />
+                          </View>
+                          <Text style={styles.personName} numberOfLines={1}>
+                            {p.name}
+                          </Text>
+                          <Text style={styles.personMeta}>{meta}</Text>
+                        </View>
+                      );
+                    })}
+                  </View>
+                </View>
+              </>
+            );
+          })()}
+
         </View>
       </ScrollView>
+
+      {/* Floating price card near bottom (not flush) */}
+      <View
+        pointerEvents="box-none"
+        style={[
+          styles.priceFloatingWrap,
+          { bottom: (insets.bottom || 0) + 16 },
+        ]}
+      >
+        <View style={styles.priceCard}>
+          <View style={styles.priceRight}>
+            <Text style={styles.priceValue}>
+              <Text style={styles.currencySign}>₪</Text>
+              {apartment.price.toLocaleString?.() ?? String(apartment.price)}
+              <Text style={styles.pricePerInline}> / חודש</Text>
+            </Text>
+            <View style={styles.greenChip}>
+              <Text style={styles.greenChipText}>זמין מיידית</Text>
+            </View>
+          </View>
+          <TouchableOpacity activeOpacity={0.9} style={styles.availabilityBtn}>
+            <Text style={styles.availabilityBtnText}>בדוק זמינות</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
 
       {/* Join as roommate button (for non-owner, non-member viewers) */}
       {!isOwner && !isMember && isAssignedAnywhere === false ? (
@@ -1065,6 +1216,35 @@ export default function ApartmentDetailsScreen() {
               )}
             </ScrollView>
           </View>
+        </View>
+      </Modal>
+
+      {/* Fullscreen image viewer with pinch-to-zoom */}
+      <Modal visible={isViewerOpen} animationType="fade" transparent={false} onRequestClose={() => setViewerOpen(false)}>
+        <View style={styles.viewerRoot} pointerEvents="box-none">
+          <ScrollView
+            horizontal
+            pagingEnabled
+            showsHorizontalScrollIndicator={false}
+            contentOffset={{ x: viewerIndex * screenWidth, y: 0 }}
+            onMomentumScrollEnd={(e) => {
+              const idx = Math.round(e.nativeEvent.contentOffset.x / screenWidth);
+              setViewerIndex(idx);
+            }}
+          >
+            {galleryImages.map((_, idx) => {
+              const uri = getImageForIndex(idx);
+              return <ZoomableImage key={`viewer-${uri}-${idx}`} uri={uri} />;
+            })}
+          </ScrollView>
+          <TouchableOpacity
+            onPress={() => setViewerOpen(false)}
+            style={[styles.viewerClose, { top: (insets.top || 0) + 12 }]}
+            activeOpacity={0.9}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
+            <Text style={styles.viewerCloseText}>✕</Text>
+          </TouchableOpacity>
         </View>
       </Modal>
 
@@ -1244,10 +1424,45 @@ export default function ApartmentDetailsScreen() {
   );
 }
 
+function ZoomableImage({ uri }: { uri: string }) {
+  const scale = useRef(new (require('react-native').Animated.Value)(1)).current;
+  const baseScale = useRef(1);
+  const AnimatedImage = require('react-native').Animated.createAnimatedComponent(Image);
+
+  const onPinchEvent = require('react-native').Animated.event(
+    [{ nativeEvent: { scale } }],
+    { useNativeDriver: true }
+  );
+
+  const onHandlerStateChange = (e: any) => {
+    if (e.nativeEvent.state === State.END || e.nativeEvent.oldState === State.ACTIVE) {
+      // clamp and keep scale within 1..4
+      let next = baseScale.current * e.nativeEvent.scale;
+      if (next < 1) next = 1;
+      if (next > 4) next = 4;
+      baseScale.current = next;
+      scale.setValue(next);
+    } else if (e.nativeEvent.state === State.BEGAN) {
+      // no-op
+    }
+  };
+
+  return (
+    <View style={{ width: Dimensions.get('window').width, height: Dimensions.get('window').height, alignItems: 'center', justifyContent: 'center' }}>
+      <PinchGestureHandler onGestureEvent={onPinchEvent} onHandlerStateChange={onHandlerStateChange}>
+        <AnimatedImage
+          source={{ uri }}
+          style={{ width: '100%', height: '100%', transform: [{ scale }], resizeMode: 'contain' }}
+        />
+      </PinchGestureHandler>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0F0F14',
+    backgroundColor: '#FAFAFA',
   },
   addAvatar: {
     width: 44,
@@ -1268,43 +1483,52 @@ const styles = StyleSheet.create({
   },
   galleryContainer: {
     position: 'relative',
+    marginBottom: 12,
   },
   slide: {
     width: '100%',
   },
   image: {
     width: '100%',
-    height: 280,
-    backgroundColor: '#22232E',
+    height: 480,
+    backgroundColor: '#f3f4f6',
+    borderBottomLeftRadius: 32,
+    borderBottomRightRadius: 32,
   },
-  imageGradient: {
+  topControlsRow: {
     position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    top: 0,
-  },
-  backButton: {
-    position: 'absolute',
-    top: 44,
-    left: 16,
-    backgroundColor: 'rgba(0,0,0,0.45)',
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    justifyContent: 'center',
+    top: 68,
+    left: 12,
+    right: 12,
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
   },
-  avatarStack: {
-    position: 'absolute',
-    top: 44,
-    right: 16,
+  leftControls: {
     flexDirection: 'row-reverse',
+    gap: 8,
+  },
+  circleBtnLight: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.9)',
+    borderWidth: 1,
+    borderColor: 'rgba(0,0,0,0.06)',
+    ...(Platform.OS === 'ios'
+      ? {
+          shadowColor: '#000',
+          shadowOpacity: 0.22,
+          shadowRadius: 10,
+          shadowOffset: { width: 0, height: 6 },
+        }
+      : { elevation: 8 }),
   },
   topHeader: {
-    paddingHorizontal: 16,
-    paddingTop: 16,
+    paddingHorizontal: 20,
+    paddingTop: 4,
     paddingBottom: 8,
     writingDirection: 'rtl',
   },
@@ -1313,37 +1537,19 @@ const styles = StyleSheet.create({
     height: 44,
     borderRadius: 22,
     borderWidth: 2,
-    borderColor: 'rgba(15,15,20,0.9)',
-    backgroundColor: '#1F1F29',
+    borderColor: 'rgba(15,15,20,0.06)',
+    backgroundColor: '#FFFFFF',
   },
   moreAvatar: {
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    borderColor: 'rgba(15,15,20,0.9)',
+    backgroundColor: 'rgba(0,0,0,0.06)',
+    borderColor: 'rgba(15,15,20,0.06)',
     alignItems: 'center',
     justifyContent: 'center',
   },
   moreAvatarText: {
-    color: '#FFFFFF',
+    color: '#111827',
     fontSize: 12,
     fontWeight: '800',
-  },
-  navBtn: {
-    position: 'absolute',
-    top: '45%',
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: 'rgba(0,0,0,0.45)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.15)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  navBtnLeft: {
-    left: 12,
-  },
-  navBtnRight: {
-    right: 12,
   },
   heroOverlay: {
     position: 'absolute',
@@ -1353,14 +1559,21 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingBottom: 16,
   },
-  dotsRow: {
+  dotsWrap: {
     position: 'absolute',
-    bottom: 12,
+    bottom: 16,
     left: 0,
     right: 0,
-    flexDirection: 'row',
-    gap: 6,
+    alignItems: 'center',
     justifyContent: 'center',
+  },
+  dotsPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 999,
+    backgroundColor: 'rgba(0,0,0,0.22)',
   },
   infoCard: {
     backgroundColor: '#17171F',
@@ -1370,22 +1583,24 @@ const styles = StyleSheet.create({
     padding: 16,
     marginBottom: 14,
   },
-  dot: {
+  dotLight: {
     width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: 'rgba(255,255,255,0.35)',
+    backgroundColor: 'rgba(255,255,255,0.6)',
+    marginHorizontal: 3,
   },
-  dotActive: {
+  dotActiveLight: {
     width: 8,
     height: 8,
     borderRadius: 4,
     backgroundColor: '#FFFFFF',
+    marginHorizontal: 3,
   },
   topActionsRow: {
     paddingHorizontal: 16,
     marginTop: 0,
-    marginBottom: 8,
+    marginBottom: 0,
     flexDirection: 'row',
     justifyContent: 'flex-end',
     gap: 10,
@@ -1422,46 +1637,11 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '900',
   },
-  pricePill: {
-    alignSelf: 'flex-start',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: 'rgba(34,197,94,0.18)',
-    borderWidth: 1,
-    borderColor: 'rgba(34,197,94,0.35)',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 14,
-    marginBottom: 8,
-  },
-  priceText: {
-    color: '#22C55E',
-    fontSize: 16,
-    fontWeight: '900',
-  },
-  currencyText: {
-    color: '#22C55E',
-    fontSize: 16,
-    fontWeight: '900',
-    marginRight: 4,
-  },
-  priceUnitDark: {
-    color: '#C9F7D7',
-    fontSize: 12,
-    marginLeft: 2,
-  },
-  priceOverlay: {
-    position: 'absolute',
-    left: 16,
-    bottom: 12,
-    zIndex: 6,
-  },
   heroTitle: {
-    color: '#FFFFFF',
-    fontSize: 22,
+    color: '#111827',
+    fontSize: 24,
     fontWeight: '800',
-    lineHeight: 28,
+    lineHeight: 32,
     textAlign: 'right',
     writingDirection: 'rtl',
   },
@@ -1472,8 +1652,10 @@ const styles = StyleSheet.create({
     marginTop: 6,
   },
   heroLocationText: {
-    color: '#C9CDD6',
+    color: '#6B7280',
     fontSize: 14,
+    lineHeight: 16,
+    fontWeight: '500',
     textAlign: 'right',
   },
   subMeta: {
@@ -1483,84 +1665,270 @@ const styles = StyleSheet.create({
     textAlign: 'right',
   },
   content: {
-    padding: 16,
+    padding: 20,
   },
-  detailsRow: {
-    flexDirection: 'row',
-    gap: 12,
-    marginBottom: 16,
+
+  statsRowLight: { flexDirection: 'row-reverse', gap: 12, marginBottom: 12 },
+  statLight: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    padding: 12,
+    aspectRatio: 1,
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...(Platform.OS === 'ios'
+      ? {
+          shadowColor: '#000',
+          shadowOpacity: 0.08,
+          shadowRadius: 8,
+          shadowOffset: { width: 0, height: 4 },
+        }
+      : { elevation: 4 }),
   },
-  capacityOverlay: {
-    position: 'absolute',
-    right: 16,
-    bottom: 12,
-    zIndex: 6,
-    backgroundColor: 'rgba(20,20,32,0.92)',
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: 'rgba(124,92,255,0.35)',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+  statIconCircle: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F5F3FF',
+    marginBottom: 8,
+  },
+  statLabelRow: {
     flexDirection: 'row-reverse',
     alignItems: 'center',
-    gap: 8,
+    gap: 6,
   },
-  capacityOverlayValue: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '800',
-  },
-  detailBoxDark: {
-    flex: 1,
-    backgroundColor: '#17171F',
-    padding: 14,
-    borderRadius: 12,
+  statLabel: { color: '#111827', fontWeight: '800', fontSize: 14 },
+  statNumber: { color: '#111827', fontWeight: '900', fontSize: 16 },
+  hostCard: {
+    flexDirection: 'row-reverse',
     alignItems: 'center',
+    gap: 10,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    padding: 12,
+    marginBottom: 12,
+    ...(Platform.OS === 'ios'
+      ? {
+          shadowColor: '#000',
+          shadowOpacity: 0.08,
+          shadowRadius: 8,
+          shadowOffset: { width: 0, height: 4 },
+        }
+      : { elevation: 4 }),
+  },
+  hostIconCircle: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F3F4F6',
+  },
+  hostAvatarWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    overflow: 'hidden',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 2,
+    borderColor: '#E9D5FF',
+  },
+  hostAvatar: { width: '100%', height: '100%' },
+  hostTitle: { color: '#111827', fontSize: 13, fontWeight: '800' },
+  hostSub: { color: '#6B7280', fontSize: 12 },
+  proBadge: {
+    backgroundColor: '#F5F3FF',
+    borderColor: '#E9D5FF',
     borderWidth: 1,
-    borderColor: '#2A2A37',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 999,
   },
-  detailLabelDark: {
-    fontSize: 12,
-    color: '#9DA4AE',
-    marginTop: 6,
+  proBadgeText: { color: '#8B5CF6', fontSize: 11, fontWeight: '900' },
+  messageBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F3F4F6',
+    ...(Platform.OS === 'ios'
+      ? {
+          shadowColor: '#000',
+          shadowOpacity: 0.08,
+          shadowRadius: 8,
+          shadowOffset: { width: 0, height: 4 },
+        }
+      : { elevation: 4 }),
   },
-  detailValueDark: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: '#FFFFFF',
-    marginTop: 2,
+  priceCard: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    marginBottom: 12,
+    ...(Platform.OS === 'ios'
+      ? {
+          shadowColor: '#000',
+          shadowOpacity: 0.08,
+          shadowRadius: 8,
+          shadowOffset: { width: 0, height: 4 },
+        }
+      : { elevation: 4 }),
   },
+  priceRight: { alignItems: 'flex-end', gap: 6 },
+  priceValue: { color: '#0B1220', fontSize: 20, fontWeight: '900' },
+  currencySign: { color: '#0B1220', fontSize: 18, fontWeight: '900' },
+  pricePerUnit: { color: '#6B7280', fontSize: 13, marginTop: 2, marginBottom: 6 },
+  pricePerInline: { color: '#6B7280', fontSize: 13, fontWeight: '600', marginLeft: 6 },
+  greenChip: { backgroundColor: '#DCFCE7', borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4 },
+  greenChipText: { color: '#16A34A', fontSize: 12, fontWeight: '800' },
+  availabilityBtn: {
+    backgroundColor: '#8B5CF6',
+    height: 44,
+    paddingHorizontal: 18,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...(Platform.OS === 'ios'
+      ? {
+          shadowColor: '#8B5CF6',
+          shadowOpacity: 0.25,
+          shadowRadius: 14,
+          shadowOffset: { width: 0, height: 8 },
+        }
+      : { elevation: 6 }),
+  },
+  availabilityBtnText: { color: '#FFFFFF', fontSize: 15, fontWeight: '900' },
   section: {
-    marginTop: 8,
-    marginBottom: 20,
+    marginTop: 12,
+    marginBottom: 16,
   },
   sectionTitle: {
-    fontSize: 16,
+    fontSize: 20,
     fontWeight: '800',
-    color: '#FFFFFF',
+    color: '#111827',
+    marginBottom: 10,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
+  descriptionLight: { fontSize: 15, color: '#374151', lineHeight: 22, textAlign: 'right', writingDirection: 'rtl' },
+
+  featuresGrid: {
+    flexDirection: 'row-reverse',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    marginTop: 6,
     marginBottom: 10,
   },
-  descriptionDark: {
-    fontSize: 15,
-    color: '#C7CBD1',
-    lineHeight: 22,
+  featureLine: {
+    width: '48%',
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    marginBottom: 16,
   },
-  ownerCardDark: {
-    backgroundColor: '#17171F',
-    padding: 14,
-    borderRadius: 12,
+  featureText: { color: '#6B7280', fontSize: 14, fontWeight: '600' },
+  showAllBtn: {
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
+    marginBottom: 12,
+    ...(Platform.OS === 'ios'
+      ? {
+          shadowColor: '#000',
+          shadowOpacity: 0.08,
+          shadowRadius: 8,
+          shadowOffset: { width: 0, height: 4 },
+        }
+      : { elevation: 4 }),
+  },
+  showAllText: { color: '#111827', fontSize: 15, fontWeight: '900' },
+  mapCard: {
+    height: 140,
+    borderRadius: 16,
+    backgroundColor: '#F3F4F6',
     borderWidth: 1,
-    borderColor: '#2A2A37',
+    borderColor: '#E5E7EB',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  ownerNameDark: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#FFFFFF',
-    marginBottom: 4,
+  mapDot: {
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: '#E9D5FF',
+    borderWidth: 3,
+    borderColor: '#8B5CF6',
   },
-  ownerEmailDark: {
-    fontSize: 13,
-    color: '#9DA4AE',
+  mapTitle: {
+    color: '#111827',
+    fontSize: 20,
+    fontWeight: '900',
+    marginTop: 8,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
+  mapCaption: {
+    color: '#6B7280',
+    fontSize: 14,
+    lineHeight: 20,
+    marginTop: 4,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
+  peopleGrid: {
+    flexDirection: 'row-reverse',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    marginTop: 8,
+  },
+  personCard: {
+    width: '48%',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    paddingVertical: 12,
+    paddingHorizontal: 10,
+    alignItems: 'center',
+    marginBottom: 12,
+    ...(Platform.OS === 'ios'
+      ? {
+          shadowColor: '#000',
+          shadowOpacity: 0.08,
+          shadowRadius: 8,
+          shadowOffset: { width: 0, height: 4 },
+        }
+      : { elevation: 4 }),
+  },
+  personAvatarWrap: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    overflow: 'hidden',
+    backgroundColor: '#F3F4F6',
+    marginBottom: 8,
+  },
+  personAvatar: { width: '100%', height: '100%' },
+  personName: {
+    color: '#111827',
+    fontSize: 14,
+    fontWeight: '800',
+    textAlign: 'center',
+    marginBottom: 2,
+  },
+  personMeta: {
+    color: '#6B7280',
+    fontSize: 12,
+    textAlign: 'center',
   },
   joinBtn: {
     flex: 1,
@@ -1592,6 +1960,12 @@ const styles = StyleSheet.create({
     // bottom offset is applied inline to respect safe area
     zIndex: 100,
     elevation: 8,
+  },
+  priceFloatingWrap: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    zIndex: 60,
   },
   // deprecated old bottom action buttons kept for potential reuse
   editButton: {
@@ -1882,6 +2256,27 @@ const styles = StyleSheet.create({
   confirmApproveText: {
     color: '#F87171',
     fontSize: 15,
+    fontWeight: '900',
+  },
+  viewerRoot: {
+    flex: 1,
+    backgroundColor: '#000',
+  },
+  viewerClose: {
+    position: 'absolute',
+    right: 16,
+    zIndex: 10,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...(Platform.OS === 'android' ? { elevation: 20 } : {}),
+  },
+  viewerCloseText: {
+    color: '#FFF',
+    fontSize: 18,
     fontWeight: '900',
   },
 });

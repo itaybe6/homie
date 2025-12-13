@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -7,20 +7,26 @@ import {
   TextInput,
   ActivityIndicator,
   RefreshControl,
-  SafeAreaView,
   TouchableOpacity,
   Modal,
   ScrollView,
   Alert,
+  Platform,
+  Animated,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+// Animated wrapper for VirtualizedList/FlatList to support native onScroll
+const AnimatedFlatList = Animated.createAnimatedComponent(FlatList as any);
 import { useRouter } from 'expo-router';
-import { Search, SlidersHorizontal, X, Plus } from 'lucide-react-native';
+import { Search, SlidersHorizontal, X, Plus, Map } from 'lucide-react-native';
 import { getNeighborhoodsForCityName, searchCitiesWithNeighborhoods } from '@/lib/neighborhoods';
 import { supabase } from '@/lib/supabase';
 import { useApartmentStore } from '@/stores/apartmentStore';
 import { useAuthStore } from '@/stores/authStore';
 import { Apartment } from '@/types/database';
 import ApartmentCard from '@/components/ApartmentCard';
+import FloatingTabBar from '@/components/FloatingTabBar';
+import FilterChipsBar, { defaultFilterChips, selectedFiltersFromIds } from '@/components/FilterChipsBar';
 
 
 export default function HomeScreen() {
@@ -47,7 +53,87 @@ export default function HomeScreen() {
   const [isNeighborhoodDropdownOpen, setIsNeighborhoodDropdownOpen] = useState(false);
   const [neighborhoodSearchQuery, setNeighborhoodSearchQuery] = useState('');
   const [isLoadingNeighborhoods, setIsLoadingNeighborhoods] = useState(false);
+  const [chipSelected, setChipSelected] = useState<string[]>([]);
   // Removed cityPlaceId/sessionToken (no Google city autocomplete)
+
+  // Animated collapse/expand for search row + chips
+  const scrollY = useRef(new Animated.Value(0)).current;
+  const clamped = Animated.diffClamp(scrollY, 0, 120);
+  const headerScale = clamped.interpolate({
+    inputRange: [0, 120],
+    outputRange: [1, 0.9],
+    extrapolate: 'clamp',
+  });
+  const headerTranslateY = clamped.interpolate({
+    inputRange: [0, 120],
+    outputRange: [0, -12],
+    extrapolate: 'clamp',
+  });
+  const chipsOpacity = clamped.interpolate({
+    inputRange: [0, 120],
+    outputRange: [1, 0.65],
+    extrapolate: 'clamp',
+  });
+  const chipsTranslateY = clamped.interpolate({
+    inputRange: [0, 120],
+    outputRange: [0, -8],
+    extrapolate: 'clamp',
+  });
+
+  // Header for the list – contains search row and filter chips so that
+  // the entire grey area scrolls together.
+  const renderListHeader = () => (
+    <Animated.View style={{ transform: [{ translateY: headerTranslateY }] }}>
+      <Animated.View style={{ transform: [{ scale: headerScale }] }}>
+        <View style={styles.searchRow}>
+        {/* Filter button on the left */}
+        <View style={styles.actionsRowBody}>
+          {/* Map button (same style as filter); rendered first so with row-reverse the filter stays near the search */}
+          <TouchableOpacity
+            activeOpacity={0.9}
+            style={styles.actionBtnBody}
+            onPress={() => {
+              Alert.alert('מפה', 'מסך המפה יתווסף בהמשך.');
+            }}
+          >
+            <Map size={22} color="#4C1D95" />
+          </TouchableOpacity>
+          <TouchableOpacity
+            activeOpacity={0.9}
+            style={styles.actionBtnBody}
+            onPress={() => setIsFilterOpen(true)}
+          >
+            <SlidersHorizontal size={22} color="#4C1D95" />
+          </TouchableOpacity>
+        </View>
+        {/* Search input */}
+        <View style={[styles.searchContainer, { flex: 1 }]}>
+          <Search size={20} color="#4C1D95" style={styles.searchIcon} />
+          <TextInput
+            style={styles.topSearchInput}
+            placeholder="חיפוש לפי עיר, שכונה או כתובת..."
+            placeholderTextColor="#9DA4AE"
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+          />
+        </View>
+        </View>
+      </Animated.View>
+      <Animated.View style={{ opacity: chipsOpacity, transform: [{ translateY: chipsTranslateY }] }}>
+        <FilterChipsBar
+          filters={defaultFilterChips}
+          selectedIds={chipSelected}
+          onChange={setChipSelected}
+          onOpenDropdown={(chip) => {
+            if (chip.id === 'price' || chip.id === 'rooms') {
+              setIsFilterOpen(true);
+            }
+          }}
+          style={{ marginTop: 8, marginBottom: 12 }}
+        />
+      </Animated.View>
+    </Animated.View>
+  );
 
   useEffect(() => {
     fetchApartments();
@@ -224,62 +310,51 @@ export default function HomeScreen() {
   }
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={[styles.topBar, { paddingTop: 52 }]}>
-        <View style={styles.actionsRow}>
-          <TouchableOpacity activeOpacity={0.8} style={styles.topActionBtn} onPress={() => setIsFilterOpen(true)}>
-            <SlidersHorizontal size={20} color="#FFFFFF" />
-          </TouchableOpacity>
-          <TouchableOpacity
-            activeOpacity={0.8}
-            style={styles.topActionBtn}
-            onPress={handleAddApartmentPress}
-          >
-            <Plus size={20} color="#FFFFFF" />
-          </TouchableOpacity>
-        </View>
-        <View style={[styles.searchContainer, { flex: 1, marginLeft: 8 }]}>
-          <Search size={20} color="#9DA4AE" style={styles.searchIcon} />
-          <TextInput
-            style={styles.topSearchInput}
-            placeholder="חיפוש לפי עיר, שכונה או כתובת..."
-            placeholderTextColor="#9DA4AE"
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-          />
-        </View>
+    <SafeAreaView edges={['top']} style={styles.safeTop}>
+      <View style={[styles.topBar, { paddingTop: 52, backgroundColor: '#FFFFFF' }]} />
+
+      {/* Page body: light grey background */}
+      <View style={styles.pageBody}>
+        {/* Removed hero banner */}
+
+        <AnimatedFlatList
+          data={filteredApartments}
+          renderItem={({ item }) => (
+            <ApartmentCard
+              apartment={item}
+              onPress={() => handleApartmentPress(item)}
+            />
+          )}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={styles.listContent}
+          ListHeaderComponent={renderListHeader}
+          onScroll={Animated.event(
+            [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+            { useNativeDriver: true }
+          )}
+          scrollEventThrottle={16}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              tintColor="#4C1D95"
+            />
+          }
+          ListEmptyComponent={
+            <View style={styles.emptyContainer}>
+              <Text style={styles.emptyText}>לא נמצאו דירות</Text>
+              <Text style={styles.emptySubtext}>
+                {searchQuery
+                  ? 'נסה לשנות את החיפוש'
+                  : 'התחל להוסיף דירות חדשות'}
+              </Text>
+            </View>
+          }
+        />
       </View>
 
-      {/* Removed hero banner */}
-
-      <FlatList
-        data={filteredApartments}
-        renderItem={({ item }) => (
-          <ApartmentCard
-            apartment={item}
-            onPress={() => handleApartmentPress(item)}
-          />
-        )}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={styles.listContent}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            tintColor="#4C1D95"
-          />
-        }
-        ListEmptyComponent={
-          <View style={styles.emptyContainer}>
-            <Text style={styles.emptyText}>לא נמצאו דירות</Text>
-            <Text style={styles.emptySubtext}>
-              {searchQuery
-                ? 'נסה לשנות את החיפוש'
-                : 'התחל להוסיף דירות חדשות'}
-            </Text>
-          </View>
-        }
-      />
+      {/* Floating bottom pill menu for the Apartments screen */}
+      <FloatingTabBar active="home" />
 
       {/* Filter Modal */}
       <Modal visible={isFilterOpen} animationType="slide" transparent onRequestClose={() => setIsFilterOpen(false)}>
@@ -489,13 +564,36 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0F0F14',
+    backgroundColor: 'transparent',
+  },
+  safeTop: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
   },
   centerContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#0F0F14',
+    backgroundColor: 'transparent',
+  },
+  pageBody: {
+    flex: 1,
+    backgroundColor: '#F3F4F6',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    overflow: 'visible',
+    paddingTop: 0,
+  },
+  searchRow: {
+    paddingHorizontal: 12,
+    paddingTop: 6,
+    paddingBottom: 6,
+    flexDirection: 'row',
+    // Force LTR order to keep the filter button on the left on iOS RTL too
+    // (we render [filter][search] so visually it will be left-to-right stable)
+    ...(Platform.OS !== 'web' ? ({ direction: 'ltr' } as const) : {}),
+    alignItems: 'center',
+    gap: 12,
   },
   topBar: {
     flexDirection: 'row',
@@ -528,7 +626,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: '#EFEAFE',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -537,32 +635,47 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
   },
-  searchContainer: {
-    flexDirection: 'row',
+  actionsRowBody: {
+    flexDirection: 'row-reverse',
     alignItems: 'center',
-    backgroundColor: '#17171F',
+    gap: 10,
+  },
+  searchContainer: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
     borderRadius: 22,
-    paddingHorizontal: 14,
+    paddingHorizontal: 10,
     height: 44,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  actionBtnBody: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#EFEAFE',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   searchIcon: {
-    marginRight: 8,
+    marginLeft: 8,
   },
   topSearchInput: {
     flex: 1,
     paddingVertical: 10,
-    fontSize: 15,
-    color: '#FFFFFF',
+    fontSize: 13,
+    color: '#111827',
     textAlign: 'right',
   },
   searchInput: {
     flex: 1,
     paddingVertical: 10,
     fontSize: 15,
-    color: '#FFFFFF',
+    color: '#111827',
   },
   heroCard: {
-    backgroundColor: '#2B2141',
+    backgroundColor: '#FFFFFF',
     marginHorizontal: 16,
     borderRadius: 16,
     paddingHorizontal: 18,
@@ -570,13 +683,14 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   heroText: {
-    color: '#FFFFFF',
+    color: '#4C1D95',
     fontSize: 20,
     fontWeight: '800',
     lineHeight: 26,
   },
   listContent: {
     padding: 16,
+    paddingBottom: 140, // Leave room for floating tab bar
   },
   modalOverlay: {
     flex: 1,
@@ -587,7 +701,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   sheet: {
-    backgroundColor: '#141420',
+    backgroundColor: '#FFFFFF',
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     overflow: 'hidden',
@@ -598,10 +712,10 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingVertical: 14,
-    backgroundColor: '#1B1B28',
+    backgroundColor: '#FFFFFF',
   },
   sheetTitle: {
-    color: '#FFFFFF',
+    color: '#111827',
     fontSize: 16,
     fontWeight: '700',
   },
@@ -611,7 +725,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: '#EFEAFE',
   },
   sheetContent: {
     paddingHorizontal: 16,
@@ -623,19 +737,19 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   fieldLabel: {
-    color: '#C9CDD6',
+    color: '#4C1D95',
     fontSize: 13,
     fontWeight: '600',
     textAlign: 'right',
   },
   fieldInput: {
-    backgroundColor: '#17171F',
+    backgroundColor: '#FFFFFF',
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#2A2A37',
+    borderColor: '#E5E7EB',
     paddingHorizontal: 14,
     paddingVertical: 12,
-    color: '#FFFFFF',
+    color: '#111827',
     textAlign: 'right',
   },
   rowBetween: {
@@ -654,21 +768,21 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     paddingHorizontal: 12,
     borderRadius: 10,
-    backgroundColor: '#17171F',
+    backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: '#2A2A37',
+    borderColor: '#E5E7EB',
   },
   chipSelected: {
-    backgroundColor: '#2B2141',
-    borderColor: '#4C1D95',
+    backgroundColor: '#EFEAFE',
+    borderColor: '#A78BFA',
   },
   chipText: {
-    color: '#C9CDD6',
+    color: '#4B5563',
     fontSize: 14,
     fontWeight: '600',
   },
   chipTextSelected: {
-    color: '#FFFFFF',
+    color: '#4C1D95',
   },
   sheetFooter: {
     flexDirection: 'row',
@@ -682,13 +796,13 @@ const styles = StyleSheet.create({
     height: 48,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#3A3A4A',
+    borderColor: '#E5E7EB',
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'transparent',
   },
   clearText: {
-    color: '#C9CDD6',
+    color: '#6B7280',
     fontSize: 15,
     fontWeight: '700',
   },
@@ -713,29 +827,29 @@ const styles = StyleSheet.create({
   emptyText: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#9DA4AE',
+    color: '#6B7280',
     marginBottom: 8,
   },
   emptySubtext: {
     fontSize: 14,
-    color: '#6B7280',
+    color: '#9CA3AF',
   },
   suggestionsBox: {
     marginTop: 6,
-    backgroundColor: '#17171F',
+    backgroundColor: '#FFFFFF',
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#2A2A37',
+    borderColor: '#E5E7EB',
     overflow: 'hidden',
   },
   suggestionItem: {
     paddingVertical: 10,
     paddingHorizontal: 12,
     borderBottomWidth: 1,
-    borderBottomColor: '#2A2A37',
+    borderBottomColor: '#F1F5F9',
   },
   suggestionText: {
-    color: '#E5E7EB',
+    color: '#111827',
     fontSize: 14,
     textAlign: 'right',
   },
@@ -746,26 +860,26 @@ const styles = StyleSheet.create({
   },
   selectButtonText: {
     flex: 1,
-    color: '#FFFFFF',
+    color: '#111827',
     fontSize: 14,
   },
   selectButtonPlaceholder: {
-    color: '#9DA4AE',
+    color: '#9CA3AF',
   },
   selectButtonArrow: {
-    color: '#9DA4AE',
+    color: '#9CA3AF',
     fontSize: 12,
     marginLeft: 8,
   },
   searchInput: {
-    backgroundColor: '#1B1B28',
+    backgroundColor: '#FFFFFF',
     paddingHorizontal: 12,
     paddingVertical: 10,
     borderRadius: 8,
     fontSize: 14,
     borderWidth: 1,
-    borderColor: '#2A2A37',
-    color: '#FFFFFF',
+    borderColor: '#E5E7EB',
+    color: '#111827',
     textAlign: 'right',
     marginBottom: 8,
     marginHorizontal: 8,

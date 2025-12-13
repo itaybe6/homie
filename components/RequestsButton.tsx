@@ -74,7 +74,7 @@ function RequestsButtonBase({ style, badgeCount }: Props) {
         onPress={() => router.push('/requests')}
         style={styles.btn}
       >
-        <Inbox size={18} color="#FFFFFF" />
+        <Inbox size={22} color="#1F2937" />
         {shownCount > 0 ? (
           <View style={styles.badge}>
             <Text style={styles.badgeText}>{shownLabel}</Text>
@@ -94,14 +94,20 @@ const styles = StyleSheet.create({
     top: 0,
   },
   btn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: 'rgba(255,255,255,0.04)',
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.16)',
+    borderColor: '#EEF2F7',
+    // soft halo shadow
+    shadowColor: '#000',
+    shadowOpacity: 0.06,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 2,
   },
   badge: {
     position: 'absolute',
@@ -114,8 +120,8 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(124,92,255,0.85)',
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(15,15,20,0.8)',
+    borderWidth: 0,
+    borderColor: 'transparent',
   },
   badgeText: {
     color: '#FFFFFF',

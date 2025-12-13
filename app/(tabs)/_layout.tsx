@@ -1,10 +1,10 @@
 import { Tabs, useRouter, usePathname } from 'expo-router';
 import { Home, User, Users } from 'lucide-react-native';
-import { BlurView } from 'expo-blur';
-import { Platform, StyleSheet, Alert } from 'react-native';
+import { Platform, StyleSheet, Alert, View, Text, Dimensions } from 'react-native';
 import { useEffect, useRef } from 'react';
 import { useAuthStore } from '@/stores/authStore';
 import { fetchUserSurvey } from '@/lib/survey';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function TabLayout() {
   const router = useRouter();
@@ -13,6 +13,7 @@ export default function TabLayout() {
   const hasPromptedRef = useRef(false);
   const prevUserIdRef = useRef<string | null>(null);
   const isCheckingSurveyRef = useRef(false);
+  const insets = useSafeAreaInsets();
 
   useEffect(() => {
     // Admins should not see the regular tabs – redirect them into admin
@@ -74,38 +75,36 @@ export default function TabLayout() {
     maybePromptSurvey();
   }, [user, pathname]);
 
+  const { width: screenWidth } = Dimensions.get('window');
+  // Numeric pill width + explicit left for perfect centering (no stretch)
+  const pillWidth = Math.min(
+    Math.max(Math.round(screenWidth * 0.88), 280),
+    Math.min(420, screenWidth - 32)
+  );
+  const pillLeft = Math.round((screenWidth - pillWidth) / 2);
+
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarShowLabel: true,
+        tabBarShowLabel: false,
         tabBarHideOnKeyboard: true,
         tabBarActiveTintColor: '#FFFFFF',
-        tabBarInactiveTintColor: 'rgba(255,255,255,0.7)',
-        tabBarStyle: {
-          position: 'absolute',
-          left: 16,
-          right: 16,
-          bottom: 20,
-          height: 72,
-          borderRadius: 24,
-          borderTopWidth: 0,
-          overflow: 'hidden',
-          backgroundColor: 'rgba(28,28,30,0.6)',
-          paddingBottom: 6,
-          paddingTop: 6,
-          ...(Platform.OS === 'ios'
-            ? {
-                shadowColor: '#000',
-                shadowOpacity: 0.15,
-                shadowRadius: 20,
-                shadowOffset: { width: 0, height: 10 },
-              }
-            : { elevation: 20 }),
-        },
-        tabBarBackground: () => (
-          <BlurView tint="dark" intensity={40} style={StyleSheet.absoluteFill} />
-        ),
+        tabBarInactiveTintColor: '#6B7280',
+        // sceneContainerStyle intentionally omitted to satisfy type constraints
+        tabBarStyle: { display: 'none' },
+        // Compact items; do not stretch
+        tabBarItemStyle: ((): any => {
+          const itemStyle = {
+            flex: 1,
+            alignItems: 'center',
+            justifyContent: 'center',
+          };
+          // eslint-disable-next-line no-console
+          console.log('tabBarItemStyle =>', itemStyle);
+          return itemStyle;
+        })(),
+        // No tabBarBackground — background handled inside tabBarStyle to avoid stretch
         tabBarLabelStyle: {
           fontSize: 12,
           fontWeight: '600',
@@ -116,21 +115,33 @@ export default function TabLayout() {
         name="profile"
         options={{
           title: 'פרופיל',
-          tabBarIcon: ({ size, color }) => <User size={size} color={color} />,
+          tabBarIcon: ({ focused, color }) => (
+            <TabPill focused={focused} label="פרופיל">
+              <User size={20} color={focused ? '#FFFFFF' : color} />
+            </TabPill>
+          ),
         }}
       />
       <Tabs.Screen
         name="home"
         options={{
           title: 'דירות',
-          tabBarIcon: ({ size, color }) => <Home size={size} color={color} />,
+          tabBarIcon: ({ focused, color }) => (
+            <TabPill focused={focused} label="דירות">
+              <Home size={20} color={focused ? '#FFFFFF' : color} />
+            </TabPill>
+          ),
         }}
       />
       <Tabs.Screen
         name="partners"
         options={{
           title: 'שותפים',
-          tabBarIcon: ({ size, color }) => <Users size={size} color={color} />,
+          tabBarIcon: ({ focused, color }) => (
+            <TabPill focused={focused} label="שותפים">
+              <Users size={20} color={focused ? '#FFFFFF' : color} />
+            </TabPill>
+          ),
         }}
       />
       <Tabs.Screen name="add-apartment" options={{ href: null }} />
@@ -144,3 +155,57 @@ export default function TabLayout() {
     </Tabs>
   );
 }
+
+function TabPill({ focused, label, children }: { focused: boolean; label: string; children: React.ReactNode }) {
+  return (
+    <View
+      style={[
+        stylesTab.pill,
+        focused ? stylesTab.pillActive : stylesTab.pillInactive,
+      ]}
+    >
+      <View style={stylesTab.iconWrap}>{children}</View>
+      <Text style={[stylesTab.label, focused ? stylesTab.labelActive : stylesTab.labelInactive]} numberOfLines={1} ellipsizeMode="tail">
+        {label}
+      </Text>
+    </View>
+  );
+}
+
+const stylesTab = StyleSheet.create({
+  pill: {
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 6,
+    paddingVertical: 6,
+    borderRadius: 22,
+    gap: 4,
+  },
+  pillInactive: {
+    backgroundColor: 'transparent',
+  },
+  pillActive: {
+    backgroundColor: '#8B5CF6',
+    shadowColor: '#000',
+    shadowOpacity: 0.12,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 2,
+  },
+  iconWrap: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 3,
+  },
+  label: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  labelInactive: {
+    color: '#6B7280',
+  },
+  labelActive: {
+    color: '#FFFFFF',
+  },
+});

@@ -14,6 +14,7 @@ import {
   Modal,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import FloatingTabBar from '@/components/FloatingTabBar';
 import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LogOut, Edit, Save, X, Plus, MapPin, Inbox, Trash2, Settings } from 'lucide-react-native';
@@ -1002,6 +1003,9 @@ export default function ProfileScreen() {
           <ActivityIndicator size="large" color="#FFFFFF" />
         </View>
       )}
+
+      {/* Floating bottom pill menu for profile */}
+      <FloatingTabBar active="profile" />
     </SafeAreaView>
   );
 }

@@ -17,6 +17,7 @@ import {
 } from 'react-native';
 import { SlidersHorizontal, ChevronLeft, ChevronRight, Heart, X, MapPin } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
+import FloatingTabBar from '@/components/FloatingTabBar';
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/authStore';
 import { User, UserSurveyResponse } from '@/types/database';
@@ -784,7 +785,7 @@ export default function PartnersScreen() {
       </View>
 
       <ScrollView
-        contentContainerStyle={[styles.listContent, { paddingBottom: 32 + insets.bottom }]}
+        contentContainerStyle={[styles.listContent, { paddingBottom: 140 + insets.bottom }]}
         showsVerticalScrollIndicator={false}
       >
         {items.length === 0 ? (
@@ -876,6 +877,9 @@ export default function PartnersScreen() {
           </View>
         )}
       </ScrollView>
+
+      {/* Floating bottom pill menu for partners */}
+      <FloatingTabBar active="partners" />
 
       {showFilters ? (
         <Modal

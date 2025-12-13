@@ -6,19 +6,17 @@ import {
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
-  KeyboardAvoidingView,
   Platform,
-  ScrollView,
-   Image,
-   Keyboard,
+  Image,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { authService } from '@/lib/auth';
 import { useAuthStore } from '@/stores/authStore';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
- import { Eye, EyeOff, ArrowLeft } from 'lucide-react-native';
- // Removed vector icon for Google since it is single-color; using multicolor image instead
- import LavaLamp from '../../components/LavaLamp';
+import { Eye, EyeOff, ArrowLeft } from 'lucide-react-native';
+// Removed vector icon for Google since it is single-color; using multicolor image instead
+import LavaLamp from '../../components/LavaLamp';
+import KeyboardAwareScrollView from 'react-native-keyboard-aware-scroll-view/lib/KeyboardAwareScrollView';
 
 const ACCENT_PURPLE = '#4C1D95'; // deeper purple
 const SHEET_TOP_OFFSET = 72;
@@ -33,8 +31,6 @@ export default function LoginScreen() {
   const [isPasswordVisible, setPasswordVisible] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
-  const [isKeyboardOpen, setIsKeyboardOpen] = useState(false);
-  const [keyboardHeight, setKeyboardHeight] = useState(0);
 
   // Clear any broken/partial session so the login screen doesn't log refresh errors on mount
   useEffect(() => {
@@ -45,19 +41,6 @@ export default function LoginScreen() {
         // ignore – getCurrentUser already clears invalid refresh tokens locally
       }
     })();
-    const showSub = Keyboard.addListener('keyboardDidShow', (e) => {
-      setIsKeyboardOpen(true);
-      // height of the keyboard to paint white filler above it
-      setKeyboardHeight(e.endCoordinates?.height ?? 0);
-    });
-    const hideSub = Keyboard.addListener('keyboardDidHide', () => {
-      setIsKeyboardOpen(false);
-      setKeyboardHeight(0);
-    });
-    return () => {
-      showSub.remove();
-      hideSub.remove();
-    };
   }, []);
 
   const handleLogin = async () => {
@@ -94,12 +77,15 @@ export default function LoginScreen() {
   return (
     <View style={{ flex: 1 }}>
       <LavaLamp hue="purple" intensity={60} count={5} duration={16000} backgroundColor="#2E1065" />
-      <KeyboardAvoidingView
-        style={styles.container}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={insets.top}
+      <KeyboardAwareScrollView
+        enableOnAndroid
+        extraScrollHeight={Platform.OS === 'ios' ? 16 : 24}
+        keyboardOpeningTime={0}
+        keyboardShouldPersistTaps="handled"
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
       >
-        <View style={styles.content}>
+          <View style={styles.content}>
           <View style={[styles.header, { paddingTop: insets.top + 24, paddingBottom: 16 }]}>
             <TouchableOpacity
               onPress={() => router.replace('/auth/intro')}
@@ -121,12 +107,12 @@ export default function LoginScreen() {
 
           {error ? <Text style={styles.errorLight}>{error}</Text> : null}
 
-          <View style={[styles.sheet, isKeyboardOpen ? { paddingBottom: 8 } : null]}>
+          <View style={styles.sheet}>
             <View style={styles.sheetHeader}>
               <Text style={styles.sheetTitle}>מצא את השותפים שלך</Text>
               <Text style={styles.sheetSubtitle}>התחבר לחשבון שלך</Text>
             </View>
-            <View style={{ paddingBottom: isKeyboardOpen ? 8 : insets.bottom + 24 }}>
+            <View style={{ paddingBottom: insets.bottom + 16 }}>
               <View style={styles.form}>
                 <TextInput
                   style={styles.inputLight}
@@ -134,6 +120,7 @@ export default function LoginScreen() {
                   value={email}
                   onChangeText={setEmail}
                   autoCapitalize="none"
+                  autoCorrect={false}
                   keyboardType="email-address"
                   placeholderTextColor="#9DA4AE"
                 />
@@ -161,19 +148,19 @@ export default function LoginScreen() {
                 <TouchableOpacity style={[styles.button, isLoading && styles.buttonDisabled]} onPress={handleLogin} disabled={isLoading}>
                   {isLoading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.buttonText}>התחבר</Text>}
                 </TouchableOpacity>
- 
-                 <View style={styles.dividerRow}>
-                   <View style={styles.line} />
-                   <Text style={styles.dividerText}>או התחברות עם</Text>
-                   <View style={styles.line} />
-                 </View>
- 
+
+                <View style={styles.dividerRow}>
+                  <View style={styles.line} />
+                  <Text style={styles.dividerText}>או התחברות עם</Text>
+                  <View style={styles.line} />
+                </View>
+
                 <TouchableOpacity
-                   style={styles.oauthBtn}
-                   onPress={handleGoogleSignIn}
-                   disabled={isLoading}
-                   activeOpacity={0.9}
-                 >
+                  style={styles.oauthBtn}
+                  onPress={handleGoogleSignIn}
+                  disabled={isLoading}
+                  activeOpacity={0.9}
+                >
                   {/* Use local multi-color SVG for Google icon */}
                   {/** We render a local SVG component to ensure brand colors **/}
                   {/** and avoid single-color font icons. **/}
@@ -183,29 +170,16 @@ export default function LoginScreen() {
                       height: 18,
                     })}
                   </View>
-                   <Text style={styles.oauthText}>Google</Text>
-                 </TouchableOpacity>
+                  <Text style={styles.oauthText}>Google</Text>
+                </TouchableOpacity>
                 <TouchableOpacity style={styles.linkContainerCenter} onPress={() => router.replace('/auth/register')} disabled={isLoading}>
                   <Text style={styles.linkTextPurple}>אין לך חשבון? הרשם כאן</Text>
                 </TouchableOpacity>
               </View>
             </View>
           </View>
-
-        </View>
-      </KeyboardAvoidingView>
-      {/* White filler above the system keyboard to avoid showing background color */}
-      <View
-        pointerEvents="none"
-        style={{
-          position: 'absolute',
-          left: 0,
-          right: 0,
-          bottom: 0,
-          height: isKeyboardOpen ? keyboardHeight : 0,
-          backgroundColor: '#FFFFFF',
-        }}
-      />
+          </View>
+      </KeyboardAwareScrollView>
     </View>
   );
 }
@@ -271,7 +245,7 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 28,
     paddingHorizontal: 40,
     paddingTop: 38,
-    paddingBottom: 40,
+    paddingBottom: 16,
     // Stretch to full width (cancel outer content padding)
     marginHorizontal: -24,
     // sheet now starts right after the purple fill

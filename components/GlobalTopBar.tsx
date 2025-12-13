@@ -28,7 +28,7 @@ function GlobalTopBarBase() {
           ]}
         >
           <Image
-            source={require('../assets/images/logo-02.png')}
+            source={require('../assets/images/logo-03.png')}
             style={styles.logo}
             resizeMode="contain"
           />
@@ -67,8 +67,8 @@ const styles = StyleSheet.create({
     letterSpacing: 0.3,
   },
   logo: {
-    width: 84,
-    height: 26,
+    width: 110,
+    height: 34,
   },
 });
 
