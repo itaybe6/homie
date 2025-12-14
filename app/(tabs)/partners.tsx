@@ -155,6 +155,9 @@ export default function PartnersScreen() {
   const translateX = useSharedValue(0);
   const headerOffset = insets.top + 52 + -40;
   const SWIPE_THRESHOLD = 120;
+  const ACTIONS_BAR_HEIGHT = 76;
+  const ACTIONS_BOTTOM_GAP = 0;
+  const actionsBottom = ACTIONS_BOTTOM_GAP + insets.bottom;
 
   const onSwipe = (type: 'like' | 'pass') => {
     const item = items[currentIndex];
@@ -998,7 +1001,15 @@ export default function PartnersScreen() {
       </View>
 
       <ScrollView
-        contentContainerStyle={[styles.listContent, { paddingTop: headerOffset, paddingBottom: 140 + insets.bottom }]}
+        contentContainerStyle={[
+          styles.listContent,
+          {
+            paddingTop: headerOffset,
+            // Reserve space so the fixed bottom buttons never overlap the card on small screens.
+            // Important: tabs do NOT overlay this screen, so we only account for safe-area + our button bar.
+            paddingBottom: ACTIONS_BAR_HEIGHT + actionsBottom + 16,
+          },
+        ]}
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} tintColor="#111827" />
@@ -1044,44 +1055,46 @@ export default function PartnersScreen() {
                 </Animated.View>
               </GestureDetector>
             </View>
-
-            {/* Bottom action buttons (below the card, not on top of it) */}
-            <View style={styles.bottomActions}>
-              <View style={styles.bottomActionsRow}>
-                <TouchableOpacity
-                  activeOpacity={0.9}
-                  style={[styles.actionBtn, styles.actionBtnDanger]}
-                  accessibilityRole="button"
-                  accessibilityLabel="לא מתאים"
-                  onPress={() => triggerSwipe('pass')}
-                >
-                  <X size={26} color="#EF4444" />
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  activeOpacity={0.9}
-                  style={[styles.actionBtn, styles.actionBtnShare]}
-                  accessibilityRole="button"
-                  accessibilityLabel="שיתוף פרופיל"
-                  onPress={onShareProfile}
-                >
-                  <Share2 size={22} color="#111827" />
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  activeOpacity={0.9}
-                  style={[styles.actionBtn, styles.actionBtnLike]}
-                  accessibilityRole="button"
-                  accessibilityLabel="אהבתי"
-                  onPress={() => triggerSwipe('like')}
-                >
-                  <Heart size={26} color="#7C5CFF" fill="#7C5CFF" />
-                </TouchableOpacity>
-              </View>
-            </View>
           </View>
         )}
       </ScrollView>
+
+      {/* Fixed bottom buttons – consistent spacing across devices */}
+      {items.length ? (
+        <View style={[styles.bottomActions, { bottom: actionsBottom }]} pointerEvents="box-none">
+          <View style={styles.bottomActionsRow}>
+            <TouchableOpacity
+              activeOpacity={0.9}
+              style={[styles.actionBtn, styles.actionBtnDanger]}
+              accessibilityRole="button"
+              accessibilityLabel="לא מתאים"
+              onPress={() => triggerSwipe('pass')}
+            >
+              <X size={26} color="#EF4444" />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              activeOpacity={0.9}
+              style={[styles.actionBtn, styles.actionBtnShare]}
+              accessibilityRole="button"
+              accessibilityLabel="שיתוף פרופיל"
+              onPress={onShareProfile}
+            >
+              <Share2 size={22} color="#111827" />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              activeOpacity={0.9}
+              style={[styles.actionBtn, styles.actionBtnLike]}
+              accessibilityRole="button"
+              accessibilityLabel="אהבתי"
+              onPress={() => triggerSwipe('like')}
+            >
+              <Heart size={26} color="#7C5CFF" fill="#7C5CFF" />
+            </TouchableOpacity>
+          </View>
+        </View>
+      ) : null}
 
       {showFilters ? (
         <Modal
@@ -1424,7 +1437,10 @@ const styles = StyleSheet.create({
     color: '#6B7280',
   },
   bottomActions: {
-    marginTop: 30,
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    zIndex: 50,
     alignItems: 'center',
   },
   bottomActionsRow: {
