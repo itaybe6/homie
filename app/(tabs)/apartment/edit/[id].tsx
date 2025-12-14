@@ -72,14 +72,22 @@ export default function EditApartmentScreen() {
     sourceUri: string,
   ): Promise<{ uri: string; ext: string; mime: string }> => {
     const MAX_WIDTH = 1200; // Maximum width for uploaded images (height scales proportionally)
-    const COMPRESSION_QUALITY = 0.7; // Compression quality (0-1)
+    const COMPRESSION_QUALITY = 0.8; // Compression quality (0-1)
 
     try {
-      // Always resize and compress images to save storage space
-      // Specifying only width maintains aspect ratio automatically
+      // First, get image info to check if resizing is needed
+      const imageInfo = await ImageManipulator.manipulateAsync(sourceUri, []);
+      
+      // Only resize if image is larger than max width
+      const actions: ImageManipulator.Action[] = [];
+      if (imageInfo.width > MAX_WIDTH) {
+        actions.push({ resize: { width: MAX_WIDTH } });
+      }
+
+      // Compress the image (with or without resize)
       const compressed = await ImageManipulator.manipulateAsync(
         sourceUri,
-        [{ resize: { width: MAX_WIDTH } }],
+        actions,
         { compress: COMPRESSION_QUALITY, format: ImageManipulator.SaveFormat.JPEG },
       );
       return { uri: compressed.uri, ext: 'jpg', mime: 'image/jpeg' };

@@ -97,7 +97,8 @@ export default function ApartmentCard({
     const unique = new Set<string>();
     raw.forEach((original) => {
       const transformed = transformSupabaseImageUrl(original);
-      [transformed, original].forEach((url) => {
+      // Prefer original URL first; transformed is best-effort (may fail on some envs)
+      ;[original, transformed].forEach((url) => {
         const trimmed = (url || '').trim();
         if (trimmed) unique.add(trimmed);
       });
@@ -110,10 +111,12 @@ export default function ApartmentCard({
   }, [apartment]);
 
   const [imageIdx, setImageIdx] = useState(0);
+  const [failedUris, setFailedUris] = useState<Record<string, true>>({});
   const candidateKey = imageCandidates.join('|');
 
   useEffect(() => {
     setImageIdx(0);
+    setFailedUris({});
   }, [candidateKey]);
 
   // Deterministic "random" selection of up to 3 images per apartment
@@ -172,7 +175,10 @@ export default function ApartmentCard({
           for (const f of data) {
             const path = `apartments/${folder}/${f.name}`;
             const { data: pub } = supabase.storage.from('apartment-images').getPublicUrl(path);
-            if (pub?.publicUrl) candidates.push(transformSupabaseImageUrl(pub.publicUrl));
+            if (pub?.publicUrl) {
+              candidates.push(pub.publicUrl);
+              candidates.push(transformSupabaseImageUrl(pub.publicUrl));
+            }
           }
           if (candidates.length) break;
         }
@@ -188,9 +194,15 @@ export default function ApartmentCard({
   }, [previewImages.join('|')]);
 
   const carouselImages = useMemo(() => {
-    if (storageImages && storageImages.length > 0) return storageImages;
-    return previewImages;
-  }, [storageImages, previewImages]);
+    const base = storageImages && storageImages.length > 0 ? storageImages : previewImages;
+    const filtered = base.filter((u) => u && !failedUris[u]);
+    return filtered.length ? filtered : [PLACEHOLDER];
+  }, [storageImages, previewImages, failedUris]);
+
+  useEffect(() => {
+    // Keep index valid if we filtered images after failures
+    setImageIdx((prev) => Math.max(0, Math.min(prev, carouselImages.length - 1)));
+  }, [carouselImages.length]);
 
   const [carouselWidth, setCarouselWidth] = useState<number>(0);
 
@@ -286,6 +298,12 @@ export default function ApartmentCard({
                   source={{ uri }}
                   style={[styles.image, carouselWidth ? { width: carouselWidth } : null]}
                   resizeMode="cover"
+                  onError={() => {
+                    setFailedUris((prev) => {
+                      if (prev[uri]) return prev;
+                      return { ...prev, [uri]: true };
+                    });
+                  }}
                 />
               ))}
             </ScrollView>
