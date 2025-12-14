@@ -15,6 +15,7 @@ import {
   Image,
   ViewStyle,
   Share,
+  useWindowDimensions,
 } from 'react-native';
 import Animated, {
   useSharedValue,
@@ -55,7 +56,7 @@ import {
 } from '@/utils/matchCalculator';
 
 // Keep swipe cards visually consistent (prevents the next card peeking below the current one)
-const SWIPE_CARD_MEDIA_HEIGHT = 520;
+const DEFAULT_SWIPE_CARD_MEDIA_HEIGHT = 520;
 const SWIPE_CARD_RADIUS = 20;
 
 const genderAliasMap: Record<string, 'male' | 'female'> = {
@@ -151,13 +152,32 @@ export default function PartnersScreen() {
   const [selectedCities, setSelectedCities] = useState<string[]>([]);
   const [matchScores, setMatchScores] = useState<Record<string, number | null>>({});
 
-  const screenWidth = Dimensions.get('window').width;
+  const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const translateX = useSharedValue(0);
   const headerOffset = insets.top + 52 + -40;
   const SWIPE_THRESHOLD = 120;
   const ACTIONS_BAR_HEIGHT = 76;
-  const ACTIONS_BOTTOM_GAP = 0;
-  const actionsBottom = ACTIONS_BOTTOM_GAP + insets.bottom;
+  // Negative gap moves the floating buttons slightly down (closer to the bottom) while staying safe on devices with no bottom inset.
+  const ACTIONS_BOTTOM_GAP = -10;
+  const actionsBottom = Math.max(0, insets.bottom + ACTIONS_BOTTOM_GAP);
+  const CARD_GAP_TO_ACTIONS = 14;
+  const EXTRA_CARD_BOTTOM_SPACE = 52; // extra safety so the card never sits behind the bottom action buttons
+  // estimate top chrome (status + logo area + small padding). We clamp so it behaves consistently across devices.
+  const TOP_CHROME_ESTIMATE = Math.max(96, insets.top + 84);
+
+  // Dynamic card height: fills most of the screen and keeps a stable gap to the bottom action buttons.
+  const swipeCardHeight = Math.round(
+    Math.min(
+      620,
+      Math.max(
+        440,
+        screenHeight -
+          TOP_CHROME_ESTIMATE -
+          (ACTIONS_BAR_HEIGHT + actionsBottom + CARD_GAP_TO_ACTIONS + EXTRA_CARD_BOTTOM_SPACE) -
+          16,
+      ),
+    ),
+  );
 
   const onSwipe = (type: 'like' | 'pass') => {
     const item = items[currentIndex];
@@ -917,6 +937,7 @@ export default function PartnersScreen() {
           onLike={handleLike}
           onPass={handlePass}
           style={{ marginBottom: 0 }}
+          mediaHeight={swipeCardHeight}
           onOpen={(u) =>
             router.push({
               pathname: '/(tabs)/user/[id]',
@@ -935,6 +956,7 @@ export default function PartnersScreen() {
         matchScores={matchScores}
         onLike={(groupId, users) => handleGroupLike(groupId, users)}
         onPass={(groupId, users) => handleGroupPass(groupId, users)}
+        mediaHeight={swipeCardHeight}
         onOpen={(userId: string) =>
           router.push({
             pathname: '/(tabs)/user/[id]',
@@ -1007,7 +1029,7 @@ export default function PartnersScreen() {
             paddingTop: headerOffset,
             // Reserve space so the fixed bottom buttons never overlap the card on small screens.
             // Important: tabs do NOT overlay this screen, so we only account for safe-area + our button bar.
-            paddingBottom: ACTIONS_BAR_HEIGHT + actionsBottom + 16,
+            paddingBottom: ACTIONS_BAR_HEIGHT + actionsBottom + CARD_GAP_TO_ACTIONS + 16,
           },
         ]}
         showsVerticalScrollIndicator={false}
@@ -1022,7 +1044,7 @@ export default function PartnersScreen() {
           </View>
         ) : (
           <View>
-            <View style={styles.cardStack}>
+            <View style={[styles.cardStack, { height: swipeCardHeight }]}>
               {items[currentIndex + 1] ? (
                 <Animated.View pointerEvents="none" style={[styles.behindCard, behindCardAnimatedStyle]}>
                   {renderBrowseItem(items[currentIndex + 1])}
@@ -1384,7 +1406,6 @@ const styles = StyleSheet.create({
   },
   cardStack: {
     position: 'relative',
-    height: SWIPE_CARD_MEDIA_HEIGHT,
   },
   behindCard: {
     ...StyleSheet.absoluteFillObject,
@@ -1605,6 +1626,7 @@ function GroupCard({
   onPass,
   onOpenApartment,
   style,
+  mediaHeight,
 }: {
   groupId: string;
   users: User[];
@@ -1615,11 +1637,14 @@ function GroupCard({
   onPass: (groupId: string, users: User[]) => void;
   onOpenApartment: (apartmentId: string) => void;
   style?: ViewStyle;
+  mediaHeight?: number;
 }) {
   const displayUsers = users.slice(0, 4);
   const extra = users.length - displayUsers.length;
   const DEFAULT_AVATAR = 'https://cdn-icons-png.flaticon.com/512/847/847969.png';
   const isOneRowLayout = displayUsers.length === 3 || displayUsers.length === 4;
+  const resolvedMediaHeight =
+    typeof mediaHeight === 'number' && Number.isFinite(mediaHeight) ? mediaHeight : DEFAULT_SWIPE_CARD_MEDIA_HEIGHT;
   const formatMatchPercent = (value: number | null | undefined) =>
     value === null || value === undefined ? '--%' : `${value}%`;
 
@@ -1628,7 +1653,7 @@ function GroupCard({
       <View style={groupStyles.gridWrap}>
         {displayUsers.map((u, idx) => {
           const rows = isOneRowLayout ? 1 : Math.ceil(displayUsers.length / 2);
-          const cellHeight = rows === 1 ? SWIPE_CARD_MEDIA_HEIGHT : SWIPE_CARD_MEDIA_HEIGHT / 2;
+          const cellHeight = rows === 1 ? resolvedMediaHeight : resolvedMediaHeight / 2;
           const isLastWithExtra = idx === displayUsers.length - 1 && extra > 0;
           const matchPercent = matchScores?.[u.id] ?? null;
           return (

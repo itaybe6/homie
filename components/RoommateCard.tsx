@@ -13,11 +13,13 @@ type RoommateCardProps = {
   onOpen?: (user: User) => void;
   style?: ViewStyle;
   matchPercent?: number | null;
+  mediaHeight?: number;
 };
 
-function RoommateCardBase({ user, onLike, onPass, onOpen, style, matchPercent }: RoommateCardProps) {
+function RoommateCardBase({ user, onLike, onPass, onOpen, style, matchPercent, mediaHeight }: RoommateCardProps) {
   const DEFAULT_AVATAR = 'https://cdn-icons-png.flaticon.com/512/847/847969.png';
   const router = useRouter();
+  const resolvedMediaHeight = typeof mediaHeight === 'number' && Number.isFinite(mediaHeight) ? mediaHeight : 520;
   type ProfileApartment = {
     id: string;
     title?: string | null;
@@ -93,7 +95,7 @@ function RoommateCardBase({ user, onLike, onPass, onOpen, style, matchPercent }:
   return (
     <View style={[styles.card, style]}>
       <TouchableOpacity activeOpacity={0.9} onPress={() => onOpen?.(user)}>
-        <View style={styles.imageWrap}>
+        <View style={[styles.imageWrap, { height: resolvedMediaHeight }]}>
           <Image
             source={{ uri: user.avatar_url || DEFAULT_AVATAR }}
             style={styles.image}
