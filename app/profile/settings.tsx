@@ -589,11 +589,17 @@ export default function ProfileSettingsScreen() {
 
       setIsUploadingAvatar(true);
       const asset = result.assets[0];
-      // Compress and resize avatar before upload
+      // Check image dimensions and only resize if larger than 800px
+      const imageInfo = await ImageManipulator.manipulateAsync(asset.uri, []);
+      const actions: ImageManipulator.Action[] = [];
+      if (imageInfo.width > 800) {
+        actions.push({ resize: { width: 800 } });
+      }
+      // Compress the image
       const compressed = await ImageManipulator.manipulateAsync(
         asset.uri,
-        [{ resize: { width: 800 } }],
-        { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG }
+        actions,
+        { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG }
       );
       const response = await fetch(compressed.uri);
       const arrayBuffer = await response.arrayBuffer();
@@ -1622,11 +1628,17 @@ export default function ProfileSettingsScreen() {
                         setEditUpdatingImages(true);
                         const newUrls: string[] = [];
                         for (const asset of result.assets) {
-                          // Compress and resize image before upload
+                          // Check image dimensions and only resize if larger than 1200px
+                          const imageInfo = await ImageManipulator.manipulateAsync(asset.uri, []);
+                          const actions: ImageManipulator.Action[] = [];
+                          if (imageInfo.width > 1200) {
+                            actions.push({ resize: { width: 1200 } });
+                          }
+                          // Compress the image
                           const compressed = await ImageManipulator.manipulateAsync(
                             asset.uri,
-                            [{ resize: { width: 1200 } }],
-                            { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG }
+                            actions,
+                            { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG }
                           );
                           const response = await fetch(compressed.uri);
                           const arrayBuffer = await response.arrayBuffer();

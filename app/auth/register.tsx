@@ -110,11 +110,17 @@ export default function RegisterScreen() {
 
   const uploadAvatar = async (userId: string, uri: string) => {
     try {
-      // Compress and resize avatar before upload
+      // Check image dimensions and only resize if larger than 800px
+      const imageInfo = await ImageManipulator.manipulateAsync(uri, []);
+      const actions: ImageManipulator.Action[] = [];
+      if (imageInfo.width > 800) {
+        actions.push({ resize: { width: 800 } });
+      }
+      // Compress the image
       const compressed = await ImageManipulator.manipulateAsync(
         uri,
-        [{ resize: { width: 800 } }],
-        { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG }
+        actions,
+        { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG }
       );
       const fileName = `${userId}-${Date.now()}.jpg`;
       const filePath = `users/${userId}/${fileName}`;

@@ -94,63 +94,43 @@ export default function ApartmentCard({
 
   const imageCandidates = useMemo(() => {
     const raw = normalizeImageUrls((apartment as any).image_urls);
-    const unique = new Set<string>();
-    raw.forEach((original) => {
-      const transformed = transformSupabaseImageUrl(original);
-      [transformed, original].forEach((url) => {
-        const trimmed = (url || '').trim();
-        if (trimmed) unique.add(trimmed);
-      });
-    });
-    if (!unique.size) unique.add(PLACEHOLDER);
-    if (!unique.has(PLACEHOLDER)) {
-      unique.add(PLACEHOLDER);
+
+    // Deduplicate while keeping original order.
+    const seen = new Set<string>();
+    const ordered: string[] = [];
+    for (const url of raw) {
+      const trimmed = (url || '').trim();
+      if (!trimmed) continue;
+      if (seen.has(trimmed)) continue;
+      seen.add(trimmed);
+      ordered.push(trimmed);
     }
-    return Array.from(unique);
+
+    // Only fallback to placeholder when there are no images at all.
+    return ordered.length ? ordered : [PLACEHOLDER];
   }, [apartment]);
 
   const [imageIdx, setImageIdx] = useState(0);
+  const [failedUris, setFailedUris] = useState<Record<string, true>>({});
+  const [imageUriOverrides, setImageUriOverrides] = useState<Record<string, string>>({});
   const candidateKey = imageCandidates.join('|');
 
   useEffect(() => {
     setImageIdx(0);
+    setFailedUris({});
+    setImageUriOverrides({});
   }, [candidateKey]);
 
-  // Deterministic "random" selection of up to 3 images per apartment
-  const previewImages = useMemo(() => {
-    const realImages = imageCandidates.filter((u) => u !== PLACEHOLDER);
-    const list = realImages.length > 0 ? realImages.slice() : [PLACEHOLDER];
-    const seedString = String((apartment as any)?.id || (apartment as any)?.title || 'seed');
-    let seed = 0;
-    for (let i = 0; i < seedString.length; i++) {
-      seed = (seed * 31 + seedString.charCodeAt(i)) >>> 0;
-    }
-    const rand = () => {
-      // xorshift32
-      seed ^= seed << 13;
-      seed ^= seed >>> 17;
-      seed ^= seed << 5;
-      // Convert to 0..1
-      return ((seed >>> 0) / 0xffffffff);
-    };
-    // Shuffle deterministically
-    for (let i = list.length - 1; i > 0; i--) {
-      const j = Math.floor(rand() * (i + 1));
-      const tmp = list[i];
-      list[i] = list[j];
-      list[j] = tmp;
-    }
-    const sliced = list.slice(0, Math.max(1, Math.min(3, list.length)));
-    if (sliced.length === 0) return [PLACEHOLDER];
-    return sliced;
-  }, [imageCandidates, apartment]);
+  // Prefer showing ALL images (in order) on the home card.
+  const previewImages = useMemo(() => imageCandidates, [imageCandidates]);
 
-  // Try to augment images from Supabase Storage folder if DB has fewer than 3
+  // Try to augment images from Supabase Storage folder only when DB has < 2 images.
+  // This keeps the home list lighter while still helping older records.
   const [storageImages, setStorageImages] = useState<string[] | null>(null);
   const attemptedStorageRef = useRef(false);
   useEffect(() => {
     if (attemptedStorageRef.current) return;
-    if (previewImages.length >= 3) return;
+    if (previewImages.filter((u) => u !== PLACEHOLDER).length >= 2) return;
     attemptedStorageRef.current = true;
     const tryLoad = async () => {
       try {
@@ -167,19 +147,23 @@ export default function ApartmentCard({
         for (const folder of folders) {
           const { data, error } = await supabase.storage
             .from('apartment-images')
-            .list(`apartments/${folder}`, { limit: 20 });
+            .list(`apartments/${folder}`, { limit: 50 });
           if (error || !data || data.length === 0) continue;
           for (const f of data) {
             const path = `apartments/${folder}/${f.name}`;
             const { data: pub } = supabase.storage.from('apartment-images').getPublicUrl(path);
-            if (pub?.publicUrl) candidates.push(transformSupabaseImageUrl(pub.publicUrl));
+            if (pub?.publicUrl) {
+              // Store the original public URL; we will try a "render" URL at display time (with fallback).
+              candidates.push(pub.publicUrl);
+            }
           }
           if (candidates.length) break;
         }
         if (candidates.length) {
           // Merge and dedupe
           const merged = Array.from(new Set([...previewImages, ...candidates]));
-          setStorageImages(merged.slice(0, 3));
+          // Avoid unbounded carousels on the home list.
+          setStorageImages(merged.slice(0, 10));
         }
       } catch {}
     };
@@ -188,9 +172,20 @@ export default function ApartmentCard({
   }, [previewImages.join('|')]);
 
   const carouselImages = useMemo(() => {
-    if (storageImages && storageImages.length > 0) return storageImages;
-    return previewImages;
-  }, [storageImages, previewImages]);
+    const base = storageImages && storageImages.length > 0 ? storageImages : previewImages;
+    // Filter out items we fully failed to load (after trying fallback).
+    const filtered = base.filter((original) => {
+      const key = (original || '').trim();
+      if (!key) return false;
+      return !failedUris[key];
+    });
+    return filtered.length ? filtered : [PLACEHOLDER];
+  }, [storageImages, previewImages, failedUris]);
+
+  useEffect(() => {
+    // Keep index valid if we filtered images after failures
+    setImageIdx((prev) => Math.max(0, Math.min(prev, carouselImages.length - 1)));
+  }, [carouselImages.length]);
 
   const [carouselWidth, setCarouselWidth] = useState<number>(0);
 
@@ -218,24 +213,9 @@ export default function ApartmentCard({
       return false;
     }
   }, [apartment]);
-  const [isCarouselInteracting, setIsCarouselInteracting] = useState(false);
-  const lastScrollXRef = useRef(0);
-  const didSwipeRef = useRef(false);
 
   return (
-    <TouchableOpacity
-      style={styles.card}
-      onPress={() => {
-        if (isCarouselInteracting || didSwipeRef.current) {
-          // reset swipe flag after cancelling press
-          didSwipeRef.current = false;
-          return;
-        }
-        onPress();
-      }}
-      activeOpacity={0.9}
-      delayPressIn={150}
-    >
+    <View style={styles.card}>
       <View style={styles.imageWrap}>
         <View style={styles.imageInner}>
           <View
@@ -250,44 +230,55 @@ export default function ApartmentCard({
               pagingEnabled
               showsHorizontalScrollIndicator={false}
               style={{ width: '100%' }}
-              // Ensure carousel captures touch immediately
-              onStartShouldSetResponder={() => true}
-              onStartShouldSetResponderCapture={() => true}
-              onMoveShouldSetResponder={() => true}
-              onMoveShouldSetResponderCapture={() => true}
               nestedScrollEnabled
               scrollEnabled={carouselImages.length > 1}
-              snapToInterval={Math.max(1, carouselWidth)}
-              decelerationRate="fast"
-              onScrollBeginDrag={() => setIsCarouselInteracting(true)}
-              onMomentumScrollBegin={() => setIsCarouselInteracting(true)}
-              onScroll={(e: NativeSyntheticEvent<NativeScrollEvent>) => {
-                const x = e.nativeEvent.contentOffset.x;
-                if (Math.abs(x - lastScrollXRef.current) > 2) {
-                  didSwipeRef.current = true;
-                }
-                lastScrollXRef.current = x;
-              }}
               onMomentumScrollEnd={(e: NativeSyntheticEvent<NativeScrollEvent>) => {
-                const x = e.nativeEvent.contentOffset.x;
-                const w = Math.max(1, carouselWidth);
-                const idx = Math.round(x / w);
+                const idx = Math.round(
+                  e.nativeEvent.contentOffset.x / e.nativeEvent.layoutMeasurement.width
+                );
                 setImageIdx(Math.max(0, Math.min(idx, carouselImages.length - 1)));
-                setIsCarouselInteracting(false);
-              }}
-              onScrollEndDrag={() => {
-                setIsCarouselInteracting(false);
               }}
               scrollEventThrottle={16}
             >
-              {carouselImages.map((uri, idx) => (
-                <Image
-                  key={`${uri}-${idx}`}
-                  source={{ uri }}
-                  style={[styles.image, carouselWidth ? { width: carouselWidth } : null]}
-                  resizeMode="cover"
-                />
-              ))}
+              {carouselImages.map((original, idx) => {
+                const displayUri =
+                  imageUriOverrides[original] ?? transformSupabaseImageUrl(original) ?? original;
+
+                return (
+                  <View
+                    key={`${original}-${idx}`}
+                    style={carouselWidth ? { width: carouselWidth } : { width: '100%' }}
+                  >
+                    <TouchableOpacity
+                      activeOpacity={0.98}
+                      delayPressIn={150}
+                      onPress={onPress}
+                    >
+                      <Image
+                        source={{ uri: displayUri }}
+                        style={styles.image}
+                        resizeMode="cover"
+                        onError={() => {
+                          // If we tried a transformed (render) URL and it failed, fall back to the original URL.
+                          if (displayUri !== original) {
+                            setImageUriOverrides((prev) => {
+                              if (prev[original] === original) return prev;
+                              return { ...prev, [original]: original };
+                            });
+                            return;
+                          }
+
+                          // If original also failed, mark as failed and remove it from carousel list.
+                          setFailedUris((prev) => {
+                            if (prev[original]) return prev;
+                            return { ...prev, [original]: true };
+                          });
+                        }}
+                      />
+                    </TouchableOpacity>
+                  </View>
+                );
+              })}
             </ScrollView>
           </View>
           {/* gradient overlay */}
@@ -301,7 +292,7 @@ export default function ApartmentCard({
           {/* Favorite */}
           <FavoriteButton apartmentId={apartment.id} />
           {/* Carousel dots */}
-          <View style={styles.dotsRow}>
+          <View style={styles.dotsRow} pointerEvents="none">
             {carouselImages.map((_, i) => (
               <View key={`dot-${i}`} style={[styles.dot, { opacity: i === imageIdx ? 1 : 0.5 }]} />
             ))}
@@ -321,7 +312,7 @@ export default function ApartmentCard({
           ) : null}
         </View>
       </View>
-      <View style={styles.content}>
+      <TouchableOpacity style={styles.content} onPress={onPress} activeOpacity={0.9} delayPressIn={150}>
         <View style={styles.titleRow}>
           <Text style={styles.title} numberOfLines={1}>
             {apartment.title}
@@ -349,8 +340,8 @@ export default function ApartmentCard({
             </View>
           </View>
         </View>
-      </View>
-    </TouchableOpacity>
+      </TouchableOpacity>
+    </View>
   );
 }
 
