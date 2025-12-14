@@ -175,6 +175,8 @@ export default function ApartmentDetailsScreen() {
 
   const fetchApartmentDetails = async () => {
     try {
+      // Reset dependent state to avoid stale data when navigating between apartments
+      setMembers([]);
       const { data: aptData, error: aptError } = await supabase
         .from('apartments')
         .select('*')
@@ -208,6 +210,8 @@ export default function ApartmentDetailsScreen() {
           .in('id', partnerIds);
         if (usersError) throw usersError;
         setMembers(usersData || []);
+      } else {
+        setMembers([]);
       }
     } catch (error) {
       console.error('Error fetching apartment:', error);
@@ -393,12 +397,21 @@ export default function ApartmentDetailsScreen() {
   }
 
   const currentPartnerIds: string[] = normalizeIds((apartment as any).partner_ids);
-  const roommatesCount = members.length; // number of partners (not including owner)
+  // Count should reflect what's stored on the apartment row (partner_ids),
+  // not only the successfully fetched user rows (members).
+  const roommatesCount = currentPartnerIds.length;
   const partnerSlotsUsed = currentPartnerIds.length;
-  const totalRoommateCapacity =
-    typeof apartment.roommate_capacity === 'number' ? apartment.roommate_capacity : null;
+
+  // Prefer max_roommates (new schema), fallback to roommate_capacity (legacy schema).
+  const maxRoommates: number | null =
+    typeof (apartment as any)?.max_roommates === 'number'
+      ? ((apartment as any).max_roommates as number)
+      : typeof apartment.roommate_capacity === 'number'
+        ? apartment.roommate_capacity
+        : null;
+
   const availableRoommateSlots =
-    totalRoommateCapacity !== null ? Math.max(0, totalRoommateCapacity - partnerSlotsUsed) : null;
+    maxRoommates !== null ? Math.max(0, maxRoommates - partnerSlotsUsed) : null;
   const isMember = !!(
     user?.id &&
     currentPartnerIds.map((v) => String(v).toLowerCase()).includes(String(user.id).toLowerCase())
@@ -1013,15 +1026,19 @@ export default function ApartmentDetailsScreen() {
                 <Text style={styles.statLabel}>חדרים</Text>
               </View>
             </View>
-            <View style={styles.statLight}>
+            <TouchableOpacity
+              style={styles.statLight}
+              activeOpacity={0.9}
+              onPress={() => setIsMembersOpen(true)}
+            >
               <View style={styles.statIconCircle}>
                 <Users size={22} color="#8B5CF6" />
               </View>
               <View style={styles.statLabelRow}>
-                <Text style={styles.statNumber}>{totalRoommateCapacity ?? 0}</Text>
+                <Text style={styles.statNumber}>{roommatesCount}</Text>
                 <Text style={styles.statLabel}>שותפים</Text>
               </View>
-            </View>
+            </TouchableOpacity>
             <View style={styles.statLight}>
               <View style={styles.statIconCircle}>
                 <Bath size={22} color="#8B5CF6" />
@@ -1236,7 +1253,9 @@ export default function ApartmentDetailsScreen() {
             <View style={styles.sheetHeader}>
               <Text style={styles.sheetTitle}>שותפים</Text>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                <Text style={styles.sheetCount}>{roommatesCount} שותפים</Text>
+                <Text style={styles.sheetCount}>
+                  {typeof maxRoommates === 'number' ? `${roommatesCount} / ${maxRoommates} שותפים` : `${roommatesCount} שותפים`}
+                </Text>
                 <TouchableOpacity onPress={() => setIsMembersOpen(false)} style={styles.closeBtn}>
                   <X size={18} color="#FFFFFF" />
                 </TouchableOpacity>
