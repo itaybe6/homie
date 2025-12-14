@@ -92,6 +92,42 @@ export default function ApartmentDetailsScreen() {
     fetchApartmentDetails();
   }, [id]);
 
+  // Persist "join request sent" per apartment + user (fixes refresh + navigation state bleed)
+  useEffect(() => {
+    let cancelled = false;
+    const aptId = Array.isArray(id) ? id[0] : id;
+
+    // Reset immediately when changing apartment/user
+    setHasRequestedJoin(false);
+
+    if (!aptId || !user?.id) {
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    (async () => {
+      try {
+        const { count, error } = await supabase
+          .from('apartments_request')
+          .select('id', { count: 'exact', head: true })
+          .eq('sender_id', user.id)
+          .eq('apartment_id', String(aptId))
+          .eq('type', 'JOIN_APT')
+          // If a request exists (pending/approved), treat as "already requested"
+          .in('status', ['PENDING', 'APPROVED'] as any);
+        if (error) throw error;
+        if (!cancelled) setHasRequestedJoin((count || 0) > 0);
+      } catch {
+        if (!cancelled) setHasRequestedJoin(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [id, user?.id]);
+
   // Ensure Android hardware back returns to previous screen (or Home), and
   // closes the fullscreen viewer first if open.
   useEffect(() => {
@@ -367,6 +403,7 @@ export default function ApartmentDetailsScreen() {
     user?.id &&
     currentPartnerIds.map((v) => String(v).toLowerCase()).includes(String(user.id).toLowerCase())
   );
+  const isAddPartnerDisabled = availableRoommateSlots !== null && availableRoommateSlots <= 0;
   
 
   // Compute a human-friendly sender label: if user is part of an ACTIVE merged profile,
@@ -890,6 +927,22 @@ export default function ApartmentDetailsScreen() {
                     </TouchableOpacity>
                     {isOwner ? (
                       <TouchableOpacity
+                        style={[styles.circleBtnLight, (isAdding || isAddPartnerDisabled) ? { opacity: 0.55 } : null]}
+                        activeOpacity={0.9}
+                        disabled={isAdding || isAddPartnerDisabled}
+                        onPress={() => {
+                          if (isAddPartnerDisabled) {
+                            Alert.alert('אין מקום', 'הגעת למספר השותפים המקסימלי בדירה זו');
+                            return;
+                          }
+                          openAddPartnerModal();
+                        }}
+                      >
+                        <UserPlus size={18} color="#111827" />
+                      </TouchableOpacity>
+                    ) : null}
+                    {isOwner ? (
+                      <TouchableOpacity
                         style={styles.circleBtnLight}
                         activeOpacity={0.9}
                         onPress={() => router.push({ pathname: '/apartment/edit/[id]', params: { id: apartment.id } })}
@@ -1146,30 +1199,33 @@ export default function ApartmentDetailsScreen() {
               <Text style={styles.greenChipText}>זמין מיידית</Text>
             </View>
           </View>
-          <TouchableOpacity activeOpacity={0.9} style={styles.availabilityBtn}>
-            <Text style={styles.availabilityBtnText}>בדוק זמינות</Text>
+          <TouchableOpacity
+            activeOpacity={0.9}
+            onPress={handleRequestJoin}
+            disabled={isOwner || isMember || isAssignedAnywhere !== false || isRequestingJoin || hasRequestedJoin}
+            style={[
+              styles.availabilityBtn,
+              (isOwner || isMember || isAssignedAnywhere !== false || isRequestingJoin || hasRequestedJoin)
+                ? { opacity: 0.6 }
+                : null,
+            ]}
+          >
+            <Text style={styles.availabilityBtnText}>
+              {isOwner || isMember
+                ? 'בדוק זמינות'
+                : isAssignedAnywhere !== false
+                  ? 'לא זמין'
+                  : isRequestingJoin
+                    ? 'שולח...'
+                    : hasRequestedJoin
+                      ? 'נשלחה בקשה'
+                      : 'הגש בקשה'}
+            </Text>
           </TouchableOpacity>
         </View>
       </View>
 
-      {/* Join as roommate button (for non-owner, non-member viewers) */}
-      {!isOwner && !isMember && isAssignedAnywhere === false ? (
-        <View style={[styles.footer, { bottom: (insets.bottom || 0) + 78 }]}>
-          <TouchableOpacity
-            activeOpacity={0.9}
-            onPress={handleRequestJoin}
-            disabled={isRequestingJoin || hasRequestedJoin}
-            style={[
-              styles.joinBtn,
-              (isRequestingJoin || hasRequestedJoin) ? styles.joinBtnDisabled : null,
-            ]}
-          >
-            <Text style={styles.joinBtnText}>
-              {isRequestingJoin ? 'שולח...' : hasRequestedJoin ? 'נשלחה בקשה' : 'מעוניין להיכנס שותף בדירה'}
-            </Text>
-          </TouchableOpacity>
-        </View>
-      ) : null}
+      {/* Join request is handled via the main CTA button in the floating price card */}
 
       {/* Members Modal */}
       <Modal visible={isMembersOpen} animationType="slide" transparent onRequestClose={() => setIsMembersOpen(false)}>
