@@ -13,16 +13,20 @@ import {
   Dimensions,
   Alert,
   Image,
+  ViewStyle,
+  Share,
 } from 'react-native';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
+  interpolate,
+  Extrapolate,
   withSpring,
   withTiming,
   runOnJS,
 } from 'react-native-reanimated';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import { SlidersHorizontal, ChevronLeft, ChevronRight, Heart, X, MapPin } from 'lucide-react-native';
+import { SlidersHorizontal, ChevronLeft, ChevronRight, Heart, X, MapPin, Share2 } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
@@ -49,6 +53,10 @@ import {
   CookingStyle,
   HomeVibe,
 } from '@/utils/matchCalculator';
+
+// Keep swipe cards visually consistent (prevents the next card peeking below the current one)
+const SWIPE_CARD_MEDIA_HEIGHT = 520;
+const SWIPE_CARD_RADIUS = 20;
 
 const genderAliasMap: Record<string, 'male' | 'female'> = {
   male: 'male',
@@ -146,6 +154,7 @@ export default function PartnersScreen() {
   const screenWidth = Dimensions.get('window').width;
   const translateX = useSharedValue(0);
   const headerOffset = insets.top + 52 + -40;
+  const SWIPE_THRESHOLD = 120;
 
   const onSwipe = (type: 'like' | 'pass') => {
     const item = items[currentIndex];
@@ -167,12 +176,11 @@ export default function PartnersScreen() {
     })
     .onEnd(() => {
       'worklet';
-      const threshold = 120;
-      if (translateX.value > threshold) {
+      if (translateX.value > SWIPE_THRESHOLD) {
         translateX.value = withTiming(screenWidth + 200, { duration: 180 }, (finished) => {
           if (finished) runOnJS(onSwipe)('like');
         });
-      } else if (translateX.value < -threshold) {
+      } else if (translateX.value < -SWIPE_THRESHOLD) {
         translateX.value = withTiming(-screenWidth - 200, { duration: 180 }, (finished) => {
           if (finished) runOnJS(onSwipe)('pass');
         });
@@ -182,7 +190,38 @@ export default function PartnersScreen() {
     });
 
   const cardAnimatedStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: translateX.value }],
+    transform: [
+      { translateX: translateX.value },
+      {
+        rotateZ: `${interpolate(
+          translateX.value,
+          [-screenWidth, 0, screenWidth],
+          [-12, 0, 12],
+          Extrapolate.CLAMP,
+        )}deg`,
+      },
+    ],
+  }));
+
+  const behindCardAnimatedStyle = useAnimatedStyle(() => {
+    const progress = interpolate(
+      Math.abs(translateX.value),
+      [0, SWIPE_THRESHOLD],
+      [0, 1],
+      Extrapolate.CLAMP,
+    );
+    return {
+      transform: [{ scale: 0.985 + progress * 0.015 }, { translateY: 10 - progress * 10 }],
+      opacity: 0.92 + progress * 0.08,
+    };
+  });
+
+  const likeOverlayAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(translateX.value, [0, SWIPE_THRESHOLD], [0, 0.75], Extrapolate.CLAMP),
+  }));
+
+  const passOverlayAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(translateX.value, [-SWIPE_THRESHOLD, 0], [0.75, 0], Extrapolate.CLAMP),
   }));
 
   useEffect(() => {
@@ -866,6 +905,84 @@ export default function PartnersScreen() {
     );
   }
 
+  const renderBrowseItem = (item: BrowseItem) => {
+    if (item.type === 'user') {
+      return (
+        <RoommateCard
+          user={(item as any).user}
+          matchPercent={matchScores[(item as any).user.id] ?? null}
+          onLike={handleLike}
+          onPass={handlePass}
+          style={{ marginBottom: 0 }}
+          onOpen={(u) =>
+            router.push({
+              pathname: '/(tabs)/user/[id]',
+              params: { id: u.id, from: 'partners' } as any,
+            })
+          }
+        />
+      );
+    }
+
+    return (
+      <GroupCard
+        groupId={(item as any).groupId}
+        users={(item as any).users}
+        apartment={(item as any).apartment}
+        matchScores={matchScores}
+        onLike={(groupId, users) => handleGroupLike(groupId, users)}
+        onPass={(groupId, users) => handleGroupPass(groupId, users)}
+        onOpen={(userId: string) =>
+          router.push({
+            pathname: '/(tabs)/user/[id]',
+            params: { id: userId, from: 'partners' } as any,
+          })
+        }
+        onOpenApartment={(apartmentId: string) =>
+          router.push({
+            pathname: '/(tabs)/apartment/[id]',
+            params: { id: apartmentId } as any,
+          })
+        }
+        style={{ marginBottom: 0 }}
+      />
+    );
+  };
+
+  const triggerSwipe = (type: 'like' | 'pass') => {
+    const outTarget = type === 'like' ? screenWidth + 200 : -screenWidth - 200;
+    translateX.value = withTiming(outTarget, { duration: 180 }, (finished) => {
+      if (finished) runOnJS(onSwipe)(type);
+    });
+  };
+
+  const onShareProfile = async () => {
+    const item = items[currentIndex];
+    if (!item) return;
+
+    const message =
+      item.type === 'user'
+        ? (() => {
+            const u = (item as any).user as User;
+            const name = u?.full_name || 'פרופיל';
+            const age = u?.age ? `, ${u.age}` : '';
+            const city = u?.city ? `\nעיר: ${u.city}` : '';
+            return `Homie – שותפים\n${name}${age}${city}`;
+          })()
+        : (() => {
+            const users = ((item as any).users || []) as User[];
+            const names = users.map((u) => u?.full_name).filter(Boolean).slice(0, 4).join(', ');
+            const suffix = users.length > 4 ? ` +${users.length - 4}` : '';
+            return `Homie – שותפים\nקבוצה: ${names || 'פרופיל משותף'}${suffix}`;
+          })();
+
+    try {
+      await Share.share({ message });
+    } catch {
+      // ignore
+    }
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={[styles.topBar, { top: insets.top + 8 }]}>
@@ -894,72 +1011,73 @@ export default function PartnersScreen() {
           </View>
         ) : (
           <View>
-            <GestureDetector gesture={swipeGesture}>
-              <Animated.View
-                style={[
-                  styles.animatedCard,
-                  cardAnimatedStyle,
-                ]}
-              >
-              {items[currentIndex].type === 'user' ? (
-                <RoommateCard
-                  user={(items[currentIndex] as any).user}
-                  matchPercent={matchScores[(items[currentIndex] as any).user.id] ?? null}
-                  onLike={handleLike}
-                  onPass={handlePass}
-                  onOpen={(u) =>
-                    router.push({
-                      pathname: '/(tabs)/user/[id]',
-                      params: { id: u.id, from: 'partners' } as any,
-                    })
-                  }
-                />
-              ) : (
-                <GroupCard
-                  groupId={(items[currentIndex] as any).groupId}
-                  users={(items[currentIndex] as any).users}
-                  apartment={(items[currentIndex] as any).apartment}
-                  matchScores={matchScores}
-                  onLike={(groupId, users) => handleGroupLike(groupId, users)}
-                  onPass={(groupId, users) => handleGroupPass(groupId, users)}
-                  onOpen={(userId: string) =>
-                    router.push({
-                      pathname: '/(tabs)/user/[id]',
-                      params: { id: userId, from: 'partners' } as any,
-                    })
-                  }
-                  onOpenApartment={(apartmentId: string) =>
-                    router.push({
-                      pathname: '/(tabs)/apartment/[id]',
-                      params: { id: apartmentId } as any,
-                    })
-                  }
-                />
-              )}
-              </Animated.View>
-            </GestureDetector>
+            <View style={styles.cardStack}>
+              {items[currentIndex + 1] ? (
+                <Animated.View pointerEvents="none" style={[styles.behindCard, behindCardAnimatedStyle]}>
+                  {renderBrowseItem(items[currentIndex + 1])}
+                </Animated.View>
+              ) : null}
 
-            <View style={styles.arrowRow}>
-              <TouchableOpacity
-                activeOpacity={0.9}
-                style={[styles.arrowBtn, currentIndex === 0 && styles.arrowBtnDisabled]}
-                onPress={goPrev}
-                disabled={currentIndex === 0}
-              >
-                <ChevronRight size={22} color="#FFFFFF" />
-              </TouchableOpacity>
-              <View style={{ flex: 1 }} />
-              <TouchableOpacity
-                activeOpacity={0.9}
-                style={[
-                  styles.arrowBtn,
-                  currentIndex === items.length - 1 && styles.arrowBtnDisabled,
-                ]}
-                onPress={goNext}
-                disabled={currentIndex === items.length - 1}
-              >
-                <ChevronLeft size={22} color="#FFFFFF" />
-              </TouchableOpacity>
+              <GestureDetector gesture={swipeGesture}>
+                <Animated.View style={[styles.animatedCard, cardAnimatedStyle]}>
+                  {renderBrowseItem(items[currentIndex])}
+
+                  {/* Right swipe (LIKE) overlay */}
+                  <Animated.View
+                    pointerEvents="none"
+                    style={[styles.swipeOverlay, styles.likeOverlay, likeOverlayAnimatedStyle]}
+                  >
+                    <View style={styles.swipeOverlayIconWrap}>
+                      <Heart size={64} color="#FFFFFF" fill="#FFFFFF" />
+                    </View>
+                  </Animated.View>
+
+                  {/* Left swipe (PASS) overlay */}
+                  <Animated.View
+                    pointerEvents="none"
+                    style={[styles.swipeOverlay, styles.passOverlay, passOverlayAnimatedStyle]}
+                  >
+                    <View style={styles.swipeOverlayIconWrap}>
+                      <X size={64} color="#FFFFFF" />
+                    </View>
+                  </Animated.View>
+                </Animated.View>
+              </GestureDetector>
+            </View>
+
+            {/* Bottom action buttons (below the card, not on top of it) */}
+            <View style={styles.bottomActions}>
+              <View style={styles.bottomActionsRow}>
+                <TouchableOpacity
+                  activeOpacity={0.9}
+                  style={[styles.actionBtn, styles.actionBtnDanger]}
+                  accessibilityRole="button"
+                  accessibilityLabel="לא מתאים"
+                  onPress={() => triggerSwipe('pass')}
+                >
+                  <X size={26} color="#EF4444" />
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  activeOpacity={0.9}
+                  style={[styles.actionBtn, styles.actionBtnShare]}
+                  accessibilityRole="button"
+                  accessibilityLabel="שיתוף פרופיל"
+                  onPress={onShareProfile}
+                >
+                  <Share2 size={22} color="#111827" />
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  activeOpacity={0.9}
+                  style={[styles.actionBtn, styles.actionBtnLike]}
+                  accessibilityRole="button"
+                  accessibilityLabel="אהבתי"
+                  onPress={() => triggerSwipe('like')}
+                >
+                  <Heart size={26} color="#7C5CFF" fill="#7C5CFF" />
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
         )}
@@ -1251,8 +1369,44 @@ const styles = StyleSheet.create({
   listContent: {
     padding: 16,
   },
+  cardStack: {
+    position: 'relative',
+    height: SWIPE_CARD_MEDIA_HEIGHT,
+  },
+  behindCard: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 1,
+    borderRadius: SWIPE_CARD_RADIUS,
+    overflow: 'hidden',
+  },
   animatedCard: {
-    // separate style for Animated.View wrapper
+    zIndex: 2,
+    borderRadius: SWIPE_CARD_RADIUS,
+    overflow: 'hidden',
+  },
+  swipeOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 10,
+    borderRadius: SWIPE_CARD_RADIUS,
+    overflow: 'hidden',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  swipeOverlayIconWrap: {
+    width: 112,
+    height: 112,
+    borderRadius: 56,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.35)',
+  },
+  likeOverlay: {
+    backgroundColor: 'rgba(124,92,255,0.42)',
+  },
+  passOverlay: {
+    backgroundColor: 'rgba(239,68,68,0.35)',
   },
   emptyContainer: {
     alignItems: 'center',
@@ -1269,23 +1423,43 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#6B7280',
   },
-  arrowRow: {
+  bottomActions: {
+    marginTop: 30,
+    alignItems: 'center',
+  },
+  bottomActionsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 6,
+    justifyContent: 'center',
+    gap: 22,
   },
-  arrowBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+  actionBtn: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
+    shadowColor: '#000',
+    shadowOpacity: 0.14,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 12,
   },
-  arrowBtnDisabled: {
-    opacity: 0.4,
+  actionBtnDanger: {
+    borderWidth: 1,
+    borderColor: 'rgba(239,68,68,0.18)',
+  },
+  actionBtnLike: {
+    borderWidth: 1,
+    borderColor: 'rgba(124,92,255,0.22)',
+  },
+  actionBtnShare: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    shadowOpacity: 0.10,
+    elevation: 10,
   },
   filterOverlay: {
     ...StyleSheet.absoluteFillObject,
@@ -1414,6 +1588,7 @@ function GroupCard({
   onLike,
   onPass,
   onOpenApartment,
+  style,
 }: {
   groupId: string;
   users: User[];
@@ -1423,6 +1598,7 @@ function GroupCard({
   onLike: (groupId: string, users: User[]) => void;
   onPass: (groupId: string, users: User[]) => void;
   onOpenApartment: (apartmentId: string) => void;
+  style?: ViewStyle;
 }) {
   const displayUsers = users.slice(0, 4);
   const extra = users.length - displayUsers.length;
@@ -1432,11 +1608,11 @@ function GroupCard({
     value === null || value === undefined ? '--%' : `${value}%`;
 
   return (
-    <View style={groupStyles.card}>
+    <View style={[groupStyles.card, style]}>
       <View style={groupStyles.gridWrap}>
         {displayUsers.map((u, idx) => {
           const rows = isOneRowLayout ? 1 : Math.ceil(displayUsers.length / 2);
-          const cellHeight = rows === 1 ? 440 : 220;
+          const cellHeight = rows === 1 ? SWIPE_CARD_MEDIA_HEIGHT : SWIPE_CARD_MEDIA_HEIGHT / 2;
           const isLastWithExtra = idx === displayUsers.length - 1 && extra > 0;
           const matchPercent = matchScores?.[u.id] ?? null;
           return (
@@ -1454,7 +1630,7 @@ function GroupCard({
               ]}
             >
               <View style={groupStyles.cellImageWrap}>
-                <Image source={{ uri: u.avatar_url || DEFAULT_AVATAR }} style={groupStyles.cellImage} />
+                <Image source={{ uri: u.avatar_url || DEFAULT_AVATAR }} style={groupStyles.cellImage} resizeMode="cover" />
                 <View style={[groupStyles.matchBadge, groupStyles.matchBadgeLarge]}>
                   <Text style={groupStyles.matchBadgeValue}>{formatMatchPercent(matchPercent)}</Text>
                   <Text style={groupStyles.matchBadgeLabel}>התאמה</Text>
