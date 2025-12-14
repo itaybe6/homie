@@ -20,6 +20,7 @@ import { authService } from '@/lib/auth';
 import { useAuthStore } from '@/stores/authStore';
 import { Home, Camera, Pencil, X, ChevronRight, Eye, EyeOff, Check } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
+import * as ImageManipulator from 'expo-image-manipulator';
 import { BlurView } from 'expo-blur';
 import { supabase } from '@/lib/supabase';
 import { autocompleteCities, createSessionToken, PlacePrediction } from '@/lib/googlePlaces';
@@ -109,20 +110,23 @@ export default function RegisterScreen() {
 
   const uploadAvatar = async (userId: string, uri: string) => {
     try {
-      // On native, prefer arrayBuffer over Blob/File
-      const match = uri.match(/\.([a-zA-Z0-9]{1,5})(?:\?.*)?$/);
-      const ext = match ? match[1].toLowerCase() : 'jpg';
-      const fileName = `${userId}-${Date.now()}.${ext}`;
+      // Compress and resize avatar before upload
+      const compressed = await ImageManipulator.manipulateAsync(
+        uri,
+        [{ resize: { width: 800 } }],
+        { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG }
+      );
+      const fileName = `${userId}-${Date.now()}.jpg`;
       const filePath = `users/${userId}/${fileName}`;
 
-      const res = await fetch(uri);
+      const res = await fetch(compressed.uri);
       const arrayBuffer = await res.arrayBuffer();
 
       const { error: uploadError } = await supabase.storage
         .from('user-images')
         .upload(filePath, arrayBuffer, {
           upsert: true,
-          contentType: `image/${ext === 'png' ? 'png' : 'jpeg'}`,
+          contentType: 'image/jpeg',
         });
       if (uploadError) throw uploadError;
 

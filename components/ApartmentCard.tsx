@@ -2,8 +2,9 @@ import { View, Text, StyleSheet, TouchableOpacity, Image, GestureResponderEvent,
 import { supabase } from '@/lib/supabase';
 import { MapPin, Bed, Bath, Users, Heart, Zap } from 'lucide-react-native';
 import { Apartment } from '@/types/database';
-import { useState, useMemo, useEffect, useRef } from 'react';
+import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useAuthStore } from '@/stores/authStore';
 
 interface ApartmentCardProps {
   apartment: Apartment;
@@ -298,7 +299,7 @@ export default function ApartmentCard({
             style={styles.gradientOverlay}
           />
           {/* Favorite */}
-          <FavoriteButton />
+          <FavoriteButton apartmentId={apartment.id} />
           {/* Carousel dots */}
           <View style={styles.dotsRow}>
             {carouselImages.map((_, i) => (
@@ -353,13 +354,74 @@ export default function ApartmentCard({
   );
 }
 
-function FavoriteButton() {
+function FavoriteButton({ apartmentId }: { apartmentId: string }) {
+  const { user } = useAuthStore();
   const [isFavorite, setIsFavorite] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
 
-  const onToggle = (e: GestureResponderEvent) => {
+  // Check if this apartment is in the user's likes on mount
+  useEffect(() => {
+    const checkIfLiked = async () => {
+      if (!user?.id) return;
+      try {
+        const { data, error } = await supabase
+          .from('users')
+          .select('likes')
+          .eq('id', user.id)
+          .single();
+
+        if (!error && data?.likes) {
+          setIsFavorite(data.likes.includes(apartmentId));
+        }
+      } catch (err) {
+        console.error('Error checking like status:', err);
+      }
+    };
+    checkIfLiked();
+  }, [user?.id, apartmentId]);
+
+  const onToggle = async (e: GestureResponderEvent) => {
     // Prevent triggering the card onPress
     e.stopPropagation();
-    setIsFavorite((v) => !v);
+    
+    if (!user?.id || isLoading) return;
+    
+    setIsLoading(true);
+    try {
+      // Get current likes
+      const { data: userData, error: fetchError } = await supabase
+        .from('users')
+        .select('likes')
+        .eq('id', user.id)
+        .single();
+
+      if (fetchError) throw fetchError;
+
+      const currentLikes: string[] = userData?.likes || [];
+      let newLikes: string[];
+
+      if (isFavorite) {
+        // Remove from likes
+        newLikes = currentLikes.filter((id) => id !== apartmentId);
+      } else {
+        // Add to likes
+        newLikes = [...currentLikes, apartmentId];
+      }
+
+      // Update in database
+      const { error: updateError } = await supabase
+        .from('users')
+        .update({ likes: newLikes, updated_at: new Date().toISOString() })
+        .eq('id', user.id);
+
+      if (updateError) throw updateError;
+
+      setIsFavorite(!isFavorite);
+    } catch (err) {
+      console.error('Error toggling like:', err);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -367,16 +429,18 @@ function FavoriteButton() {
       onPress={onToggle}
       activeOpacity={0.9}
       accessibilityRole="button"
-      accessibilityLabel={isFavorite ? 'הסר ממועדפים' : 'הוסף למועדפים'}
+      accessibilityLabel={isFavorite ? 'הסר מאהבתי' : 'הוסף לאהבתי'}
+      disabled={isLoading}
       style={[
         styles.favoriteButton,
         isFavorite ? styles.favoriteButtonActive : styles.favoriteButtonInactive,
+        isLoading && { opacity: 0.6 },
       ]}
     >
       <Heart
         size={18}
         color={isFavorite ? '#FFFFFF' : '#1F2937'}
-        fill={isFavorite ? '#FFFFFF' : '#1F2937'}
+        fill={isFavorite ? '#FFFFFF' : 'transparent'}
       />
     </TouchableOpacity>
   );

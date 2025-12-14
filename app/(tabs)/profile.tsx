@@ -19,6 +19,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LogOut, Edit, Save, X, Plus, MapPin, Inbox, Trash2, Settings, ClipboardList } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
+import * as ImageManipulator from 'expo-image-manipulator';
 import { supabase } from '@/lib/supabase';
 import { authService } from '@/lib/auth';
 import { useAuthStore } from '@/stores/authStore';
@@ -477,10 +478,15 @@ export default function ProfileScreen() {
 
       setIsSaving(true);
       const asset = result.assets[0];
-      const response = await fetch(asset.uri);
+      // Compress and resize avatar before upload
+      const compressed = await ImageManipulator.manipulateAsync(
+        asset.uri,
+        [{ resize: { width: 800 } }],
+        { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG }
+      );
+      const response = await fetch(compressed.uri);
       const arrayBuffer = await response.arrayBuffer();
-      const fileExt = (asset.fileName || 'avatar.jpg').split('.').pop() || 'jpg';
-      const fileName = `${user.id}-${Date.now()}.${fileExt}`;
+      const fileName = `${user.id}-${Date.now()}.jpg`;
       const filePath = `users/${user.id}/${fileName}`;
       // Use arrayBuffer on native (Blob/File may not exist)
       const filePayload: any = arrayBuffer as any;
@@ -528,10 +534,15 @@ export default function ProfileScreen() {
 
       setIsAddingImage(true);
       const asset = result.assets[0];
-      const response = await fetch(asset.uri);
+      // Compress and resize image before upload
+      const compressed = await ImageManipulator.manipulateAsync(
+        asset.uri,
+        [{ resize: { width: 1200 } }],
+        { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG }
+      );
+      const response = await fetch(compressed.uri);
       const arrayBuffer = await response.arrayBuffer();
-      const fileExt = (asset.fileName || 'photo.jpg').split('.').pop() || 'jpg';
-      const fileName = `${user.id}-${Date.now()}.${fileExt}`;
+      const fileName = `${user.id}-${Date.now()}.jpg`;
       const filePath = `users/${user.id}/gallery/${fileName}`;
       const filePayload: any = arrayBuffer as any;
 

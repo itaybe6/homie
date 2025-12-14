@@ -161,45 +161,21 @@ export default function AddApartmentScreen() {
   const normalizeImageForUpload = async (
     sourceUri: string,
   ): Promise<{ uri: string; ext: string; mime: string }> => {
-    const lowerUri = sourceUri.toLowerCase();
-    const match = lowerUri.match(/\.([a-z0-9]{1,5})(?:\?.*)?$/);
-    const rawExt = match ? match[1] : '';
-    const ext = rawExt === 'jpeg' ? 'jpg' : rawExt;
-    const isHeic = ext === 'heic' || ext === 'heif';
+    const MAX_WIDTH = 1200; // Maximum width for uploaded images (height scales proportionally)
+    const COMPRESSION_QUALITY = 0.7; // Compression quality (0-1)
 
-    if (isHeic) {
-      try {
-        const converted = await ImageManipulator.manipulateAsync(
-          sourceUri,
-          [],
-          { compress: 0.9, format: ImageManipulator.SaveFormat.JPEG },
-        );
-        return { uri: converted.uri, ext: 'jpg', mime: 'image/jpeg' };
-      } catch (err) {
-        console.warn('Failed to convert HEIC image', err);
-        throw new Error('לא הצלחנו להמיר קובץ HEIC, נסה שמירה כ-JPEG');
-      }
-    }
-
-    if (ext === 'png') {
-      return { uri: sourceUri, ext: 'png', mime: 'image/png' };
-    }
-
-    if (ext === 'jpg') {
-      return { uri: sourceUri, ext: 'jpg', mime: 'image/jpeg' };
-    }
-
-    // Unknown extension (blob URIs, missing suffix, etc.) → convert to JPEG for safety
     try {
-      const converted = await ImageManipulator.manipulateAsync(
+      // Always resize and compress images to save storage space
+      // Specifying only width maintains aspect ratio automatically
+      const compressed = await ImageManipulator.manipulateAsync(
         sourceUri,
-        [],
-        { compress: 0.9, format: ImageManipulator.SaveFormat.JPEG },
+        [{ resize: { width: MAX_WIDTH } }],
+        { compress: COMPRESSION_QUALITY, format: ImageManipulator.SaveFormat.JPEG },
       );
-      return { uri: converted.uri, ext: 'jpg', mime: 'image/jpeg' };
+      return { uri: compressed.uri, ext: 'jpg', mime: 'image/jpeg' };
     } catch (err) {
-      console.warn('Failed to normalize image', err);
-      throw new Error('לא הצלחנו לעבד את התמונה, נסה פורמט JPG או PNG');
+      console.warn('Failed to compress image', err);
+      throw new Error('לא הצלחנו לעבד את התמונה, נסה שוב');
     }
   };
 

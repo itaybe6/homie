@@ -24,6 +24,7 @@ import { supabase } from '@/lib/supabase';
 import { Apartment, User } from '@/types/database';
 import { fetchUserSurvey, upsertUserSurvey } from '@/lib/survey';
 import * as ImagePicker from 'expo-image-picker';
+import * as ImageManipulator from 'expo-image-manipulator';
 
 export default function ProfileSettingsScreen() {
   const router = useRouter();
@@ -588,10 +589,15 @@ export default function ProfileSettingsScreen() {
 
       setIsUploadingAvatar(true);
       const asset = result.assets[0];
-      const response = await fetch(asset.uri);
+      // Compress and resize avatar before upload
+      const compressed = await ImageManipulator.manipulateAsync(
+        asset.uri,
+        [{ resize: { width: 800 } }],
+        { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG }
+      );
+      const response = await fetch(compressed.uri);
       const arrayBuffer = await response.arrayBuffer();
-      const fileExt = (asset.fileName || 'avatar.jpg').split('.').pop() || 'jpg';
-      const fileName = `${user.id}-${Date.now()}.${fileExt}`;
+      const fileName = `${user.id}-${Date.now()}.jpg`;
       const filePath = `users/${user.id}/${fileName}`;
       const filePayload: any = arrayBuffer as any;
 
@@ -1616,10 +1622,15 @@ export default function ProfileSettingsScreen() {
                         setEditUpdatingImages(true);
                         const newUrls: string[] = [];
                         for (const asset of result.assets) {
-                          const response = await fetch(asset.uri);
+                          // Compress and resize image before upload
+                          const compressed = await ImageManipulator.manipulateAsync(
+                            asset.uri,
+                            [{ resize: { width: 1200 } }],
+                            { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG }
+                          );
+                          const response = await fetch(compressed.uri);
                           const arrayBuffer = await response.arrayBuffer();
-                          const fileExt = (asset.fileName || 'image.jpg').split('.').pop() || 'jpg';
-                          const fileName = `${user.id}-${Date.now()}-${Math.random().toString(36).slice(2)}.${fileExt}`;
+                          const fileName = `${user.id}-${Date.now()}-${Math.random().toString(36).slice(2)}.jpg`;
                           const filePath = `users/${user.id}/gallery/${fileName}`;
                           const filePayload: any = arrayBuffer as any;
                           const { error: upErr } = await supabase.storage
