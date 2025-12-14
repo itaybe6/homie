@@ -1400,7 +1400,7 @@ export default function ApartmentDetailsScreen() {
                                 </View>
                               </View>
                               <View style={styles.candidateRight}>
-                                <UserPlus size={16} color="#A78BFA" />
+                                <UserPlus size={16} color="#4C1D95" />
                               </View>
                             </TouchableOpacity>
                           );
@@ -1430,7 +1430,7 @@ export default function ApartmentDetailsScreen() {
                           </View>
                         </View>
                         <View style={styles.candidateRight}>
-                          <UserPlus size={16} color="#A78BFA" />
+                          <UserPlus size={16} color="#4C1D95" />
                         </View>
                       </TouchableOpacity>
                     ))
@@ -1469,7 +1469,13 @@ export default function ApartmentDetailsScreen() {
                 <Text style={styles.confirmCancelText}>{confirmState.cancelLabel || 'ביטול'}</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.confirmBtn, styles.confirmApprove]}
+                style={[
+                  styles.confirmBtn,
+                  styles.confirmApprove,
+                  (confirmState.confirmLabel || '').includes('הסר') || (confirmState.title || '').includes('הסרה')
+                    ? styles.confirmApproveDestructive
+                    : styles.confirmApprovePrimary,
+                ]}
                 onPress={() => {
                   const fn = confirmState.onConfirm;
                   setConfirmState((s) => ({ ...s, visible: false }));
@@ -1477,7 +1483,16 @@ export default function ApartmentDetailsScreen() {
                 }}
                 activeOpacity={0.9}
               >
-                <Text style={styles.confirmApproveText}>{confirmState.confirmLabel || 'אישור'}</Text>
+                <Text
+                  style={[
+                    styles.confirmApproveText,
+                    (confirmState.confirmLabel || '').includes('הסר') || (confirmState.title || '').includes('הסרה')
+                      ? styles.confirmApproveDestructiveText
+                      : styles.confirmApprovePrimaryText,
+                  ]}
+                >
+                  {confirmState.confirmLabel || 'אישור'}
+                </Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -2050,18 +2065,28 @@ const styles = StyleSheet.create({
   modalOverlay: {
     flex: 1,
     justifyContent: 'flex-end',
-    backgroundColor: 'rgba(0,0,0,0.45)',
+    backgroundColor: 'rgba(17,24,39,0.45)',
   },
   modalBackdrop: {
     flex: 1,
   },
   sheet: {
-    backgroundColor: '#141420',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
     overflow: 'hidden',
-    maxHeight: '70%',
+    maxHeight: '75%',
     writingDirection: 'rtl',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    ...(Platform.OS === 'android'
+      ? { elevation: 18 }
+      : {
+          shadowColor: '#111827',
+          shadowOpacity: 0.16,
+          shadowRadius: 18,
+          shadowOffset: { width: 0, height: -8 },
+        }),
   },
   sheetHeader: {
     flexDirection: 'row',
@@ -2069,7 +2094,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingVertical: 14,
-    backgroundColor: '#1B1B28',
+    backgroundColor: '#4C1D95',
   },
   sheetTitle: {
     color: '#FFFFFF',
@@ -2077,12 +2102,12 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   sheetCount: {
-    color: '#C9CDD6',
+    color: 'rgba(255,255,255,0.85)',
     fontSize: 13,
     fontWeight: '700',
   },
   sectionHeading: {
-    color: '#C9CDD6',
+    color: '#6B7280',
     fontSize: 13,
     fontWeight: '700',
     textAlign: 'right',
@@ -2093,7 +2118,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: 'rgba(255,255,255,0.18)',
   },
   sheetContent: {
     paddingHorizontal: 16,
@@ -2110,13 +2135,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     height: 40,
     borderRadius: 10,
-    backgroundColor: '#17171F',
+    backgroundColor: '#F3F4F6',
     borderWidth: 1,
-    borderColor: '#2A2A37',
+    borderColor: '#E5E7EB',
   },
   searchInput: {
     flex: 1,
-    color: '#FFFFFF',
+    color: '#111827',
     fontSize: 14,
     textAlign: 'right',
   },
@@ -2133,17 +2158,25 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 12,
     padding: 12,
-    backgroundColor: '#17171F',
+    backgroundColor: '#FFFFFF',
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#2A2A37',
+    borderColor: '#E5E7EB',
+    ...(Platform.OS === 'android'
+      ? { elevation: 2 }
+      : {
+          shadowColor: '#111827',
+          shadowOpacity: 0.06,
+          shadowRadius: 10,
+          shadowOffset: { width: 0, height: 4 },
+        }),
   },
   candidateLeft: {
     width: 48,
     height: 48,
     borderRadius: 24,
     overflow: 'hidden',
-    backgroundColor: '#1F1F29',
+    backgroundColor: '#F3F4F6',
   },
   candidateAvatar: {
     width: 48,
@@ -2156,12 +2189,12 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(124,92,255,0.10)',
+    backgroundColor: '#F3E8FF',
     borderWidth: 1,
-    borderColor: 'rgba(124,92,255,0.25)',
+    borderColor: '#A78BFA',
   },
   candidateName: {
-    color: '#FFFFFF',
+    color: '#111827',
     fontSize: 15,
     fontWeight: '800',
     marginBottom: 4,
@@ -2174,13 +2207,13 @@ const styles = StyleSheet.create({
   candidateBadge: {
     paddingHorizontal: 8,
     paddingVertical: 4,
-    backgroundColor: '#1F1F29',
+    backgroundColor: '#F3E8FF',
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)',
+    borderColor: 'rgba(167,139,250,0.55)',
   },
   candidateBadgeText: {
-    color: '#C9CDD6',
+    color: '#4C1D95',
     fontSize: 11,
     fontWeight: '700',
   },
@@ -2198,8 +2231,8 @@ const styles = StyleSheet.create({
     height: 32,
     borderRadius: 16,
     borderWidth: 2,
-    borderColor: 'rgba(15,15,20,0.9)',
-    backgroundColor: '#1F1F29',
+    borderColor: '#FFFFFF',
+    backgroundColor: '#F3F4F6',
   },
   groupAvatarMd: {
     width: 32,
@@ -2207,8 +2240,8 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     marginLeft: -8,
     borderWidth: 2,
-    borderColor: 'rgba(15,15,20,0.9)',
-    backgroundColor: '#1F1F29',
+    borderColor: '#FFFFFF',
+    backgroundColor: '#F3F4F6',
   },
   groupAvatarSm: {
     width: 32,
@@ -2216,8 +2249,8 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     marginLeft: -8,
     borderWidth: 2,
-    borderColor: 'rgba(15,15,20,0.9)',
-    backgroundColor: '#1F1F29',
+    borderColor: '#FFFFFF',
+    backgroundColor: '#F3F4F6',
   },
   avatarLarge: {
     width: 48,
@@ -2226,7 +2259,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#1F1F29',
   },
   memberName: {
-    color: '#FFFFFF',
+    color: '#111827',
     fontSize: 15,
     fontWeight: '700',
     textAlign: 'right',
@@ -2237,7 +2270,7 @@ const styles = StyleSheet.create({
     textAlign: 'right',
   },
   emptyMembers: {
-    color: '#9DA4AE',
+    color: '#6B7280',
     textAlign: 'center',
     paddingVertical: 12,
   },
@@ -2266,24 +2299,32 @@ const styles = StyleSheet.create({
     bottom: 0,
   },
   confirmCard: {
-    backgroundColor: '#141420',
+    backgroundColor: '#FFFFFF',
     marginHorizontal: 16,
     marginBottom: 0,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#2A2A37',
+    borderColor: '#E5E7EB',
     padding: 16,
     writingDirection: 'rtl',
+    ...(Platform.OS === 'android'
+      ? { elevation: 12 }
+      : {
+          shadowColor: '#111827',
+          shadowOpacity: 0.18,
+          shadowRadius: 18,
+          shadowOffset: { width: 0, height: 10 },
+        }),
   },
   confirmTitle: {
-    color: '#FFFFFF',
+    color: '#111827',
     fontSize: 18,
     fontWeight: '900',
     marginBottom: 8,
     textAlign: 'right',
   },
   confirmMessage: {
-    color: '#C9CDD6',
+    color: '#4B5563',
     fontSize: 14,
     lineHeight: 20,
     marginBottom: 14,
@@ -2302,24 +2343,35 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   confirmCancel: {
-    backgroundColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: '#F3F4F6',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
+    borderColor: '#E5E7EB',
   },
   confirmApprove: {
-    backgroundColor: 'rgba(248,113,113,0.12)',
     borderWidth: 1,
-    borderColor: 'rgba(248,113,113,0.28)',
   },
   confirmCancelText: {
-    color: '#FFFFFF',
+    color: '#111827',
     fontSize: 15,
     fontWeight: '800',
   },
   confirmApproveText: {
-    color: '#F87171',
     fontSize: 15,
     fontWeight: '900',
+  },
+  confirmApprovePrimary: {
+    backgroundColor: '#4C1D95',
+    borderColor: '#4C1D95',
+  },
+  confirmApprovePrimaryText: {
+    color: '#FFFFFF',
+  },
+  confirmApproveDestructive: {
+    backgroundColor: 'rgba(248,113,113,0.12)',
+    borderColor: 'rgba(248,113,113,0.28)',
+  },
+  confirmApproveDestructiveText: {
+    color: '#DC2626',
   },
   viewerRoot: {
     flex: 1,
