@@ -1,6 +1,6 @@
 import { View, Text, StyleSheet, TouchableOpacity, Image, GestureResponderEvent, ScrollView, NativeSyntheticEvent, NativeScrollEvent } from 'react-native';
 import { supabase } from '@/lib/supabase';
-import { MapPin, Bed, Bath, Users, Heart, Zap } from 'lucide-react-native';
+import { MapPin, Bed, Bath, Users, Heart } from 'lucide-react-native';
 import { Apartment } from '@/types/database';
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -201,19 +201,6 @@ export default function ApartmentCard({
   const availableRoommateSlots =
     totalRoommateCapacity !== null ? Math.max(0, totalRoommateCapacity - partnerSlotsUsed) : null;
 
-  const isNew = useMemo(() => {
-    try {
-      const createdIso = (apartment as any).created_at as string | undefined;
-      if (!createdIso) return false;
-      const created = new Date(createdIso);
-      if (Number.isNaN(created.getTime())) return false;
-      const days = (Date.now() - created.getTime()) / (1000 * 60 * 60 * 24);
-      return days <= 14;
-    } catch {
-      return false;
-    }
-  }, [apartment]);
-
   return (
     <View style={styles.card}>
       <View style={styles.imageWrap}>
@@ -304,13 +291,6 @@ export default function ApartmentCard({
               <Text style={styles.priceBadgeCurrency}>₪</Text>
             </Text>
           </View>
-          {/* New */}
-          {isNew ? (
-            <View style={styles.newChip}>
-              <Zap size={12} color="#4C1D95" />
-              <Text style={styles.newChipText}>חדש</Text>
-            </View>
-          ) : null}
         </View>
       </View>
       <TouchableOpacity style={styles.content} onPress={onPress} activeOpacity={0.9} delayPressIn={150}>
@@ -532,23 +512,6 @@ const styles = StyleSheet.create({
     writingDirection: 'rtl',
     textAlign: 'right',
   },
-  newChip: {
-    position: 'absolute',
-    left: 12,
-    bottom: 12,
-    backgroundColor: 'rgba(192,132,252,0.12)',
-    borderRadius: 12,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  newChipText: {
-    color: '#c084fc',
-    fontSize: 12,
-    fontWeight: '800',
-  },
   content: {
     paddingHorizontal: 12,
     paddingTop: 12,
@@ -575,7 +538,7 @@ const styles = StyleSheet.create({
   },
   location: {
     fontSize: 14,
-    color: '#9DA4AE',
+    color: '#4C1D95',
     textAlign: 'right',
     writingDirection: 'rtl',
   },

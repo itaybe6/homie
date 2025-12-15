@@ -212,10 +212,7 @@ export default function MapTabScreen() {
   const pointsCount = useMemo(() => points.features.length, [points.features.length]);
 
   return (
-    <SafeAreaView edges={['top']} style={styles.safeTop}>
-      {/* Spacer under the absolute GlobalTopBar */}
-      <View style={[styles.topBar, { paddingTop: 52, backgroundColor: '#FFFFFF' }]} />
-
+    <SafeAreaView edges={[]} style={styles.safeTop}>
       <View style={styles.mapWrap}>
         <MapboxMap
           accessToken={token}
@@ -270,14 +267,6 @@ const styles = StyleSheet.create({
   safeTop: {
     flex: 1,
     backgroundColor: '#FFFFFF',
-  },
-  topBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingTop: 10,
-    paddingBottom: 8,
   },
   mapWrap: {
     flex: 1,

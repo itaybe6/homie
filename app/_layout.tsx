@@ -17,8 +17,10 @@ export default function RootLayout() {
   const user = useAuthStore((s) => s.user);
   usePushNotifications();
   const pathname = usePathname();
+  const isMapRoute =
+    typeof pathname === 'string' && (pathname === '/map' || pathname === '/(tabs)/map' || pathname.endsWith('/map'));
   const hideGlobalTopBar =
-    typeof pathname === 'string' && pathname.includes('/apartment/');
+    typeof pathname === 'string' && (pathname.includes('/apartment/') || isMapRoute);
   const isAuthRoute = typeof pathname === 'string' && pathname.startsWith('/auth');
   const isAdminRoute = typeof pathname === 'string' && pathname.startsWith('/admin');
   const shouldShowGlobalTopBar = !!user && !hideGlobalTopBar && !isAuthRoute && !isAdminRoute;

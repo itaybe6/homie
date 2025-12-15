@@ -19,7 +19,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 const AnimatedFlatList = Animated.createAnimatedComponent(FlatList as any);
 import { useRouter } from 'expo-router';
 import { Search, SlidersHorizontal, X, Map } from 'lucide-react-native';
-import { getNeighborhoodsForCityName, searchCitiesWithNeighborhoods } from '@/lib/neighborhoods';
+import { getAllCitiesWithNeighborhoods, getNeighborhoodsForCityName } from '@/lib/neighborhoods';
 import { supabase } from '@/lib/supabase';
 import { useApartmentStore } from '@/stores/apartmentStore';
 import { useAuthStore } from '@/stores/authStore';
@@ -33,6 +33,38 @@ export default function HomeScreen() {
   const { apartments, setApartments, isLoading, setLoading } =
     useApartmentStore();
   const { user } = useAuthStore();
+
+  function normalizeIds(value: any): string[] {
+    if (Array.isArray(value)) return value.filter(Boolean);
+    if (typeof value === 'string') {
+      try {
+        const parsed = JSON.parse(value);
+        if (Array.isArray(parsed)) return parsed.filter(Boolean);
+      } catch {}
+      return value
+        .replace(/^{|}$/g, '')
+        .split(',')
+        .map((s: string) => s.replace(/^"+|"+$/g, '').trim())
+        .filter(Boolean);
+    }
+    return [];
+  }
+
+  function getMaxRoommates(apartment: Apartment): number | null {
+    const anyApt = apartment as any;
+    return typeof anyApt?.max_roommates === 'number'
+      ? (anyApt.max_roommates as number)
+      : typeof apartment.roommate_capacity === 'number'
+        ? apartment.roommate_capacity
+        : null;
+  }
+
+  function getAvailableRoommateSlots(apartment: Apartment): number | null {
+    const max = getMaxRoommates(apartment);
+    if (max === null) return null;
+    const used = normalizeIds((apartment as any)?.partner_ids).length;
+    return Math.max(0, max - used);
+  }
   const [searchQuery, setSearchQuery] = useState('');
   const [filteredApartments, setFilteredApartments] = useState<Apartment[]>(
     []
@@ -46,8 +78,11 @@ export default function HomeScreen() {
     maxPrice: '',
     minBedrooms: '',
     minBathrooms: '',
+    minAvailableRoommateSlots: '',
   });
-  const [citySuggestions, setCitySuggestions] = useState<string[]>([]);
+  const [cityOptions] = useState<string[]>(() => getAllCitiesWithNeighborhoods());
+  const [isCityDropdownOpen, setIsCityDropdownOpen] = useState(false);
+  const [citySearchQuery, setCitySearchQuery] = useState('');
   const [neighborhoodOptions, setNeighborhoodOptions] = useState<string[]>([]);
   const [isNeighborhoodDropdownOpen, setIsNeighborhoodDropdownOpen] = useState(false);
   const [neighborhoodSearchQuery, setNeighborhoodSearchQuery] = useState('');
@@ -140,28 +175,17 @@ export default function HomeScreen() {
 
   useEffect(() => {
     filterApartments();
-  }, [searchQuery, apartments, filters]);
+  }, [searchQuery, apartments, filters, chipSelected]);
 
   // no-op
 
   useEffect(() => {
     if (!isFilterOpen) {
       setIsNeighborhoodDropdownOpen(false);
+      setIsCityDropdownOpen(false);
+      setCitySearchQuery('');
     }
   }, [isFilterOpen]);
-
-  // City suggestions (local)
-  useEffect(() => {
-    let active = true;
-    const run = () => {
-      const q = filters.city.trim();
-      if (!q || q.length < 1) { setCitySuggestions([]); return; }
-      const names = searchCitiesWithNeighborhoods(q, 8);
-      if (active) setCitySuggestions(names);
-    };
-    run();
-    return () => { active = false; };
-  }, [filters.city]);
 
   useEffect(() => {
     let cancelled = false;
@@ -221,10 +245,15 @@ export default function HomeScreen() {
     const maxPrice = filters.maxPrice ? Number(filters.maxPrice) : null;
     const minBedrooms = filters.minBedrooms ? Number(filters.minBedrooms) : null;
     const minBathrooms = filters.minBathrooms ? Number(filters.minBathrooms) : null;
+    const minAvailableRoommateSlots = filters.minAvailableRoommateSlots
+      ? Number(filters.minAvailableRoommateSlots)
+      : null;
     const cityFilter = filters.city.trim().toLowerCase();
     const selectedNeighborhoods = (filters.neighborhoods || []).map((n) => n.toLowerCase());
+    const chipFilters = selectedFiltersFromIds(chipSelected || []);
 
     const filtered = apartments.filter((apartment) => {
+      const anyApt = apartment as any;
       // search query
       const matchesSearch = !query
         || apartment.title.toLowerCase().includes(query)
@@ -245,6 +274,27 @@ export default function HomeScreen() {
       if (minBedrooms !== null && apartment.bedrooms < minBedrooms) return false;
       if (minBathrooms !== null && apartment.bathrooms < minBathrooms) return false;
 
+      // Property feature chips (toggles)
+      if (chipFilters.pets_allowed && !anyApt?.pets_allowed) return false;
+      if (chipFilters.is_furnished && !anyApt?.is_furnished) return false;
+      if (chipFilters.wheelchair_accessible && !anyApt?.wheelchair_accessible) return false;
+      if (chipFilters.has_safe_room && !anyApt?.has_safe_room) return false;
+      if (chipFilters.has_elevator && !anyApt?.has_elevator) return false;
+      if (chipFilters.kosher_kitchen && !anyApt?.kosher_kitchen) return false;
+      if (chipFilters.has_air_conditioning && !anyApt?.has_air_conditioning) return false;
+      if (chipFilters.has_solar_heater && !anyApt?.has_solar_heater) return false;
+      if (chipFilters.is_renovated && !anyApt?.is_renovated) return false;
+      if (chipFilters.balcony) {
+        const bc = typeof anyApt?.balcony_count === 'number' ? (anyApt.balcony_count as number) : 0;
+        if (bc <= 0) return false;
+      }
+
+      // roommate slots (available spots for partners)
+      if (minAvailableRoommateSlots !== null) {
+        const available = getAvailableRoommateSlots(apartment);
+        if (available === null || available < minAvailableRoommateSlots) return false;
+      }
+
       // neighborhoods filter (any selected)
       if (selectedNeighborhoods.length > 0) {
         const hoodField = ((apartment as any).neighborhood || '').toLowerCase();
@@ -263,10 +313,21 @@ export default function HomeScreen() {
   };
 
   const clearFilters = () => {
-    setFilters({ city: '', neighborhoods: [], minPrice: '', maxPrice: '', minBedrooms: '', minBathrooms: '' });
-    setCitySuggestions([]);
+    setFilters({
+      city: '',
+      neighborhoods: [],
+      minPrice: '',
+      maxPrice: '',
+      minBedrooms: '',
+      minBathrooms: '',
+      minAvailableRoommateSlots: '',
+    });
+    setChipSelected([]);
+    setIsCityDropdownOpen(false);
+    setCitySearchQuery('');
     setNeighborhoodOptions([]);
     setIsNeighborhoodDropdownOpen(false);
+    setNeighborhoodSearchQuery('');
   };
 
   const handleApartmentPress = (apartment: Apartment) => {
@@ -368,33 +429,63 @@ export default function HomeScreen() {
             <View style={styles.sheetContent}>
               <View style={styles.fieldGroup}> 
                 <Text style={styles.fieldLabel}>עיר</Text>
-                <TextInput
-                  style={styles.fieldInput}
-                  placeholder="לדוגמה: תל אביב-יפו"
-                  placeholderTextColor="#9DA4AE"
-                  value={filters.city}
-                  onChangeText={(t) => {
-                    setFilters((f) => ({ ...f, city: t, neighborhoods: [] }));
-                    setNeighborhoodOptions([]);
+                <TouchableOpacity
+                  style={[styles.fieldInput, styles.selectButton]}
+                  onPress={() => {
+                    setIsCityDropdownOpen(!isCityDropdownOpen);
                     setIsNeighborhoodDropdownOpen(false);
+                    setNeighborhoodSearchQuery('');
                   }}
-                />
-                {citySuggestions.length > 0 ? (
+                >
+                  <Text
+                    style={[
+                      styles.selectButtonText,
+                      !filters.city && styles.selectButtonPlaceholder,
+                    ]}
+                  >
+                    {filters.city ? filters.city : 'בחר עיר'}
+                  </Text>
+                  <Text style={styles.selectButtonArrow}>▼</Text>
+                </TouchableOpacity>
+                {isCityDropdownOpen ? (
                   <View style={styles.suggestionsBox}>
-                    {citySuggestions.map((name) => (
-                      <TouchableOpacity
-                        key={name}
-                        style={styles.suggestionItem}
-                        onPress={() => {
-                          setFilters((f) => ({ ...f, city: name, neighborhoods: [] }));
-                          setCitySuggestions([]);
-                          setNeighborhoodOptions([]);
-                          setIsNeighborhoodDropdownOpen(false);
-                        }}
-                      >
-                        <Text style={styles.suggestionText}>{name}</Text>
-                      </TouchableOpacity>
-                    ))}
+                    <TextInput
+                      style={styles.dropdownSearchInput}
+                      placeholder="חפש עיר..."
+                      placeholderTextColor="#9DA4AE"
+                      value={citySearchQuery}
+                      onChangeText={setCitySearchQuery}
+                    />
+                    <ScrollView style={styles.dropdownScroll} nestedScrollEnabled>
+                      {(citySearchQuery
+                        ? cityOptions.filter((name) =>
+                            name.toLowerCase().includes(citySearchQuery.toLowerCase())
+                          )
+                        : cityOptions
+                      )
+                        .slice(0, 100)
+                        .map((name) => (
+                          <TouchableOpacity
+                            key={name}
+                            style={[
+                              styles.suggestionItem,
+                              filters.city === name ? styles.suggestionItemSelected : null,
+                            ]}
+                            onPress={() => {
+                              setFilters((f) => ({ ...f, city: name, neighborhoods: [] }));
+                              setIsCityDropdownOpen(false);
+                              setCitySearchQuery('');
+                              setNeighborhoodOptions([]);
+                              setIsNeighborhoodDropdownOpen(false);
+                              setNeighborhoodSearchQuery('');
+                            }}
+                          >
+                            <Text style={[styles.suggestionText, filters.city === name ? styles.suggestionTextSelected : null]}>
+                              {filters.city === name ? '✓ ' : ''}{name}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                    </ScrollView>
                   </View>
                 ) : null}
               </View>
@@ -441,7 +532,6 @@ export default function HomeScreen() {
                       placeholderTextColor="#9DA4AE"
                       value={neighborhoodSearchQuery}
                       onChangeText={setNeighborhoodSearchQuery}
-                      autoFocus
                     />
                     <ScrollView style={styles.dropdownScroll} nestedScrollEnabled>
                       {(neighborhoodSearchQuery
@@ -456,7 +546,7 @@ export default function HomeScreen() {
                             key={name}
                             style={[
                               styles.suggestionItem,
-                              (filters.neighborhoods || []).includes(name) ? { backgroundColor: '#1B1C27' } : null,
+                              (filters.neighborhoods || []).includes(name) ? styles.suggestionItemSelected : null,
                             ]}
                             onPress={() => {
                               setFilters((f) => {
@@ -467,7 +557,12 @@ export default function HomeScreen() {
                               });
                             }}
                           >
-                            <Text style={styles.suggestionText}>
+                            <Text
+                              style={[
+                                styles.suggestionText,
+                                (filters.neighborhoods || []).includes(name) ? styles.suggestionTextSelected : null,
+                              ]}
+                            >
                               {(filters.neighborhoods || []).includes(name) ? '✓ ' : ''}{name}
                             </Text>
                           </TouchableOpacity>
@@ -530,6 +625,24 @@ export default function HomeScreen() {
                         key={`bath-${n}`}
                         style={[styles.chip, selected && styles.chipSelected]}
                         onPress={() => setFilters((f) => ({ ...f, minBathrooms: selected ? '' : String(n) }))}
+                      >
+                        <Text style={[styles.chipText, selected && styles.chipTextSelected]}>{n}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </View>
+
+              <View style={styles.fieldGroup}>
+                <Text style={styles.fieldLabel}>מקומות פנויים לשותפים (מינימום)</Text>
+                <View style={styles.chipsRow}>
+                  {[1,2,3,4].map((n) => {
+                    const selected = String(n) === filters.minAvailableRoommateSlots;
+                    return (
+                      <TouchableOpacity
+                        key={`slots-${n}`}
+                        style={[styles.chip, selected && styles.chipSelected]}
+                        onPress={() => setFilters((f) => ({ ...f, minAvailableRoommateSlots: selected ? '' : String(n) }))}
                       >
                         <Text style={[styles.chipText, selected && styles.chipTextSelected]}>{n}</Text>
                       </TouchableOpacity>
@@ -663,12 +776,15 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#111827',
     textAlign: 'right',
+    writingDirection: 'rtl',
   },
   searchInput: {
     flex: 1,
     paddingVertical: 10,
     fontSize: 15,
     color: '#111827',
+    textAlign: 'right',
+    writingDirection: 'rtl',
   },
   heroCard: {
     backgroundColor: '#FFFFFF',
@@ -703,7 +819,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   sheetHeader: {
-    flexDirection: 'row',
+    flexDirection: 'row-reverse',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
@@ -747,9 +863,10 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     color: '#111827',
     textAlign: 'right',
+    writingDirection: 'rtl',
   },
   rowBetween: {
-    flexDirection: 'row',
+    flexDirection: 'row-reverse',
     justifyContent: 'space-between',
     gap: 12,
   },
@@ -757,7 +874,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   chipsRow: {
-    flexDirection: 'row',
+    flexDirection: 'row-reverse',
     gap: 8,
   },
   chip: {
@@ -781,7 +898,7 @@ const styles = StyleSheet.create({
     color: '#4C1D95',
   },
   sheetFooter: {
-    flexDirection: 'row',
+    flexDirection: 'row-reverse',
     alignItems: 'center',
     justifyContent: 'space-between',
     padding: 16,
@@ -845,19 +962,29 @@ const styles = StyleSheet.create({
     borderBottomColor: '#F1F5F9',
   },
   suggestionText: {
-    color: '#111827',
+    color: '#4C1D95',
     fontSize: 14,
     textAlign: 'right',
+    writingDirection: 'rtl',
+  },
+  suggestionItemSelected: {
+    backgroundColor: '#4C1D95',
+  },
+  suggestionTextSelected: {
+    color: '#FFFFFF',
+    fontWeight: '700',
   },
   selectButton: {
-    flexDirection: 'row',
+    flexDirection: 'row-reverse',
     alignItems: 'center',
     justifyContent: 'space-between',
   },
   selectButtonText: {
     flex: 1,
-    color: '#111827',
+    color: '#4C1D95',
     fontSize: 14,
+    textAlign: 'right',
+    writingDirection: 'rtl',
   },
   selectButtonPlaceholder: {
     color: '#9CA3AF',
@@ -865,7 +992,7 @@ const styles = StyleSheet.create({
   selectButtonArrow: {
     color: '#9CA3AF',
     fontSize: 12,
-    marginLeft: 8,
+    marginRight: 8,
   },
   dropdownSearchInput: {
     backgroundColor: '#FFFFFF',
@@ -877,6 +1004,7 @@ const styles = StyleSheet.create({
     borderColor: '#E5E7EB',
     color: '#111827',
     textAlign: 'right',
+    writingDirection: 'rtl',
     marginBottom: 8,
     marginHorizontal: 8,
     marginTop: 8,
