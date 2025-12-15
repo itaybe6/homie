@@ -11,6 +11,7 @@ export interface User {
   avatar_url?: string;
   image_urls?: string[]; // up to 6 additional images
   favorites?: string[]; // national IDs of favorited users
+  likes?: string[]; // IDs of apartments the user has liked
   created_at: string;
   updated_at: string;
 }

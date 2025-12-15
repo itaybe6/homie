@@ -1,10 +1,10 @@
 import { Tabs, useRouter, usePathname } from 'expo-router';
-import { Home, User, Users } from 'lucide-react-native';
-import { BlurView } from 'expo-blur';
-import { Platform, StyleSheet, Alert } from 'react-native';
+import Ionicons from '@expo/vector-icons/Ionicons';
+import { StyleSheet, Alert } from 'react-native';
 import { useEffect, useRef } from 'react';
 import { useAuthStore } from '@/stores/authStore';
 import { fetchUserSurvey } from '@/lib/survey';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function TabLayout() {
   const router = useRouter();
@@ -13,6 +13,7 @@ export default function TabLayout() {
   const hasPromptedRef = useRef(false);
   const prevUserIdRef = useRef<string | null>(null);
   const isCheckingSurveyRef = useRef(false);
+  const insets = useSafeAreaInsets();
 
   useEffect(() => {
     // Admins should not see the regular tabs – redirect them into admin
@@ -80,68 +81,71 @@ export default function TabLayout() {
         headerShown: false,
         tabBarShowLabel: true,
         tabBarHideOnKeyboard: true,
-        tabBarActiveTintColor: '#FFFFFF',
-        tabBarInactiveTintColor: 'rgba(255,255,255,0.7)',
+        tabBarActiveTintColor: '#4C1D95',
+        tabBarInactiveTintColor: '#6B7280',
         tabBarStyle: {
-          position: 'absolute',
-          left: 16,
-          right: 16,
-          bottom: 20,
-          height: 72,
-          borderRadius: 24,
-          borderTopWidth: 0,
-          overflow: 'hidden',
-          backgroundColor: 'rgba(28,28,30,0.6)',
-          paddingBottom: 6,
+          backgroundColor: '#FFFFFF',
+          borderTopColor: '#E5E7EB',
+          borderTopWidth: StyleSheet.hairlineWidth,
+          height: Math.max(56, 56 + insets.bottom),
+          paddingBottom: Math.max(6, insets.bottom),
           paddingTop: 6,
-          ...(Platform.OS === 'ios'
-            ? {
-                shadowColor: '#000',
-                shadowOpacity: 0.15,
-                shadowRadius: 20,
-                shadowOffset: { width: 0, height: 10 },
-              }
-            : { elevation: 20 }),
-        },
-        tabBarBackground: () => (
-          <BlurView tint="dark" intensity={40} style={StyleSheet.absoluteFill} />
-        ),
-        tabBarLabelStyle: {
-          fontSize: 12,
-          fontWeight: '600',
-          marginBottom: Platform.OS === 'ios' ? 0 : 2,
-        },
+          // subtle top shadow to separate from content
+          shadowColor: '#000000',
+          shadowOpacity: 0.08,
+          shadowRadius: 12,
+          shadowOffset: { width: 0, height: -2 },
+          elevation: 10,
+        } as any,
+        tabBarLabelStyle: { fontSize: 12, fontWeight: '600' },
       }}>
-      <Tabs.Screen
-        name="profile"
-        options={{
-          title: 'פרופיל',
-          tabBarIcon: ({ size, color }) => <User size={size} color={color} />,
-        }}
-      />
       <Tabs.Screen
         name="home"
         options={{
-          title: 'דירות',
-          tabBarIcon: ({ size, color }) => <Home size={size} color={color} />,
+          tabBarLabel: 'דירות',
+          tabBarIcon: ({ color }) => <Ionicons name="home" size={24} color={color} />,
         }}
       />
       <Tabs.Screen
         name="partners"
         options={{
-          title: 'שותפים',
-          tabBarIcon: ({ size, color }) => <Users size={size} color={color} />,
+          tabBarLabel: 'שותפים',
+          tabBarIcon: ({ color }) => <Ionicons name="people" size={24} color={color} />,
         }}
       />
-      <Tabs.Screen name="add-apartment" options={{ href: null }} />
+      <Tabs.Screen
+        name="add-apartment"
+        options={{
+          tabBarLabel: 'הוספת דירה',
+          tabBarIcon: ({ color }) => <Ionicons name="add" size={28} color={color} />,
+        }}
+      />
+      <Tabs.Screen
+        name="likes"
+        options={{
+          tabBarLabel: 'אהבתי',
+          tabBarIcon: ({ color }) => <Ionicons name="heart" size={24} color={color} />,
+        }}
+      />
+      <Tabs.Screen
+        name="profile"
+        options={{
+          tabBarLabel: 'פרופיל',
+          tabBarIcon: ({ color }) => <Ionicons name="person" size={24} color={color} />,
+        }}
+      />
       {/* Hide nested detail routes from the tab bar */}
       <Tabs.Screen name="apartment/[id]" options={{ href: null }} />
       <Tabs.Screen name="apartment/edit/[id]" options={{ href: null }} />
       <Tabs.Screen name="user/[id]" options={{ href: null }} />
+      <Tabs.Screen name="group-requests" options={{ href: null }} />
       <Tabs.Screen name="requests" options={{ href: null }} />
       <Tabs.Screen name="match-requests" options={{ href: null }} />
+      <Tabs.Screen name="profile/settings" options={{ href: null }} />
       <Tabs.Screen name="onboarding/survey" options={{ href: null }} />
       <Tabs.Screen name="notifications" options={{ href: null }} />
     </Tabs>
   );
 }
+
+// Removed custom TabPill. Using standard bottom tab bar with icons and labels.

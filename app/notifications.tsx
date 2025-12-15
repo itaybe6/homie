@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import {
-  SafeAreaView,
   View,
   Text,
   StyleSheet,
@@ -18,11 +17,13 @@ import { useAuthStore } from '@/stores/authStore';
 import { Notification } from '@/types/database';
 import { computeGroupAwareLabel } from '@/lib/group';
 import { useNotificationsStore } from '@/stores/notificationsStore';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function NotificationsScreen() {
   const router = useRouter();
   const user = useAuthStore((s) => s.user);
   const setUnreadCount = useNotificationsStore((s) => s.setUnreadCount);
+  const insets = useSafeAreaInsets();
   const [items, setItems] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -274,172 +275,182 @@ export default function NotificationsScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <View style={styles.iconBtnPlaceholder} />
-        <Text style={styles.headerTitle}>התראות</Text>
-        <View style={styles.iconBtnPlaceholder} />
-      </View>
-
-      {loading ? (
-        <View style={styles.centerContainer}>
-          <ActivityIndicator size="large" color="#4C1D95" />
-        </View>
-      ) : (
-        <FlatList
-          data={items}
-          keyExtractor={(item) => item.id}
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#4C1D95" />
-          }
-          contentContainerStyle={[
-            styles.listContent,
-            items.length === 0 ? { flex: 1, justifyContent: 'center' } : null,
-          ]}
-          ListEmptyComponent={
-            <View style={styles.emptyContainer}>
-              <View style={styles.emptyIconWrap}>
-                <Bell size={28} color="#9DA4AE" />
+    <SafeAreaView style={styles.container} edges={['top']}>
+      <View style={{ paddingTop: 52, flex: 1 }}>
+        <View style={styles.pageBody}>
+        {loading ? (
+          <View style={styles.centerContainer}>
+            <ActivityIndicator size="large" color="#8B5CF6" />
+          </View>
+        ) : (
+          <FlatList
+            data={items}
+            keyExtractor={(item) => item.id}
+            refreshControl={
+              <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#4C1D95" />
+            }
+            contentContainerStyle={[
+              styles.listContent,
+              items.length === 0 ? { flex: 1, justifyContent: 'center' } : null,
+            ]}
+            ListEmptyComponent={
+              <View style={styles.emptyContainer}>
+                <View style={styles.emptyIconWrap}>
+                  <Bell size={28} color="#9DA4AE" />
+                </View>
+                <Text style={styles.emptyText}>אין התראות להצגה</Text>
+                <Text style={styles.emptySubtext}>כשתתקבלנה התראות חדשות הן יופיעו כאן</Text>
               </View>
-              <Text style={styles.emptyText}>אין התראות להצגה</Text>
-              <Text style={styles.emptySubtext}>כשתתקבלנה התראות חדשות הן יופיעו כאן</Text>
-            </View>
-          }
-          renderItem={({ item }) => {
-            const sender = sendersById[item.sender_id];
-            const aptId = extractInviteApartmentId(item.description);
-            const apt = aptId ? apartmentsById[aptId] : undefined;
-            const aptImage = apt
-              ? (Array.isArray(apt.image_urls) && apt.image_urls.length ? apt.image_urls[0] : APT_PLACEHOLDER)
-              : null;
-            const senderGroupId = senderGroupIdByUserId[item.sender_id];
-            const isPartnerRequest = isPartnerRequestNotification(item);
-            const groupMemberIds = senderGroupId ? (groupMembersByGroupId[senderGroupId] || []) : [];
-            const groupMembers = groupMemberIds.map((id) => sendersById[id]).filter(Boolean);
-            return (
-              <View style={styles.rowRtl}>
-                <TouchableOpacity
-                  activeOpacity={0.9}
-                  style={styles.bubble}
-                  onPress={() => {
-                    if (aptId) {
-                      router.push({ pathname: '/apartment/[id]', params: { id: aptId } });
-                    } else if (isPartnerRequestNotification(item)) {
-                      router.push({
-                        pathname: '/(tabs)/requests',
-                        params: {
-                          tab: 'incoming',
-                          kind: 'MATCH',
-                          status: 'PENDING',
-                        },
-                      });
-                    }
-                  }}
-                >
-                  <View style={styles.bubbleInner}>
-                    {aptImage ? (
-                      <View style={styles.thumbWrap}>
-                        <Image source={{ uri: aptImage }} style={styles.thumbImg} />
-                      </View>
-                    ) : senderGroupId && groupMembers.length ? (
-                      (() => {
-                        const gridMembers = groupMembers.slice(0, 4);
-                        if (gridMembers.length === 1) {
+            }
+            renderItem={({ item }) => {
+              const sender = sendersById[item.sender_id];
+              const aptId = extractInviteApartmentId(item.description);
+              const apt = aptId ? apartmentsById[aptId] : undefined;
+              const aptImage = apt
+                ? (Array.isArray(apt.image_urls) && apt.image_urls.length ? apt.image_urls[0] : APT_PLACEHOLDER)
+                : null;
+              const senderGroupId = senderGroupIdByUserId[item.sender_id];
+              const isPartnerRequest = isPartnerRequestNotification(item);
+              const groupMemberIds = senderGroupId ? (groupMembersByGroupId[senderGroupId] || []) : [];
+              const groupMembers = groupMemberIds.map((id) => sendersById[id]).filter(Boolean);
+              return (
+                <View style={styles.rowRtl}>
+                  <TouchableOpacity
+                    activeOpacity={0.9}
+                    style={styles.bubble}
+                    onPress={() => {
+                      if (aptId) {
+                        router.push({ pathname: '/apartment/[id]', params: { id: aptId } });
+                      } else if (isPartnerRequestNotification(item)) {
+                        router.push({
+                          pathname: '/(tabs)/requests',
+                          params: {
+                            tab: 'incoming',
+                            kind: 'MATCH',
+                            status: 'PENDING',
+                          },
+                        });
+                      }
+                    }}
+                  >
+                    <View style={styles.bubbleInner}>
+                      {aptImage ? (
+                        <View style={styles.thumbWrap}>
+                          <Image source={{ uri: aptImage }} style={styles.thumbImg} />
+                        </View>
+                      ) : senderGroupId && groupMembers.length ? (
+                        (() => {
+                          const gridMembers = groupMembers.slice(0, 4);
+                          if (gridMembers.length === 1) {
+                            return (
+                              <View style={styles.thumbWrap}>
+                                <Image
+                                  source={{ uri: gridMembers[0]?.avatar_url || DEFAULT_AVATAR }}
+                                  style={{ width: '100%', height: '100%' }}
+                                  resizeMode="cover"
+                                />
+                              </View>
+                            );
+                          }
+                          const isThree = gridMembers.length === 3;
+                          const rows = isThree ? 1 : Math.ceil(gridMembers.length / 2);
+                          const cellHeightPct = rows === 1 ? '100%' : (`${100 / rows}%` as any);
+                          const cellWidthPct = isThree ? '33.3333%' : '50%';
                           return (
                             <View style={styles.thumbWrap}>
+                              <View style={{ flex: 1, flexDirection: 'row', flexWrap: 'wrap' }}>
+                                {gridMembers.map((gm: any, idx: number) => (
+                                  <View key={idx} style={{ width: cellWidthPct, height: cellHeightPct, padding: 1 }}>
+                                    <Image
+                                      source={{ uri: gm?.avatar_url || DEFAULT_AVATAR }}
+                                      style={{ width: '100%', height: '100%' }}
+                                      resizeMode="cover"
+                                    />
+                                  </View>
+                                ))}
+                              </View>
+                            </View>
+                          );
+                        })()
+                      ) : null}
+                    <View style={styles.bubbleTextArea}>
+                        <Text style={styles.cardTitle} numberOfLines={1}>{item.title}</Text>
+                      {senderGroupId && groupMembers.length
+                        ? (
+                          <Text style={styles.senderName} numberOfLines={1}>
+                            {groupMembers.map((gm: any) => gm?.full_name).filter(Boolean).join(' • ')}
+                          </Text>
+                        )
+                        : (!!sender?.full_name ? (
+                          <Text style={styles.senderName} numberOfLines={1}>{sender.full_name}</Text>
+                        ) : null)
+                      }
+                        <Text style={styles.cardDesc} numberOfLines={2}>{displayDescription(item.description)}</Text>
+                        <Text style={styles.cardMeta}>
+                          {new Date(item.created_at).toLocaleString()}
+                        </Text>
+                        {aptId && !isInviteApproved(item.description) ? (
+                          <View style={styles.actionsRow}>
+                            <TouchableOpacity
+                              style={[
+                                styles.approveBtn,
+                                actionLoadingId === item.id ? styles.approveBtnDisabled : null,
+                              ]}
+                              activeOpacity={0.85}
+                              disabled={actionLoadingId === item.id}
+                              onPress={() => handleApproveInvite(item, aptId)}
+                            >
+                              <Text style={styles.approveBtnText}>
+                                {actionLoadingId === item.id ? 'מאשר...' : 'אישור'}
+                              </Text>
+                            </TouchableOpacity>
+                          </View>
+                        ) : null}
+                      </View>
+                    </View>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.avatarRing}
+                    activeOpacity={0.85}
+                    onPress={() => {
+                      if (sender?.id) {
+                        router.push({ pathname: '/user/[id]', params: { id: sender.id } });
+                      }
+                    }}
+                  >
+                    <View style={styles.avatarShadow} />
+                    <View style={styles.avatarWrap}>
+                      {senderGroupId && groupMembers.length ? (
+                        (() => {
+                          const gm = groupMembers.slice(0, 4);
+                          if (gm.length === 1) {
+                            return (
                               <Image
-                                source={{ uri: gridMembers[0]?.avatar_url || DEFAULT_AVATAR }}
+                                source={{ uri: gm[0]?.avatar_url || DEFAULT_AVATAR }}
                                 style={{ width: '100%', height: '100%' }}
                                 resizeMode="cover"
                               />
-                            </View>
-                          );
-                        }
-                        const isThree = gridMembers.length === 3;
-                        const rows = isThree ? 1 : Math.ceil(gridMembers.length / 2);
-                        const cellHeightPct = rows === 1 ? '100%' : (`${100 / rows}%` as any);
-                        const cellWidthPct = isThree ? '33.3333%' : '50%';
-                        return (
-                          <View style={styles.thumbWrap}>
+                            );
+                          }
+                          if (gm.length === 2) {
+                            return (
+                              <View style={{ flex: 1, flexDirection: 'row' }}>
+                                {gm.map((m: any, idx: number) => (
+                                  <View key={idx} style={{ width: '50%', height: '100%' }}>
+                                    <Image
+                                      source={{ uri: m?.avatar_url || DEFAULT_AVATAR }}
+                                      style={{ width: '100%', height: '100%' }}
+                                      resizeMode="cover"
+                                    />
+                                  </View>
+                                ))}
+                              </View>
+                            );
+                          }
+                          return (
                             <View style={{ flex: 1, flexDirection: 'row', flexWrap: 'wrap' }}>
-                              {gridMembers.map((gm: any, idx: number) => (
-                                <View key={idx} style={{ width: cellWidthPct, height: cellHeightPct, padding: 1 }}>
-                                  <Image
-                                    source={{ uri: gm?.avatar_url || DEFAULT_AVATAR }}
-                                    style={{ width: '100%', height: '100%' }}
-                                    resizeMode="cover"
-                                  />
-                                </View>
-                              ))}
-                            </View>
-                          </View>
-                        );
-                      })()
-                    ) : null}
-                  <View style={styles.bubbleTextArea}>
-                      <Text style={styles.cardTitle} numberOfLines={1}>{item.title}</Text>
-                    {senderGroupId && groupMembers.length
-                      ? (
-                        <Text style={styles.senderName} numberOfLines={1}>
-                          {groupMembers.map((gm: any) => gm?.full_name).filter(Boolean).join(' • ')}
-                        </Text>
-                      )
-                      : (!!sender?.full_name ? (
-                        <Text style={styles.senderName} numberOfLines={1}>{sender.full_name}</Text>
-                      ) : null)
-                    }
-                      <Text style={styles.cardDesc} numberOfLines={2}>{displayDescription(item.description)}</Text>
-                      <Text style={styles.cardMeta}>
-                        {new Date(item.created_at).toLocaleString()}
-                      </Text>
-                      {aptId && !isInviteApproved(item.description) ? (
-                        <View style={styles.actionsRow}>
-                          <TouchableOpacity
-                            style={[
-                              styles.approveBtn,
-                              actionLoadingId === item.id ? styles.approveBtnDisabled : null,
-                            ]}
-                            activeOpacity={0.85}
-                            disabled={actionLoadingId === item.id}
-                            onPress={() => handleApproveInvite(item, aptId)}
-                          >
-                            <Text style={styles.approveBtnText}>
-                              {actionLoadingId === item.id ? 'מאשר...' : 'אישור'}
-                            </Text>
-                          </TouchableOpacity>
-                        </View>
-                      ) : null}
-                    </View>
-                  </View>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.avatarRing}
-                  activeOpacity={0.85}
-                  onPress={() => {
-                    if (sender?.id) {
-                      router.push({ pathname: '/user/[id]', params: { id: sender.id } });
-                    }
-                  }}
-                >
-                  <View style={styles.avatarShadow} />
-                  <View style={styles.avatarWrap}>
-                    {senderGroupId && groupMembers.length ? (
-                      (() => {
-                        const gm = groupMembers.slice(0, 4);
-                        if (gm.length === 1) {
-                          return (
-                            <Image
-                              source={{ uri: gm[0]?.avatar_url || DEFAULT_AVATAR }}
-                              style={{ width: '100%', height: '100%' }}
-                              resizeMode="cover"
-                            />
-                          );
-                        }
-                        if (gm.length === 2) {
-                          return (
-                            <View style={{ flex: 1, flexDirection: 'row' }}>
                               {gm.map((m: any, idx: number) => (
-                                <View key={idx} style={{ width: '50%', height: '100%' }}>
+                                <View key={idx} style={{ width: '50%', height: '50%' }}>
                                   <Image
                                     source={{ uri: m?.avatar_url || DEFAULT_AVATAR }}
                                     style={{ width: '100%', height: '100%' }}
@@ -449,34 +460,22 @@ export default function NotificationsScreen() {
                               ))}
                             </View>
                           );
-                        }
-                        return (
-                          <View style={{ flex: 1, flexDirection: 'row', flexWrap: 'wrap' }}>
-                            {gm.map((m: any, idx: number) => (
-                              <View key={idx} style={{ width: '50%', height: '50%' }}>
-                                <Image
-                                  source={{ uri: m?.avatar_url || DEFAULT_AVATAR }}
-                                  style={{ width: '100%', height: '100%' }}
-                                  resizeMode="cover"
-                                />
-                              </View>
-                            ))}
-                          </View>
-                        );
-                      })()
-                    ) : (
-                      <Image
-                        source={{ uri: sender?.avatar_url || DEFAULT_AVATAR }}
-                        style={styles.avatarImg}
-                      />
-                    )}
-                  </View>
-                </TouchableOpacity>
-              </View>
-            );
-          }}
-        />
-      )}
+                        })()
+                      ) : (
+                        <Image
+                          source={{ uri: sender?.avatar_url || DEFAULT_AVATAR }}
+                          style={styles.avatarImg}
+                        />
+                      )}
+                    </View>
+                  </TouchableOpacity>
+                </View>
+              );
+            }}
+          />
+        )}
+        </View>
+      </View>
     </SafeAreaView>
   );
 }
@@ -484,12 +483,13 @@ export default function NotificationsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0F0F14',
+    backgroundColor: '#FFFFFF',
   },
   centerContainer: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
   },
   header: {
     flexDirection: 'row',
@@ -518,6 +518,13 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '800',
   },
+  pageBody: {
+    flex: 1,
+    backgroundColor: '#FAFAFA',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    overflow: 'visible',
+  },
   listContent: {
     padding: 16,
     gap: 10 as any,
@@ -532,18 +539,18 @@ const styles = StyleSheet.create({
     borderRadius: 28,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    backgroundColor: '#F3F4F6',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
+    borderColor: '#E5E7EB',
     marginBottom: 6,
   },
   emptyText: {
-    color: '#E5E7EB',
+    color: '#6B7280',
     fontSize: 16,
     fontWeight: '700',
   },
   emptySubtext: {
-    color: '#9DA4AE',
+    color: '#9CA3AF',
     fontSize: 13,
   },
   rowRtl: {
@@ -552,14 +559,20 @@ const styles = StyleSheet.create({
     gap: 12 as any,
     alignItems: 'center',
     paddingRight: 70,
+    marginVertical: 8,
   },
   bubble: {
     flex: 1,
-    backgroundColor: '#15151C',
+    backgroundColor: '#FFFFFF',
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
+    borderColor: '#E5E7EB',
     overflow: 'hidden',
+    // subtle shadow for card feel
+    shadowColor: '#000000',
+    shadowOpacity: 0.05,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
   },
   bubbleInner: {
     flexDirection: 'row-reverse',
@@ -576,9 +589,9 @@ const styles = StyleSheet.create({
     height: 70,
     borderRadius: 14,
     overflow: 'hidden',
-    backgroundColor: '#1F1F29',
+    backgroundColor: '#F3F4F6',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
+    borderColor: '#E5E7EB',
   },
   thumbImg: {
     width: '100%',
@@ -590,9 +603,9 @@ const styles = StyleSheet.create({
     borderRadius: 30,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(124,92,255,0.12)',
+    backgroundColor: '#EFEAFE',
     borderWidth: 1,
-    borderColor: 'rgba(124,92,255,0.35)',
+    borderColor: '#E5E7EB',
     position: 'absolute',
     right: 0,
   },
@@ -613,16 +626,16 @@ const styles = StyleSheet.create({
     height: 54,
     borderRadius: 27,
     overflow: 'hidden',
-    backgroundColor: '#1F1F29',
+    backgroundColor: '#F3F4F6',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
+    borderColor: '#E5E7EB',
   },
   avatarImg: {
     width: '100%',
     height: '100%',
   },
   cardTitle: {
-    color: '#FFFFFF',
+    color: '#111827',
     fontSize: 16,
     fontWeight: '800',
     marginBottom: 4,
@@ -630,19 +643,19 @@ const styles = StyleSheet.create({
     writingDirection: 'rtl',
   },
   senderName: {
-    color: '#E6E9F0',
+    color: '#6B7280',
     fontSize: 15,
     fontWeight: '900',
     marginBottom: 4,
     textAlign: 'right',
   },
   cardDesc: {
-    color: '#C9CDD6',
+    color: '#6B7280',
     fontSize: 14,
     textAlign: 'right',
   },
   cardMeta: {
-    color: '#9DA4AE',
+    color: '#9CA3AF',
     fontSize: 12,
     marginTop: 6,
     textAlign: 'right',

@@ -16,9 +16,10 @@ import {
 import { useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { LogOut, Edit, Save, X, Plus, MapPin, Inbox, Trash2, Settings } from 'lucide-react-native';
+import { LogOut, Edit, Save, X, Plus, MapPin, Inbox, Trash2, Settings, ClipboardList } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
+import * as ImageManipulator from 'expo-image-manipulator';
 import { supabase } from '@/lib/supabase';
 import { authService } from '@/lib/auth';
 import { useAuthStore } from '@/stores/authStore';
@@ -42,6 +43,7 @@ export default function ProfileScreen() {
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);
   const [isDeletingImage, setIsDeletingImage] = useState(false);
   const [isAddingImage, setIsAddingImage] = useState(false);
+  const [isSurveyOpen, setIsSurveyOpen] = useState(false);
   const [sharedGroups, setSharedGroups] = useState<
     { id: string; name?: string | null; members: Pick<User, 'id' | 'full_name' | 'avatar_url'>[] }[]
   >([]);
@@ -476,10 +478,21 @@ export default function ProfileScreen() {
 
       setIsSaving(true);
       const asset = result.assets[0];
-      const response = await fetch(asset.uri);
+      // Check image dimensions and only resize if larger than 800px
+      const imageInfo = await ImageManipulator.manipulateAsync(asset.uri, []);
+      const actions: ImageManipulator.Action[] = [];
+      if (imageInfo.width > 800) {
+        actions.push({ resize: { width: 800 } });
+      }
+      // Compress the image
+      const compressed = await ImageManipulator.manipulateAsync(
+        asset.uri,
+        actions,
+        { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG }
+      );
+      const response = await fetch(compressed.uri);
       const arrayBuffer = await response.arrayBuffer();
-      const fileExt = (asset.fileName || 'avatar.jpg').split('.').pop() || 'jpg';
-      const fileName = `${user.id}-${Date.now()}.${fileExt}`;
+      const fileName = `${user.id}-${Date.now()}.jpg`;
       const filePath = `users/${user.id}/${fileName}`;
       // Use arrayBuffer on native (Blob/File may not exist)
       const filePayload: any = arrayBuffer as any;
@@ -527,10 +540,21 @@ export default function ProfileScreen() {
 
       setIsAddingImage(true);
       const asset = result.assets[0];
-      const response = await fetch(asset.uri);
+      // Check image dimensions and only resize if larger than 1200px
+      const imageInfo = await ImageManipulator.manipulateAsync(asset.uri, []);
+      const actions: ImageManipulator.Action[] = [];
+      if (imageInfo.width > 1200) {
+        actions.push({ resize: { width: 1200 } });
+      }
+      // Compress the image
+      const compressed = await ImageManipulator.manipulateAsync(
+        asset.uri,
+        actions,
+        { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG }
+      );
+      const response = await fetch(compressed.uri);
       const arrayBuffer = await response.arrayBuffer();
-      const fileExt = (asset.fileName || 'photo.jpg').split('.').pop() || 'jpg';
-      const fileName = `${user.id}-${Date.now()}.${fileExt}`;
+      const fileName = `${user.id}-${Date.now()}.jpg`;
       const filePath = `users/${user.id}/gallery/${fileName}`;
       const filePayload: any = arrayBuffer as any;
 
@@ -658,6 +682,14 @@ export default function ProfileScreen() {
     return items;
   }, [surveyResponse]);
 
+  const surveySubtitle = useMemo(() => {
+    if (!surveyResponse || !surveyHighlights.length) {
+      return 'לחיצה להצגת סיכום ההעדפות';
+    }
+    const values = surveyHighlights.map((h) => h.value).filter(Boolean);
+    return values.slice(0, 2).join(' • ') || 'לחיצה להצגת סיכום ההעדפות';
+  }, [surveyResponse, surveyHighlights]);
+
   const surveyStatusLabel = surveyResponse
     ? surveyResponse.is_completed
       ? 'הסקר הושלם'
@@ -681,14 +713,14 @@ export default function ProfileScreen() {
     return (
       <SafeAreaView style={styles.container}>
         <View style={{ padding: 16, alignItems: 'center', gap: 12 }}>
-          <Text style={{ color: '#FFFFFF', fontSize: 18, fontWeight: '800' }}>לא מחובר/ת</Text>
-          <Text style={{ color: '#9DA4AE', textAlign: 'center' }}>
+          <Text style={{ color: '#111827', fontSize: 18, fontWeight: '800', textAlign: 'right', alignSelf: 'stretch' }}>לא מחובר/ת</Text>
+          <Text style={{ color: '#6B7280', textAlign: 'right', alignSelf: 'stretch' }}>
             כדי לראות את הפרופיל שלך, יש להתחבר או להירשם.
           </Text>
           <TouchableOpacity
             onPress={() => router.push('/auth/login')}
             style={{ backgroundColor: '#4C1D95', paddingHorizontal: 18, paddingVertical: 12, borderRadius: 10 }}>
-            <Text style={{ color: '#0F0F14', fontWeight: '800' }}>כניסה / הרשמה</Text>
+            <Text style={{ color: '#FFFFFF', fontWeight: '800' }}>כניסה / הרשמה</Text>
           </TouchableOpacity>
         </View>
       </SafeAreaView>
@@ -724,7 +756,7 @@ export default function ProfileScreen() {
 
               <TouchableOpacity
                 style={styles.settingsBtn}
-                onPress={() => router.push('/profile/settings')}
+                onPress={() => router.push('/(tabs)/profile/settings')}
                 activeOpacity={0.9}
               >
                 <Settings size={18} color="#FFFFFF" />
@@ -732,17 +764,27 @@ export default function ProfileScreen() {
 
               {!profile?.avatar_url ? (
                 <TouchableOpacity style={styles.addPhotoBtn} onPress={pickAndUploadAvatar} activeOpacity={0.9} disabled={isSaving}>
-                  <Plus size={20} color="#0F0F14" />
+                  <Plus size={20} color="#FFFFFF" />
                 </TouchableOpacity>
               ) : null}
             </View>
 
             <View style={styles.infoPanel}>
               <Text style={styles.nameText}>
-                {(profile?.full_name || 'משתמש/ת')} {profile?.age ? `, ${profile.age}` : ''}{profile?.city ? ` • ${profile.city}` : ''}
+                {profile?.full_name || 'משתמש/ת'}
               </Text>
-              
-            
+              {(profile?.address || profile?.city) ? (
+                <View style={styles.locationRow}>
+                  <MapPin size={16} color="#6B7280" style={{ marginLeft: 6 }} />
+                  <Text style={styles.locationText}>
+                    {profile?.address || profile?.city}
+                  </Text>
+                </View>
+              ) : null}
+              {profile?.age ? (
+                <Text style={styles.ageText}>גיל {profile.age}</Text>
+              ) : null}
+
               {profile?.bio ? (
                 <Text style={styles.bioText}>{profile.bio}</Text>
               ) : null}
@@ -829,41 +871,44 @@ export default function ProfileScreen() {
         {/* Gallery section */}
         <View style={styles.sectionDark}>
           <View style={styles.galleryHeaderRow}>
-            <Text style={styles.galleryHeaderTitle}>הגלריה שלי</Text>
-            <TouchableOpacity
-              style={[styles.galleryAddBtn, isAddingImage ? styles.galleryAddBtnDisabled : null]}
-              onPress={isAddingImage ? undefined : addGalleryImage}
-              activeOpacity={0.9}
-            >
-              {isAddingImage ? (
-                <ActivityIndicator size="small" color="#FFFFFF" />
-              ) : (
-                <Plus size={16} color="#FFFFFF" />
-              )}
-            </TouchableOpacity>
+            <Text style={styles.galleryHeaderTitle}>תמונות</Text>
+            <Text style={styles.galleryCountText}>{(profile?.image_urls?.length || 0)}/6</Text>
           </View>
           <View style={styles.galleryCard}>
             {profile?.image_urls?.length ? (
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.galleryRow}
-              >
-                {profile.image_urls.map((url, idx) => {
-                  return (
-                    <TouchableOpacity
-                      key={url + idx}
-                      style={styles.galleryItem}
-                      activeOpacity={0.9}
-                      onPress={() => setViewerIndex(idx)}
-                    >
-                      <Image source={{ uri: url }} style={styles.galleryImg} />
-                    </TouchableOpacity>
-                  );
-                })}
-              </ScrollView>
+              <View style={styles.galleryGrid}>
+                {profile.image_urls.map((url, idx) => (
+                  <TouchableOpacity
+                    key={url + idx}
+                    style={styles.galleryItem}
+                    activeOpacity={0.9}
+                    onPress={() => setViewerIndex(idx)}
+                  >
+                    <Image source={{ uri: url }} style={styles.galleryImg} />
+                  </TouchableOpacity>
+                ))}
+                {profile.image_urls.length < 6 && (
+                  <TouchableOpacity
+                    style={[styles.galleryAddTile, isAddingImage && { opacity: 0.75 }]}
+                    onPress={isAddingImage ? undefined : addGalleryImage}
+                    activeOpacity={0.9}
+                  >
+                    <Plus size={18} color="#4C1D95" />
+                    <Text style={styles.galleryAddTileText}>הוסף</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
             ) : (
-              <Text style={styles.galleryEmptyText}>אין תמונות בגלריה</Text>
+              <View style={styles.galleryGrid}>
+                <TouchableOpacity
+                  style={[styles.galleryAddTile, isAddingImage && { opacity: 0.75 }]}
+                  onPress={isAddingImage ? undefined : addGalleryImage}
+                  activeOpacity={0.9}
+                >
+                  <Plus size={18} color="#4C1D95" />
+                  <Text style={styles.galleryAddTileText}>הוסף</Text>
+                </TouchableOpacity>
+              </View>
             )}
           </View>
         </View>
@@ -882,21 +927,10 @@ export default function ProfileScreen() {
                   <Image source={{ uri: thumb }} style={styles.aptThumb} />
                   <View style={styles.aptTextWrap}>
                     <Text style={styles.aptTitle} numberOfLines={1}>{apt.title}</Text>
-                    <Text style={styles.aptSub} numberOfLines={1}>{apt.city}</Text>
-                    {!!aptMembers[apt.id]?.length && (
-                      <View style={styles.aptAvatarsRow}>
-                        {aptMembers[apt.id].slice(0, 4).map((u) => (
-                          <Image
-                            key={u.id}
-                            source={{ uri: u.avatar_url || 'https://cdn-icons-png.flaticon.com/512/847/847969.png' }}
-                            style={styles.aptAvatar}
-                          />
-                        ))}
-                      </View>
-                    )}
-                    <View style={styles.aptPricePill}>
-                      <Text style={styles.aptPriceText}>₪{apt.price}/חודש</Text>
-                    </View>
+                    <Text style={styles.aptSub} numberOfLines={1}>
+                      {([apt.city, (apt as any).address].filter(Boolean) as string[]).join(' • ')}
+                    </Text>
+                    <Text style={styles.aptPricePurple}>₪{apt.price}/חודש</Text>
                   </View>
                 </TouchableOpacity>
               );
@@ -905,55 +939,43 @@ export default function ProfileScreen() {
         )}
 
         <View style={styles.sectionDark}>
-          <LinearGradient
-            colors={['rgba(124,92,255,0.28)', 'rgba(60,49,120,0.32)', 'rgba(15,15,20,0.92)']}
-            start={{ x: 1, y: 0 }}
-            end={{ x: 0, y: 1 }}
-            style={styles.surveyCard}
+          <TouchableOpacity
+            style={styles.surveyCTA}
+            activeOpacity={0.9}
+            onPress={() => setIsSurveyOpen(true)}
           >
-            <View style={styles.surveyHeaderRow}>
-              <Text style={styles.surveyTitle}>סיכום הסקר שלי</Text>
-              <View style={[styles.surveyBadge, surveyStatusStyle]}>
-                <Text style={styles.surveyBadgeText}>{surveyStatusLabel}</Text>
-              </View>
+            {profile ? (
+              <LinearGradient
+                colors={['#A78BFA', '#4C1D95']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.surveyCTAAvatarRing}
+              >
+                <View style={styles.surveyCTAAvatarInner}>
+                  <Image
+                    source={{ uri: profile.avatar_url || 'https://cdn-icons-png.flaticon.com/512/847/847969.png' }}
+                    style={styles.surveyCTAAvatar}
+                  />
+                </View>
+              </LinearGradient>
+            ) : null}
+            <View style={styles.surveyCTATexts}>
+              <Text style={styles.surveyCTATitle}>תוצאות הסקר</Text>
+              <Text style={styles.surveyCTASubtitle} numberOfLines={1}>
+                {profile?.full_name || ''}
+              </Text>
             </View>
-
-            {!!surveyHighlights.length && (
-              <View style={styles.surveyHighlightsRow}>
-                {surveyHighlights.map((item) => (
-                  <View key={`${item.label}-${item.value}`} style={styles.surveyHighlightPill}>
-                    <Text style={styles.surveyHighlightLabel}>{item.label}</Text>
-                    <Text style={styles.surveyHighlightValue}>{item.value}</Text>
-                  </View>
-                ))}
-              </View>
-            )}
-
-            {surveyResponse ? (
-              surveyItems.length ? (
-                <View style={styles.surveyGrid}>
-                  {surveyItems.map((item) => (
-                    <View key={`${item.label}-${item.value}`} style={styles.surveyCell}>
-                      <Text style={styles.surveyCellLabel}>{item.label}</Text>
-                      <Text style={styles.surveyCellValue}>{item.value}</Text>
-                    </View>
-                  ))}
-                </View>
-              ) : (
-                <View style={styles.surveyEmptyState}>
-                  <Text style={styles.surveyEmptyText}>
-                    סקר ההעדפות הושלם אך אין עדיין נתונים להצגה.
-                  </Text>
-                </View>
-              )
-            ) : (
-              <View style={styles.surveyEmptyState}>
-                <Text style={styles.surveyEmptyText}>
-                  ברגע שתמלא/י את סקר ההעדפות נציג כאן את ההתאמות האישיות שלך.
-                </Text>
-              </View>
-            )}
-          </LinearGradient>
+            <View style={styles.surveyCTABadge}>
+              <LinearGradient
+                colors={['#A78BFA', '#4C1D95']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.surveyCTABadgeInner}
+              >
+                <ClipboardList size={24} color="#FFFFFF" />
+              </LinearGradient>
+            </View>
+          </TouchableOpacity>
         </View>
 
         {/* moved logout and delete actions to /profile/settings */}
@@ -997,11 +1019,61 @@ export default function ProfileScreen() {
           </View>
         </Modal>
       )}
+      <Modal visible={isSurveyOpen} animationType="slide" transparent onRequestClose={() => setIsSurveyOpen(false)}>
+        <View style={styles.modalOverlay}>
+          <TouchableOpacity style={styles.modalBackdrop} activeOpacity={1} onPress={() => setIsSurveyOpen(false)} />
+          <View style={styles.sheet}>
+            <View style={styles.sheetHeader}>
+              <Text style={styles.sheetTitle}>סיכום ההעדפות</Text>
+              <TouchableOpacity onPress={() => setIsSurveyOpen(false)} style={styles.closeBtn}>
+                <X size={20} color="#FFFFFF" />
+              </TouchableOpacity>
+            </View>
+            <View style={styles.sheetContent}>
+              {!!surveyHighlights.length && (
+                <View style={styles.surveyHighlightsRow}>
+                  {surveyHighlights.map((item) => (
+                    <View key={`${item.label}-${item.value}`} style={styles.surveyHighlightPill}>
+                      <Text style={styles.surveyHighlightLabel}>{item.label}</Text>
+                      <Text style={styles.surveyHighlightValue}>{item.value}</Text>
+                    </View>
+                  ))}
+                </View>
+              )}
+              {surveyResponse ? (
+                surveyItems.length ? (
+                  <View style={styles.surveyGrid}>
+                    {surveyItems.map((item) => (
+                      <View key={`${item.label}-${item.value}`} style={styles.surveyCell}>
+                        <Text style={styles.surveyCellLabel}>{item.label}</Text>
+                        <Text style={styles.surveyCellValue}>{item.value}</Text>
+                      </View>
+                    ))}
+                  </View>
+                ) : (
+                  <View style={styles.surveyEmptyState}>
+                    <Text style={styles.surveyEmptyText}>
+                      סקר ההעדפות הושלם אך אין עדיין נתונים להצגה.
+                    </Text>
+                  </View>
+                )
+              ) : (
+                <View style={styles.surveyEmptyState}>
+                  <Text style={styles.surveyEmptyText}>
+                    ברגע שתמלא/י את סקר ההעדפות נציג כאן את ההתאמות האישיות שלך.
+                  </Text>
+                </View>
+              )}
+            </View>
+          </View>
+        </View>
+      </Modal>
       {(isSaving || isAddingImage) && (
         <View style={styles.fullScreenLoader}>
           <ActivityIndicator size="large" color="#FFFFFF" />
         </View>
       )}
+
     </SafeAreaView>
   );
 }
@@ -1009,13 +1081,14 @@ export default function ProfileScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0F0F14',
+    backgroundColor: '#FFFFFF',
+    writingDirection: 'rtl',
   },
   centerContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#0F0F14',
+    backgroundColor: '#FFFFFF',
   },
   scrollContent: {
     paddingBottom: 120,
@@ -1052,11 +1125,13 @@ const styles = StyleSheet.create({
     marginTop: 16,
     borderRadius: 24,
     overflow: 'hidden',
-    backgroundColor: '#15151C',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
   },
   photoWrap: {
     position: 'relative',
-    backgroundColor: '#22232E',
+    backgroundColor: '#F3F4F6',
   },
   photo: {
     width: '100%',
@@ -1087,7 +1162,7 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: '#A78BFA',
+    backgroundColor: '#4C1D95',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1098,11 +1173,16 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: 'rgba(255,255,255,0.12)',
+    backgroundColor: '#4C1D95',
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.18)',
+    borderWidth: 0,
+    borderColor: 'transparent',
+    shadowColor: '#000000',
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 4,
   },
   viewerOverlay: {
     flex: 1,
@@ -1114,7 +1194,7 @@ const styles = StyleSheet.create({
     width: '92%',
     height: '70%',
     borderRadius: 12,
-    backgroundColor: '#0F0F14',
+    backgroundColor: '#FFFFFF',
   },
   viewerDeleteBtn: {
     position: 'absolute',
@@ -1172,22 +1252,31 @@ const styles = StyleSheet.create({
   },
   infoPanel: {
     padding: 16,
-    backgroundColor: '#15151C',
+    backgroundColor: '#FFFFFF',
   },
   nameText: {
-    color: '#FFFFFF',
-    fontSize: 32,
+    color: '#111827',
+    fontSize: 26,
     fontWeight: '900',
     marginBottom: 6,
+    textAlign: 'right',
   },
   locationRow: {
-    flexDirection: 'row',
+    flexDirection: 'row-reverse',
     alignItems: 'center',
     marginBottom: 12,
   },
   locationText: {
-    color: '#C7CBD1',
+    color: '#6B7280',
     fontSize: 16,
+    textAlign: 'right',
+  },
+  ageText: {
+    color: '#6B7280',
+    fontSize: 14,
+    fontWeight: '700',
+    textAlign: 'right',
+    marginBottom: 8,
   },
   tagsRow: {
     flexDirection: 'row',
@@ -1196,43 +1285,48 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   tagChip: {
-    backgroundColor: '#1E1F2A',
+    backgroundColor: '#F3F4F6',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
+    borderColor: '#E5E7EB',
     paddingHorizontal: 14,
     paddingVertical: 8,
     borderRadius: 18,
   },
   tagText: {
-    color: '#E5E7EB',
+    color: '#374151',
     fontSize: 13,
     fontWeight: '700',
+    textAlign: 'right',
   },
   whyInlineWrap: {
     marginBottom: 8,
   },
   whyInlineTitle: {
-    color: '#FFFFFF',
+    color: '#111827',
     fontWeight: '800',
     marginBottom: 6,
+    textAlign: 'right',
   },
   bioText: {
-    color: '#C7CBD1',
+    color: '#6B7280',
     fontSize: 16,
     lineHeight: 22,
     marginBottom: 8,
+    textAlign: 'right',
   },
   seeMoreText: {
-    color: '#FFFFFF',
+    color: '#111827',
     fontWeight: '800',
+    textAlign: 'right',
   },
 
   // actions for gallery moved to edit screen
   galleryGrid: {
     marginTop: 12,
-    flexDirection: 'row',
+    flexDirection: 'row-reverse',
     flexWrap: 'wrap',
     gap: 10,
+    justifyContent: 'flex-start',
   },
   galleryRow: {
     flexDirection: 'row',
@@ -1247,22 +1341,28 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   galleryCard: {
-    backgroundColor: '#15151C',
+    backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)',
+    borderColor: '#E5E7EB',
     borderRadius: 16,
     padding: 12,
     marginTop: 8,
   },
   galleryHeaderTitle: {
-    color: '#FFFFFF',
+    color: '#111827',
     fontSize: 16,
     fontWeight: '800',
+    textAlign: 'right',
+  },
+  galleryCountText: {
+    color: '#6B7280',
+    fontSize: 12,
+    fontWeight: '700',
   },
   galleryAddBtn: {
-    backgroundColor: 'rgba(255,255,255,0.10)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.28)',
+    backgroundColor: '#4C1D95',
+    borderWidth: 0,
+    borderColor: 'transparent',
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 12,
@@ -1278,17 +1378,41 @@ const styles = StyleSheet.create({
     opacity: 0.75,
   },
   galleryEmptyText: {
-    color: '#9DA4AE',
+    color: '#6B7280',
     fontSize: 14,
-    textAlign: 'center',
+    textAlign: 'right',
     paddingVertical: 16,
   },
   galleryItem: {
-    width: 130,
-    height: 160,
+    width: '31%',
+    aspectRatio: 1,
     borderRadius: 18,
     overflow: 'hidden',
-    backgroundColor: '#1B1C27',
+    backgroundColor: '#F3F4F6',
+    position: 'relative',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    shadowColor: '#000000',
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+  },
+  galleryAddTile: {
+    width: '31%',
+    aspectRatio: 1,
+    borderRadius: 18,
+    borderWidth: 2,
+    borderStyle: 'dashed',
+    borderColor: '#A78BFA',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F9FAFB',
+  },
+  galleryAddTileText: {
+    marginTop: 6,
+    color: '#4C1D95',
+    fontWeight: '800',
+    fontSize: 12,
   },
   galleryItemTall: {
     aspectRatio: 0.8,
@@ -1303,8 +1427,10 @@ const styles = StyleSheet.create({
     marginTop: 16,
     marginHorizontal: 16,
     padding: 16,
-    backgroundColor: '#15151C',
+    backgroundColor: '#FFFFFF',
     borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
   },
   editHeaderRow: {
     flexDirection: 'row',
@@ -1313,9 +1439,10 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   editTitle: {
-    color: '#FFFFFF',
+    color: '#111827',
     fontSize: 18,
     fontWeight: '800',
+    textAlign: 'right',
   },
   headerActions: {
     flexDirection: 'row',
@@ -1339,17 +1466,19 @@ const styles = StyleSheet.create({
   label: {
     fontSize: 14,
     fontWeight: '700',
-    color: '#E5E7EB',
+    color: '#111827',
+    textAlign: 'right',
   },
   input: {
-    backgroundColor: '#1B1C27',
+    backgroundColor: '#FFFFFF',
     paddingHorizontal: 16,
     paddingVertical: 14,
     borderRadius: 10,
     fontSize: 16,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)',
-    color: '#FFFFFF',
+    borderColor: '#E5E7EB',
+    color: '#111827',
+    textAlign: 'right',
   },
   textArea: {
     minHeight: 100,
@@ -1360,17 +1489,19 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
   },
   sectionTitleDark: {
-    color: '#FFFFFF',
+    color: '#111827',
     fontSize: 18,
     fontWeight: '800',
     marginBottom: 10,
+    textAlign: 'right',
   },
   surveyCard: {
     borderRadius: 20,
     padding: 18,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
+    borderColor: '#E5E7EB',
     overflow: 'hidden',
+    backgroundColor: '#FFFFFF',
   },
   surveyHeaderRow: {
     flexDirection: 'row-reverse',
@@ -1379,34 +1510,35 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   surveyTitle: {
-    color: '#FFFFFF',
+    color: '#111827',
     fontSize: 18,
     fontWeight: '800',
+    textAlign: 'right',
   },
   surveyBadge: {
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 999,
     borderWidth: 1,
-    backgroundColor: 'rgba(255,255,255,0.12)',
-    borderColor: 'rgba(255,255,255,0.2)',
+    backgroundColor: '#EFEAFE',
+    borderColor: '#E5E7EB',
   },
   surveyBadgeText: {
-    color: '#FFFFFF',
+    color: '#4C1D95',
     fontSize: 12,
     fontWeight: '800',
   },
   surveyBadgeSuccess: {
-    backgroundColor: 'rgba(34,197,94,0.18)',
-    borderColor: 'rgba(34,197,94,0.45)',
+    backgroundColor: 'rgba(34,197,94,0.12)',
+    borderColor: 'rgba(34,197,94,0.25)',
   },
   surveyBadgePending: {
-    backgroundColor: 'rgba(250,204,21,0.16)',
-    borderColor: 'rgba(250,204,21,0.4)',
+    backgroundColor: 'rgba(250,204,21,0.12)',
+    borderColor: 'rgba(250,204,21,0.25)',
   },
   surveyBadgeMuted: {
-    backgroundColor: 'rgba(148,163,184,0.14)',
-    borderColor: 'rgba(148,163,184,0.32)',
+    backgroundColor: 'rgba(148,163,184,0.12)',
+    borderColor: 'rgba(148,163,184,0.25)',
   },
   surveyHighlightsRow: {
     flexDirection: 'row-reverse',
@@ -1415,23 +1547,23 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   surveyHighlightPill: {
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    backgroundColor: '#F9FAFB',
     borderRadius: 14,
     paddingHorizontal: 12,
     paddingVertical: 10,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
+    borderColor: '#E5E7EB',
     width: '48%',
   },
   surveyHighlightLabel: {
-    color: '#9DA4AE',
+    color: '#6B7280',
     fontSize: 12,
     marginBottom: 2,
     textAlign: 'right',
     fontWeight: '600',
   },
   surveyHighlightValue: {
-    color: '#FFFFFF',
+    color: '#111827',
     fontSize: 14,
     fontWeight: '800',
     textAlign: 'right',
@@ -1442,22 +1574,22 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   surveyCell: {
-    backgroundColor: 'rgba(15,15,20,0.6)',
+    backgroundColor: '#F9FAFB',
     borderRadius: 16,
     padding: 14,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.05)',
+    borderColor: '#E5E7EB',
     width: '48%',
   },
   surveyCellLabel: {
-    color: '#9DA4AE',
+    color: '#6B7280',
     fontSize: 12,
     marginBottom: 6,
     textAlign: 'right',
     fontWeight: '600',
   },
   surveyCellValue: {
-    color: '#FFFFFF',
+    color: '#111827',
     fontSize: 15,
     fontWeight: '800',
     textAlign: 'right',
@@ -1469,15 +1601,142 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   surveyEmptyText: {
-    color: '#D1D5DB',
+    color: '#6B7280',
     fontSize: 14,
     lineHeight: 20,
     textAlign: 'right',
   },
-  sharedCard: {
-    backgroundColor: '#15151C',
+  surveyCTA: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)',
+    borderColor: '#E5E7EB',
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    shadowColor: '#000000',
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+  },
+  surveyCTATexts: {
+    flex: 1,
+    marginRight: 8,
+  },
+  surveyCTATitle: {
+    color: '#111827',
+    fontSize: 16,
+    fontWeight: '800',
+    textAlign: 'right',
+    marginBottom: 4,
+  },
+  surveyCTASubtitle: {
+    color: '#6B7280',
+    fontSize: 13,
+    textAlign: 'right',
+  },
+  surveyCTABadge: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 2,
+    borderColor: '#E5E7EB',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000000',
+    shadowOpacity: 0.12,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 6 },
+  },
+  surveyCTABadgeInner: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#4C1D95',
+    shadowColor: '#4C1D95',
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+  },
+  modalOverlay: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(0,0,0,0.4)',
+  },
+  modalBackdrop: {
+    flex: 1,
+  },
+  sheet: {
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    overflow: 'hidden',
+  },
+  sheetHeader: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    backgroundColor: '#FFFFFF',
+  },
+  sheetTitle: {
+    color: '#111827',
+    fontSize: 16,
+    fontWeight: '800',
+    textAlign: 'right',
+  },
+  closeBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#4C1D95',
+  },
+  sheetContent: {
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 8,
+    gap: 12,
+  },
+  surveyCTAAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#F3F4F6',
+    marginLeft: 0,
+  },
+  surveyCTAAvatarRing: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    padding: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 12,
+    shadowColor: '#4C1D95',
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 3 },
+  },
+  surveyCTAAvatarInner: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sharedCard: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
     borderRadius: 16,
     padding: 12,
     marginTop: 4,
@@ -1494,26 +1753,26 @@ const styles = StyleSheet.create({
     height: 44,
     borderRadius: 22,
     borderWidth: 2,
-    borderColor: '#0F0F14',
+    borderColor: '#FFFFFF',
     overflow: 'hidden',
-    backgroundColor: '#1F1F29',
+    backgroundColor: '#F3F4F6',
   },
   sharedAvatar: {
     width: '100%',
     height: '100%',
   },
   sharedMembersLine: {
-    color: '#C7CBD1',
+    color: '#6B7280',
     fontSize: 13,
-    textAlign: 'center',
+    textAlign: 'right',
   },
   apartmentRow: {
-    backgroundColor: '#15151C',
+    backgroundColor: '#FFFFFF',
     padding: 14,
     borderRadius: 16,
     marginBottom: 12,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)',
+    borderColor: '#E5E7EB',
     flexDirection: 'row-reverse',
     alignItems: 'center',
     gap: 14,
@@ -1523,23 +1782,23 @@ const styles = StyleSheet.create({
     width: 120,
     height: 90,
     borderRadius: 14,
-    backgroundColor: '#1B1C27',
+    backgroundColor: '#F3F4F6',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
+    borderColor: '#E5E7EB',
   },
   aptTextWrap: {
     flex: 1,
     gap: 6,
   },
   aptTitle: {
-    color: '#FFFFFF',
+    color: '#111827',
     fontSize: 16,
     fontWeight: '800',
     marginBottom: 4,
     textAlign: 'right',
   },
   aptSub: {
-    color: '#9DA4AE',
+    color: '#6B7280',
     fontSize: 14,
     textAlign: 'right',
   },
@@ -1553,9 +1812,9 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: '#1B1C27',
+    backgroundColor: '#F3F4F6',
     borderWidth: 2,
-    borderColor: '#0F0F14',
+    borderColor: '#FFFFFF',
   },
   aptPricePill: {
     alignSelf: 'flex-end',
@@ -1571,6 +1830,13 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     fontSize: 13,
   },
+  aptPricePurple: {
+    color: '#4C1D95',
+    fontWeight: '900',
+    fontSize: 14,
+    textAlign: 'right',
+    marginTop: 6,
+  },
   actionButtonsRow: {
     marginTop: 10,
     flexDirection: 'row-reverse',
@@ -1581,7 +1847,7 @@ const styles = StyleSheet.create({
   editProfileBtn: {
     backgroundColor: 'transparent',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.18)',
+    borderColor: '#E5E7EB',
     paddingHorizontal: 14,
     paddingVertical: 10,
     borderRadius: 12,
@@ -1590,7 +1856,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   editProfileBtnText: {
-    color: '#FFFFFF',
+    color: '#111827',
     fontWeight: '900',
     fontSize: 14,
   },

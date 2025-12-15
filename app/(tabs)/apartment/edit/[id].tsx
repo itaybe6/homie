@@ -71,44 +71,29 @@ export default function EditApartmentScreen() {
   const normalizeImageForUpload = async (
     sourceUri: string,
   ): Promise<{ uri: string; ext: string; mime: string }> => {
-    const lowerUri = sourceUri.toLowerCase();
-    const match = lowerUri.match(/\.([a-z0-9]{1,5})(?:\?.*)?$/);
-    const rawExt = match ? match[1] : '';
-    const ext = rawExt === 'jpeg' ? 'jpg' : rawExt;
-    const isHeic = ext === 'heic' || ext === 'heif';
-
-    if (isHeic) {
-      try {
-        const converted = await ImageManipulator.manipulateAsync(
-          sourceUri,
-          [],
-          { compress: 0.9, format: ImageManipulator.SaveFormat.JPEG },
-        );
-        return { uri: converted.uri, ext: 'jpg', mime: 'image/jpeg' };
-      } catch (err) {
-        console.warn('Failed to convert HEIC image', err);
-        throw new Error('לא הצלחנו להמיר קובץ HEIC, שמור כ-JPG/PNG ונסה שוב');
-      }
-    }
-
-    if (ext === 'png') {
-      return { uri: sourceUri, ext: 'png', mime: 'image/png' };
-    }
-
-    if (ext === 'jpg') {
-      return { uri: sourceUri, ext: 'jpg', mime: 'image/jpeg' };
-    }
+    const MAX_WIDTH = 1200; // Maximum width for uploaded images (height scales proportionally)
+    const COMPRESSION_QUALITY = 0.8; // Compression quality (0-1)
 
     try {
-      const converted = await ImageManipulator.manipulateAsync(
+      // First, get image info to check if resizing is needed
+      const imageInfo = await ImageManipulator.manipulateAsync(sourceUri, []);
+      
+      // Only resize if image is larger than max width
+      const actions: ImageManipulator.Action[] = [];
+      if (imageInfo.width > MAX_WIDTH) {
+        actions.push({ resize: { width: MAX_WIDTH } });
+      }
+
+      // Compress the image (with or without resize)
+      const compressed = await ImageManipulator.manipulateAsync(
         sourceUri,
-        [],
-        { compress: 0.9, format: ImageManipulator.SaveFormat.JPEG },
+        actions,
+        { compress: COMPRESSION_QUALITY, format: ImageManipulator.SaveFormat.JPEG },
       );
-      return { uri: converted.uri, ext: 'jpg', mime: 'image/jpeg' };
+      return { uri: compressed.uri, ext: 'jpg', mime: 'image/jpeg' };
     } catch (err) {
-      console.warn('Failed to normalize image', err);
-      throw new Error('לא הצלחנו לעבד את התמונה, נסה פורמט JPG או PNG');
+      console.warn('Failed to compress image', err);
+      throw new Error('לא הצלחנו לעבד את התמונה, נסה שוב');
     }
   };
 
@@ -535,7 +520,7 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#0F0F14',
+    backgroundColor: '#FFFFFF',
   },
   scrollContent: {
     padding: 16,

@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-  SafeAreaView,
   View,
   Text,
   StyleSheet,
@@ -13,16 +12,18 @@ import {
   Linking,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { ArrowLeft, Inbox, Send, Filter, Home, Users, UserPlus2, UserPlus } from 'lucide-react-native';
+import { Inbox, Send, Filter, Home, Users, UserPlus2, UserPlus } from 'lucide-react-native';
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/authStore';
 import { Apartment, User } from '@/types/database';
 import { computeGroupAwareLabel } from '@/lib/group';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function RequestsScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ tab?: string | string[]; kind?: string | string[]; status?: string | string[] }>();
   const user = useAuthStore((s) => s.user);
+  const insets = useSafeAreaInsets();
   const toSingle = (value: string | string[] | undefined): string | undefined =>
     Array.isArray(value) ? value[0] : value;
   type KindFilterValue = 'APT' | 'APT_INVITE' | 'MATCH' | 'GROUP' | 'ALL';
@@ -70,6 +71,8 @@ export default function RequestsScreen() {
   const [tab, setTab] = useState<'incoming' | 'sent'>(() => parseTabParam(toSingle(params.tab)));
   const [statusFilter, setStatusFilter] = useState<StatusFilterValue>(() => parseStatusParam(toSingle(params.status)));
   const [kindFilter, setKindFilter] = useState<KindFilterValue>(() => parseKindParam(toSingle(params.kind)));
+  const [isKindOpen, setIsKindOpen] = useState(false);
+  const [isStatusOpen, setIsStatusOpen] = useState(false);
 
   const [usersById, setUsersById] = useState<Record<string, Partial<User>>>({});
   const [aptsById, setAptsById] = useState<Record<string, Partial<Apartment>>>({});
@@ -1358,7 +1361,13 @@ export default function RequestsScreen() {
     <View style={{ marginTop: 12 }}>
       <Text style={styles.sectionTitle}>{title}</Text>
       {data.length === 0 ? (
-        <Text style={styles.emptyText}>אין פריטים להצגה</Text>
+        <View style={styles.emptyState}>
+          <View style={styles.emptyIconWrap}>
+            <Inbox size={40} color="#7C3AED" />
+          </View>
+          <Text style={styles.emptyTitle}>אין כרגע בקשות</Text>
+          <Text style={styles.emptySubtitle}>כשתתקבל בקשה חדשה נציג אותה כאן</Text>
+        </View>
       ) : (
         <FlatList
           data={data}
@@ -1450,44 +1459,43 @@ export default function RequestsScreen() {
                     ) : null}
                     <Text style={styles.cardMeta}>{new Date(item.created_at).toLocaleString()}</Text>
                     <View style={{ marginTop: 10, flexDirection: 'row-reverse', gap: 8 as any }}>
-                      {(item.kind === 'APT' || item.kind === 'APT_INVITE') ? <StatusPill status={item.status} /> : null}
                       {incoming && (item.kind === 'APT' || item.kind === 'APT_INVITE') && item.status === 'PENDING' && (
                         <View style={{ flexDirection: 'row-reverse', gap: 8 as any }}>
                           <TouchableOpacity
-                            style={[styles.approveBtn, actionId === item.id && { opacity: 0.7 }]}
+                            style={[styles.approveBtnLight, actionId === item.id && { opacity: 0.7 }]}
                             onPress={() => approveIncoming(item)}
                             disabled={actionId === item.id}
                             activeOpacity={0.85}
                           >
-                            {actionId === item.id ? <ActivityIndicator size="small" color="#0F0F14" /> : <Text style={styles.approveBtnText}>אישור</Text>}
+                            {actionId === item.id ? <ActivityIndicator size="small" color="#FFFFFF" /> : <Text style={styles.approveBtnTextLight}>אשר בקשה</Text>}
                           </TouchableOpacity>
                           <TouchableOpacity
-                            style={[styles.rejectBtn, actionId === item.id && { opacity: 0.7 }]}
+                            style={[styles.rejectBtnLight, actionId === item.id && { opacity: 0.7 }]}
                             onPress={() => rejectIncoming(item)}
                             disabled={actionId === item.id}
                             activeOpacity={0.85}
                           >
-                            <Text style={styles.rejectBtnText}>דחייה</Text>
+                            <Text style={styles.rejectBtnTextLight}>דחייה</Text>
                           </TouchableOpacity>
                         </View>
                       )}
                       {incoming && item.kind === 'GROUP' && item.status === 'PENDING' && (
                         <View style={{ flexDirection: 'row-reverse', gap: 8 as any }}>
                           <TouchableOpacity
-                            style={[styles.approveBtn, actionId === item.id && { opacity: 0.7 }]}
+                            style={[styles.approveBtnLight, actionId === item.id && { opacity: 0.7 }]}
                             onPress={() => approveIncomingGroup(item)}
                             disabled={actionId === item.id}
                             activeOpacity={0.85}
                           >
-                            {actionId === item.id ? <ActivityIndicator size="small" color="#0F0F14" /> : <Text style={styles.approveBtnText}>אישור</Text>}
+                            {actionId === item.id ? <ActivityIndicator size="small" color="#FFFFFF" /> : <Text style={styles.approveBtnTextLight}>אישור</Text>}
                           </TouchableOpacity>
                           <TouchableOpacity
-                            style={[styles.rejectBtn, actionId === item.id && { opacity: 0.7 }]}
+                            style={[styles.rejectBtnLight, actionId === item.id && { opacity: 0.7 }]}
                             onPress={() => rejectIncomingGroup(item)}
                             disabled={actionId === item.id}
                             activeOpacity={0.85}
                           >
-                            <Text style={styles.rejectBtnText}>דחייה</Text>
+                            <Text style={styles.rejectBtnTextLight}>דחייה</Text>
                           </TouchableOpacity>
                         </View>
                       )}
@@ -1574,7 +1582,7 @@ export default function RequestsScreen() {
                             </Text>
                             {otherUser?.phone ? (
                               <TouchableOpacity
-                                style={[styles.approveBtn]}
+                                style={[styles.approveBtnLight]}
                                 activeOpacity={0.85}
                                 onPress={() =>
                                   openWhatsApp(
@@ -1583,7 +1591,7 @@ export default function RequestsScreen() {
                                   )
                                 }
                               >
-                                <Text style={styles.approveBtnText}>שליחת וואטסאפ למתעניין/ת</Text>
+                                <Text style={styles.approveBtnTextLight}>שליחת וואטסאפ למתעניין/ת</Text>
                               </TouchableOpacity>
                             ) : null}
                           </View>
@@ -1597,7 +1605,7 @@ export default function RequestsScreen() {
                           </Text>
                           {ownerPhone ? (
                             <TouchableOpacity
-                              style={[styles.approveBtn]}
+                              style={[styles.approveBtnLight]}
                               activeOpacity={0.85}
                               onPress={() =>
                                 openWhatsApp(
@@ -1606,7 +1614,7 @@ export default function RequestsScreen() {
                                 )
                               }
                             >
-                              <Text style={styles.approveBtnText}>שליחת וואטסאפ לבעל הדירה</Text>
+                              <Text style={styles.approveBtnTextLight}>שליחת וואטסאפ לבעל הדירה</Text>
                             </TouchableOpacity>
                           ) : null}
                         </View>
@@ -1614,24 +1622,24 @@ export default function RequestsScreen() {
                       {incoming && item.kind === 'MATCH' && item.status === 'PENDING' && (
                         <View style={{ flexDirection: 'row-reverse', gap: 8 as any }}>
                           <TouchableOpacity
-                            style={[styles.approveBtn, actionId === item.id && { opacity: 0.7 }]}
+                            style={[styles.approveBtnLight, actionId === item.id && { opacity: 0.7 }]}
                             onPress={() => approveIncomingMatch(item)}
                             disabled={actionId === item.id}
                             activeOpacity={0.85}
                           >
                             {actionId === item.id ? (
-                              <ActivityIndicator size="small" color="#0F0F14" />
+                              <ActivityIndicator size="small" color="#FFFFFF" />
                             ) : (
-                              <Text style={styles.approveBtnText}>אישור</Text>
+                              <Text style={styles.approveBtnTextLight}>אישור</Text>
                             )}
                           </TouchableOpacity>
                           <TouchableOpacity
-                            style={[styles.rejectBtn, actionId === item.id && { opacity: 0.7 }]}
+                            style={[styles.rejectBtnLight, actionId === item.id && { opacity: 0.7 }]}
                             onPress={() => rejectIncomingMatch(item)}
                             disabled={actionId === item.id}
                             activeOpacity={0.85}
                           >
-                            <Text style={styles.rejectBtnText}>דחייה</Text>
+                            <Text style={styles.rejectBtnTextLight}>דחייה</Text>
                           </TouchableOpacity>
                         </View>
                       )}
@@ -1838,129 +1846,154 @@ export default function RequestsScreen() {
   const filteredSent = applyStatus(applyKind(sent));
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        {/* placeholder on the right to avoid overlap with global RequestsButton */}
-        <View style={styles.iconBtnPlaceholder} />
-        <Text style={styles.headerTitle}>בקשות</Text>
-        {/* move back button to the left side */}
-        <TouchableOpacity
-          onPress={() => {
-            if ((router as any).canGoBack?.()) {
-              router.back();
-            } else {
-              router.replace('/(tabs)/home');
-            }
-          }}
-          style={styles.iconBtn}
-          activeOpacity={0.85}
-        >
-          <ArrowLeft size={18} color="#FFFFFF" />
-        </TouchableOpacity>
-      </View>
-
-      {/* Filters */}
-      <View style={styles.filtersWrap}>
-        <View style={styles.segmentWrap}>
+    <View style={styles.container}>
+      <View style={{ paddingTop: insets.top + 60, flex: 1 }}>
+        <View style={styles.pageBody}>
+          {/* Filters */}
+          <View style={styles.filtersWrap}>
+        <View style={styles.switchWrap}>
           <TouchableOpacity
-            style={[styles.segmentBtn, tab === 'incoming' && styles.segmentBtnActive]}
+            style={[styles.switchItem, tab === 'incoming' && styles.switchItemActive]}
             onPress={() => setTab('incoming')}
             activeOpacity={0.9}
           >
-            <Inbox size={16} color={tab === 'incoming' ? '#FFFFFF' : '#C9CDD6'} />
-            <Text style={[styles.segmentText, tab === 'incoming' && styles.segmentTextActive]}>בקשות אליי</Text>
+            <View style={styles.switchItemContent}>
+              <Text style={[styles.switchText, tab === 'incoming' && styles.switchTextActive]}>בקשות אליי</Text>
+            </View>
           </TouchableOpacity>
           <TouchableOpacity
-            style={[styles.segmentBtn, tab === 'sent' && styles.segmentBtnActive]}
+            style={[styles.switchItem, tab === 'sent' && styles.switchItemActive]}
             onPress={() => setTab('sent')}
             activeOpacity={0.9}
           >
-            <Send size={16} color={tab === 'sent' ? '#FFFFFF' : '#C9CDD6'} />
-            <Text style={[styles.segmentText, tab === 'sent' && styles.segmentTextActive]}>בקשות שלי</Text>
+            <View style={styles.switchItemContent}>
+              <Text style={[styles.switchText, tab === 'sent' && styles.switchTextActive]}>בקשות שלי</Text>
+            </View>
           </TouchableOpacity>
         </View>
 
-        <View style={[styles.segmentWrap, { marginTop: 8 }]}>
-          <TouchableOpacity
-            style={[styles.segmentBtn, kindFilter === 'APT' && styles.segmentBtnActive]}
-            onPress={() => setKindFilter('APT')}
-            activeOpacity={0.9}
-          >
-            <Home size={16} color={kindFilter === 'APT' ? '#FFFFFF' : '#C9CDD6'} />
-            <Text style={[styles.segmentText, kindFilter === 'APT' && styles.segmentTextActive]}>דירות</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.segmentBtn, kindFilter === 'APT_INVITE' && styles.segmentBtnActive]}
-            onPress={() => setKindFilter('APT_INVITE')}
-            activeOpacity={0.9}
-          >
-            <UserPlus size={16} color={kindFilter === 'APT_INVITE' ? '#FFFFFF' : '#C9CDD6'} />
-            <Text style={[styles.segmentText, kindFilter === 'APT_INVITE' && styles.segmentTextActive]}>הזמנות לדירה</Text>
-          </TouchableOpacity>
-          {/* Removed MATCH filter button (moved to Match Requests screen) */}
-          <TouchableOpacity
-            style={[styles.segmentBtn, kindFilter === 'GROUP' && styles.segmentBtnActive]}
-            onPress={() => setKindFilter('GROUP')}
-            activeOpacity={0.9}
-          >
-            <UserPlus2 size={16} color={kindFilter === 'GROUP' ? '#FFFFFF' : '#C9CDD6'} />
-            <Text style={[styles.segmentText, kindFilter === 'GROUP' && styles.segmentTextActive]}>מיזוג פרופילים</Text>
-          </TouchableOpacity>
-        </View>
+            {/* Inline dropdown row */}
+            <View style={styles.dropdownRow}>
+              {/* Kind dropdown */}
+              <View style={styles.selectWrap}>
+                <TouchableOpacity
+                  activeOpacity={0.9}
+                  style={styles.selectButton}
+                  onPress={() => { setIsKindOpen((v) => !v); setIsStatusOpen(false); }}
+                >
+                  <Text style={styles.selectText}>
+                    {kindFilter === 'APT'
+                      ? 'דירות'
+                      : kindFilter === 'APT_INVITE'
+                      ? 'הזמנות לדירה'
+                      : 'מיזוג פרופילים'}
+                  </Text>
+                  <Text style={styles.selectCaret}>▼</Text>
+                </TouchableOpacity>
+                {isKindOpen && (
+                  <View style={styles.menu}>
+                    {[
+                      { key: 'APT', label: 'דירות' },
+                      { key: 'APT_INVITE', label: 'הזמנות לדירה' },
+                      { key: 'GROUP', label: 'מיזוג פרופילים' },
+                    ].map((opt) => (
+                      <TouchableOpacity
+                        key={opt.key}
+                        style={[styles.menuItem, (kindFilter === (opt.key as any)) && styles.menuItemActive]}
+                        activeOpacity={0.9}
+                        onPress={() => { setKindFilter(opt.key as any); setIsKindOpen(false); }}
+                      >
+                        <Text style={[styles.menuItemText, (kindFilter === (opt.key as any)) && styles.menuItemTextActive]}>
+                          {opt.label}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                )}
+              </View>
+              {/* Status dropdown */}
+              <View style={styles.selectWrap}>
+                <TouchableOpacity
+                  activeOpacity={0.9}
+                  style={styles.selectButton}
+                  onPress={() => { setIsStatusOpen((v) => !v); setIsKindOpen(false); }}
+                >
+                  <Text style={styles.selectText}>
+                    {statusFilter === 'ALL'
+                      ? 'הכל'
+                      : statusFilter === 'PENDING'
+                      ? 'ממתין'
+                      : statusFilter === 'APPROVED'
+                      ? 'אושר'
+                      : 'נדחה'}
+                  </Text>
+                  <Text style={styles.selectCaret}>▼</Text>
+                </TouchableOpacity>
+                {isStatusOpen && (
+                  <View style={styles.menu}>
+                    {[
+                      { key: 'ALL', label: 'הכל' },
+                      { key: 'PENDING', label: 'ממתין' },
+                      { key: 'APPROVED', label: 'אושר' },
+                      { key: 'REJECTED', label: 'נדחה' },
+                    ].map((opt) => (
+                      <TouchableOpacity
+                        key={opt.key}
+                        style={[styles.menuItem, (statusFilter === (opt.key as any)) && styles.menuItemActive]}
+                        activeOpacity={0.9}
+                        onPress={() => { setStatusFilter(opt.key as any); setIsStatusOpen(false); }}
+                      >
+                        <Text style={[styles.menuItemText, (statusFilter === (opt.key as any)) && styles.menuItemTextActive]}>
+                          {opt.label}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                )}
+              </View>
+            </View>
+          </View>
 
-        <View style={styles.statusChipsRow}>
-          {(['ALL','PENDING','APPROVED','REJECTED'] as const).map((key) => (
-            <TouchableOpacity
-              key={key}
-              onPress={() => setStatusFilter(key)}
-              activeOpacity={0.9}
-              style={[styles.statusChip, statusFilter === key && styles.statusChipActive]}
-            >
-              <Text style={[styles.statusChipText, statusFilter === key && styles.statusChipTextActive]}>
-                {key === 'ALL'
-                  ? 'הכל'
-                  : key === 'PENDING'
-                  ? 'ממתין'
-                  : key === 'APPROVED'
-                  ? 'אושר'
-                  : key === 'REJECTED'
-                  ? 'נדחה'
-                  : 'בוטל'}
-              </Text>
-            </TouchableOpacity>
-          ))}
+          {loading ? (
+            <View style={styles.centerContainer}>
+              <ActivityIndicator size="large" color="#4C1D95" />
+            </View>
+          ) : (
+            <FlatList
+              data={[{ key: tab }]}
+              keyExtractor={(i) => i.key}
+              refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#4C1D95" />}
+              renderItem={({ item }) => {
+                if (item.key === 'incoming') {
+                  return <Section title="בקשות אליי" data={filteredReceived} incoming />;
+                }
+                return <Section title="הבקשות שלי" data={filteredSent} />;
+              }}
+              contentContainerStyle={styles.listContent}
+            />
+          )}
         </View>
       </View>
-
-      {loading ? (
-        <View style={styles.centerContainer}>
-          <ActivityIndicator size="large" color="#4C1D95" />
-        </View>
-      ) : (
-        <FlatList
-          data={[{ key: tab }]}
-          keyExtractor={(i) => i.key}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#4C1D95" />}
-          renderItem={({ item }) => {
-            if (item.key === 'incoming') {
-              return <Section title="בקשות אליי" data={filteredReceived} incoming />;
-            }
-            return <Section title="הבקשות שלי" data={filteredSent} />;
-          }}
-          contentContainerStyle={styles.listContent}
-        />
-      )}
-    </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0F0F14',
+    backgroundColor: '#FFFFFF',
+  },
+  pageBody: {
+    flex: 1,
+    backgroundColor: '#FAFAFA',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    overflow: 'visible',
+    paddingTop: 0,
+    paddingHorizontal: 25,
   },
   filtersWrap: {
-    paddingHorizontal: 16,
+    paddingHorizontal: 0,
     paddingBottom: 6,
     alignItems: 'flex-end',
   },
@@ -1976,22 +2009,27 @@ const styles = StyleSheet.create({
     gap: 8 as any,
     paddingHorizontal: 12,
     paddingVertical: 10,
-    borderRadius: 12,
-    backgroundColor: 'transparent',
+    borderRadius: 999,
+    backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.14)',
+    borderColor: '#E5E7EB',
+    shadowColor: '#000',
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 1,
   },
   segmentBtnActive: {
-    borderColor: 'rgba(124,92,255,0.55)',
-    backgroundColor: 'rgba(124,92,255,0.10)',
+    borderColor: '#A78BFA',
+    backgroundColor: '#EFEAFE',
   },
   segmentText: {
-    color: '#C9CDD6',
+    color: '#6B7280',
     fontWeight: '800',
     fontSize: 13,
   },
   segmentTextActive: {
-    color: '#FFFFFF',
+    color: '#4C1D95',
   },
   statusChipsRow: {
     marginTop: 8,
@@ -2000,30 +2038,140 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
     gap: 8 as any,
   },
+  dropdownRow: {
+    marginTop: 8,
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8 as any,
+  },
+  selectWrap: {
+    flex: 1,
+    position: 'relative',
+  },
+  selectButton: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  selectText: {
+    color: '#111827',
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  selectCaret: {
+    color: '#9CA3AF',
+    fontSize: 12,
+    marginLeft: 8,
+  },
+  menu: {
+    position: 'absolute',
+    top: 46,
+    left: 0,
+    right: 0,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 12,
+    paddingVertical: 4,
+    shadowColor: '#000',
+    shadowOpacity: 0.06,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 3,
+    zIndex: 30,
+  },
+  menuItem: {
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+  },
+  menuItemActive: {
+    backgroundColor: '#F3F4F6',
+  },
+  menuItemText: {
+    color: '#374151',
+    fontSize: 14,
+    textAlign: 'right',
+    fontWeight: '700',
+  },
+  menuItemTextActive: {
+    color: '#4C1D95',
+  },
+  switchWrap: {
+    flexDirection: 'row-reverse',
+    backgroundColor: '#E9EEF3',
+    borderRadius: 28,
+    padding: 4,
+    borderWidth: 0,
+    borderColor: '#E5E7EB',
+    marginTop: 20,
+    marginBottom: 6,
+  },
+  switchItem: {
+    flex: 1,
+    borderRadius: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+  },
+  switchItemActive: {
+    backgroundColor: '#FFFFFF',
+    shadowColor: '#000',
+    shadowOpacity: 0.07,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
+  },
+  switchItemContent: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 8 as any,
+  },
+  switchText: {
+    color: '#6B7280',
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  switchTextActive: {
+    color: '#5B21B6',
+  },
+  switchDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#EF4444',
+  },
   statusChip: {
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 999,
-    backgroundColor: 'transparent',
+    backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
+    borderColor: '#E5E7EB',
   },
   statusChipActive: {
-    borderColor: 'rgba(124,92,255,0.55)',
-    backgroundColor: 'rgba(124,92,255,0.10)',
+    borderColor: '#A78BFA',
+    backgroundColor: '#EFEAFE',
   },
   statusChipText: {
-    color: '#C9CDD6',
+    color: '#6B7280',
     fontSize: 12,
     fontWeight: '800',
   },
   statusChipTextActive: {
-    color: '#FFFFFF',
+    color: '#4C1D95',
   },
   centerContainer: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: '#FAFAFA',
   },
   header: {
     flexDirection: 'row',
@@ -2048,17 +2196,18 @@ const styles = StyleSheet.create({
     height: 36,
   },
   headerTitle: {
-    color: '#FFFFFF',
+    color: '#0F0F14',
     fontSize: 18,
     fontWeight: '800',
   },
   listContent: {
-    padding: 16,
+    paddingHorizontal: 0,
+    paddingTop: 12,
     paddingBottom: 24,
     gap: 12 as any,
   },
   sectionTitle: {
-    color: '#FFFFFF',
+    color: '#111827',
     fontSize: 18,
     fontWeight: '900',
     marginBottom: 10,
@@ -2068,12 +2217,66 @@ const styles = StyleSheet.create({
     color: '#9DA4AE',
     textAlign: 'right',
   },
+  emptyState: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 60,
+    gap: 12 as any,
+  },
+  emptyIconWrap: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#EFEAFE',
+    borderWidth: 1,
+    borderColor: '#E9E3FF',
+  },
+  emptyTitle: {
+    color: '#5B21B6',
+    fontSize: 16,
+    fontWeight: '900',
+  },
+  emptySubtitle: {
+    color: '#6B7280',
+    fontSize: 13,
+    textAlign: 'center',
+  },
   card: {
-    backgroundColor: '#15151C',
+    backgroundColor: '#FFFFFF',
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
+    borderColor: '#E5E7EB',
     overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 2,
+    position: 'relative',
+  },
+  cardAccent: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    width: 6,
+    height: '100%',
+    borderTopRightRadius: 16,
+    borderBottomRightRadius: 16,
+  },
+  statusBadge: {
+    position: 'absolute',
+    top: 10,
+    left: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+  },
+  statusBadgeText: {
+    fontSize: 12,
+    fontWeight: '800',
   },
   cardInner: {
     flexDirection: 'row-reverse',
@@ -2082,19 +2285,19 @@ const styles = StyleSheet.create({
     gap: 12 as any,
   },
   cardTitle: {
-    color: '#FFFFFF',
+    color: '#111827',
     fontSize: 16,
     fontWeight: '900',
     textAlign: 'right',
   },
   cardSub: {
-    color: '#E6E9F0',
+    color: '#4B5563',
     fontSize: 14,
     textAlign: 'right',
     marginTop: 4,
   },
   cardMeta: {
-    color: '#9DA4AE',
+    color: '#6B7280',
     fontSize: 12,
     marginTop: 6,
     textAlign: 'right',
@@ -2104,9 +2307,9 @@ const styles = StyleSheet.create({
     height: 54,
     borderRadius: 27,
     overflow: 'hidden',
-    backgroundColor: '#1F1F29',
+    backgroundColor: '#F3F4F6',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
+    borderColor: '#E5E7EB',
   },
   avatarImg: {
     width: '100%',
@@ -2117,24 +2320,23 @@ const styles = StyleSheet.create({
     height: 96,
     borderRadius: 14,
     overflow: 'hidden',
-    backgroundColor: '#1F1F29',
+    backgroundColor: '#F3F4F6',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
+    borderColor: '#E5E7EB',
   },
   thumbImg: {
     width: '100%',
     height: '100%',
   },
-  approveBtn: {
-    backgroundColor: 'transparent',
-    borderWidth: 1,
-    borderColor: 'rgba(34,197,94,0.6)',
-    paddingHorizontal: 12,
+  approveBtnLight: {
+    backgroundColor: '#7C3AED',
+    borderWidth: 0,
+    paddingHorizontal: 14,
     paddingVertical: 10,
-    borderRadius: 10,
+    borderRadius: 999,
   },
-  approveBtnText: {
-    color: '#22C55E',
+  approveBtnTextLight: {
+    color: '#FFFFFF',
     fontSize: 14,
     fontWeight: '800',
   },
@@ -2142,16 +2344,16 @@ const styles = StyleSheet.create({
     width: 16,
     height: 16,
   },
-  rejectBtn: {
-    backgroundColor: 'transparent',
+  rejectBtnLight: {
+    backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: 'rgba(248,113,113,0.45)',
-    paddingHorizontal: 12,
+    borderColor: '#FCA5A5',
+    paddingHorizontal: 14,
     paddingVertical: 10,
-    borderRadius: 10,
+    borderRadius: 999,
   },
-  rejectBtnText: {
-    color: '#F87171',
+  rejectBtnTextLight: {
+    color: '#EF4444',
     fontSize: 14,
     fontWeight: '800',
   },

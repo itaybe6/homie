@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, SafeAreaView, TouchableOpacity, TextInput, Acti
 import { useRouter } from 'expo-router';
 import { Save, X, Trash2, Plus } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
+import * as ImageManipulator from 'expo-image-manipulator';
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/authStore';
 
@@ -110,10 +111,21 @@ export default function EditProfileScreen() {
       setIsUpdatingImages(true);
       const newUrls: string[] = [];
       for (const asset of (result as any).assets) {
-        const response = await fetch(asset.uri);
+        // Check image dimensions and only resize if larger than 1200px
+        const imageInfo = await ImageManipulator.manipulateAsync(asset.uri, []);
+        const actions: ImageManipulator.Action[] = [];
+        if (imageInfo.width > 1200) {
+          actions.push({ resize: { width: 1200 } });
+        }
+        // Compress the image
+        const compressed = await ImageManipulator.manipulateAsync(
+          asset.uri,
+          actions,
+          { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG }
+        );
+        const response = await fetch(compressed.uri);
         const arrayBuffer = await response.arrayBuffer();
-        const fileExt = (asset.fileName || 'image.jpg').split('.').pop() || 'jpg';
-        const fileName = `${user.id}-${Date.now()}-${Math.random().toString(36).slice(2)}.${fileExt}`;
+        const fileName = `${user.id}-${Date.now()}-${Math.random().toString(36).slice(2)}.jpg`;
         const filePath = `users/${user.id}/gallery/${fileName}`;
         const filePayload: any = arrayBuffer as any;
 

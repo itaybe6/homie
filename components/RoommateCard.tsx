@@ -1,5 +1,6 @@
 import React, { memo, useEffect, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Image, ViewStyle } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Heart, X, MapPin } from 'lucide-react-native';
 import { User } from '@/types/database';
 import { supabase } from '@/lib/supabase';
@@ -12,11 +13,13 @@ type RoommateCardProps = {
   onOpen?: (user: User) => void;
   style?: ViewStyle;
   matchPercent?: number | null;
+  mediaHeight?: number;
 };
 
-function RoommateCardBase({ user, onLike, onPass, onOpen, style, matchPercent }: RoommateCardProps) {
+function RoommateCardBase({ user, onLike, onPass, onOpen, style, matchPercent, mediaHeight }: RoommateCardProps) {
   const DEFAULT_AVATAR = 'https://cdn-icons-png.flaticon.com/512/847/847969.png';
   const router = useRouter();
+  const resolvedMediaHeight = typeof mediaHeight === 'number' && Number.isFinite(mediaHeight) ? mediaHeight : 520;
   type ProfileApartment = {
     id: string;
     title?: string | null;
@@ -92,7 +95,7 @@ function RoommateCardBase({ user, onLike, onPass, onOpen, style, matchPercent }:
   return (
     <View style={[styles.card, style]}>
       <TouchableOpacity activeOpacity={0.9} onPress={() => onOpen?.(user)}>
-        <View style={styles.imageWrap}>
+        <View style={[styles.imageWrap, { height: resolvedMediaHeight }]}>
           <Image
             source={{ uri: user.avatar_url || DEFAULT_AVATAR }}
             style={styles.image}
@@ -102,93 +105,30 @@ function RoommateCardBase({ user, onLike, onPass, onOpen, style, matchPercent }:
             <Text style={styles.matchBadgeValue}>{formattedMatch}</Text>
             <Text style={styles.matchBadgeLabel}>התאמה</Text>
           </View>
+          <View style={styles.bottomOverlayWrap}>
+            <LinearGradient
+              colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.6)']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 0, y: 1 }}
+              style={styles.bottomOverlayGradient}
+            />
+            <View style={styles.bottomOverlayContent}>
+              {!!user.full_name ? (
+                <Text style={styles.overlayName} numberOfLines={1}>
+                  {user.full_name}{user.age ? `, ${user.age}` : ''}
+                </Text>
+              ) : null}
+              {!!user.bio ? (
+                <Text style={styles.overlayBio} numberOfLines={2}>
+                  {user.bio}
+                </Text>
+              ) : null}
+            </View>
+          </View>
         </View>
       </TouchableOpacity>
 
-      <View style={styles.content}>
-        <View style={styles.headerRow}>
-          <Text style={styles.name} numberOfLines={1}>
-            {user.full_name}{user.age ? `, ${user.age}` : ''}
-          </Text>
-          {!!user.city ? (
-            <View style={styles.cityRow}>
-              <MapPin size={14} color="#C9CDD6" />
-              <Text style={styles.city} numberOfLines={1}>
-                {user.city}
-              </Text>
-            </View>
-          ) : null}
-        </View>
-
-        {!!user.bio ? (
-          <Text style={styles.bio} numberOfLines={3}>
-            {user.bio}
-          </Text>
-        ) : null}
-
-        <View style={styles.actionsRow}>
-          <TouchableOpacity
-            activeOpacity={0.9}
-            style={[styles.circleBtn, styles.passBtn]}
-            onPress={() => onPass(user)}
-          >
-            <X size={22} color="#F43F5E" />
-          </TouchableOpacity>
-          <TouchableOpacity
-            activeOpacity={0.9}
-            style={[styles.circleBtn, styles.likeBtn]}
-            onPress={() => onLike(user)}
-          >
-            <Heart size={22} color="#22C55E" />
-          </TouchableOpacity>
-        </View>
-
-        {apartments.length ? (
-          <View style={styles.aptSection}>
-            <Text style={styles.aptSectionTitle}>
-              הדירה של {user.full_name?.split(' ')?.[0] || 'המשתמש/ת'}
-            </Text>
-            {apartments.map((apt) => {
-              const imgs = normalizeImageUrls(apt.image_urls);
-              const PLACEHOLDER = 'https://images.pexels.com/photos/1457842/pexels-photo-1457842.jpeg';
-              const firstImg = imgs?.length ? imgs[0] : PLACEHOLDER;
-              return (
-                <TouchableOpacity
-                  key={apt.id}
-                  style={styles.aptCard}
-                  activeOpacity={0.9}
-                  onPress={() => router.push({ pathname: '/apartment/[id]', params: { id: apt.id } })}
-                >
-                  <View style={styles.aptThumbWrap}>
-                    <Image
-                      source={{ uri: failedThumbs[apt.id] ? PLACEHOLDER : firstImg }}
-                      style={styles.aptThumbImg}
-                      resizeMode="cover"
-                      onError={() =>
-                        setFailedThumbs((s) => (s[apt.id] ? s : { ...s, [apt.id]: true }))
-                      }
-                    />
-                  </View>
-                  <View style={styles.aptInfo}>
-                    <Text style={styles.aptTitle} numberOfLines={1}>
-                      {apt.title || 'דירה'}
-                    </Text>
-                    {!!apt.city ? (
-                      <View style={styles.aptMetaRow}>
-                        <MapPin size={14} color="#C9CDD6" />
-                        <Text style={styles.aptMeta} numberOfLines={1}>
-                          {apt.city}
-                        </Text>
-                      </View>
-                    ) : null}
-                  </View>
-                 
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-        ) : null}
-      </View>
+      {/* Bottom action buttons removed — swipe on card in parent */}
     </View>
   );
 }
@@ -197,22 +137,78 @@ export default memo(RoommateCardBase);
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: '#17171F',
+    backgroundColor: '#FFFFFF',
     borderRadius: 20,
     overflow: 'hidden',
     marginBottom: 18,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)',
+    borderColor: '#E5E7EB',
+  },
+  summary: {
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    paddingBottom: 12,
+  },
+  summaryTitle: {
+    color: '#111827',
+    fontSize: 18,
+    fontWeight: '900',
+    textAlign: 'right',
+  },
+  summaryText: {
+    color: '#6B7280',
+    fontSize: 14,
+    lineHeight: 20,
+    textAlign: 'right',
+    marginTop: 4,
   },
   imageWrap: {
     width: '100%',
-    height: 260,
-    backgroundColor: '#22232E',
+    height: 520,
+    backgroundColor: '#FFFFFF',
     position: 'relative',
   },
   image: {
     width: '100%',
     height: '100%',
+  },
+  bottomOverlayWrap: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: 128,
+  },
+  bottomOverlayGradient: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  bottomOverlayContent: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    alignItems: 'flex-end',
+  },
+  overlayName: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '900',
+    textAlign: 'right',
+  },
+  overlayAge: {
+    color: '#E5E7EB',
+    fontSize: 13,
+    marginTop: 2,
+    textAlign: 'right',
+  },
+  overlayBio: {
+    color: '#E5E7EB',
+    fontSize: 13,
+    lineHeight: 18,
+    marginTop: 4,
+    textAlign: 'right',
   },
   matchBadge: {
     position: 'absolute',

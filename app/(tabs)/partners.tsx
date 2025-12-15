@@ -10,13 +10,25 @@ import {
   TouchableOpacity,
   Modal,
   TextInput,
-  Animated,
   Dimensions,
-  Easing,
   Alert,
   Image,
+  ViewStyle,
+  Share,
+  useWindowDimensions,
 } from 'react-native';
-import { SlidersHorizontal, ChevronLeft, ChevronRight, Heart, X, MapPin } from 'lucide-react-native';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  interpolate,
+  Extrapolate,
+  withSpring,
+  withTiming,
+  runOnJS,
+} from 'react-native-reanimated';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import { SlidersHorizontal, ChevronLeft, ChevronRight, Heart, X, MapPin, Share2 } from 'lucide-react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/authStore';
@@ -42,6 +54,10 @@ import {
   CookingStyle,
   HomeVibe,
 } from '@/utils/matchCalculator';
+
+// Keep swipe cards visually consistent (prevents the next card peeking below the current one)
+const DEFAULT_SWIPE_CARD_MEDIA_HEIGHT = 520;
+const SWIPE_CARD_RADIUS = 20;
 
 const genderAliasMap: Record<string, 'male' | 'female'> = {
   male: 'male',
@@ -136,8 +152,100 @@ export default function PartnersScreen() {
   const [selectedCities, setSelectedCities] = useState<string[]>([]);
   const [matchScores, setMatchScores] = useState<Record<string, number | null>>({});
 
-  const screenWidth = Dimensions.get('window').width;
-  const translateX = useRef(new Animated.Value(0)).current;
+  const { width: screenWidth, height: screenHeight } = useWindowDimensions();
+  const translateX = useSharedValue(0);
+  const headerOffset = insets.top + 52 + -40;
+  const SWIPE_THRESHOLD = 120;
+  const ACTIONS_BAR_HEIGHT = 76;
+  // Negative gap moves the floating buttons slightly down (closer to the bottom) while staying safe on devices with no bottom inset.
+  const ACTIONS_BOTTOM_GAP = -10;
+  const actionsBottom = Math.max(0, insets.bottom + ACTIONS_BOTTOM_GAP);
+  const CARD_GAP_TO_ACTIONS = 14;
+  const EXTRA_CARD_BOTTOM_SPACE = 52; // extra safety so the card never sits behind the bottom action buttons
+  // estimate top chrome (status + logo area + small padding). We clamp so it behaves consistently across devices.
+  const TOP_CHROME_ESTIMATE = Math.max(96, insets.top + 84);
+
+  // Dynamic card height: fills most of the screen and keeps a stable gap to the bottom action buttons.
+  const swipeCardHeight = Math.round(
+    Math.min(
+      620,
+      Math.max(
+        440,
+        screenHeight -
+          TOP_CHROME_ESTIMATE -
+          (ACTIONS_BAR_HEIGHT + actionsBottom + CARD_GAP_TO_ACTIONS + EXTRA_CARD_BOTTOM_SPACE) -
+          16,
+      ),
+    ),
+  );
+
+  const onSwipe = (type: 'like' | 'pass') => {
+    const item = items[currentIndex];
+    if (!item) return;
+    if (type === 'like') {
+      if (item.type === 'user') handleLike((item as any).user, { skipSlide: true });
+      else handleGroupLike((item as any).groupId, (item as any).users, { skipSlide: true });
+    } else {
+      if (item.type === 'user') handlePass((item as any).user, { skipSlide: true });
+      else handleGroupPass((item as any).groupId, (item as any).users, { skipSlide: true });
+    }
+    setCurrentIndex((i) => Math.min(i + 1, items.length - 1));
+    translateX.value = 0;
+  };
+
+  const swipeGesture = Gesture.Pan()
+    .onChange((e) => {
+      translateX.value = e.translationX;
+    })
+    .onEnd(() => {
+      'worklet';
+      if (translateX.value > SWIPE_THRESHOLD) {
+        translateX.value = withTiming(screenWidth + 200, { duration: 180 }, (finished) => {
+          if (finished) runOnJS(onSwipe)('like');
+        });
+      } else if (translateX.value < -SWIPE_THRESHOLD) {
+        translateX.value = withTiming(-screenWidth - 200, { duration: 180 }, (finished) => {
+          if (finished) runOnJS(onSwipe)('pass');
+        });
+      } else {
+        translateX.value = withSpring(0, { damping: 18, stiffness: 180 });
+      }
+    });
+
+  const cardAnimatedStyle = useAnimatedStyle(() => ({
+    transform: [
+      { translateX: translateX.value },
+      {
+        rotateZ: `${interpolate(
+          translateX.value,
+          [-screenWidth, 0, screenWidth],
+          [-12, 0, 12],
+          Extrapolate.CLAMP,
+        )}deg`,
+      },
+    ],
+  }));
+
+  const behindCardAnimatedStyle = useAnimatedStyle(() => {
+    const progress = interpolate(
+      Math.abs(translateX.value),
+      [0, SWIPE_THRESHOLD],
+      [0, 1],
+      Extrapolate.CLAMP,
+    );
+    return {
+      transform: [{ scale: 0.985 + progress * 0.015 }, { translateY: 10 - progress * 10 }],
+      opacity: 0.92 + progress * 0.08,
+    };
+  });
+
+  const likeOverlayAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(translateX.value, [0, SWIPE_THRESHOLD], [0, 0.75], Extrapolate.CLAMP),
+  }));
+
+  const passOverlayAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(translateX.value, [-SWIPE_THRESHOLD, 0], [0.75, 0], Extrapolate.CLAMP),
+  }));
 
   useEffect(() => {
     fetchUsersAndGroups();
@@ -247,7 +355,7 @@ export default function PartnersScreen() {
       }
 
       if (currentUser) {
-        userMap[authId] = currentUser;
+        userMap[authId] = currentUser as unknown as User;
       }
       const myCompat = buildCompatSurvey(userMap[authId], mySurvey);
 
@@ -544,7 +652,7 @@ export default function PartnersScreen() {
         }
       });
       if (currentUser?.id) {
-        userMap[currentUser.id] = currentUser;
+        userMap[currentUser.id] = currentUser as unknown as User;
       }
       const candidateIds = Array.from(candidateIdSet);
       const newMatchScores = await computeMatchPercentages(candidateIds, userMap);
@@ -568,27 +676,19 @@ export default function PartnersScreen() {
   const slideTo = (nextIndex: number, direction: 'next' | 'prev') => {
     if (nextIndex < 0 || nextIndex >= items.length) return;
     const outTarget = direction === 'next' ? -screenWidth : screenWidth;
-    Animated.timing(translateX, {
-      toValue: outTarget,
-      duration: 220,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: true,
-    }).start(() => {
-      setCurrentIndex(nextIndex);
-      translateX.setValue(direction === 'next' ? screenWidth : -screenWidth);
-      Animated.spring(translateX, {
-        toValue: 0,
-        useNativeDriver: true,
-        friction: 8,
-        tension: 50,
-      }).start();
+    translateX.value = withTiming(outTarget, { duration: 220 }, (finished) => {
+      if (finished) {
+        runOnJS(setCurrentIndex)(nextIndex);
+        translateX.value = direction === 'next' ? screenWidth : -screenWidth;
+        translateX.value = withSpring(0, { damping: 18, stiffness: 160 });
+      }
     });
   };
 
   const goNext = () => slideTo(currentIndex + 1, 'next');
   const goPrev = () => slideTo(currentIndex - 1, 'prev');
 
-  const handleLike = async (likedUser: User) => {
+  const handleLike = async (likedUser: User, opts?: { skipSlide?: boolean }) => {
     if (currentUser?.id && likedUser.id === currentUser.id) {
       goNext();
       return;
@@ -648,13 +748,15 @@ export default function PartnersScreen() {
         description: notifDesc,
       });
 
-      goNext();
+      if (!opts?.skipSlide) {
+        goNext();
+      }
     } catch (e: any) {
       console.error('like failed', e);
       Alert.alert('שגיאה', e?.message || 'לא ניתן לשלוח בקשה');
     }
   };
-  const handlePass = async (user: User) => {
+  const handlePass = async (user: User, opts?: { skipSlide?: boolean }) => {
     if (!currentUser?.id) {
       Alert.alert('שגיאה', 'יש להתחבר כדי לבצע פעולה זו');
       return;
@@ -709,12 +811,14 @@ export default function PartnersScreen() {
       console.error('pass failed', e);
       Alert.alert('שגיאה', e?.message || 'לא ניתן לסמן כלא רלוונטי');
     } finally {
-      goNext();
+      if (!opts?.skipSlide) {
+        goNext();
+      }
     }
   };
   // Removed favorite action per request
 
-  const handleGroupLike = async (groupId: string, groupUsers: User[]) => {
+  const handleGroupLike = async (groupId: string, groupUsers: User[], opts?: { skipSlide?: boolean }) => {
     try {
       if (!currentUser?.id) {
         Alert.alert('שגיאה', 'יש להתחבר כדי לבצע פעולה זו');
@@ -769,14 +873,16 @@ export default function PartnersScreen() {
         }));
         await supabase.from('notifications').insert(notifications as any);
       }
-      goNext();
+      if (!opts?.skipSlide) {
+        goNext();
+      }
     } catch (e: any) {
       console.error('group like failed', e);
       Alert.alert('שגיאה', e?.message || 'לא ניתן לשלוח בקשות לקבוצה');
     }
   };
 
-  const handleGroupPass = async (groupId: string, groupUsers: User[]) => {
+  const handleGroupPass = async (groupId: string, groupUsers: User[], opts?: { skipSlide?: boolean }) => {
     try {
       if (!currentUser?.id) {
         Alert.alert('שגיאה', 'יש להתחבר כדי לבצע פעולה זו');
@@ -809,20 +915,102 @@ export default function PartnersScreen() {
       console.error('group pass failed', e);
       Alert.alert('שגיאה', e?.message || 'לא ניתן לסמן קבוצה כלא רלוונטית');
     } finally {
-      goNext();
+      if (!opts?.skipSlide) {
+        goNext();
+      }
     }
   };
   if (isLoading) {
     return (
       <View style={styles.centerContainer}>
-        <ActivityIndicator size="large" color="#4C1D95" />
+        <ActivityIndicator size="large" color="#111827" />
       </View>
     );
   }
 
+  const renderBrowseItem = (item: BrowseItem) => {
+    if (item.type === 'user') {
+      return (
+        <RoommateCard
+          user={(item as any).user}
+          matchPercent={matchScores[(item as any).user.id] ?? null}
+          onLike={handleLike}
+          onPass={handlePass}
+          style={{ marginBottom: 0 }}
+          mediaHeight={swipeCardHeight}
+          onOpen={(u) =>
+            router.push({
+              pathname: '/(tabs)/user/[id]',
+              params: { id: u.id, from: 'partners' } as any,
+            })
+          }
+        />
+      );
+    }
+
+    return (
+      <GroupCard
+        groupId={(item as any).groupId}
+        users={(item as any).users}
+        apartment={(item as any).apartment}
+        matchScores={matchScores}
+        onLike={(groupId, users) => handleGroupLike(groupId, users)}
+        onPass={(groupId, users) => handleGroupPass(groupId, users)}
+        mediaHeight={swipeCardHeight}
+        onOpen={(userId: string) =>
+          router.push({
+            pathname: '/(tabs)/user/[id]',
+            params: { id: userId, from: 'partners' } as any,
+          })
+        }
+        onOpenApartment={(apartmentId: string) =>
+          router.push({
+            pathname: '/(tabs)/apartment/[id]',
+            params: { id: apartmentId } as any,
+          })
+        }
+        style={{ marginBottom: 0 }}
+      />
+    );
+  };
+
+  const triggerSwipe = (type: 'like' | 'pass') => {
+    const outTarget = type === 'like' ? screenWidth + 200 : -screenWidth - 200;
+    translateX.value = withTiming(outTarget, { duration: 180 }, (finished) => {
+      if (finished) runOnJS(onSwipe)(type);
+    });
+  };
+
+  const onShareProfile = async () => {
+    const item = items[currentIndex];
+    if (!item) return;
+
+    const message =
+      item.type === 'user'
+        ? (() => {
+            const u = (item as any).user as User;
+            const name = u?.full_name || 'פרופיל';
+            const age = u?.age ? `, ${u.age}` : '';
+            const city = u?.city ? `\nעיר: ${u.city}` : '';
+            return `Homie – שותפים\n${name}${age}${city}`;
+          })()
+        : (() => {
+            const users = ((item as any).users || []) as User[];
+            const names = users.map((u) => u?.full_name).filter(Boolean).slice(0, 4).join(', ');
+            const suffix = users.length > 4 ? ` +${users.length - 4}` : '';
+            return `Homie – שותפים\nקבוצה: ${names || 'פרופיל משותף'}${suffix}`;
+          })();
+
+    try {
+      await Share.share({ message });
+    } catch {
+      // ignore
+    }
+  };
+
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.topBar}>
+      <View style={[styles.topBar, { top: insets.top + 8 }]}>
         <View style={styles.actionsRow}>
           <TouchableOpacity
             activeOpacity={0.8}
@@ -835,10 +1023,18 @@ export default function PartnersScreen() {
       </View>
 
       <ScrollView
-        contentContainerStyle={[styles.listContent, { paddingBottom: 32 + insets.bottom }]}
+        contentContainerStyle={[
+          styles.listContent,
+          {
+            paddingTop: headerOffset,
+            // Reserve space so the fixed bottom buttons never overlap the card on small screens.
+            // Important: tabs do NOT overlay this screen, so we only account for safe-area + our button bar.
+            paddingBottom: ACTIONS_BAR_HEIGHT + actionsBottom + CARD_GAP_TO_ACTIONS + 16,
+          },
+        ]}
         showsVerticalScrollIndicator={false}
         refreshControl={
-          <RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} tintColor="#4C1D95" />
+          <RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} tintColor="#111827" />
         }
       >
         {items.length === 0 ? (
@@ -848,88 +1044,79 @@ export default function PartnersScreen() {
           </View>
         ) : (
           <View>
-            <Animated.View
-              style={[
-                styles.animatedCard,
-                {
-                  transform: [
-                    { translateX },
-                    {
-                      scale: translateX.interpolate({
-                        inputRange: [-screenWidth, 0, screenWidth],
-                        outputRange: [0.96, 1, 0.96],
-                      }),
-                    },
-                  ],
-                  opacity: translateX.interpolate({
-                    inputRange: [-screenWidth, 0, screenWidth],
-                    outputRange: [0.85, 1, 0.85],
-                  }),
-                },
-              ]}
-            >
-              {items[currentIndex].type === 'user' ? (
-                <RoommateCard
-                  user={(items[currentIndex] as any).user}
-                  matchPercent={matchScores[(items[currentIndex] as any).user.id] ?? null}
-                  onLike={handleLike}
-                  onPass={handlePass}
-                  onOpen={(u) =>
-                    router.push({
-                      pathname: '/(tabs)/user/[id]',
-                      params: { id: u.id, from: 'partners' } as any,
-                    })
-                  }
-                />
-              ) : (
-                <GroupCard
-                  groupId={(items[currentIndex] as any).groupId}
-                  users={(items[currentIndex] as any).users}
-                  apartment={(items[currentIndex] as any).apartment}
-                  matchScores={matchScores}
-                  onLike={(groupId, users) => handleGroupLike(groupId, users)}
-                  onPass={(groupId, users) => handleGroupPass(groupId, users)}
-                  onOpen={(userId: string) =>
-                    router.push({
-                      pathname: '/(tabs)/user/[id]',
-                      params: { id: userId, from: 'partners' } as any,
-                    })
-                  }
-                  onOpenApartment={(apartmentId: string) =>
-                    router.push({
-                      pathname: '/(tabs)/apartment/[id]',
-                      params: { id: apartmentId } as any,
-                    })
-                  }
-                />
-              )}
-            </Animated.View>
+            <View style={[styles.cardStack, { height: swipeCardHeight }]}>
+              {items[currentIndex + 1] ? (
+                <Animated.View pointerEvents="none" style={[styles.behindCard, behindCardAnimatedStyle]}>
+                  {renderBrowseItem(items[currentIndex + 1])}
+                </Animated.View>
+              ) : null}
 
-            <View style={styles.arrowRow}>
-              <TouchableOpacity
-                activeOpacity={0.9}
-                style={[styles.arrowBtn, currentIndex === 0 && styles.arrowBtnDisabled]}
-                onPress={goPrev}
-                disabled={currentIndex === 0}
-              >
-                <ChevronRight size={22} color="#FFFFFF" />
-              </TouchableOpacity>
-              <View style={{ flex: 1 }} />
-              <TouchableOpacity
-                activeOpacity={0.9}
-                style={[
-                  styles.arrowBtn,
-                  currentIndex === items.length - 1 && styles.arrowBtnDisabled,
-                ]}
-                onPress={goNext}
-                disabled={currentIndex === items.length - 1}
-              >
-                <ChevronLeft size={22} color="#FFFFFF" />
-              </TouchableOpacity>
+              <GestureDetector gesture={swipeGesture}>
+                <Animated.View style={[styles.animatedCard, cardAnimatedStyle]}>
+                  {renderBrowseItem(items[currentIndex])}
+
+                  {/* Right swipe (LIKE) overlay */}
+                  <Animated.View
+                    pointerEvents="none"
+                    style={[styles.swipeOverlay, styles.likeOverlay, likeOverlayAnimatedStyle]}
+                  >
+                    <View style={styles.swipeOverlayIconWrap}>
+                      <Heart size={64} color="#FFFFFF" fill="#FFFFFF" />
+                    </View>
+                  </Animated.View>
+
+                  {/* Left swipe (PASS) overlay */}
+                  <Animated.View
+                    pointerEvents="none"
+                    style={[styles.swipeOverlay, styles.passOverlay, passOverlayAnimatedStyle]}
+                  >
+                    <View style={styles.swipeOverlayIconWrap}>
+                      <X size={64} color="#FFFFFF" />
+                    </View>
+                  </Animated.View>
+                </Animated.View>
+              </GestureDetector>
             </View>
           </View>
         )}
       </ScrollView>
+
+      {/* Fixed bottom buttons – consistent spacing across devices */}
+      {items.length ? (
+        <View style={[styles.bottomActions, { bottom: actionsBottom }]} pointerEvents="box-none">
+          <View style={styles.bottomActionsRow}>
+            <TouchableOpacity
+              activeOpacity={0.9}
+              style={[styles.actionBtn, styles.actionBtnDanger]}
+              accessibilityRole="button"
+              accessibilityLabel="לא מתאים"
+              onPress={() => triggerSwipe('pass')}
+            >
+              <X size={26} color="#EF4444" />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              activeOpacity={0.9}
+              style={[styles.actionBtn, styles.actionBtnShare]}
+              accessibilityRole="button"
+              accessibilityLabel="שיתוף פרופיל"
+              onPress={onShareProfile}
+            >
+              <Share2 size={22} color="#111827" />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              activeOpacity={0.9}
+              style={[styles.actionBtn, styles.actionBtnLike]}
+              accessibilityRole="button"
+              accessibilityLabel="אהבתי"
+              onPress={() => triggerSwipe('like')}
+            >
+              <Heart size={26} color="#7C5CFF" fill="#7C5CFF" />
+            </TouchableOpacity>
+          </View>
+        </View>
+      ) : null}
 
       {showFilters ? (
         <Modal
@@ -1151,21 +1338,20 @@ export default function PartnersScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0F0F14',
+    backgroundColor: '#FFFFFF',
   },
   centerContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#0F0F14',
+    backgroundColor: '#FFFFFF',
   },
   topBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    zIndex: 20,
     paddingHorizontal: 16,
-    paddingTop: 52,
-    paddingBottom: 8,
   },
   brandRow: {
     flexDirection: 'row',
@@ -1218,8 +1404,43 @@ const styles = StyleSheet.create({
   listContent: {
     padding: 16,
   },
+  cardStack: {
+    position: 'relative',
+  },
+  behindCard: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 1,
+    borderRadius: SWIPE_CARD_RADIUS,
+    overflow: 'hidden',
+  },
   animatedCard: {
-    // separate style for Animated.View wrapper
+    zIndex: 2,
+    borderRadius: SWIPE_CARD_RADIUS,
+    overflow: 'hidden',
+  },
+  swipeOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 10,
+    borderRadius: SWIPE_CARD_RADIUS,
+    overflow: 'hidden',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  swipeOverlayIconWrap: {
+    width: 112,
+    height: 112,
+    borderRadius: 56,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.35)',
+  },
+  likeOverlay: {
+    backgroundColor: 'rgba(124,92,255,0.42)',
+  },
+  passOverlay: {
+    backgroundColor: 'rgba(239,68,68,0.35)',
   },
   emptyContainer: {
     alignItems: 'center',
@@ -1236,23 +1457,46 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#6B7280',
   },
-  arrowRow: {
+  bottomActions: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    zIndex: 50,
+    alignItems: 'center',
+  },
+  bottomActionsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 6,
+    justifyContent: 'center',
+    gap: 22,
   },
-  arrowBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+  actionBtn: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
+    shadowColor: '#000',
+    shadowOpacity: 0.14,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 12,
   },
-  arrowBtnDisabled: {
-    opacity: 0.4,
+  actionBtnDanger: {
+    borderWidth: 1,
+    borderColor: 'rgba(239,68,68,0.18)',
+  },
+  actionBtnLike: {
+    borderWidth: 1,
+    borderColor: 'rgba(124,92,255,0.22)',
+  },
+  actionBtnShare: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    shadowOpacity: 0.10,
+    elevation: 10,
   },
   filterOverlay: {
     ...StyleSheet.absoluteFillObject,
@@ -1305,7 +1549,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.06)',
   },
   chipActive: {
-    backgroundColor: '#4C1D95',
+    backgroundColor: '#2A2A37',
     borderColor: 'rgba(255,255,255,0.15)',
   },
   chipText: {
@@ -1357,7 +1601,7 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   applyBtn: {
-    backgroundColor: '#A78BFA',
+    backgroundColor: '#22C55E',
     marginLeft: 8,
   },
   resetText: {
@@ -1381,6 +1625,8 @@ function GroupCard({
   onLike,
   onPass,
   onOpenApartment,
+  style,
+  mediaHeight,
 }: {
   groupId: string;
   users: User[];
@@ -1390,20 +1636,24 @@ function GroupCard({
   onLike: (groupId: string, users: User[]) => void;
   onPass: (groupId: string, users: User[]) => void;
   onOpenApartment: (apartmentId: string) => void;
+  style?: ViewStyle;
+  mediaHeight?: number;
 }) {
   const displayUsers = users.slice(0, 4);
   const extra = users.length - displayUsers.length;
   const DEFAULT_AVATAR = 'https://cdn-icons-png.flaticon.com/512/847/847969.png';
   const isOneRowLayout = displayUsers.length === 3 || displayUsers.length === 4;
+  const resolvedMediaHeight =
+    typeof mediaHeight === 'number' && Number.isFinite(mediaHeight) ? mediaHeight : DEFAULT_SWIPE_CARD_MEDIA_HEIGHT;
   const formatMatchPercent = (value: number | null | undefined) =>
     value === null || value === undefined ? '--%' : `${value}%`;
 
   return (
-    <View style={groupStyles.card}>
+    <View style={[groupStyles.card, style]}>
       <View style={groupStyles.gridWrap}>
         {displayUsers.map((u, idx) => {
           const rows = isOneRowLayout ? 1 : Math.ceil(displayUsers.length / 2);
-          const cellHeight = rows === 1 ? 240 : 120;
+          const cellHeight = rows === 1 ? resolvedMediaHeight : resolvedMediaHeight / 2;
           const isLastWithExtra = idx === displayUsers.length - 1 && extra > 0;
           const matchPercent = matchScores?.[u.id] ?? null;
           return (
@@ -1421,10 +1671,31 @@ function GroupCard({
               ]}
             >
               <View style={groupStyles.cellImageWrap}>
-                <Image source={{ uri: u.avatar_url || DEFAULT_AVATAR }} style={groupStyles.cellImage} />
+                <Image source={{ uri: u.avatar_url || DEFAULT_AVATAR }} style={groupStyles.cellImage} resizeMode="cover" />
                 <View style={[groupStyles.matchBadge, groupStyles.matchBadgeLarge]}>
                   <Text style={groupStyles.matchBadgeValue}>{formatMatchPercent(matchPercent)}</Text>
                   <Text style={groupStyles.matchBadgeLabel}>התאמה</Text>
+                </View>
+                <View style={groupStyles.cellBottomOverlay}>
+                  <LinearGradient
+                    colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.55)']}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 0, y: 1 }}
+                    style={groupStyles.cellBottomOverlayGradient}
+                  />
+                  <View style={groupStyles.cellBottomOverlayContent}>
+                    {!!u.full_name ? (
+                      <Text style={groupStyles.cellOverlayName} numberOfLines={1}>
+                        {u.full_name}
+                      </Text>
+                    ) : null}
+                    {!!u.age ? <Text style={groupStyles.cellOverlayAge}>{u.age}</Text> : null}
+                    {!!u.bio ? (
+                      <Text style={groupStyles.cellOverlayBio} numberOfLines={1}>
+                        {u.bio}
+                      </Text>
+                    ) : null}
+                  </View>
                 </View>
                 {isLastWithExtra ? (
                   <View style={groupStyles.extraOverlay}>
@@ -1437,115 +1708,35 @@ function GroupCard({
         })}
       </View>
 
-      <View style={groupStyles.membersSection}>
-        {users.map((u) => (
-          <TouchableOpacity
-            key={u.id}
-            activeOpacity={0.9}
-            onPress={() => onOpen(u.id)}
-            style={groupStyles.memberRow}
-          >
-            <View style={groupStyles.memberAvatarWrap}>
-              <Image source={{ uri: u.avatar_url || DEFAULT_AVATAR }} style={groupStyles.memberAvatar} />
-              <View style={[groupStyles.matchBadge, groupStyles.matchBadgeSmall]}>
-                <Text style={groupStyles.matchBadgeValueSmall}>{formatMatchPercent(matchScores?.[u.id])}</Text>
-              </View>
-            </View>
-            <View style={groupStyles.memberInfo}>
-              <Text style={groupStyles.memberNameAge} numberOfLines={1}>
-                {u.full_name}{u.age ? `, ${u.age}` : ''}
-              </Text>
-              {!!u.city && (
-                <View style={groupStyles.memberCityRow}>
-                  <MapPin size={14} color="#C9CDD6" />
-                  <Text style={groupStyles.memberCityText}>{u.city}</Text>
-                </View>
-              )}
-              {u.bio ? (
-                <Text style={groupStyles.memberBio} numberOfLines={3}>
-                  {u.bio}
-                </Text>
-              ) : null}
-            </View>
-          </TouchableOpacity>
-        ))}
-      </View>
+      {/* Summary under grid removed — details shown on image overlay */}
 
-      {apartment && (
-        <View style={groupStyles.apartmentSection}>
-          <Text style={groupStyles.apartmentTitle}>הדירה שלהם</Text>
-          <TouchableOpacity
-            activeOpacity={0.9}
-            onPress={() => onOpenApartment(apartment.id)}
-            style={groupStyles.apartmentCardContainer}
-          >
-            <View style={groupStyles.apartmentCardCompact}>
-              <Image
-                source={{ uri: apartment.image_url || 'https://images.pexels.com/photos/1457842/pexels-photo-1457842.jpeg' }}
-                style={groupStyles.apartmentImage}
-              />
-              <View style={groupStyles.apartmentDetails}>
-                <Text style={groupStyles.apartmentCardTitle} numberOfLines={1}>
-                  {apartment.title}
-                </Text>
-                <View style={groupStyles.apartmentLocation}>
-                  <MapPin size={14} color="#9DA4AE" />
-                  <Text style={groupStyles.apartmentLocationText}>{apartment.city}</Text>
-                </View>
-                <View style={groupStyles.apartmentPrice}>
-                  <Text style={groupStyles.apartmentPriceAmount}>₪{apartment.price}</Text>
-                  <Text style={groupStyles.apartmentPriceUnit}>/חודש</Text>
-                </View>
-              </View>
-            </View>
-          </TouchableOpacity>
-        </View>
-      )}
-
-      <View style={{ paddingHorizontal: 16, paddingBottom: 12 }}>
-        <View style={groupStyles.actionsRow}>
-          <TouchableOpacity
-            activeOpacity={0.9}
-            style={[groupStyles.circleBtn, groupStyles.passBtn]}
-            onPress={() => onPass(groupId, users)}
-          >
-            <X size={22} color="#F43F5E" />
-          </TouchableOpacity>
-          <TouchableOpacity
-            activeOpacity={0.9}
-            style={[groupStyles.circleBtn, groupStyles.likeBtn]}
-            onPress={() => onLike(groupId, users)}
-          >
-            <Heart size={22} color="#22C55E" />
-          </TouchableOpacity>
-        </View>
-      </View>
+      {/* Bottom action buttons removed — swipe to like/pass */}
     </View>
   );
 }
 
 const groupStyles = StyleSheet.create({
   card: {
-    backgroundColor: '#17171F',
+    backgroundColor: '#FAFAFA',
     borderRadius: 20,
     overflow: 'hidden',
     marginBottom: 18,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)',
+    borderColor: '#E5E7EB',
   },
   gridWrap: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    backgroundColor: '#22232E',
+    backgroundColor: '#FFFFFF',
     borderBottomWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)',
+    borderColor: '#E5E7EB',
   },
   cell: {
     width: '50%',
     position: 'relative',
     borderRightWidth: 1,
     borderBottomWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)',
+    borderColor: '#E5E7EB',
   },
   cellImageWrap: {
     width: '100%',
@@ -1555,6 +1746,43 @@ const groupStyles = StyleSheet.create({
   cellImage: {
     width: '100%',
     height: '100%',
+  },
+  cellBottomOverlay: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: 72,
+  },
+  cellBottomOverlayGradient: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  cellBottomOverlayContent: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    alignItems: 'flex-end',
+  },
+  cellOverlayName: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '800',
+    textAlign: 'right',
+  },
+  cellOverlayAge: {
+    color: '#E5E7EB',
+    fontSize: 12,
+    marginTop: 1,
+    textAlign: 'right',
+  },
+  cellOverlayBio: {
+    color: '#E5E7EB',
+    fontSize: 12,
+    marginTop: 2,
+    textAlign: 'right',
   },
   matchBadge: {
     position: 'absolute',
@@ -1620,7 +1848,7 @@ const groupStyles = StyleSheet.create({
     gap: 12 as any,
     paddingVertical: 10,
     borderTopWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)',
+    borderColor: '#E5E7EB',
   },
   memberAvatarWrap: {
     width: 60,
@@ -1632,13 +1860,13 @@ const groupStyles = StyleSheet.create({
     width: 60,
     height: 60,
     borderRadius: 12,
-    backgroundColor: '#1F1F29',
+    backgroundColor: '#F3F4F6',
   },
   memberInfo: {
     flex: 1,
   },
   memberNameAge: {
-    color: '#FFFFFF',
+    color: '#111827',
     fontSize: 16,
     fontWeight: '800',
     marginBottom: 4,
@@ -1652,11 +1880,11 @@ const groupStyles = StyleSheet.create({
     marginBottom: 6,
   },
   memberCityText: {
-    color: '#C9CDD6',
+    color: '#111827',
     fontSize: 13,
   },
   memberBio: {
-    color: '#C7CBD1',
+    color: '#111827',
     fontSize: 13,
     lineHeight: 18,
     textAlign: 'right',
@@ -1687,11 +1915,11 @@ const groupStyles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderTopWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)',
-    backgroundColor: '#1A1A24',
+    borderColor: '#E5E7EB',
+    backgroundColor: '#FFFFFF',
   },
   apartmentTitle: {
-    color: '#FFFFFF',
+    color: '#111827',
     fontSize: 16,
     fontWeight: '800',
     marginBottom: 12,
@@ -1702,16 +1930,16 @@ const groupStyles = StyleSheet.create({
   },
   apartmentCardCompact: {
     flexDirection: 'row-reverse',
-    backgroundColor: '#22232E',
+    backgroundColor: '#FFFFFF',
     borderRadius: 12,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)',
+    borderColor: '#E5E7EB',
   },
   apartmentImage: {
     width: 120,
     height: 100,
-    backgroundColor: '#2A2B36',
+    backgroundColor: '#F3F4F6',
   },
   apartmentDetails: {
     flex: 1,
@@ -1719,7 +1947,7 @@ const groupStyles = StyleSheet.create({
     justifyContent: 'center',
   },
   apartmentCardTitle: {
-    color: '#FFFFFF',
+    color: '#111827',
     fontSize: 15,
     fontWeight: '700',
     marginBottom: 6,
@@ -1732,7 +1960,7 @@ const groupStyles = StyleSheet.create({
     marginBottom: 6,
   },
   apartmentLocationText: {
-    color: '#9DA4AE',
+    color: '#111827',
     fontSize: 13,
     textAlign: 'right',
   },

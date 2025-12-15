@@ -6,7 +6,6 @@ import {
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
-  KeyboardAvoidingView,
   Keyboard,
   TouchableWithoutFeedback,
   Platform,
@@ -21,11 +20,13 @@ import { authService } from '@/lib/auth';
 import { useAuthStore } from '@/stores/authStore';
 import { Home, Camera, Pencil, X, ChevronRight, Eye, EyeOff, Check } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
+import * as ImageManipulator from 'expo-image-manipulator';
 import { BlurView } from 'expo-blur';
 import { supabase } from '@/lib/supabase';
 import { autocompleteCities, createSessionToken, PlacePrediction } from '@/lib/googlePlaces';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import LavaLamp from '../../components/LavaLamp';
+import KeyboardAwareScrollView from 'react-native-keyboard-aware-scroll-view/lib/KeyboardAwareScrollView';
 
 // App primary accent color (align with dark theme)
 const PRIMARY = '#4C1D95';
@@ -109,20 +110,29 @@ export default function RegisterScreen() {
 
   const uploadAvatar = async (userId: string, uri: string) => {
     try {
-      // On native, prefer arrayBuffer over Blob/File
-      const match = uri.match(/\.([a-zA-Z0-9]{1,5})(?:\?.*)?$/);
-      const ext = match ? match[1].toLowerCase() : 'jpg';
-      const fileName = `${userId}-${Date.now()}.${ext}`;
+      // Check image dimensions and only resize if larger than 800px
+      const imageInfo = await ImageManipulator.manipulateAsync(uri, []);
+      const actions: ImageManipulator.Action[] = [];
+      if (imageInfo.width > 800) {
+        actions.push({ resize: { width: 800 } });
+      }
+      // Compress the image
+      const compressed = await ImageManipulator.manipulateAsync(
+        uri,
+        actions,
+        { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG }
+      );
+      const fileName = `${userId}-${Date.now()}.jpg`;
       const filePath = `users/${userId}/${fileName}`;
 
-      const res = await fetch(uri);
+      const res = await fetch(compressed.uri);
       const arrayBuffer = await res.arrayBuffer();
 
       const { error: uploadError } = await supabase.storage
         .from('user-images')
         .upload(filePath, arrayBuffer, {
           upsert: true,
-          contentType: `image/${ext === 'png' ? 'png' : 'jpeg'}`,
+          contentType: 'image/jpeg',
         });
       if (uploadError) throw uploadError;
 
@@ -229,9 +239,7 @@ export default function RegisterScreen() {
   };
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+    <View style={styles.container}>
       {/* Animated “liquid glass” background */}
       <View pointerEvents="none" style={styles.bgWrap}>
         <LavaLamp hue="purple" intensity={40} count={5} duration={16000} backgroundColor="#F5F3FF" />
@@ -254,6 +262,14 @@ export default function RegisterScreen() {
       >
         <X size={24} color={PRIMARY} />
       </TouchableOpacity>
+      <KeyboardAwareScrollView
+        enableOnAndroid
+        extraScrollHeight={Platform.OS === 'ios' ? 16 : 24}
+        keyboardOpeningTime={0}
+        keyboardShouldPersistTaps="handled"
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
       <View style={{ flex: 1 }}>
         <View style={[styles.content, (step === 1 || step === 0) && styles.contentForSheet, step === 0 && styles.contentBottom]}>
           <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
@@ -270,13 +286,7 @@ export default function RegisterScreen() {
 
           {step === 0 ? (
             <View style={[styles.sheet, styles.sheetStep0]}>
-              <ScrollView
-                keyboardShouldPersistTaps="handled"
-                keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
-                showsVerticalScrollIndicator={false}
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={{ paddingBottom: insets.bottom + 28 }}
-              >
+              <View style={{ paddingBottom: insets.bottom + 28 }}>
                 <View style={styles.sheetHeader}>
                   <Text style={styles.sheetTitle}>בואו נתחיל מהתחלה</Text>
                   <Text style={styles.sheetIntro}>צרו חשבון חדש כדי למצוא שותף או לפרסם דירה.</Text>
@@ -342,20 +352,14 @@ export default function RegisterScreen() {
                     {isLoading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.buttonText}>המשך</Text>}
                   </TouchableOpacity>
                 </View>
-              </ScrollView>
+              </View>
             </View>
           ) : null}
 
           {/* Step 1 - form */}
           {step === 1 ? (
             <View style={[styles.sheet, styles.sheetLowered]}>
-              <ScrollView
-                keyboardShouldPersistTaps="handled"
-                keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
-                showsVerticalScrollIndicator={false}
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={{ paddingBottom: insets.bottom + 28 }}
-              >
+              <View style={{ paddingBottom: insets.bottom + 28 }}>
                 <View style={styles.sheetHeader}>
                   <Text style={styles.sheetTitle}>
                     {mode === 'user'
@@ -650,11 +654,12 @@ export default function RegisterScreen() {
                 </View>
               </>
             )}
-              </ScrollView>
+              </View>
             </View>
           ) : null}
         </View>
       </View>
+      </KeyboardAwareScrollView>
       {/* Gender picker modal */}
       <Modal visible={isGenderPickerOpen} transparent animationType="fade" onRequestClose={() => setIsGenderPickerOpen(false)}>
         <TouchableOpacity style={styles.modalBackdrop} activeOpacity={1} onPress={() => setIsGenderPickerOpen(false)}>
@@ -698,7 +703,7 @@ export default function RegisterScreen() {
           </TouchableOpacity>
         </View>
       </Modal>
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 

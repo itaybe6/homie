@@ -1,45 +1,36 @@
 import { memo } from 'react';
-import { View, Text, StyleSheet, Platform, Image } from 'react-native';
+import { View, StyleSheet, Platform, Image } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { usePathname } from 'expo-router';
 import NotificationsButton from '@/components/NotificationsButton';
 import RequestsButton from '@/components/RequestsButton';
-import MatchRequestsButton from '@/components/MatchRequestsButton';
-import GroupRequestsButton from '@/components/GroupRequestsButton';
 
 function GlobalTopBarBase() {
   const insets = useSafeAreaInsets();
   const isWeb = Platform.OS === 'web';
-  const pathname = usePathname();
-  const p = typeof pathname === 'string' ? pathname : '';
-  const showMatchButton =
-    p === '/(tabs)/home' ||
-    p === '/home' ||
-    p.startsWith('/(tabs)/apartment/') ||
-    p.startsWith('/apartment/') ||
-    p === '/(tabs)/profile' ||
-    p === '/profile' ||
-    p === '/(tabs)/partners' ||
-    p === '/partners' ||
-    p === '/(tabs)/notifications' ||
-    p === '/notifications' ||
-    p === '/(tabs)/requests' ||
-    p === '/requests' ||
-    p.startsWith('/(tabs)/user/') ||
-    p.startsWith('/user/');
-  const showGroupButton = showMatchButton;
   return (
     <View
       {...(!isWeb ? { pointerEvents: 'box-none' as const } : {})}
       style={[styles.container, isWeb ? ({ pointerEvents: 'box-none' } as const) : undefined]}
     >
+      {/* Solid white background under the safe area + header height */}
+      <View
+        style={[
+          styles.background,
+          { height: (insets.top || 0) + 52 },
+        ]}
+        pointerEvents="none"
+      />
       <View
         {...(!isWeb ? { pointerEvents: 'box-none' as const } : {})}
-        style={[styles.inner, { paddingTop: insets.top, paddingBottom: 0 }, isWeb ? ({ pointerEvents: 'box-none' } as const) : undefined]}
+        style={[
+          styles.inner,
+          { paddingTop: insets.top, paddingBottom: 0 },
+          isWeb ? ({ pointerEvents: 'box-none' } as const) : undefined,
+        ]}
       >
         {/* Left: notifications */}
         <NotificationsButton style={{ left: 16 }} />
-        {/* Center title */}
+        {/* Center logo */}
         <View
           {...(!isWeb ? { pointerEvents: 'none' as const } : {})}
           style={[
@@ -49,15 +40,13 @@ function GlobalTopBarBase() {
           ]}
         >
           <Image
-            source={require('../assets/images/logo-02.png')}
+            source={require('../assets/images/logo-03.png')}
             style={styles.logo}
             resizeMode="contain"
           />
         </View>
         {/* Right: requests */}
         <RequestsButton style={{ right: 16 }} />
-        {showMatchButton ? <MatchRequestsButton style={{ right: 60 }} /> : null}
-        {showGroupButton ? <GroupRequestsButton style={{ right: 104 }} /> : null}
       </View>
     </View>
   );
@@ -72,9 +61,19 @@ const styles = StyleSheet.create({
     right: 0,
     top: 0,
     zIndex: 60,
+    backgroundColor: '#FFFFFF',
   },
   inner: {
-    minHeight: 56,
+    width: '100%',
+    minHeight: 52,
+    backgroundColor: '#FFFFFF',
+  },
+  background: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    backgroundColor: '#FFFFFF',
   },
   centerWrap: {
     position: 'absolute',
@@ -83,15 +82,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  title: {
-    color: '#FFFFFF',
-    fontSize: 20,
-    fontWeight: '900',
-    letterSpacing: 0.3,
-  },
   logo: {
-    width: 84,
-    height: 26,
+    width: 110,
+    height: 34,
   },
 });
 
