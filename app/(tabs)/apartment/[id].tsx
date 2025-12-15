@@ -891,7 +891,13 @@ export default function ApartmentDetailsScreen() {
   return (
     <View style={styles.container}>
       {isOwner ? <StatusBar translucent backgroundColor="transparent" style="light" /> : null}
-      <ScrollView contentContainerStyle={{ paddingBottom: 220, paddingTop: 0, backgroundColor: '#FAFAFA' }}>
+      <ScrollView
+        contentContainerStyle={{
+          paddingBottom: (insets.bottom || 0) + 24,
+          paddingTop: 0,
+          backgroundColor: '#FAFAFA',
+        }}
+      >
         {/* Owner actions pinned to top of the page */}
         {null}
 
@@ -1008,13 +1014,9 @@ export default function ApartmentDetailsScreen() {
           <Text style={styles.heroTitle} numberOfLines={2}>
             {apartment.title}
           </Text>
-          <View style={styles.heroLocation}>
-            <MapPin size={16} color="#8B5CF6" />
-            <Text style={styles.heroLocationText} numberOfLines={1} allowFontScaling={false}>
-              {apartment.neighborhood ? `${apartment.neighborhood}, ` : ''}
-              {apartment.city}
-            </Text>
-          </View>
+          {apartment.description ? (
+            <Text style={styles.heroDescription}>{apartment.description}</Text>
+          ) : null}
         </View>
 
 
@@ -1085,13 +1087,6 @@ export default function ApartmentDetailsScreen() {
 
           {/* price card moved to floating overlay at bottom */}
 
-          {apartment.description ? (
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>תיאור הנכס</Text>
-              <Text style={styles.descriptionLight}>{apartment.description}</Text>
-            </View>
-          ) : null}
-
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>מה יש בדירה?</Text>
             <View style={styles.featuresGrid}>
@@ -1134,16 +1129,15 @@ export default function ApartmentDetailsScreen() {
           </View>
 
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>המיקום</Text>
+            <View style={styles.locationHeaderRow}>
+              <MapPin size={16} color="#8B5CF6" />
+              <Text style={styles.locationHeaderText} numberOfLines={1} allowFontScaling={false}>
+                {apartment.neighborhood ? `${apartment.neighborhood}, ${apartment.city}` : apartment.city}
+              </Text>
+            </View>
             <View style={styles.mapCard}>
               <View style={styles.mapDot} />
             </View>
-            <Text style={styles.mapTitle}>
-              {apartment.neighborhood ? `${apartment.neighborhood}, ${apartment.city}` : apartment.city}
-            </Text>
-            <Text style={styles.mapCaption}>
-              שכונה צעירה ותוססת, מלאה בבתי קפה, ברים וגלריות אמנות.
-            </Text>
           </View>
 
 
@@ -1218,54 +1212,47 @@ export default function ApartmentDetailsScreen() {
             );
           })()}
 
-        </View>
-      </ScrollView>
-
-      {/* Floating price card near bottom (not flush) */}
-      <View
-        pointerEvents="box-none"
-        style={[
-          styles.priceFloatingWrap,
-          { bottom: (insets.bottom || 0) + 16 },
-        ]}
-      >
-        <View style={styles.priceCard}>
-          <View style={styles.priceRight}>
-            <Text style={styles.priceValue}>
-              <Text style={styles.currencySign}>₪</Text>
-              {apartment.price.toLocaleString?.() ?? String(apartment.price)}
-            </Text>
-            <View style={styles.greenChip}>
-              <Text style={styles.greenChipText}>זמין מיידית</Text>
+          {/* Availability card pinned at the bottom of the content (not floating) */}
+          <View style={{ paddingBottom: (insets.bottom || 0) + 8 }}>
+            <View style={styles.priceCard}>
+              <View style={styles.priceRight}>
+                <Text style={styles.priceValue}>
+                  <Text style={styles.currencySign}>₪</Text>
+                  {apartment.price.toLocaleString?.() ?? String(apartment.price)}
+                </Text>
+                <View style={styles.greenChip}>
+                  <Text style={styles.greenChipText}>זמין מיידית</Text>
+                </View>
+              </View>
+              <TouchableOpacity
+                activeOpacity={0.9}
+                onPress={handleRequestJoin}
+                disabled={isOwner || isMember || isAssignedAnywhere !== false || isRequestingJoin || hasRequestedJoin}
+                style={[
+                  styles.availabilityBtn,
+                  (isOwner || isMember || isAssignedAnywhere !== false || isRequestingJoin || hasRequestedJoin)
+                    ? { opacity: 0.6 }
+                    : null,
+                ]}
+              >
+                <Text style={styles.availabilityBtnText}>
+                  {isOwner || isMember
+                    ? 'בדוק זמינות'
+                    : isAssignedAnywhere !== false
+                      ? 'לא זמין'
+                      : isRequestingJoin
+                        ? 'שולח...'
+                        : hasRequestedJoin
+                          ? 'נשלחה בקשה'
+                          : 'הגש בקשה'}
+                </Text>
+              </TouchableOpacity>
             </View>
           </View>
-          <TouchableOpacity
-            activeOpacity={0.9}
-            onPress={handleRequestJoin}
-            disabled={isOwner || isMember || isAssignedAnywhere !== false || isRequestingJoin || hasRequestedJoin}
-            style={[
-              styles.availabilityBtn,
-              (isOwner || isMember || isAssignedAnywhere !== false || isRequestingJoin || hasRequestedJoin)
-                ? { opacity: 0.6 }
-                : null,
-            ]}
-          >
-            <Text style={styles.availabilityBtnText}>
-              {isOwner || isMember
-                ? 'בדוק זמינות'
-                : isAssignedAnywhere !== false
-                  ? 'לא זמין'
-                  : isRequestingJoin
-                    ? 'שולח...'
-                    : hasRequestedJoin
-                      ? 'נשלחה בקשה'
-                      : 'הגש בקשה'}
-            </Text>
-          </TouchableOpacity>
-        </View>
-      </View>
 
-      {/* Join request is handled via the main CTA button in the floating price card */}
+        </View>
+      </ScrollView>
+      {/* Join request is handled via the main CTA card at the bottom of the content */}
 
       {/* Members Modal */}
       <Modal visible={isMembersOpen} animationType="slide" transparent onRequestClose={() => setIsMembersOpen(false)}>
@@ -1765,24 +1752,27 @@ const styles = StyleSheet.create({
     textAlign: 'right',
     writingDirection: 'rtl',
   },
-  heroLocation: {
+  heroDescription: {
+    color: '#374151',
+    fontSize: 14,
+    lineHeight: 20,
+    marginTop: 8,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
+  locationHeaderRow: {
     flexDirection: 'row-reverse',
     alignItems: 'center',
     gap: 6,
-    marginTop: 6,
+    marginBottom: 10,
   },
-  heroLocationText: {
+  locationHeaderText: {
     color: '#6B7280',
     fontSize: 14,
     lineHeight: 16,
     fontWeight: '500',
     textAlign: 'right',
-  },
-  subMeta: {
-    color: '#B0B4BF',
-    fontSize: 13,
-    marginTop: 6,
-    textAlign: 'right',
+    writingDirection: 'rtl',
   },
   content: {
     padding: 20,
@@ -1980,22 +1970,6 @@ const styles = StyleSheet.create({
     borderWidth: 3,
     borderColor: '#8B5CF6',
   },
-  mapTitle: {
-    color: '#111827',
-    fontSize: 20,
-    fontWeight: '900',
-    marginTop: 8,
-    textAlign: 'right',
-    writingDirection: 'rtl',
-  },
-  mapCaption: {
-    color: '#6B7280',
-    fontSize: 14,
-    lineHeight: 20,
-    marginTop: 4,
-    textAlign: 'right',
-    writingDirection: 'rtl',
-  },
   peopleGrid: {
     flexDirection: 'row-reverse',
     flexWrap: 'wrap',
@@ -2070,12 +2044,6 @@ const styles = StyleSheet.create({
     // bottom offset is applied inline to respect safe area
     zIndex: 100,
     elevation: 8,
-  },
-  priceFloatingWrap: {
-    position: 'absolute',
-    left: 16,
-    right: 16,
-    zIndex: 60,
   },
   // deprecated old bottom action buttons kept for potential reuse
   editButton: {
