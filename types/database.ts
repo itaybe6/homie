@@ -72,6 +72,20 @@ export interface Apartment {
   roommate_capacity?: number;
   image_urls?: string[]; // new: multiple images
   partner_ids?: string[]; // national IDs of roommates associated to the apartment
+
+  // Property features (מאפייני הנכס)
+  balcony_count?: number; // 0-3
+  wheelchair_accessible?: boolean; // גישה לנכים
+  has_air_conditioning?: boolean; // מיזוג
+  has_bars?: boolean; // סורגים
+  has_solar_heater?: boolean; // דוד שמש
+  is_furnished?: boolean; // ריהוט
+  has_safe_room?: boolean; // ממ"ד
+  is_renovated?: boolean; // משופצת
+  pets_allowed?: boolean; // חיות מחמד
+  has_elevator?: boolean; // מעלית
+  kosher_kitchen?: boolean; // מטבח כשר
+
   created_at: string;
   updated_at: string;
 }

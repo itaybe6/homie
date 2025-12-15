@@ -299,9 +299,10 @@ export default function ApartmentCard({
           </View>
           {/* Price badge */}
           <View style={styles.priceBadge}>
-          <Text style={styles.priceBadgeText}>{apartment.price}</Text>
-          <Text style={styles.priceBadgeCurrency}>₪</Text>
-          <Text style={styles.priceBadgeUnit}>/חודש</Text>
+            <Text style={styles.priceBadgeText}>
+              {apartment.price?.toLocaleString?.() ?? String(apartment.price ?? '')}
+              <Text style={styles.priceBadgeCurrency}>₪</Text>
+            </Text>
           </View>
           {/* New */}
           {isNew ? (
@@ -510,33 +511,24 @@ const styles = StyleSheet.create({
     bottom: 12,
     flexDirection: 'row-reverse',
     alignItems: 'center',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: 'rgba(255,255,255,0.86)',
     borderRadius: 22,
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderWidth: 1,
     borderColor: '#E5E7EB',
-    gap: 4,
   },
   priceBadgeText: {
-    color: '#c084fc',
+    color: '#111827',
     fontSize: 16,
-    fontWeight: '900',
+    fontWeight: '800',
     writingDirection: 'rtl',
     textAlign: 'right',
   },
   priceBadgeCurrency: {
-    color: '#c084fc',
+    color: '#111827',
     fontSize: 14,
-    fontWeight: '900',
-    marginHorizontal: 2,
-    writingDirection: 'rtl',
-    textAlign: 'right',
-  },
-  priceBadgeUnit: {
-    color: '#6B7280',
-    fontSize: 12,
-    marginRight: 6,
+    fontWeight: '800',
     writingDirection: 'rtl',
     textAlign: 'right',
   },

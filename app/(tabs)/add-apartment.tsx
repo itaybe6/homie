@@ -22,6 +22,19 @@ import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { autocompleteAddresses, createSessionToken } from '@/lib/googlePlaces';
 import { getNeighborhoodsForCityName, searchCitiesWithNeighborhoods } from '@/lib/neighborhoods';
+import {
+  Accessibility,
+  Snowflake,
+  Fence,
+  Sun,
+  Sofa,
+  Shield,
+  Hammer,
+  PawPrint,
+  ArrowUpDown,
+  Utensils,
+  Users,
+} from 'lucide-react-native';
 
 
 export default function AddApartmentScreen() {
@@ -56,6 +69,21 @@ export default function AddApartmentScreen() {
   const [roommateCapacity, setRoommateCapacity] = useState<number | null>(null);
   const [isRoommateDropdownOpen, setIsRoommateDropdownOpen] = useState(false);
   const roommateCapacityOptions = [2, 3, 4, 5];
+  const [isBalconyDropdownOpen, setIsBalconyDropdownOpen] = useState(false);
+  const balconyOptions: Array<0 | 1 | 2 | 3> = [0, 1, 2, 3];
+
+  // Property features (מאפייני הנכס)
+  const [balconyCount, setBalconyCount] = useState<0 | 1 | 2 | 3>(0);
+  const [wheelchairAccessible, setWheelchairAccessible] = useState(false);
+  const [hasAirConditioning, setHasAirConditioning] = useState(false);
+  const [hasBars, setHasBars] = useState(false);
+  const [hasSolarHeater, setHasSolarHeater] = useState(false);
+  const [isFurnished, setIsFurnished] = useState(false);
+  const [hasSafeRoom, setHasSafeRoom] = useState(false);
+  const [isRenovated, setIsRenovated] = useState(false);
+  const [petsAllowed, setPetsAllowed] = useState(false);
+  const [hasElevator, setHasElevator] = useState(false);
+  const [kosherKitchen, setKosherKitchen] = useState(false);
 
   useEffect(() => {
     setSessionToken(createSessionToken());
@@ -121,6 +149,7 @@ export default function AddApartmentScreen() {
     setIsNeighborhoodOpen(false);
     setNeighborhoodSearchQuery('');
     setIsRoommateDropdownOpen(false);
+    setIsBalconyDropdownOpen(false);
   };
 
   const goToStep = (next: Step) => {
@@ -140,6 +169,10 @@ export default function AddApartmentScreen() {
       }
       if (!address.trim()) {
         setError('אנא מלא/י כתובת');
+        return false;
+      }
+      if (![0, 1, 2, 3].includes(balconyCount)) {
+        setError('מספר מרפסות לא תקין');
         return false;
       }
       return true;
@@ -388,6 +421,19 @@ export default function AddApartmentScreen() {
           bathrooms: bathroomsNum,
           roommate_capacity: roommatesNum,
           image_urls: uploadedUrls.length ? uploadedUrls : null,
+
+          // Property features
+          balcony_count: balconyCount,
+          wheelchair_accessible: wheelchairAccessible,
+          has_air_conditioning: hasAirConditioning,
+          has_bars: hasBars,
+          has_solar_heater: hasSolarHeater,
+          is_furnished: isFurnished,
+          has_safe_room: hasSafeRoom,
+          is_renovated: isRenovated,
+          pets_allowed: petsAllowed,
+          has_elevator: hasElevator,
+          kosher_kitchen: kosherKitchen,
         })
         .select()
         .single();
@@ -643,6 +689,111 @@ export default function AddApartmentScreen() {
                     placeholderTextColor="#9AA0A6"
                   />
                 </View>
+
+                {/* Property features */}
+                <View style={styles.section}>
+                  <Text style={styles.sectionTitle}>מאפייני הנכס</Text>
+
+                  <View style={styles.featuresGrid}>
+                    {(
+                      [
+                        {
+                          key: 'wheelchairAccessible',
+                          label: 'גישה לנכים',
+                          Icon: Accessibility,
+                          value: wheelchairAccessible,
+                          set: setWheelchairAccessible,
+                        },
+                        {
+                          key: 'hasAirConditioning',
+                          label: 'מיזוג',
+                          Icon: Snowflake,
+                          value: hasAirConditioning,
+                          set: setHasAirConditioning,
+                        },
+                        {
+                          key: 'hasBars',
+                          label: 'סורגים',
+                          Icon: Fence,
+                          value: hasBars,
+                          set: setHasBars,
+                        },
+                        {
+                          key: 'hasSolarHeater',
+                          label: 'דוד שמש',
+                          Icon: Sun,
+                          value: hasSolarHeater,
+                          set: setHasSolarHeater,
+                        },
+                        {
+                          key: 'isFurnished',
+                          label: 'ריהוט',
+                          Icon: Sofa,
+                          value: isFurnished,
+                          set: setIsFurnished,
+                        },
+                        {
+                          key: 'hasSafeRoom',
+                          label: 'ממ"ד',
+                          Icon: Shield,
+                          value: hasSafeRoom,
+                          set: setHasSafeRoom,
+                        },
+                        {
+                          key: 'isRenovated',
+                          label: 'משופצת',
+                          Icon: Hammer,
+                          value: isRenovated,
+                          set: setIsRenovated,
+                        },
+                        {
+                          key: 'petsAllowed',
+                          label: 'חיות מחמד',
+                          Icon: PawPrint,
+                          value: petsAllowed,
+                          set: setPetsAllowed,
+                        },
+                        {
+                          key: 'hasElevator',
+                          label: 'מעלית',
+                          Icon: ArrowUpDown,
+                          value: hasElevator,
+                          set: setHasElevator,
+                        },
+                        {
+                          key: 'kosherKitchen',
+                          label: 'מטבח כשר',
+                          Icon: Utensils,
+                          value: kosherKitchen,
+                          set: setKosherKitchen,
+                        },
+                      ] as const
+                    ).map((item) => {
+                      const active = item.value;
+                      const Icon = item.Icon;
+                      return (
+                        <TouchableOpacity
+                          key={item.key}
+                          style={[styles.featureCard, active ? styles.featureCardActive : null]}
+                          onPress={() => item.set(!item.value)}
+                          activeOpacity={0.85}
+                          disabled={isLoading}
+                        >
+                          <Icon size={18} color={active ? '#4C1D95' : '#6B7280'} />
+                          <Text
+                            style={[
+                              styles.featureText,
+                              active ? styles.featureTextActive : null,
+                            ]}
+                            numberOfLines={1}
+                          >
+                            {item.label}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                </View>
               </>
             ) : null}
 
@@ -678,6 +829,40 @@ export default function AddApartmentScreen() {
                       placeholderTextColor="#9AA0A6"
                     />
                   </View>
+                </View>
+
+                <View style={[styles.inputGroup, isBalconyDropdownOpen ? styles.inputGroupRaised : null]}>
+                  <Text style={styles.label}>מרפסות</Text>
+                  <TouchableOpacity
+                    style={[styles.input, styles.selectButton]}
+                    onPress={() => setIsBalconyDropdownOpen((prev) => !prev)}
+                    disabled={isLoading}
+                  >
+                    <Text
+                      style={styles.selectButtonText}
+                    >
+                      {balconyCount === 0 ? 'ללא מרפסת' : `${balconyCount} מרפסות`}
+                    </Text>
+                    <Text style={styles.selectButtonArrow}>▼</Text>
+                  </TouchableOpacity>
+                  {isBalconyDropdownOpen ? (
+                    <View style={styles.suggestionsBox}>
+                      {balconyOptions.map((value) => (
+                        <TouchableOpacity
+                          key={value}
+                          style={styles.suggestionItem}
+                          onPress={() => {
+                            setBalconyCount(value);
+                            setIsBalconyDropdownOpen(false);
+                          }}
+                        >
+                          <Text style={styles.suggestionText}>
+                            {value === 0 ? 'ללא מרפסת' : `${value} מרפסות`}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  ) : null}
                 </View>
 
                 <View style={[styles.inputGroup, isRoommateDropdownOpen ? styles.inputGroupRaised : null]}>
@@ -1186,5 +1371,82 @@ const styles = StyleSheet.create({
   },
   dropdownScroll: {
     maxHeight: 200,
+  },
+
+  section: {
+    marginTop: 6,
+    paddingTop: 6,
+    borderTopWidth: 1,
+    borderTopColor: '#F1ECFF',
+    gap: 10,
+  },
+  sectionTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#111827',
+    textAlign: 'right',
+  },
+  chipsRow: {
+    flexDirection: 'row-reverse',
+    gap: 10,
+    flexWrap: 'wrap',
+    justifyContent: 'flex-end',
+  },
+  chip: {
+    borderWidth: 1,
+    borderColor: '#E7E2F5',
+    borderRadius: 999,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    backgroundColor: '#FFFFFF',
+    minWidth: 60,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  chipActive: {
+    backgroundColor: 'rgba(76, 29, 149, 0.10)',
+    borderColor: '#4C1D95',
+  },
+  chipText: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#111827',
+  },
+  chipTextActive: {
+    color: '#4C1D95',
+  },
+  featuresGrid: {
+    flexDirection: 'row-reverse',
+    flexWrap: 'wrap',
+    gap: 10,
+    justifyContent: 'space-between',
+  },
+  featureCard: {
+    width: '48%',
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    gap: 10,
+    paddingVertical: 14,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: '#E7E2F5',
+    borderRadius: 12,
+    backgroundColor: '#FFFFFF',
+  },
+  featureCardActive: {
+    backgroundColor: 'rgba(76, 29, 149, 0.08)',
+    borderColor: 'rgba(76, 29, 149, 0.55)',
+  },
+  featureText: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#111827',
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
+  featureTextActive: {
+    color: '#4C1D95',
   },
 });

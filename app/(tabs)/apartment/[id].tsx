@@ -1210,7 +1210,6 @@ export default function ApartmentDetailsScreen() {
             <Text style={styles.priceValue}>
               <Text style={styles.currencySign}>₪</Text>
               {apartment.price.toLocaleString?.() ?? String(apartment.price)}
-              <Text style={styles.pricePerInline}> / חודש</Text>
             </Text>
             <View style={styles.greenChip}>
               <Text style={styles.greenChipText}>זמין מיידית</Text>
@@ -1867,7 +1866,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 12,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: 'rgba(255,255,255,0.92)',
     borderRadius: 14,
     paddingHorizontal: 14,
     paddingVertical: 14,
@@ -1882,8 +1881,8 @@ const styles = StyleSheet.create({
       : { elevation: 4 }),
   },
   priceRight: { alignItems: 'flex-end', gap: 6 },
-  priceValue: { color: '#0B1220', fontSize: 20, fontWeight: '900' },
-  currencySign: { color: '#0B1220', fontSize: 18, fontWeight: '900' },
+  priceValue: { color: '#0B1220', fontSize: 20, fontWeight: '800' },
+  currencySign: { color: '#0B1220', fontSize: 18, fontWeight: '800' },
   pricePerUnit: { color: '#6B7280', fontSize: 13, marginTop: 2, marginBottom: 6 },
   pricePerInline: { color: '#6B7280', fontSize: 13, fontWeight: '600', marginLeft: 6 },
   greenChip: { backgroundColor: '#DCFCE7', borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4 },
