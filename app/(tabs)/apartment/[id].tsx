@@ -34,12 +34,17 @@ import {
   Heart,
   Share2,
   MessageCircle,
-  Wifi,
   Snowflake,
-  WashingMachine,
   Utensils,
-  Tv,
   Home,
+  Accessibility,
+  Fence,
+  Sun,
+  Sofa,
+  Shield,
+  Hammer,
+  PawPrint,
+  ArrowUpDown,
 } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { supabase } from '@/lib/supabase';
@@ -1090,23 +1095,42 @@ export default function ApartmentDetailsScreen() {
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>מה יש בדירה?</Text>
             <View style={styles.featuresGrid}>
-              {[
-                { label: 'אינטרנט אלחוטי', Icon: Wifi },
-                { label: 'מיזוג אוויר', Icon: Snowflake },
-                { label: 'מכונת כביסה', Icon: WashingMachine },
-                { label: 'טלוויזיה', Icon: Tv },
-                { label: 'מטבח מאובזר', Icon: Utensils },
-                { label: 'מרפסת', Icon: Home },
-              ].map(({ label, Icon }, idx) => (
-                <View key={`feat-${idx}`} style={styles.featureLine}>
-                  <Icon size={18} color="#6B7280" style={{ marginLeft: 6 }} />
-                  <Text style={styles.featureText}>{label}</Text>
-                </View>
-              ))}
+              {(() => {
+                const balcony = typeof (apartment as any)?.balcony_count === 'number'
+                  ? ((apartment as any).balcony_count as number)
+                  : 0;
+                const items: Array<{ key: string; label: string; Icon: any }> = [];
+
+                if (balcony > 0) {
+                  items.push({
+                    key: 'balcony_count',
+                    label: balcony === 1 ? 'מרפסת' : `${balcony} מרפסות`,
+                    Icon: Home,
+                  });
+                }
+                if ((apartment as any)?.wheelchair_accessible) items.push({ key: 'wheelchair_accessible', label: 'גישה לנכים', Icon: Accessibility });
+                if ((apartment as any)?.has_air_conditioning) items.push({ key: 'has_air_conditioning', label: 'מיזוג', Icon: Snowflake });
+                if ((apartment as any)?.has_bars) items.push({ key: 'has_bars', label: 'סורגים', Icon: Fence });
+                if ((apartment as any)?.has_solar_heater) items.push({ key: 'has_solar_heater', label: 'דוד שמש', Icon: Sun });
+                if ((apartment as any)?.is_furnished) items.push({ key: 'is_furnished', label: 'ריהוט', Icon: Sofa });
+                if ((apartment as any)?.has_safe_room) items.push({ key: 'has_safe_room', label: 'ממ״ד', Icon: Shield });
+                if ((apartment as any)?.is_renovated) items.push({ key: 'is_renovated', label: 'משופצת', Icon: Hammer });
+                if ((apartment as any)?.pets_allowed) items.push({ key: 'pets_allowed', label: 'חיות מחמד', Icon: PawPrint });
+                if ((apartment as any)?.has_elevator) items.push({ key: 'has_elevator', label: 'מעלית', Icon: ArrowUpDown });
+                if ((apartment as any)?.kosher_kitchen) items.push({ key: 'kosher_kitchen', label: 'מטבח כשר', Icon: Utensils });
+
+                if (!items.length) {
+                  return <Text style={styles.featuresEmpty}>לא צוינו מאפיינים</Text>;
+                }
+
+                return items.map(({ key, label, Icon }) => (
+                  <View key={`feat-${key}`} style={styles.featureLine}>
+                    <Icon size={18} color="#6B7280" style={{ marginLeft: 6 }} />
+                    <Text style={styles.featureText}>{label}</Text>
+                  </View>
+                ));
+              })()}
             </View>
-            <TouchableOpacity activeOpacity={0.9} style={styles.showAllBtn}>
-              <Text style={styles.showAllText}>הצג את כל 24 השירותים</Text>
-            </TouchableOpacity>
           </View>
 
           <View style={styles.section}>
@@ -1932,23 +1956,13 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   featureText: { color: '#6B7280', fontSize: 14, fontWeight: '600' },
-  showAllBtn: {
-    height: 44,
-    borderRadius: 22,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#FFFFFF',
-    marginBottom: 12,
-    ...(Platform.OS === 'ios'
-      ? {
-          shadowColor: '#000',
-          shadowOpacity: 0.08,
-          shadowRadius: 8,
-          shadowOffset: { width: 0, height: 4 },
-        }
-      : { elevation: 4 }),
+  featuresEmpty: {
+    color: '#6B7280',
+    fontSize: 14,
+    fontWeight: '600',
+    textAlign: 'right',
+    writingDirection: 'rtl',
   },
-  showAllText: { color: '#111827', fontSize: 15, fontWeight: '900' },
   mapCard: {
     height: 140,
     borderRadius: 16,
