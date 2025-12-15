@@ -17,6 +17,7 @@ import { BackHandler } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { PinchGestureHandler, State } from 'react-native-gesture-handler';
+import { useNavigation } from '@react-navigation/native';
 import {
   ArrowLeft,
   ArrowRight,
@@ -55,7 +56,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function ApartmentDetailsScreen() {
   const router = useRouter();
-  const { id } = useLocalSearchParams();
+  const navigation = useNavigation();
+  const { id, returnTo } = useLocalSearchParams();
   const { user } = useAuthStore();
   const removeApartment = useApartmentStore((state) => state.removeApartment);
 
@@ -141,12 +143,22 @@ export default function ApartmentDetailsScreen() {
         setViewerOpen(false);
         return true;
       }
-      router.replace('/(tabs)/home');
+      const returnToStr = Array.isArray(returnTo) ? returnTo[0] : returnTo;
+      if (typeof returnToStr === 'string' && returnToStr.trim()) {
+        router.replace(returnToStr as any);
+        return true;
+      }
+      // Use React Navigation's canGoBack() (reliable on iOS) so coming from Map returns to Map.
+      if (navigation.canGoBack()) {
+        navigation.goBack();
+      } else {
+        router.replace('/(tabs)/home');
+      }
       return true;
     };
     const sub = BackHandler.addEventListener('hardwareBackPress', onBack);
     return () => sub.remove();
-  }, [isViewerOpen, router]);
+  }, [isViewerOpen, router, navigation, returnTo]);
 
   useEffect(() => {
     const checkAssigned = async () => {
@@ -987,7 +999,17 @@ export default function ApartmentDetailsScreen() {
                   <TouchableOpacity
                     style={styles.circleBtnLight}
                     onPress={() => {
-                      router.replace('/(tabs)/home');
+                      const returnToStr = Array.isArray(returnTo) ? returnTo[0] : returnTo;
+                      if (typeof returnToStr === 'string' && returnToStr.trim()) {
+                        router.replace(returnToStr as any);
+                        return;
+                      }
+                      // Go back to the previous screen (map/home), fallback to home if no history
+                      if (navigation.canGoBack()) {
+                        navigation.goBack();
+                      } else {
+                        router.replace('/(tabs)/home');
+                      }
                     }}
                     activeOpacity={0.9}
                   >

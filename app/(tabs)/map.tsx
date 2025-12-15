@@ -225,7 +225,7 @@ export default function MapTabScreen() {
           zoom={11}
           points={points}
           onApartmentPress={(id) => {
-            router.push({ pathname: '/apartment/[id]', params: { id } });
+            router.push({ pathname: '/apartment/[id]', params: { id, returnTo: '/(tabs)/map' } });
           }}
         />
       </View>
