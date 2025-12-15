@@ -92,7 +92,7 @@ export default function HomeScreen() {
             activeOpacity={0.9}
             style={styles.actionBtnBody}
             onPress={() => {
-              Alert.alert('מפה', 'מסך המפה יתווסף בהמשך.');
+              router.push('/(tabs)/map');
             }}
           >
             <Map size={22} color="#4C1D95" />

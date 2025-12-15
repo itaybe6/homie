@@ -1,10 +1,10 @@
 import { Tabs, useRouter, usePathname } from 'expo-router';
-import Ionicons from '@expo/vector-icons/Ionicons';
 import { StyleSheet, Alert, Pressable, View, Platform } from 'react-native';
 import { useEffect, useRef } from 'react';
 import { useAuthStore } from '@/stores/authStore';
 import { fetchUserSurvey } from '@/lib/survey';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Home, Users, Plus, Heart, User as UserIcon } from 'lucide-react-native';
 
 function FloatingCenterTabButton({
   children,
@@ -14,7 +14,7 @@ function FloatingCenterTabButton({
   testID,
 }: {
   children: React.ReactNode;
-  onPress?: () => void;
+  onPress?: React.ComponentProps<typeof Pressable>['onPress'];
   accessibilityState?: { selected?: boolean };
   accessibilityLabel?: string;
   testID?: string;
@@ -136,14 +136,14 @@ export default function TabLayout() {
         name="home"
         options={{
           tabBarLabel: 'דירות',
-          tabBarIcon: ({ color }) => <Ionicons name="home" size={24} color={color} />,
+          tabBarIcon: ({ color }) => <Home size={24} color={color} />,
         }}
       />
       <Tabs.Screen
         name="partners"
         options={{
           tabBarLabel: 'שותפים',
-          tabBarIcon: ({ color }) => <Ionicons name="people" size={24} color={color} />,
+          tabBarIcon: ({ color }) => <Users size={24} color={color} />,
         }}
       />
       <Tabs.Screen
@@ -156,11 +156,7 @@ export default function TabLayout() {
               accessibilityLabel={props.accessibilityLabel}
               accessibilityState={props.accessibilityState as any}
               testID={props.testID}>
-              <Ionicons
-                name="add"
-                size={32}
-                color={(props.accessibilityState as any)?.selected ? '#FFFFFF' : '#FFFFFF'}
-              />
+              <Plus size={32} color="#FFFFFF" />
             </FloatingCenterTabButton>
           ),
         }}
@@ -169,16 +165,18 @@ export default function TabLayout() {
         name="likes"
         options={{
           tabBarLabel: 'אהבתי',
-          tabBarIcon: ({ color }) => <Ionicons name="heart" size={24} color={color} />,
+          tabBarIcon: ({ color }) => <Heart size={24} color={color} />,
         }}
       />
       <Tabs.Screen
         name="profile"
         options={{
           tabBarLabel: 'פרופיל',
-          tabBarIcon: ({ color }) => <Ionicons name="person" size={24} color={color} />,
+          tabBarIcon: ({ color }) => <UserIcon size={24} color={color} />,
         }}
       />
+      {/* Map screen: keep tab bar visible but hide from tab items */}
+      <Tabs.Screen name="map" options={{ href: null }} />
       {/* Hide nested detail routes from the tab bar */}
       <Tabs.Screen name="apartment/[id]" options={{ href: null }} />
       <Tabs.Screen name="apartment/edit/[id]" options={{ href: null }} />

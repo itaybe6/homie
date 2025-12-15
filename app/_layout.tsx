@@ -17,7 +17,8 @@ export default function RootLayout() {
   const user = useAuthStore((s) => s.user);
   usePushNotifications();
   const pathname = usePathname();
-  const hideGlobalTopBar = typeof pathname === 'string' && pathname.includes('/apartment/');
+  const hideGlobalTopBar =
+    typeof pathname === 'string' && pathname.includes('/apartment/');
   const isAuthRoute = typeof pathname === 'string' && pathname.startsWith('/auth');
   const isAdminRoute = typeof pathname === 'string' && pathname.startsWith('/admin');
   const shouldShowGlobalTopBar = !!user && !hideGlobalTopBar && !isAuthRoute && !isAdminRoute;
