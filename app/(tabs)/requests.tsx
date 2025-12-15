@@ -34,7 +34,7 @@ export default function RequestsScreen() {
     if (value === 'MATCH' || value === 'ALL' || value === 'GROUP' || value === 'APT' || value === 'APT_INVITE') {
       return value as KindFilterValue;
     }
-    return 'APT';
+    return 'ALL';
   };
   const parseStatusParam = (value?: string): StatusFilterValue => {
     switch (value) {
@@ -355,12 +355,9 @@ export default function RequestsScreen() {
         _sender_group_id: row.group_id, // inviter's group
       }));
 
-      // Exclude MATCH kind from the Requests screen (moved to dedicated Match Requests screen)
       const sentUnified = [...aptSent, ...matchSent, ...groupSent]
-        .filter((i) => i.kind !== 'MATCH')
         .sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
       const recvUnifiedRaw = [...aptRecv, ...matchRecv, ...matchRecvFromGroups, ...groupRecv]
-        .filter((i) => i.kind !== 'MATCH')
         .sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
 
       // Normalize display user for group-targeted matches:
@@ -1619,6 +1616,137 @@ export default function RequestsScreen() {
                           ) : null}
                         </View>
                       )}
+                      {/* Sender view (sent): expose recipient phone and WhatsApp action once a MATCH is approved */}
+                      {!incoming && item.kind === 'MATCH' && item.status === 'APPROVED' && (
+                        isGroupMatch && groupMembers.length ? (
+                          <View style={{ marginTop: 12, alignItems: 'flex-end', gap: 6 as any }}>
+                            <View
+                              style={{
+                                width: '100%',
+                                flexDirection: 'row-reverse',
+                                flexWrap: 'wrap',
+                                gap: 12 as any,
+                                justifyContent: 'flex-end',
+                              }}
+                            >
+                              {groupMembers.map((m, idx) => {
+                                const firstName = (m.full_name || '').split(' ')[0] || '';
+                                return (
+                                  <View
+                                    key={idx}
+                                    style={{
+                                      flexBasis: '48%',
+                                      flexGrow: 0,
+                                      minWidth: 240,
+                                      maxWidth: 360,
+                                      backgroundColor: 'rgba(124,92,255,0.08)',
+                                      borderRadius: 12,
+                                      borderWidth: 1,
+                                      borderColor: 'rgba(124,92,255,0.2)',
+                                      padding: 12,
+                                      gap: 10 as any,
+                                    }}
+                                  >
+                                    <View style={{ flexDirection: 'row-reverse', alignItems: 'center', gap: 10 as any }}>
+                                      <Image
+                                        source={{ uri: m.avatar_url || DEFAULT_AVATAR }}
+                                        style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: '#1F1F29', borderWidth: 2, borderColor: 'rgba(124,92,255,0.3)' }}
+                                      />
+                                      <View style={{ flex: 1, alignItems: 'flex-end' }}>
+                                        <Text style={{ color: '#FFFFFF', fontSize: 15, fontWeight: '800' }}>
+                                          {m.full_name}
+                                        </Text>
+                                        <Text style={{ color: '#C9CDD6', fontSize: 13, marginTop: 2 }}>
+                                          {m.phone || 'מספר לא זמין'}
+                                        </Text>
+                                      </View>
+                                    </View>
+                                    {m.phone ? (
+                                      <TouchableOpacity
+                                        style={{
+                                          flexDirection: 'row-reverse',
+                                          alignItems: 'center',
+                                          justifyContent: 'center',
+                                          gap: 8 as any,
+                                          backgroundColor: '#25D366',
+                                          paddingVertical: 11,
+                                          paddingHorizontal: 16,
+                                          borderRadius: 10,
+                                        }}
+                                        activeOpacity={0.85}
+                                        onPress={() =>
+                                          openWhatsApp(
+                                            m.phone as string,
+                                            `היי${firstName ? ` ${firstName}` : ''}, בקשת ההתאמה שלנו ב-Homie אושרה. בוא/י נדבר ונראה אם יש התאמה!`
+                                          )
+                                        }
+                                      >
+                                        <Text style={{ color: '#FFFFFF', fontSize: 14, fontWeight: '800' }}>
+                                          שלח הודעה בוואטסאפ
+                                        </Text>
+                                      </TouchableOpacity>
+                                    ) : null}
+                                  </View>
+                                );
+                              })}
+                            </View>
+                          </View>
+                        ) : (
+                          <View style={{ marginTop: 10, alignItems: 'flex-end', gap: 10 as any }}>
+                            <View
+                              style={{
+                                width: '100%',
+                                backgroundColor: 'rgba(124,92,255,0.08)',
+                                borderRadius: 12,
+                                borderWidth: 1,
+                                borderColor: 'rgba(124,92,255,0.2)',
+                                padding: 12,
+                                gap: 10 as any,
+                              }}
+                            >
+                              <View style={{ flexDirection: 'row-reverse', alignItems: 'center', gap: 10 as any }}>
+                                <Image
+                                  source={{ uri: otherUser?.avatar_url || DEFAULT_AVATAR }}
+                                  style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: '#1F1F29', borderWidth: 2, borderColor: 'rgba(124,92,255,0.3)' }}
+                                />
+                                <View style={{ flex: 1, alignItems: 'flex-end' }}>
+                                  <Text style={{ color: '#FFFFFF', fontSize: 15, fontWeight: '800' }}>
+                                    {otherUser?.full_name || 'משתמש'}
+                                  </Text>
+                                  <Text style={{ color: '#C9CDD6', fontSize: 13, marginTop: 2 }}>
+                                    {otherUser?.phone || 'מספר לא זמין'}
+                                  </Text>
+                                </View>
+                              </View>
+                              {otherUser?.phone ? (
+                                <TouchableOpacity
+                                  style={{
+                                    flexDirection: 'row-reverse',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    gap: 8 as any,
+                                    backgroundColor: '#25D366',
+                                    paddingVertical: 11,
+                                    paddingHorizontal: 16,
+                                    borderRadius: 10,
+                                  }}
+                                  activeOpacity={0.85}
+                                  onPress={() =>
+                                    openWhatsApp(
+                                      otherUser.phone as string,
+                                      `היי${otherUser?.full_name ? ` ${otherUser.full_name.split(' ')[0]}` : ''}, בקשת ההתאמה שלנו ב-Homie אושרה. בוא/י נדבר ונראה אם יש התאמה!`
+                                    )
+                                  }
+                                >
+                                  <Text style={{ color: '#FFFFFF', fontSize: 14, fontWeight: '800' }}>
+                                    שלח הודעה בוואטסאפ
+                                  </Text>
+                                </TouchableOpacity>
+                              ) : null}
+                            </View>
+                          </View>
+                        )
+                      )}
                       {incoming && item.kind === 'MATCH' && item.status === 'PENDING' && (
                         <View style={{ flexDirection: 'row-reverse', gap: 8 as any }}>
                           <TouchableOpacity
@@ -1882,10 +2010,14 @@ export default function RequestsScreen() {
                   onPress={() => { setIsKindOpen((v) => !v); setIsStatusOpen(false); }}
                 >
                   <Text style={styles.selectText}>
-                    {kindFilter === 'APT'
+                    {kindFilter === 'ALL'
+                      ? 'הכל'
+                      : kindFilter === 'APT'
                       ? 'דירות'
                       : kindFilter === 'APT_INVITE'
                       ? 'הזמנות לדירה'
+                      : kindFilter === 'MATCH'
+                      ? 'התאמות'
                       : 'מיזוג פרופילים'}
                   </Text>
                   <Text style={styles.selectCaret}>▼</Text>
@@ -1893,8 +2025,10 @@ export default function RequestsScreen() {
                 {isKindOpen && (
                   <View style={styles.menu}>
                     {[
+                      { key: 'ALL', label: 'הכל' },
                       { key: 'APT', label: 'דירות' },
                       { key: 'APT_INVITE', label: 'הזמנות לדירה' },
+                      { key: 'MATCH', label: 'התאמות' },
                       { key: 'GROUP', label: 'מיזוג פרופילים' },
                     ].map((opt) => (
                       <TouchableOpacity

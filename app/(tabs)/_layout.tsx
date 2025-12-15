@@ -1,10 +1,42 @@
 import { Tabs, useRouter, usePathname } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { StyleSheet, Alert } from 'react-native';
+import { StyleSheet, Alert, Pressable, View, Platform } from 'react-native';
 import { useEffect, useRef } from 'react';
 import { useAuthStore } from '@/stores/authStore';
 import { fetchUserSurvey } from '@/lib/survey';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+function FloatingCenterTabButton({
+  children,
+  onPress,
+  accessibilityState,
+  accessibilityLabel,
+  testID,
+}: {
+  children: React.ReactNode;
+  onPress?: () => void;
+  accessibilityState?: { selected?: boolean };
+  accessibilityLabel?: string;
+  testID?: string;
+}) {
+  const selected = !!accessibilityState?.selected;
+  return (
+    <View style={styles.centerButtonWrap} pointerEvents="box-none">
+      <Pressable
+        onPress={onPress}
+        accessibilityRole="button"
+        accessibilityLabel={accessibilityLabel}
+        testID={testID}
+        style={({ pressed }) => [
+          styles.centerButton,
+          selected && styles.centerButtonSelected,
+          pressed && styles.centerButtonPressed,
+        ]}>
+        {children}
+      </Pressable>
+    </View>
+  );
+}
 
 export default function TabLayout() {
   const router = useRouter();
@@ -90,6 +122,7 @@ export default function TabLayout() {
           height: Math.max(56, 56 + insets.bottom),
           paddingBottom: Math.max(6, insets.bottom),
           paddingTop: 6,
+          overflow: 'visible',
           // subtle top shadow to separate from content
           shadowColor: '#000000',
           shadowOpacity: 0.08,
@@ -116,8 +149,20 @@ export default function TabLayout() {
       <Tabs.Screen
         name="add-apartment"
         options={{
-          tabBarLabel: 'הוספת דירה',
-          tabBarIcon: ({ color }) => <Ionicons name="add" size={28} color={color} />,
+          tabBarLabel: '',
+          tabBarButton: (props) => (
+            <FloatingCenterTabButton
+              onPress={props.onPress}
+              accessibilityLabel={props.accessibilityLabel}
+              accessibilityState={props.accessibilityState as any}
+              testID={props.testID}>
+              <Ionicons
+                name="add"
+                size={32}
+                color={(props.accessibilityState as any)?.selected ? '#FFFFFF' : '#FFFFFF'}
+              />
+            </FloatingCenterTabButton>
+          ),
         }}
       />
       <Tabs.Screen
@@ -149,3 +194,41 @@ export default function TabLayout() {
 }
 
 // Removed custom TabPill. Using standard bottom tab bar with icons and labels.
+
+const styles = StyleSheet.create({
+  centerButtonWrap: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  centerButton: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#4C1D95',
+    marginTop: -28, // lifts it above the tab bar
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000000',
+        shadowOpacity: 0.28,
+        shadowRadius: 18,
+        shadowOffset: { width: 0, height: 14 },
+      },
+      android: {
+        elevation: 18,
+      },
+      default: {},
+    }),
+  },
+  centerButtonSelected: {
+    backgroundColor: '#4C1D95',
+  },
+  centerButtonPressed: {
+    transform: [{ scale: 0.98 }],
+    opacity: 0.95,
+  },
+});

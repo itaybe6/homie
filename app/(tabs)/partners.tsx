@@ -546,7 +546,14 @@ export default function PartnersScreen() {
       // Only show merged profiles (groups)
       // Also include single users not in active groups, filtered, and not already interacted with
 
-      let matchRows: { id: string; sender_id: string; receiver_id: string | null; receiver_group_id?: string | null; sender_group_id?: string | null }[] = [];
+      let matchRows: {
+        id: string;
+        sender_id: string;
+        receiver_id: string | null;
+        receiver_group_id?: string | null;
+        sender_group_id?: string | null;
+        status?: string | null;
+      }[] = [];
       if (authId) {
         // Include interactions that involve me directly OR any of my groups
         const myGroupIds = Array.from(groupIdsWithCurrentUser);
@@ -561,7 +568,7 @@ export default function PartnersScreen() {
         }
         const { data: matchesData, error: matchesError } = await supabase
           .from('matches')
-          .select('id, sender_id, receiver_id, receiver_group_id, sender_group_id')
+          .select('id, sender_id, receiver_id, receiver_group_id, sender_group_id, status')
           .or(orParts.join(','));
         if (matchesError) throw matchesError;
         matchRows = matchesData || [];
@@ -571,25 +578,52 @@ export default function PartnersScreen() {
       const interacted = new Set<string>();
       const interactedGroupIds = new Set<string>();
       if (authId) {
+        const myGroupIds = new Set(
+          members.filter((m) => m.user_id === authId).map((m) => m.group_id),
+        );
+
         matchRows.forEach((row) => {
-          // User <-> User interactions
-          if (row.sender_id === authId && row.receiver_id) interacted.add(row.receiver_id);
-          if (row.receiver_id === authId) interacted.add(row.sender_id);
-          // User -> Group interactions (I sent to a group)
-          if (row.sender_id === authId && row.receiver_group_id) interactedGroupIds.add(row.receiver_group_id);
-          // Group -> User interactions (a group sent to me, or to my group)
-          if (row.receiver_id === authId && row.sender_group_id) interactedGroupIds.add(row.sender_group_id);
-          // Any interaction involving my groups: exclude the other side (single user) too
-          const myGroupIds = new Set(
-            members
-              .filter((m) => m.user_id === authId)
-              .map((m) => m.group_id)
-          );
-          if (row.receiver_group_id && myGroupIds.has(row.receiver_group_id) && row.sender_id) {
-            interacted.add(row.sender_id);
+          const status = String(row.status || '').trim().toUpperCase();
+
+          // APPROVED is a mutual "match": hide the other side regardless of direction.
+          if (status === 'APPROVED') {
+            // User <-> User
+            if (row.sender_id === authId && row.receiver_id) interacted.add(row.receiver_id);
+            if (row.receiver_id === authId && row.sender_id) interacted.add(row.sender_id);
+
+            // User <-> Group
+            if (row.sender_id === authId && row.receiver_group_id) interactedGroupIds.add(row.receiver_group_id);
+            if (row.receiver_group_id && myGroupIds.has(row.receiver_group_id) && row.sender_id) interacted.add(row.sender_id);
+
+            // Group <-> User/Group
+            if (row.sender_group_id && myGroupIds.has(row.sender_group_id)) {
+              if (row.receiver_id) interacted.add(row.receiver_id);
+              if (row.receiver_group_id) interactedGroupIds.add(row.receiver_group_id);
+            }
+            if (row.receiver_id === authId && row.sender_group_id) interactedGroupIds.add(row.sender_group_id);
+
+            // done for APPROVED
+            return;
           }
-          if (row.sender_group_id && myGroupIds.has(row.sender_group_id) && row.receiver_id) {
+
+          // IMPORTANT: interaction filtering should be directional.
+          // We only hide profiles that *I* (or one of my ACTIVE groups) already acted on (sent like/pass).
+          // If someone acted on me (incoming request / NOT_RELEVANT), I should still be able to see them here.
+
+          // Outgoing: User -> User
+          if (row.sender_id === authId && row.receiver_id) {
             interacted.add(row.receiver_id);
+          }
+
+          // Outgoing: User -> Group
+          if (row.sender_id === authId && row.receiver_group_id) {
+            interactedGroupIds.add(row.receiver_group_id);
+          }
+
+          // Outgoing: My Group -> User/Group
+          if (row.sender_group_id && myGroupIds.has(row.sender_group_id)) {
+            if (row.receiver_id) interacted.add(row.receiver_id);
+            if (row.receiver_group_id) interactedGroupIds.add(row.receiver_group_id);
           }
         });
       }
