@@ -18,11 +18,13 @@ export function buildMapboxHtml(params: {
   zoom?: number;
   points?: MapboxFeatureCollection;
 }): string {
+  const hasExplicitCenter = Array.isArray(params.center) && params.center.length === 2;
   const center = params.center ?? [34.7818, 32.0853];
   const zoom = typeof params.zoom === 'number' ? params.zoom : 11;
   const token = params.accessToken;
   const styleUrl = params.styleUrl || 'mapbox://styles/mapbox/streets-v12';
   const points = params.points ?? { type: 'FeatureCollection', features: [] };
+  const labelColor = '#6D28D9'; // purple (Tailwind violet-700)
 
   // NOTE: This HTML is used inside WebView (native) and iframe srcDoc (web).
   return `<!doctype html>
@@ -118,6 +120,7 @@ export function buildMapboxHtml(params: {
           var zoom = ${JSON.stringify(zoom)};
           var styleUrl = ${JSON.stringify(styleUrl)};
           var points = ${JSON.stringify(points)};
+          var hasExplicitCenter = ${JSON.stringify(hasExplicitCenter)};
           var map = new mapboxgl.Map({
             container: 'map',
             style: styleUrl,
@@ -128,8 +131,40 @@ export function buildMapboxHtml(params: {
           map.addControl(new mapboxgl.NavigationControl({ showCompass: true }), 'top-left');
           map.addControl(new mapboxgl.ScaleControl({ maxWidth: 100, unit: 'metric' }), 'bottom-left');
 
+          // Make base-map place/road/POI labels purple (instead of default gray).
+          // Some styles keep mutating layers after load, so we also retry on idle/styledata.
+          var __labelsApplied = false;
+          var __applyScheduled = false;
+          function applyPurpleLabels() {
+            __applyScheduled = false;
+            try {
+              var style = map.getStyle && map.getStyle();
+              if (!style || !style.layers) return;
+              var changed = 0;
+              for (var i = 0; i < style.layers.length; i++) {
+                var layer = style.layers[i];
+                if (!layer || layer.type !== 'symbol') continue;
+                // Try regardless of whether text-field exists; errors are caught.
+                try { map.setPaintProperty(layer.id, 'text-color', ${JSON.stringify(labelColor)}); changed++; } catch (_) {}
+                // Keep labels readable on a light basemap
+                try { map.setPaintProperty(layer.id, 'text-halo-color', '#FFFFFF'); } catch (_) {}
+                try { map.setPaintProperty(layer.id, 'text-halo-width', 1.2); } catch (_) {}
+              }
+              if (changed > 0) __labelsApplied = true;
+            } catch (_) {}
+          }
+          function scheduleApply() {
+            if (__labelsApplied || __applyScheduled) return;
+            __applyScheduled = true;
+            try { requestAnimationFrame(applyPurpleLabels); } catch (_) { setTimeout(applyPurpleLabels, 0); }
+          }
+          map.on('style.load', function () { __labelsApplied = false; scheduleApply(); });
+          map.on('styledata', function () { __labelsApplied = false; scheduleApply(); });
+          map.on('idle', function () { scheduleApply(); });
+
           map.on('load', function () {
             try {
+              scheduleApply();
               if (!points || !points.features || points.features.length === 0) return;
 
               map.addSource('apartments', {
@@ -150,15 +185,17 @@ export function buildMapboxHtml(params: {
                 }
               });
 
-              // Fit bounds to points
-              var bounds = new mapboxgl.LngLatBounds();
-              points.features.forEach(function (f) {
-                var c = f && f.geometry && f.geometry.coordinates;
-                if (!c || c.length < 2) return;
-                bounds.extend(c);
-              });
-              if (typeof bounds.isEmpty === 'function' ? !bounds.isEmpty() : true) {
-                map.fitBounds(bounds, { padding: 60, duration: 0, maxZoom: 14 });
+              // Fit bounds to points (only when center isn't explicitly provided)
+              if (!hasExplicitCenter) {
+                var bounds = new mapboxgl.LngLatBounds();
+                points.features.forEach(function (f) {
+                  var c = f && f.geometry && f.geometry.coordinates;
+                  if (!c || c.length < 2) return;
+                  bounds.extend(c);
+                });
+                if (typeof bounds.isEmpty === 'function' ? !bounds.isEmpty() : true) {
+                  map.fitBounds(bounds, { padding: 60, duration: 0, maxZoom: 14 });
+                }
               }
 
               // Popup on click
