@@ -193,13 +193,17 @@ export default function ApartmentCard({
     () => normalizePartnerIds((apartment as any).partner_ids),
     [apartment]
   );
-  const totalRoommateCapacity =
-    typeof (apartment as any).roommate_capacity === 'number'
-      ? (apartment as any).roommate_capacity
-      : null;
+  // Prefer max_roommates (new schema), fallback to roommate_capacity (legacy schema).
+  const maxRoommates: number | null =
+    typeof (apartment as any)?.max_roommates === 'number'
+      ? ((apartment as any).max_roommates as number)
+      : typeof (apartment as any)?.roommate_capacity === 'number'
+        ? ((apartment as any).roommate_capacity as number)
+        : null;
+
   const partnerSlotsUsed = partnerIds.length;
   const availableRoommateSlots =
-    totalRoommateCapacity !== null ? Math.max(0, totalRoommateCapacity - partnerSlotsUsed) : null;
+    maxRoommates !== null ? Math.max(0, maxRoommates - partnerSlotsUsed) : null;
 
   return (
     <View style={styles.card}>
@@ -278,6 +282,13 @@ export default function ApartmentCard({
           />
           {/* Favorite */}
           <FavoriteButton apartmentId={apartment.id} />
+          {/* Roommates badge */}
+          <View style={styles.roommatesBadge} pointerEvents="none">
+            <Users size={18} color="#111827" />
+            <Text style={styles.roommatesBadgeText}>
+              {typeof maxRoommates === 'number' ? `${partnerSlotsUsed}/${maxRoommates}` : `${partnerSlotsUsed}`}
+            </Text>
+          </View>
           {/* Carousel dots */}
           <View style={styles.dotsRow} pointerEvents="none">
             {carouselImages.map((_, i) => (
@@ -470,6 +481,31 @@ const styles = StyleSheet.create({
   },
   favoriteButtonActive: {
     backgroundColor: '#8B5CF6',
+  },
+  roommatesBadge: {
+    position: 'absolute',
+    top: 10,
+    right: 10,
+    minHeight: 40,
+    paddingHorizontal: 12,
+    borderRadius: 20,
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(0,0,0,0.06)',
+    backgroundColor: 'rgba(255,255,255,0.75)',
+    shadowColor: '#000',
+    shadowOpacity: 0.16,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+  },
+  roommatesBadgeText: {
+    color: '#111827',
+    fontSize: 13,
+    fontWeight: '800',
+    writingDirection: 'ltr',
   },
   dotsRow: {
     position: 'absolute',

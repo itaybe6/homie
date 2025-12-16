@@ -254,6 +254,11 @@ export default function HomeScreen() {
 
     const filtered = apartments.filter((apartment) => {
       const anyApt = apartment as any;
+
+      // Hide apartments that are already full (when capacity is known).
+      const availableSlots = getAvailableRoommateSlots(apartment);
+      if (availableSlots !== null && availableSlots <= 0) return false;
+
       // search query
       const matchesSearch = !query
         || apartment.title.toLowerCase().includes(query)
