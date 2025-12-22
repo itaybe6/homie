@@ -39,6 +39,10 @@ type Props = {
   onChange?: (selectedIds: string[]) => void;
   onOpenDropdown?: (chip: FilterChip) => void;
   style?: ViewStyle;
+  inactiveBackgroundColor?: string;
+  activeBackgroundColor?: string;
+  inactiveBorderColor?: string;
+  activeBorderColor?: string;
 };
 
 // Default chips configuration (RTL labels)
@@ -70,6 +74,10 @@ export default function FilterChipsBar({
   onChange,
   onOpenDropdown,
   style,
+  inactiveBackgroundColor,
+  activeBackgroundColor,
+  inactiveBorderColor,
+  activeBorderColor,
 }: Props) {
   const [internalSelected, setInternalSelected] = useState<string[]>([]);
   const active = selectedIds ?? internalSelected;
@@ -157,6 +165,22 @@ export default function FilterChipsBar({
             const Icon =
               chip.renderIcon ??
               ((c: string, s: number) => <Tag color={c} size={s} />);
+
+            const inactiveOverrides =
+              inactiveBackgroundColor || inactiveBorderColor
+                ? ({
+                    ...(inactiveBackgroundColor ? { backgroundColor: inactiveBackgroundColor } : null),
+                    ...(inactiveBorderColor ? { borderColor: inactiveBorderColor } : null),
+                  } as const)
+                : null;
+
+            const activeOverrides =
+              activeBackgroundColor || activeBorderColor
+                ? ({
+                    ...(activeBackgroundColor ? { backgroundColor: activeBackgroundColor } : null),
+                    ...(activeBorderColor ? { borderColor: activeBorderColor } : null),
+                  } as const)
+                : null;
             return (
               <TouchableOpacity
                 key={chip.id}
@@ -165,6 +189,7 @@ export default function FilterChipsBar({
                 style={[
                   styles.chipBase,
                   activeChip ? styles.chipActive : styles.chipInactive,
+                  activeChip ? activeOverrides : inactiveOverrides,
                 ]}
               >
                 <View style={styles.chipInnerRow}>

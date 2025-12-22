@@ -127,9 +127,8 @@ export function buildMapboxHtml(params: {
             center: center,
             zoom: zoom,
           });
-
-          map.addControl(new mapboxgl.NavigationControl({ showCompass: true }), 'top-left');
-          map.addControl(new mapboxgl.ScaleControl({ maxWidth: 100, unit: 'metric' }), 'bottom-left');
+          // Intentionally no built-in UI controls (zoom +/- / compass / scale).
+          // We keep the map clean and rely on gestures (pinch/drag) and the app UI.
 
           // Make base-map place/road/POI labels purple (instead of default gray).
           // Some styles keep mutating layers after load, so we also retry on idle/styledata.

@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { View, Text, StyleSheet, ActivityIndicator, TextInput, TouchableOpacity, Platform } from 'react-native';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { View, Text, StyleSheet, ActivityIndicator, TextInput, TouchableOpacity, Platform, ScrollView, Image, Modal } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import MapboxMap from '@/components/MapboxMap';
 import { useRouter } from 'expo-router';
@@ -7,8 +7,8 @@ import { supabase } from '@/lib/supabase';
 import { geocodeApartmentAddress, geocodePlace } from '@/lib/mapboxGeocoding';
 import type { Apartment } from '@/types/database';
 import type { MapboxFeatureCollection } from '@/lib/mapboxHtml';
-import FilterChipsBar, { type FilterChip } from '@/components/FilterChipsBar';
-import { Search, X, MapPin } from 'lucide-react-native';
+import FilterChipsBar, { defaultFilterChips, selectedFiltersFromIds, type FilterChip } from '@/components/FilterChipsBar';
+import { Search, X, MapPin, LocateFixed } from 'lucide-react-native';
 import * as Location from 'expo-location/build/Location';
 import { LocationAccuracy } from 'expo-location/build/Location.types';
 
@@ -43,6 +43,22 @@ function normalizeStringArray(value: unknown): string[] {
   return [];
 }
 
+function transformSupabaseImageUrl(value: string): string {
+  if (!value) return '';
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+  // Prefer the Supabase image renderer endpoint when available for better perf.
+  if (trimmed.includes('/storage/v1/object/public/')) {
+    const [base, query] = trimmed.split('?');
+    const transformed = base.replace('/storage/v1/object/public/', '/storage/v1/render/image/public/');
+    const params: string[] = [];
+    if (query) params.push(query);
+    params.push('width=800', 'quality=85', 'format=webp');
+    return `${transformed}?${params.join('&')}`;
+  }
+  return trimmed;
+}
+
 export default function MapTabScreen() {
   const router = useRouter();
   const token = process.env.EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN as string | undefined;
@@ -57,70 +73,68 @@ export default function MapTabScreen() {
   const [pointsError, setPointsError] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState('');
   const [chipSelected, setChipSelected] = useState<string[]>([]);
+  const [distanceKm, setDistanceKm] = useState<number | null>(null);
+  const [distancePickerOpen, setDistancePickerOpen] = useState(false);
   const [userLocation, setUserLocation] = useState<{ lng: number; lat: number } | null>(null);
   const [locating, setLocating] = useState(false);
   const [locationError, setLocationError] = useState<string>('');
   const [searchCenter, setSearchCenter] = useState<{ lng: number; lat: number } | null>(null);
+  const [centerOverride, setCenterOverride] = useState<{ lng: number; lat: number } | null>(null);
+  const [zoomOverride, setZoomOverride] = useState<number | null>(null);
+  const [resultImgCandidateIdxById, setResultImgCandidateIdxById] = useState<Record<string, number>>({});
 
   const filterChips = useMemo<FilterChip[]>(
     () => [
-      { id: 'within_3km', label: 'עד 3 ק״מ ממני', type: 'toggle', renderIcon: (c, s) => <MapPin color={c} size={s} /> },
-      { id: 'within_5km', label: 'עד 5 ק״מ ממני', type: 'toggle', renderIcon: (c, s) => <MapPin color={c} size={s} /> },
-      { id: 'within_10km', label: 'עד 10 ק״מ ממני', type: 'toggle', renderIcon: (c, s) => <MapPin color={c} size={s} /> },
-      { id: 'within_13km', label: 'עד 13 ק״מ ממני', type: 'toggle', renderIcon: (c, s) => <MapPin color={c} size={s} /> },
+      {
+        id: 'distance',
+        label: distanceKm ? `טווח: עד ${distanceKm} ק״מ` : 'טווח',
+        type: 'dropdown',
+        renderIcon: (c, s) => <MapPin color={c} size={s} />,
+      },
+      ...defaultFilterChips,
     ],
-    []
+    [distanceKm]
   );
 
-  const onChipChange = (next: string[]) => {
-    // Make distance chips mutually exclusive
-    const distanceIds = ['within_3km', 'within_5km', 'within_10km', 'within_13km'];
-    const prev = chipSelected || [];
-    const prevSet = new Set(prev);
-    const nextSet = new Set(next);
-    let toggledId: string | null = null;
-    for (const id of nextSet) if (!prevSet.has(id)) toggledId = id;
-    if (!toggledId) for (const id of prevSet) if (!nextSet.has(id)) toggledId = id;
+  const selectedChipIds = useMemo(() => {
+    const ids = [...(chipSelected || [])];
+    if (distanceKm != null) ids.push('distance');
+    return ids;
+  }, [chipSelected, distanceKm]);
 
-    if (toggledId && distanceIds.includes(toggledId) && nextSet.has(toggledId)) {
-      distanceIds.forEach((id) => {
-        if (id !== toggledId) nextSet.delete(id);
+  const fetchUserLocation = useCallback(async () => {
+    setLocating(true);
+    setLocationError('');
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        setLocationError('אין הרשאת מיקום — כדי לסנן לפי מרחק או למרכז למיקום שלך, צריך לאשר גישה למיקום.');
+        return null;
+      }
+      const pos = await Location.getCurrentPositionAsync({
+        accuracy: LocationAccuracy.Balanced,
       });
+      const lng = pos?.coords?.longitude;
+      const lat = pos?.coords?.latitude;
+      if (typeof lng === 'number' && typeof lat === 'number') {
+        const next = { lng, lat };
+        setUserLocation(next);
+        return next;
+      }
+      setLocationError('לא הצלחתי לזהות את המיקום שלך');
+      return null;
+    } catch (e: any) {
+      setLocationError(e?.message || 'שגיאה באיתור מיקום');
+      return null;
+    } finally {
+      setLocating(false);
     }
-
-    setChipSelected(Array.from(nextSet));
-  };
+  }, []);
 
   useEffect(() => {
-    let cancelled = false;
-    const run = async () => {
-      setLocating(true);
-      setLocationError('');
-      try {
-        const { status } = await Location.requestForegroundPermissionsAsync();
-        if (status !== 'granted') {
-          if (!cancelled) setLocationError('אין הרשאת מיקום — כדי לפתוח את המפה עליך/עלייך לאשר גישה למיקום.');
-          return;
-        }
-        const pos = await Location.getCurrentPositionAsync({
-          accuracy: LocationAccuracy.Balanced,
-        });
-        const lng = pos?.coords?.longitude;
-        const lat = pos?.coords?.latitude;
-        if (typeof lng === 'number' && typeof lat === 'number' && !cancelled) {
-          setUserLocation({ lng, lat });
-        }
-      } catch (e: any) {
-        if (!cancelled) setLocationError(e?.message || 'שגיאה באיתור מיקום');
-      } finally {
-        if (!cancelled) setLocating(false);
-      }
-    };
-    run();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    // Best-effort: prefetch location so distance chips + "my location" feel instant.
+    fetchUserLocation();
+  }, [fetchUserLocation]);
 
   // When typing a city/place, recenter the map to that place (debounced).
   useEffect(() => {
@@ -131,6 +145,9 @@ export default function MapTabScreen() {
       setSearchCenter(null);
       return;
     }
+    // When searching, release any explicit manual centering.
+    setCenterOverride(null);
+    setZoomOverride(null);
     const t = setTimeout(async () => {
       try {
         const geo = await geocodePlace({ accessToken: token, query: q, country: 'il' });
@@ -156,16 +173,37 @@ export default function MapTabScreen() {
       try {
         const { data, error } = await supabase
           .from('apartments')
-          .select('id,title,address,city,image_urls,partner_ids,roommate_capacity,owner_id')
+          .select(
+            'id,title,address,city,image_urls,partner_ids,roommate_capacity,max_roommates,owner_id,' +
+              'pets_allowed,is_furnished,wheelchair_accessible,has_safe_room,has_elevator,kosher_kitchen,' +
+              'has_air_conditioning,has_solar_heater,is_renovated,balcony_count'
+          )
           .order('created_at', { ascending: false });
         if (error) throw error;
 
-        const apartments = (data || []) as Array<
-          Pick<
-            Apartment,
-            'id' | 'title' | 'address' | 'city' | 'owner_id' | 'roommate_capacity' | 'image_urls' | 'partner_ids'
-          >
-        >;
+        type AptRow = Pick<
+          Apartment,
+          | 'id'
+          | 'title'
+          | 'address'
+          | 'city'
+          | 'owner_id'
+          | 'roommate_capacity'
+          | 'image_urls'
+          | 'partner_ids'
+          | 'pets_allowed'
+          | 'is_furnished'
+          | 'wheelchair_accessible'
+          | 'has_safe_room'
+          | 'has_elevator'
+          | 'kosher_kitchen'
+          | 'has_air_conditioning'
+          | 'has_solar_heater'
+          | 'is_renovated'
+          | 'balcony_count'
+        > & { max_roommates?: number | null };
+
+        const apartments = (data || []) as AptRow[];
 
         // Collect all occupant ids (owner + partners) to fetch avatars/names
         const occupantIds = new Set<string>();
@@ -211,6 +249,17 @@ export default function MapTabScreen() {
           availableSlots: number | null;
           lng: number;
           lat: number;
+          // property features
+          pets_allowed?: boolean;
+          is_furnished?: boolean;
+          wheelchair_accessible?: boolean;
+          has_safe_room?: boolean;
+          has_elevator?: boolean;
+          kosher_kitchen?: boolean;
+          has_air_conditioning?: boolean;
+          has_solar_heater?: boolean;
+          is_renovated?: boolean;
+          balcony_count?: number | null;
         }> = [];
 
         const worker = async () => {
@@ -253,7 +302,11 @@ export default function MapTabScreen() {
               typeof (current as any).roommate_capacity === 'number' ? ((current as any).roommate_capacity as number) : null;
 
             const usedPartners = uniqPartners.length;
-            const availableSlots = typeof roommateCapacity === 'number' ? Math.max(0, roommateCapacity - usedPartners) : null;
+            const maxRoommates =
+              typeof (current as any).max_roommates === 'number'
+                ? ((current as any).max_roommates as number)
+                : roommateCapacity;
+            const availableSlots = typeof maxRoommates === 'number' ? Math.max(0, maxRoommates - usedPartners) : null;
 
             // Show on map only apartments with known capacity and at least 1 available spot
             if (availableSlots == null || availableSlots <= 0) continue;
@@ -271,13 +324,23 @@ export default function MapTabScreen() {
               address,
               city,
               imageUrl,
-              roommateCapacity,
+              roommateCapacity: maxRoommates,
               imageUrlsJson: JSON.stringify(imageUrls.slice(0, 12)),
               occupantsJson: JSON.stringify(occupants),
               partnerCount: usedPartners,
               availableSlots,
               lng: geo.lng,
               lat: geo.lat,
+              pets_allowed: !!(current as any)?.pets_allowed,
+              is_furnished: !!(current as any)?.is_furnished,
+              wheelchair_accessible: !!(current as any)?.wheelchair_accessible,
+              has_safe_room: !!(current as any)?.has_safe_room,
+              has_elevator: !!(current as any)?.has_elevator,
+              kosher_kitchen: !!(current as any)?.kosher_kitchen,
+              has_air_conditioning: !!(current as any)?.has_air_conditioning,
+              has_solar_heater: !!(current as any)?.has_solar_heater,
+              is_renovated: !!(current as any)?.is_renovated,
+              balcony_count: typeof (current as any)?.balcony_count === 'number' ? ((current as any).balcony_count as number) : 0,
             });
           }
         };
@@ -299,6 +362,17 @@ export default function MapTabScreen() {
               roommate_capacity: r.roommateCapacity ?? '',
               occupants_json: r.occupantsJson,
               available_slots: r.availableSlots ?? '',
+              // Property features for filters
+              pets_allowed: !!r.pets_allowed,
+              is_furnished: !!r.is_furnished,
+              wheelchair_accessible: !!r.wheelchair_accessible,
+              has_safe_room: !!r.has_safe_room,
+              has_elevator: !!r.has_elevator,
+              kosher_kitchen: !!r.kosher_kitchen,
+              has_air_conditioning: !!r.has_air_conditioning,
+              has_solar_heater: !!r.has_solar_heater,
+              is_renovated: !!r.is_renovated,
+              balcony_count: typeof r.balcony_count === 'number' ? r.balcony_count : 0,
               has_image: !!(r.imageUrl && String(r.imageUrl).trim()),
             },
           })),
@@ -326,12 +400,7 @@ export default function MapTabScreen() {
   const filteredPoints = useMemo<MapboxFeatureCollection>(() => {
     const query = searchQuery.trim().toLowerCase();
     const selected = new Set(chipSelected || []);
-    const distanceKm =
-      selected.has('within_3km') ? 3 :
-      selected.has('within_5km') ? 5 :
-      selected.has('within_10km') ? 10 :
-      selected.has('within_13km') ? 13 :
-      null;
+    const chipFilters = selectedFiltersFromIds(Array.from(selected));
 
     function toRad(d: number) {
       return (d * Math.PI) / 180;
@@ -363,6 +432,21 @@ export default function MapTabScreen() {
         if (!ok) return false;
       }
 
+      // Feature chips (same logic as Home screen)
+      if (chipFilters.pets_allowed && !props?.pets_allowed) return false;
+      if (chipFilters.is_furnished && !props?.is_furnished) return false;
+      if (chipFilters.wheelchair_accessible && !props?.wheelchair_accessible) return false;
+      if (chipFilters.has_safe_room && !props?.has_safe_room) return false;
+      if (chipFilters.has_elevator && !props?.has_elevator) return false;
+      if (chipFilters.kosher_kitchen && !props?.kosher_kitchen) return false;
+      if (chipFilters.has_air_conditioning && !props?.has_air_conditioning) return false;
+      if (chipFilters.has_solar_heater && !props?.has_solar_heater) return false;
+      if (chipFilters.is_renovated && !props?.is_renovated) return false;
+      if (chipFilters.balcony) {
+        const bc = typeof props?.balcony_count === 'number' ? (props.balcony_count as number) : 0;
+        if (bc <= 0) return false;
+      }
+
       if (distanceKm != null && userLocation) {
         const coords = (f as any)?.geometry?.coordinates;
         const lng = Array.isArray(coords) ? Number(coords[0]) : NaN;
@@ -377,26 +461,120 @@ export default function MapTabScreen() {
     });
 
     return { type: 'FeatureCollection', features };
-  }, [points, searchQuery, chipSelected, userLocation]);
+  }, [points, searchQuery, chipSelected, distanceKm, userLocation]);
 
   const filteredCount = useMemo(() => filteredPoints.features.length, [filteredPoints.features.length]);
-  const isFiltering = useMemo(() => !!searchQuery.trim() || (chipSelected?.length ?? 0) > 0, [searchQuery, chipSelected]);
+  const isFiltering = useMemo(
+    () => !!searchQuery.trim() || (chipSelected?.length ?? 0) > 0 || distanceKm != null,
+    [searchQuery, chipSelected, distanceKm]
+  );
   const isDistanceFilteringWithoutLocation = useMemo(() => {
-    const s = new Set(chipSelected || []);
-    return (s.has('within_3km') || s.has('within_5km') || s.has('within_10km') || s.has('within_13km')) && !userLocation;
-  }, [chipSelected, userLocation]);
+    return distanceKm != null && !userLocation;
+  }, [distanceKm, userLocation]);
 
   const mapCenter = useMemo(() => {
+    if (centerOverride) return [centerOverride.lng, centerOverride.lat] as const;
     if (searchCenter && searchQuery.trim()) return [searchCenter.lng, searchCenter.lat] as const;
     if (userLocation) return [userLocation.lng, userLocation.lat] as const;
     return undefined;
-  }, [searchCenter, searchQuery, userLocation]);
+  }, [centerOverride, searchCenter, searchQuery, userLocation]);
 
   const mapZoom = useMemo(() => {
+    if (typeof zoomOverride === 'number') return zoomOverride;
     if (searchCenter && searchQuery.trim()) return 12;
     if (userLocation) return 13;
     return 11;
-  }, [searchCenter, searchQuery, userLocation]);
+  }, [zoomOverride, searchCenter, searchQuery, userLocation]);
+
+  const statusText = useMemo(() => {
+    if (!token) return '';
+    if (loadingPoints) return 'טוען דירות למפה…';
+    if (pointsError) return pointsError;
+    if (locating) return 'מאתר מיקום…';
+    if (locationError) return locationError;
+    if (isDistanceFilteringWithoutLocation) return 'כדי לסנן לפי מרחק צריך לאשר גישה למיקום';
+    if (isFiltering && filteredCount === 0) return 'אין תוצאות לסינון/חיפוש';
+    // Do not show a persistent "count" banner; keep status pill only for important states.
+    if (totalCount > 0) return '';
+    return 'אין עדיין דירות להצגה';
+  }, [
+    token,
+    loadingPoints,
+    pointsError,
+    locating,
+    locationError,
+    isDistanceFilteringWithoutLocation,
+    isFiltering,
+    filteredCount,
+    totalCount,
+  ]);
+
+  const statusTone = useMemo<'error' | 'neutral'>(() => {
+    if (!token) return 'neutral';
+    if (pointsError || locationError) return 'error';
+    return 'neutral';
+  }, [token, pointsError, locationError]);
+
+  const results = useMemo(() => {
+    const PLACEHOLDER = 'https://images.pexels.com/photos/1457842/pexels-photo-1457842.jpeg';
+    return (filteredPoints.features || [])
+      .map((f) => {
+        const props = (f as any)?.properties ?? {};
+        const id = String(props.id || '').trim();
+        if (!id) return null;
+        // Prefer "main" image from the images JSON array; fall back to image_url; then placeholder.
+        let primaryFromJson = '';
+        try {
+          const raw = String(props.image_urls_json || '').trim();
+          const parsed = raw ? JSON.parse(raw) : [];
+          if (Array.isArray(parsed) && parsed.length > 0) primaryFromJson = String(parsed[0] || '').trim();
+        } catch {
+          // ignore parse errors
+        }
+        const imageUrlRaw = primaryFromJson || String(props.image_url || '').trim();
+        const candidates = [
+          transformSupabaseImageUrl(imageUrlRaw),
+          imageUrlRaw,
+          PLACEHOLDER,
+        ]
+          .map((u) => String(u || '').trim())
+          .filter(Boolean);
+        const imageCandidates = Array.from(new Set(candidates));
+        const title = String(props.title || 'דירה');
+        const city = String(props.city || '');
+        const address = String(props.address || '');
+        const availableSlots = Number(props.available_slots);
+        return {
+          id,
+          imageCandidates,
+          title,
+          city,
+          address,
+          availableSlots: Number.isFinite(availableSlots) ? availableSlots : null,
+        };
+      })
+      .filter(Boolean)
+      .slice(0, 25) as Array<{
+      id: string;
+      imageCandidates: string[];
+      title: string;
+      city: string;
+      address: string;
+      availableSlots: number | null;
+    }>;
+  }, [filteredPoints]);
+
+  const resultsKey = useMemo(() => results.map((r) => r.id).join('|'), [results]);
+  useEffect(() => {
+    // Keep only indices for visible results, and initialize missing ids to 0.
+    setResultImgCandidateIdxById((prev) => {
+      const next: Record<string, number> = {};
+      for (const r of results) {
+        next[r.id] = typeof prev[r.id] === 'number' ? prev[r.id] : 0;
+      }
+      return next;
+    });
+  }, [resultsKey]);
 
   return (
     <SafeAreaView edges={[]} style={styles.safeTop}>
@@ -404,7 +582,7 @@ export default function MapTabScreen() {
         <MapboxMap
           accessToken={token}
           styleUrl={styleUrl}
-          // Prefer search center (city/place), otherwise user location, otherwise fit-to-points.
+          // Prefer manual center override, then search center, then user location, otherwise fit-to-points.
           center={mapCenter}
           zoom={mapZoom}
           points={filteredPoints}
@@ -412,6 +590,102 @@ export default function MapTabScreen() {
             router.push({ pathname: '/apartment/[id]', params: { id, returnTo: '/(tabs)/map' } });
           }}
         />
+
+        {/* Floating actions */}
+        {token ? (
+          <View pointerEvents="box-none" style={[styles.floatingActions, { bottom: (insets.bottom || 0) + 12 + 86 + 16 }]}>
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel="מרכז למיקום שלי"
+              onPress={async () => {
+                // Clear search centering and snap to current location.
+                setSearchQuery('');
+                setSearchCenter(null);
+                const pos = await fetchUserLocation();
+                if (pos) {
+                  setCenterOverride(pos);
+                  setZoomOverride(13);
+                }
+              }}
+              activeOpacity={0.9}
+              style={[styles.fabBtn, locating && { opacity: 0.7 }]}
+            >
+              <LocateFixed size={18} color="#111827" />
+            </TouchableOpacity>
+          </View>
+        ) : null}
+
+        {/* Bottom results rail */}
+        {token && !loadingPoints && !pointsError ? (
+          <View pointerEvents="box-none" style={[styles.resultsWrap, { bottom: (insets.bottom || 0) + 12 }]}>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.resultsContent}
+              style={{ direction: 'rtl' as any }}
+            >
+              {results.length ? (
+                results.map((r) => (
+                  <TouchableOpacity
+                    key={r.id}
+                    activeOpacity={0.92}
+                    onPress={() => router.push({ pathname: '/apartment/[id]', params: { id: r.id, returnTo: '/(tabs)/map' } })}
+                    style={styles.resultCard}
+                    accessibilityRole="button"
+                    accessibilityLabel={`פתח דירה: ${r.title}`}
+                  >
+                    <View style={styles.resultBody}>
+                      <View style={styles.resultTopRow}>
+                        <Text style={styles.resultTitle} numberOfLines={1}>
+                          {r.title}
+                        </Text>
+                      </View>
+                        {typeof r.availableSlots === 'number' ? (
+                          <View style={styles.slotsRow}>
+                            <View style={styles.slotsPill}>
+                              <Text style={styles.slotsText}>{`${r.availableSlots} מקומות פנויים`}</Text>
+                            </View>
+                          </View>
+                        ) : null}
+                        <Text style={styles.resultMeta} numberOfLines={1}>
+                          {r.city || r.address}
+                        </Text>
+                    </View>
+                      <Image
+                        source={{
+                          uri:
+                            r.imageCandidates[
+                              Math.max(
+                                0,
+                                Math.min(
+                                  resultImgCandidateIdxById[r.id] ?? 0,
+                                  r.imageCandidates.length - 1
+                                )
+                              )
+                            ],
+                        }}
+                        style={styles.resultImage}
+                        resizeMode="cover"
+                        onError={() => {
+                          // Try next candidate (e.g., fall back from Supabase render URL to raw URL, then to placeholder)
+                          setResultImgCandidateIdxById((prev) => {
+                            const current = typeof prev[r.id] === 'number' ? prev[r.id] : 0;
+                            const nextIdx = Math.min(current + 1, r.imageCandidates.length - 1);
+                            if (nextIdx === current) return prev;
+                            return { ...prev, [r.id]: nextIdx };
+                          });
+                        }}
+                      />
+                  </TouchableOpacity>
+                ))
+              ) : (
+                <View style={styles.emptyRail}>
+                  <Text style={styles.emptyRailText}>אין תוצאות להצגה</Text>
+                </View>
+              )}
+            </ScrollView>
+          </View>
+        ) : null}
       </View>
 
       {/* Search + filters overlay */}
@@ -447,10 +721,22 @@ export default function MapTabScreen() {
 
           <FilterChipsBar
             filters={filterChips}
-            selectedIds={chipSelected}
-            onChange={onChipChange}
+            selectedIds={selectedChipIds}
+            onChange={(next) => setChipSelected((next || []).filter((id) => id !== 'distance'))}
+            onOpenDropdown={(chip) => {
+              if (chip.id === 'distance') setDistancePickerOpen(true);
+            }}
+            inactiveBackgroundColor="#FAFAFA"
+            activeBackgroundColor="#FAFAFA"
             style={{ marginTop: 8 }}
           />
+
+          {statusText ? (
+            <View style={[styles.statusPill, statusTone === 'error' ? styles.statusPillError : styles.statusPillNeutral]}>
+              {loadingPoints ? <ActivityIndicator color="#FFFFFF" /> : null}
+              <Text style={styles.statusText}>{statusText}</Text>
+            </View>
+          ) : null}
         </View>
       ) : null}
 
@@ -468,50 +754,42 @@ export default function MapTabScreen() {
         </View>
       ) : null}
 
-      {token && loadingPoints ? (
-        <View pointerEvents="none" style={styles.loadingBadge}>
-          <ActivityIndicator color="#FFFFFF" />
-          <Text style={styles.loadingText}>טוען דירות למפה…</Text>
-        </View>
-      ) : null}
+      {/* Distance picker modal */}
+      <Modal
+        visible={distancePickerOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setDistancePickerOpen(false)}
+      >
+        <TouchableOpacity activeOpacity={1} onPress={() => setDistancePickerOpen(false)} style={styles.modalBackdrop}>
+          <TouchableOpacity activeOpacity={1} onPress={() => {}} style={styles.modalCard}>
+            <Text style={styles.modalTitle}>בחירת טווח</Text>
+            {[
+              { label: 'ללא סינון טווח', value: null as number | null },
+              { label: 'עד 3 ק״מ', value: 3 },
+              { label: 'עד 5 ק״מ', value: 5 },
+              { label: 'עד 10 ק״מ', value: 10 },
+              { label: 'עד 13 ק״מ', value: 13 },
+            ].map((opt) => {
+              const active = distanceKm === opt.value;
+              return (
+                <TouchableOpacity
+                  key={String(opt.value)}
+                  activeOpacity={0.9}
+                  onPress={() => {
+                    setDistanceKm(opt.value);
+                    setDistancePickerOpen(false);
+                  }}
+                  style={[styles.modalOption, active && styles.modalOptionActive]}
+                >
+                  <Text style={[styles.modalOptionText, active && styles.modalOptionTextActive]}>{opt.label}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
 
-      {token && !loadingPoints && pointsError ? (
-        <View pointerEvents="none" style={[styles.loadingBadge, { backgroundColor: 'rgba(153, 27, 27, 0.9)' }]}>
-          <Text style={styles.loadingText}>{pointsError}</Text>
-        </View>
-      ) : null}
-
-      {token && !loadingPoints && !pointsError && totalCount > 0 && (!isFiltering || filteredCount > 0) ? (
-        <View pointerEvents="none" style={styles.countBadge}>
-          <Text style={styles.countText}>
-            {isFiltering ? `מוצגות ${filteredCount} מתוך ${totalCount}` : `מוצגות ${totalCount} דירות`}
-          </Text>
-        </View>
-      ) : null}
-
-      {token && !loadingPoints && !pointsError && isFiltering && filteredCount === 0 ? (
-        <View pointerEvents="none" style={[styles.loadingBadge, { backgroundColor: 'rgba(17, 24, 39, 0.86)' }]}>
-          <Text style={styles.loadingText}>אין תוצאות לסינון/חיפוש</Text>
-        </View>
-      ) : null}
-
-      {token && !loadingPoints && !pointsError && isDistanceFilteringWithoutLocation ? (
-        <View pointerEvents="none" style={[styles.loadingBadge, { backgroundColor: 'rgba(17, 24, 39, 0.86)' }]}>
-          <Text style={styles.loadingText}>כדי לסנן לפי מרחק צריך לאשר גישה למיקום</Text>
-        </View>
-      ) : null}
-
-      {token && !loadingPoints && !pointsError && locating ? (
-        <View pointerEvents="none" style={[styles.countBadge, { backgroundColor: 'rgba(17, 24, 39, 0.86)' }]}>
-          <Text style={[styles.countText, { fontWeight: '800' }]}>מאתר מיקום…</Text>
-        </View>
-      ) : null}
-
-      {token && !loadingPoints && !pointsError && !locating && !!locationError ? (
-        <View pointerEvents="none" style={[styles.loadingBadge, { backgroundColor: 'rgba(153, 27, 27, 0.9)' }]}>
-          <Text style={styles.loadingText}>{locationError}</Text>
-        </View>
-      ) : null}
     </SafeAreaView>
   );
 }
@@ -539,7 +817,7 @@ const styles = StyleSheet.create({
   searchContainer: {
     flexDirection: 'row-reverse',
     alignItems: 'center',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#FAFAFA',
     borderRadius: 22,
     paddingHorizontal: 10,
     height: 44,
@@ -581,39 +859,187 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     textAlign: 'right',
   },
-  loadingBadge: {
-    position: 'absolute',
-    left: 12,
-    right: 12,
-    bottom: 12,
+  statusPill: {
+    marginTop: 10,
     paddingVertical: 10,
     paddingHorizontal: 12,
-    borderRadius: 12,
-    backgroundColor: 'rgba(17, 24, 39, 0.86)',
+    borderRadius: 14,
     flexDirection: 'row-reverse',
     alignItems: 'center',
     gap: 10,
+    borderWidth: 1,
   },
-  loadingText: {
+  statusPillNeutral: {
+    backgroundColor: 'rgba(17, 24, 39, 0.86)',
+    borderColor: 'rgba(255,255,255,0.14)',
+  },
+  statusPillError: {
+    backgroundColor: 'rgba(153, 27, 27, 0.92)',
+    borderColor: 'rgba(255,255,255,0.14)',
+  },
+  statusText: {
     color: '#FFFFFF',
     fontSize: 12,
     fontWeight: '800',
     textAlign: 'right',
     flex: 1,
   },
-  countBadge: {
+  floatingActions: {
     position: 'absolute',
-    left: 12,
-    bottom: 12,
-    paddingVertical: 8,
-    paddingHorizontal: 10,
-    borderRadius: 999,
-    backgroundColor: 'rgba(76, 29, 149, 0.92)',
+    right: 12,
+    zIndex: 60,
   },
-  countText: {
+  fabBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.92)',
+    borderWidth: 1,
+    borderColor: 'rgba(229, 231, 235, 0.95)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.16,
+    shadowRadius: 18,
+    elevation: 12,
+  },
+  resultsWrap: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    zIndex: 55,
+  },
+  resultsContent: {
+    paddingHorizontal: 12,
+    gap: 10,
+    alignItems: 'flex-end',
+  },
+  resultCard: {
+    width: 250,
+    height: 96,
+    backgroundColor: 'rgba(255,255,255,0.96)',
+    borderRadius: 18,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(229, 231, 235, 0.95)',
+    // Use explicit LTR layout here and place the image as the last child,
+    // so the image always sticks to the RIGHT even under RTL screens.
+    flexDirection: 'row',
+    direction: 'ltr' as any,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.22,
+    shadowRadius: 22,
+    elevation: 18,
+  },
+  resultImage: {
+    width: 86,
+    height: '100%',
+    backgroundColor: '#111827',
+  },
+  resultBody: {
+    flex: 1,
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+    justifyContent: 'center',
+    alignItems: 'flex-end',
+  },
+  resultTopRow: {
+    width: '100%',
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 8,
+  },
+  resultTitle: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: '900',
+    color: '#111827',
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
+  slotsRow: {
+    width: '100%',
+    marginTop: 6,
+    alignItems: 'flex-end',
+  },
+  slotsPill: {
+    flexShrink: 0,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 999,
+    backgroundColor: '#EFEAFE',
+    borderWidth: 1,
+    borderColor: '#E9D5FF',
+  },
+  slotsText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#4C1D95',
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
+  resultMeta: {
+    marginTop: 6,
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#6B7280',
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
+  emptyRail: {
+    height: 86,
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+  },
+  emptyRailText: {
     color: '#FFFFFF',
     fontSize: 12,
+    fontWeight: '800',
+    textAlign: 'right',
+  },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    paddingHorizontal: 16,
+    justifyContent: 'center',
+  },
+  modalCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 18,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  modalTitle: {
+    fontSize: 16,
     fontWeight: '900',
+    color: '#111827',
+    textAlign: 'right',
+    marginBottom: 10,
+  },
+  modalOption: {
+    borderRadius: 14,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    marginBottom: 10,
+  },
+  modalOptionActive: {
+    backgroundColor: '#EFEAFE',
+    borderColor: '#E9D5FF',
+  },
+  modalOptionText: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#111827',
+    textAlign: 'right',
+  },
+  modalOptionTextActive: {
+    color: '#4C1D95',
   },
 });
 
