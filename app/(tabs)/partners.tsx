@@ -27,7 +27,7 @@ import Animated, {
   runOnJS,
 } from 'react-native-reanimated';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import { SlidersHorizontal, ChevronLeft, ChevronRight, Heart, X, MapPin, Share2 } from 'lucide-react-native';
+import { SlidersHorizontal, ChevronLeft, ChevronRight, Heart, X, MapPin, Share2, Users, RefreshCw } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
@@ -179,6 +179,8 @@ export default function PartnersScreen() {
     ),
   );
 
+  const isDeckExhausted = items.length > 0 && currentIndex >= items.length;
+
   const onSwipe = (type: 'like' | 'pass') => {
     const item = items[currentIndex];
     if (!item) return;
@@ -189,11 +191,16 @@ export default function PartnersScreen() {
       if (item.type === 'user') handlePass((item as any).user, { skipSlide: true });
       else handleGroupPass((item as any).groupId, (item as any).users, { skipSlide: true });
     }
-    setCurrentIndex((i) => Math.min(i + 1, items.length - 1));
+    // IMPORTANT: allow advancing past the last item so we can show a proper "end of deck" state.
+    setCurrentIndex((i) => {
+      const next = i + 1;
+      return next >= items.length ? items.length : next;
+    });
     translateX.value = 0;
   };
 
   const swipeGesture = Gesture.Pan()
+    .enabled(!isDeckExhausted)
     .onChange((e) => {
       translateX.value = e.translationX;
     })
@@ -1009,6 +1016,7 @@ export default function PartnersScreen() {
   };
 
   const triggerSwipe = (type: 'like' | 'pass') => {
+    if (isDeckExhausted) return;
     const outTarget = type === 'like' ? screenWidth + 200 : -screenWidth - 200;
     translateX.value = withTiming(outTarget, { duration: 180 }, (finished) => {
       if (finished) runOnJS(onSwipe)(type);
@@ -1072,9 +1080,62 @@ export default function PartnersScreen() {
         }
       >
         {items.length === 0 ? (
-          <View style={styles.emptyContainer}>
-            <Text style={styles.emptyText}>לא נמצאו שותפים</Text>
-            <Text style={styles.emptySubtext}>חזרו מאוחר יותר</Text>
+          <View style={[styles.cardStack, { height: swipeCardHeight, justifyContent: 'center', alignItems: 'center' }]}>
+            <View style={styles.emptyStateCard}>
+              <LinearGradient
+                colors={['rgba(124,92,255,0.18)', 'rgba(124,92,255,0.06)']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.emptyStateIconWrap}
+              >
+                <Users size={34} color="#6D28D9" />
+              </LinearGradient>
+              <Text style={styles.emptyStateTitle}>לא נמצאו שותפים להצגה</Text>
+              <Text style={styles.emptyStateSubtitle}>
+                כרגע אין התאמות זמינות. אפשר לנסות שוב בעוד כמה דקות או לרענן.
+              </Text>
+              <View style={styles.emptyStateActions}>
+                <TouchableOpacity
+                  activeOpacity={0.9}
+                  style={[styles.emptyStateBtn, styles.emptyStateBtnPrimary]}
+                  onPress={onRefresh}
+                  accessibilityRole="button"
+                  accessibilityLabel="רענון שותפים"
+                >
+                  <RefreshCw size={16} color="#FFFFFF" />
+                  <Text style={[styles.emptyStateBtnText, styles.emptyStateBtnTextPrimary]}>רענן</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        ) : isDeckExhausted ? (
+          <View style={[styles.cardStack, { height: swipeCardHeight, justifyContent: 'center', alignItems: 'center' }]}>
+            <View style={styles.endOfDeckCard}>
+              <LinearGradient
+                colors={['rgba(124,92,255,0.18)', 'rgba(124,92,255,0.06)']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.endOfDeckIconWrap}
+              >
+                <Users size={34} color="#6D28D9" />
+              </LinearGradient>
+              <Text style={styles.endOfDeckTitle}>אין יותר שותפים להציג</Text>
+              <Text style={styles.endOfDeckSubtitle}>
+                זה הכול לעכשיו — אפשר לרענן כדי לבדוק אם נוספו התאמות חדשות.
+              </Text>
+              <View style={styles.endOfDeckActions}>
+                <TouchableOpacity
+                  activeOpacity={0.9}
+                  style={[styles.endOfDeckBtn, styles.endOfDeckBtnPrimary]}
+                  onPress={onRefresh}
+                  accessibilityRole="button"
+                  accessibilityLabel="רענון שותפים"
+                >
+                  <RefreshCw size={16} color="#FFFFFF" />
+                  <Text style={[styles.endOfDeckBtnText, styles.endOfDeckBtnTextPrimary]}>רענן</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
           </View>
         ) : (
           <View>
@@ -1116,7 +1177,7 @@ export default function PartnersScreen() {
       </ScrollView>
 
       {/* Fixed bottom buttons – consistent spacing across devices */}
-      {items.length ? (
+      {items.length && !isDeckExhausted ? (
         <View style={[styles.bottomActions, { bottom: actionsBottom }]} pointerEvents="box-none">
           <View style={styles.bottomActionsRow}>
             <TouchableOpacity
@@ -1490,6 +1551,160 @@ const styles = StyleSheet.create({
   emptySubtext: {
     fontSize: 14,
     color: '#6B7280',
+  },
+  emptyStateCard: {
+    width: '100%',
+    borderRadius: SWIPE_CARD_RADIUS,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: 'rgba(17,24,39,0.08)',
+    paddingHorizontal: 22,
+    paddingVertical: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.10,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 10,
+  },
+  emptyStateIconWrap: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(124,92,255,0.22)',
+  },
+  emptyStateTitle: {
+    fontSize: 18,
+    fontWeight: '900',
+    color: '#111827',
+    textAlign: 'center',
+    marginBottom: 6,
+  },
+  emptyStateSubtitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#6B7280',
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 16,
+    paddingHorizontal: 8,
+  },
+  emptyStateActions: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+  },
+  emptyStateBtn: {
+    height: 42,
+    paddingHorizontal: 14,
+    borderRadius: 999,
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  emptyStateBtnPrimary: {
+    backgroundColor: '#6D28D9',
+    borderWidth: 1,
+    borderColor: 'rgba(109,40,217,0.25)',
+  },
+  emptyStateBtnSecondary: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: 'rgba(17,24,39,0.12)',
+  },
+  emptyStateBtnText: {
+    fontSize: 14,
+    fontWeight: '900',
+  },
+  emptyStateBtnTextPrimary: {
+    color: '#FFFFFF',
+  },
+  emptyStateBtnTextSecondary: {
+    color: '#111827',
+  },
+  endOfDeckCard: {
+    width: '100%',
+    borderRadius: SWIPE_CARD_RADIUS,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: 'rgba(17,24,39,0.08)',
+    paddingHorizontal: 22,
+    paddingVertical: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.10,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 10,
+  },
+  endOfDeckIconWrap: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(124,92,255,0.22)',
+  },
+  endOfDeckTitle: {
+    fontSize: 18,
+    fontWeight: '900',
+    color: '#111827',
+    textAlign: 'center',
+    marginBottom: 6,
+  },
+  endOfDeckSubtitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#6B7280',
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 16,
+    paddingHorizontal: 8,
+  },
+  endOfDeckActions: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+  },
+  endOfDeckBtn: {
+    height: 42,
+    paddingHorizontal: 14,
+    borderRadius: 999,
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  endOfDeckBtnPrimary: {
+    backgroundColor: '#6D28D9',
+    borderWidth: 1,
+    borderColor: 'rgba(109,40,217,0.25)',
+  },
+  endOfDeckBtnSecondary: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: 'rgba(17,24,39,0.12)',
+  },
+  endOfDeckBtnText: {
+    fontSize: 14,
+    fontWeight: '900',
+  },
+  endOfDeckBtnTextPrimary: {
+    color: '#FFFFFF',
+  },
+  endOfDeckBtnTextSecondary: {
+    color: '#111827',
   },
   bottomActions: {
     position: 'absolute',

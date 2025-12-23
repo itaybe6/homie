@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -53,6 +53,9 @@ import { useAuthStore } from '@/stores/authStore';
 import { useApartmentStore } from '@/stores/apartmentStore';
 import { Apartment, User } from '@/types/database';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import MapboxMap from '@/components/MapboxMap';
+import type { MapboxFeatureCollection } from '@/lib/mapboxHtml';
+import { geocodeApartmentAddress } from '@/lib/mapboxGeocoding';
 
 export default function ApartmentDetailsScreen() {
   const router = useRouter();
@@ -94,10 +97,70 @@ export default function ApartmentDetailsScreen() {
   const insets = useSafeAreaInsets();
   const [isViewerOpen, setViewerOpen] = useState(false);
   const [viewerIndex, setViewerIndex] = useState(0);
+  const mapboxToken = process.env.EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN as string | undefined;
+  const mapboxStyleUrl = process.env.EXPO_PUBLIC_MAPBOX_STYLE_URL as string | undefined;
+  const [aptGeo, setAptGeo] = useState<{ lng: number; lat: number } | null>(null);
+  const [isGeocoding, setIsGeocoding] = useState(false);
+  const [geoError, setGeoError] = useState<string>('');
 
   useEffect(() => {
     fetchApartmentDetails();
   }, [id]);
+
+  // Geocode apartment address -> show on Mapbox map (bottom map card)
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      setGeoError('');
+      setAptGeo(null);
+      const token = (mapboxToken || '').trim();
+      if (!token) return;
+      const address = String((apartment as any)?.address || '').trim();
+      const city = String((apartment as any)?.city || '').trim();
+      if (!address || !city) return;
+      setIsGeocoding(true);
+      try {
+        const geo = await geocodeApartmentAddress({ accessToken: token, address, city, country: 'il' });
+        if (cancelled) return;
+        if (geo) setAptGeo(geo);
+      } catch (e: any) {
+        if (cancelled) return;
+        setGeoError(e?.message || 'לא הצלחתי לאתר מיקום למפה');
+      } finally {
+        if (!cancelled) setIsGeocoding(false);
+      }
+    };
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, [apartment?.id, (apartment as any)?.address, (apartment as any)?.city, mapboxToken]);
+
+  const aptMapPoints: MapboxFeatureCollection = useMemo(() => {
+    if (!aptGeo) return { type: 'FeatureCollection', features: [] };
+    const aptId = String((apartment as any)?.id || 'apt');
+    return {
+      type: 'FeatureCollection',
+      features: [
+        {
+          type: 'Feature',
+          geometry: { type: 'Point', coordinates: [aptGeo.lng, aptGeo.lat] },
+          properties: {
+            id: aptId,
+            title: String((apartment as any)?.title || 'דירה'),
+            address: String((apartment as any)?.address || ''),
+            city: String((apartment as any)?.city || ''),
+          },
+        },
+      ],
+    };
+  }, [aptGeo, (apartment as any)?.id, (apartment as any)?.title, (apartment as any)?.address, (apartment as any)?.city]);
+
+  const mapCardHeight = useMemo(() => {
+    // Aim for a "more square" card: approx (screenWidth - horizontal padding) capped for large screens
+    const target = screenWidth - 40; // content padding is 20 on each side
+    return Math.max(190, Math.min(320, target));
+  }, [screenWidth]);
 
   // Persist "join request sent" per apartment + user (fixes refresh + navigation state bleed)
   useEffect(() => {
@@ -1151,14 +1214,49 @@ export default function ApartmentDetailsScreen() {
           </View>
 
           <View style={styles.section}>
-            <View style={styles.locationHeaderRow}>
-              <MapPin size={16} color="#8B5CF6" />
-              <Text style={styles.locationHeaderText} numberOfLines={1} allowFontScaling={false}>
-                {apartment.neighborhood ? `${apartment.neighborhood}, ${apartment.city}` : apartment.city}
-              </Text>
+            <View style={styles.mapHeader}>
+              <View style={styles.mapHeaderIcon}>
+                <MapPin size={16} color="#8B5CF6" />
+              </View>
+              <View style={{ flex: 1, alignItems: 'flex-end' }}>
+                <Text style={styles.mapHeaderTitle} numberOfLines={1} allowFontScaling={false}>
+                  {apartment.city}
+                </Text>
+                <Text style={styles.mapHeaderSubtitle} numberOfLines={1} allowFontScaling={false}>
+                  {apartment.address}
+                </Text>
+              </View>
             </View>
-            <View style={styles.mapCard}>
-              <View style={styles.mapDot} />
+            <View style={[styles.mapCard, { height: mapCardHeight }]}>
+              {!mapboxToken ? (
+                <View style={styles.mapFallback}>
+                  <Text style={styles.mapFallbackText}>חסר EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN</Text>
+                </View>
+              ) : isGeocoding ? (
+                <View style={styles.mapFallback}>
+                  <ActivityIndicator size="small" color="#4C1D95" />
+                  <Text style={styles.mapFallbackText}>טוען מפה…</Text>
+                </View>
+              ) : geoError ? (
+                <View style={styles.mapFallback}>
+                  <Text style={styles.mapFallbackText}>{geoError}</Text>
+                </View>
+              ) : (
+                <View style={styles.mapInner}>
+                  <MapboxMap
+                    accessToken={mapboxToken}
+                    styleUrl={mapboxStyleUrl}
+                    center={aptGeo ? ([aptGeo.lng, aptGeo.lat] as const) : undefined}
+                    zoom={aptGeo ? 15 : 11}
+                    points={aptGeo ? aptMapPoints : { type: 'FeatureCollection', features: [] }}
+                  />
+                  {!aptGeo ? (
+                    <View pointerEvents="none" style={styles.mapOverlayHint}>
+                      <Text style={styles.mapOverlayHintText}>בחרנו להציג את המפה גם בלי נקודה — כדי לקבל נקודה ודא שכתובת+עיר תקינים</Text>
+                    </View>
+                  ) : null}
+                </View>
+              )}
             </View>
           </View>
 
@@ -1782,17 +1880,34 @@ const styles = StyleSheet.create({
     textAlign: 'right',
     writingDirection: 'rtl',
   },
-  locationHeaderRow: {
+  mapHeader: {
     flexDirection: 'row-reverse',
     alignItems: 'center',
-    gap: 6,
+    gap: 10,
     marginBottom: 10,
   },
-  locationHeaderText: {
+  mapHeaderIcon: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F5F3FF',
+    borderWidth: 1,
+    borderColor: '#E9D5FF',
+  },
+  mapHeaderTitle: {
+    color: '#111827',
+    fontSize: 16,
+    fontWeight: '900',
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
+  mapHeaderSubtitle: {
+    marginTop: 2,
     color: '#6B7280',
-    fontSize: 14,
-    lineHeight: 16,
-    fontWeight: '500',
+    fontSize: 13,
+    fontWeight: '700',
     textAlign: 'right',
     writingDirection: 'rtl',
   },
@@ -1976,21 +2091,47 @@ const styles = StyleSheet.create({
     writingDirection: 'rtl',
   },
   mapCard: {
-    height: 140,
     borderRadius: 16,
     backgroundColor: '#F3F4F6',
     borderWidth: 1,
     borderColor: '#E5E7EB',
+    overflow: 'hidden',
+  },
+  mapInner: {
+    flex: 1,
+    alignSelf: 'stretch',
+  },
+  mapOverlayHint: {
+    position: 'absolute',
+    left: 8,
+    right: 8,
+    bottom: 8,
+    backgroundColor: 'rgba(17, 24, 39, 0.72)',
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+  },
+  mapOverlayHintText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '800',
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
+  mapFallback: {
+    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 8,
+    paddingHorizontal: 12,
   },
-  mapDot: {
-    width: 14,
-    height: 14,
-    borderRadius: 7,
-    backgroundColor: '#E9D5FF',
-    borderWidth: 3,
-    borderColor: '#8B5CF6',
+  mapFallbackText: {
+    color: '#6B7280',
+    fontSize: 12,
+    fontWeight: '800',
+    textAlign: 'center',
   },
   peopleGrid: {
     flexDirection: 'row-reverse',

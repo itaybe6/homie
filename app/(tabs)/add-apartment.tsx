@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -20,8 +20,9 @@ import { useAuthStore } from '@/stores/authStore';
 import { useApartmentStore } from '@/stores/apartmentStore';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
-import { autocompleteAddresses, createSessionToken } from '@/lib/googlePlaces';
-import { getNeighborhoodsForCityName, searchCitiesWithNeighborhoods } from '@/lib/neighborhoods';
+import MapboxMap from '@/components/MapboxMap';
+import type { MapboxFeatureCollection } from '@/lib/mapboxHtml';
+import { autocompleteMapbox, reverseGeocodeMapbox, type MapboxGeocodingFeature } from '@/lib/mapboxAutocomplete';
 import {
   Accessibility,
   Snowflake,
@@ -41,6 +42,8 @@ export default function AddApartmentScreen() {
   const router = useRouter();
   const { user } = useAuthStore();
   const addApartment = useApartmentStore((state) => state.addApartment);
+  const mapboxToken = process.env.EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN as string | undefined;
+  const mapboxStyleUrl = process.env.EXPO_PUBLIC_MAPBOX_STYLE_URL as string | undefined;
 
   const TOTAL_STEPS = 4 as const;
   type Step = 1 | 2 | 3 | 4;
@@ -58,13 +61,15 @@ export default function AddApartmentScreen() {
   const [images, setImages] = useState<string[]>([]); // local URIs before upload
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
-  const [citySuggestions, setCitySuggestions] = useState<string[]>([]);
-  const [sessionToken, setSessionToken] = useState<string>('');
-  const [addressSuggestions, setAddressSuggestions] = useState<string[]>([]);
-  const [neighborhoodOptions, setNeighborhoodOptions] = useState<string[]>([]);
-  const [isNeighborhoodOpen, setIsNeighborhoodOpen] = useState(false);
-  const [neighborhoodSearchQuery, setNeighborhoodSearchQuery] = useState('');
-  const [isLoadingNeighborhoods, setIsLoadingNeighborhoods] = useState(false);
+  const [citySuggestions, setCitySuggestions] = useState<MapboxGeocodingFeature[]>([]);
+  const [addressSuggestions, setAddressSuggestions] = useState<MapboxGeocodingFeature[]>([]);
+  const [selectedGeo, setSelectedGeo] = useState<{ lng: number; lat: number } | null>(null);
+  const [isResolvingNeighborhood, setIsResolvingNeighborhood] = useState(false);
+  const [selectedCity, setSelectedCity] = useState<{
+    name: string;
+    center?: { lng: number; lat: number };
+    bbox?: [number, number, number, number];
+  } | null>(null);
   const [includeAsPartner, setIncludeAsPartner] = useState(false);
   const [roommateCapacity, setRoommateCapacity] = useState<number | null>(null);
   const [isRoommateDropdownOpen, setIsRoommateDropdownOpen] = useState(false);
@@ -86,71 +91,133 @@ export default function AddApartmentScreen() {
   const [kosherKitchen, setKosherKitchen] = useState(false);
 
   useEffect(() => {
-    setSessionToken(createSessionToken());
-  }, []);
-
-  useEffect(() => {
     let active = true;
-    const run = () => {
+    const run = async () => {
       const q = city.trim();
-      if (!q || q.length < 1) { setCitySuggestions([]); return; }
-      const names = searchCitiesWithNeighborhoods(q, 8);
-      if (active) setCitySuggestions(names);
-    };
-    run();
-    return () => { active = false; };
-  }, [city]);
-
-  // Load neighborhoods list for selected city from static data (dropdown)
-  useEffect(() => {
-    let cancelled = false;
-    const load = () => {
-      const key = (city || '').trim();
-      if (!key) {
-        setNeighborhoodOptions([]);
-        setIsLoadingNeighborhoods(false);
+      if (!mapboxToken) {
+        if (active) setCitySuggestions([]);
         return;
       }
-      setIsLoadingNeighborhoods(true);
-      try {
-        const list = getNeighborhoodsForCityName(key);
-        if (!cancelled) {
-          setNeighborhoodOptions(list);
-          setIsLoadingNeighborhoods(false);
-        }
-      } catch {
-        if (!cancelled) {
-          setNeighborhoodOptions([]);
-          setIsLoadingNeighborhoods(false);
-        }
+      if (!q || q.length < 1) {
+        if (active) setCitySuggestions([]);
+        return;
       }
+      const t = setTimeout(async () => {
+        const results = await autocompleteMapbox({
+          accessToken: mapboxToken,
+          query: q,
+          country: 'il',
+          language: 'he',
+          limit: 8,
+          types: 'place,locality',
+        });
+        if (active) setCitySuggestions(results);
+      }, 250);
+      return () => clearTimeout(t);
     };
-    load();
-    return () => { cancelled = true; };
-  }, [city]);
+    let cleanup: undefined | (() => void);
+    (async () => {
+      cleanup = await run();
+    })();
+    return () => {
+      active = false;
+      cleanup?.();
+    };
+  }, [city, mapboxToken]);
 
-  // Removed Google neighborhood autocomplete in favor of static dropdown search
+  // If user edits the city after selecting a city, invalidate the selection (so address search won't be "wrong city")
+  useEffect(() => {
+    const c = city.trim();
+    if (!selectedCity) return;
+    if (c && c === selectedCity.name) return;
+    // user changed city text -> require re-selecting city from suggestions
+    setSelectedCity(null);
+    setSelectedGeo(null);
+    setAddress('');
+    setNeighborhood('');
+    setAddressSuggestions([]);
+  }, [city]); // intentionally not depending on selectedCity to keep logic simple
 
   useEffect(() => {
     let active = true;
     const run = async () => {
       const q = address.trim();
-      if (!q || q.length < 2) { setAddressSuggestions([]); return; }
-      const preds = await autocompleteAddresses(q, null, sessionToken, city);
-      if (active) setAddressSuggestions(preds.slice(0, 8));
+      if (!mapboxToken) {
+        if (active) setAddressSuggestions([]);
+        return;
+      }
+      // enforce flow: must pick city (from suggestions) before searching address
+      if (!selectedCity || !selectedCity.name.trim()) {
+        if (active) setAddressSuggestions([]);
+        return;
+      }
+      if (!q || q.length < 2) {
+        if (active) setAddressSuggestions([]);
+        return;
+      }
+      const cityPart = city.trim();
+      const query = cityPart ? `${q}, ${cityPart}` : q;
+      const t = setTimeout(async () => {
+        const results = await autocompleteMapbox({
+          accessToken: mapboxToken,
+          query,
+          country: 'il',
+          language: 'he',
+          limit: 8,
+          types: 'address',
+          bbox: selectedCity.bbox,
+          proximity: selectedCity.center,
+        });
+        if (active) setAddressSuggestions(results);
+      }, 320);
+      return () => clearTimeout(t);
     };
-    run();
-    return () => { active = false; };
-  }, [address, sessionToken, city]);
+    let cleanup: undefined | (() => void);
+    (async () => {
+      cleanup = await run();
+    })();
+    return () => {
+      active = false;
+      cleanup?.();
+    };
+  }, [address, city, mapboxToken]);
 
   const closeOverlays = () => {
     setCitySuggestions([]);
     setAddressSuggestions([]);
-    setIsNeighborhoodOpen(false);
-    setNeighborhoodSearchQuery('');
     setIsRoommateDropdownOpen(false);
     setIsBalconyDropdownOpen(false);
   };
+
+  function ctxText(feature: MapboxGeocodingFeature, prefix: string): string {
+    const ctx = feature?.context || [];
+    const hit = ctx.find((c) => String(c?.id || '').startsWith(prefix));
+    return String(hit?.text || '').trim();
+  }
+
+  const neighborhoodReqIdRef = useRef(0);
+
+  function ctxTextFromFeatures(features: MapboxGeocodingFeature[], prefix: string): string {
+    for (const f of features || []) {
+      const t = ctxText(f, prefix);
+      if (t) return t;
+    }
+    return '';
+  }
+
+  const previewPoints = useMemo<MapboxFeatureCollection | undefined>(() => {
+    if (!selectedGeo) return { type: 'FeatureCollection', features: [] };
+    return {
+      type: 'FeatureCollection',
+      features: [
+        {
+          type: 'Feature',
+          geometry: { type: 'Point', coordinates: [selectedGeo.lng, selectedGeo.lat] },
+          properties: { id: 'preview', title: 'מיקום הדירה' },
+        },
+      ],
+    };
+  }, [selectedGeo]);
 
   const goToStep = (next: Step) => {
     closeOverlays();
@@ -163,8 +230,8 @@ export default function AddApartmentScreen() {
     closeOverlays();
 
     if (step === 1) {
-      if (!city.trim()) {
-        setError('אנא בחר/י עיר');
+      if (!city.trim() || !selectedCity) {
+        setError('אנא בחר/י עיר מהרשימה');
         return false;
       }
       if (!address.trim()) {
@@ -529,89 +596,36 @@ export default function AddApartmentScreen() {
                     style={styles.input}
                     placeholder="לדוגמה: תל אביב"
                     value={city}
-                    onChangeText={(t) => { setCity(t); }}
+                    onChangeText={(t) => {
+                      setCity(t);
+                    }}
                     editable={!isLoading}
                     placeholderTextColor="#9AA0A6"
                   />
                   {citySuggestions.length > 0 ? (
                     <View style={styles.suggestionsBox}>
-                      {citySuggestions.map((name) => (
+                      {citySuggestions.map((f) => (
                         <TouchableOpacity
-                          key={name}
+                          key={f.id}
                           style={styles.suggestionItem}
-                          onPress={() => { setCity(name); setCitySuggestions([]); }}
+                          onPress={() => {
+                            setCity(f.text);
+                            setCitySuggestions([]);
+                            const center = Array.isArray(f.center) && f.center.length === 2 ? { lng: f.center[0], lat: f.center[1] } : undefined;
+                            setSelectedCity({
+                              name: f.text,
+                              center,
+                              bbox: f.bbox,
+                            });
+                            // reset address flow when changing city
+                            setAddress('');
+                            setNeighborhood('');
+                            setSelectedGeo(center ?? null);
+                          }}
                         >
-                          <Text style={styles.suggestionText}>{name}</Text>
+                          <Text style={styles.suggestionText}>{f.place_name}</Text>
                         </TouchableOpacity>
                       ))}
-                    </View>
-                  ) : null}
-                </View>
-
-                <View style={[styles.inputGroup, isNeighborhoodOpen ? styles.inputGroupRaised : null]}>
-                  <Text style={styles.label}>שכונה</Text>
-                  <TouchableOpacity
-                    style={[
-                      styles.input,
-                      styles.selectButton,
-                      !city ? { opacity: 0.6 } : null,
-                    ]}
-                    onPress={() => {
-                      if (city && !isLoadingNeighborhoods) {
-                        setIsNeighborhoodOpen(!isNeighborhoodOpen);
-                      }
-                    }}
-                    disabled={!city || isLoading}
-                  >
-                    <Text
-                      style={[
-                        styles.selectButtonText,
-                        !neighborhood && styles.selectButtonPlaceholder,
-                      ]}
-                    >
-                      {neighborhood ||
-                        (isLoadingNeighborhoods
-                          ? 'טוען שכונות...'
-                          : neighborhoodOptions.length > 0
-                          ? 'בחר שכונה'
-                          : city
-                          ? 'אין שכונות זמינות'
-                          : 'בחר עיר קודם')}
-                    </Text>
-                    <Text style={styles.selectButtonArrow}>▼</Text>
-                  </TouchableOpacity>
-                  {isNeighborhoodOpen && neighborhoodOptions.length > 0 ? (
-                    <View style={styles.suggestionsBox}>
-                      <TextInput
-                        style={styles.searchInput}
-                        placeholder="חפש שכונה..."
-                        placeholderTextColor="#9AA0A6"
-                        value={neighborhoodSearchQuery}
-                        onChangeText={setNeighborhoodSearchQuery}
-                        autoFocus
-                      />
-                      <ScrollView style={styles.dropdownScroll} nestedScrollEnabled>
-                        {(neighborhoodSearchQuery
-                          ? neighborhoodOptions.filter((n) =>
-                              n.toLowerCase().includes(neighborhoodSearchQuery.toLowerCase())
-                            )
-                          : neighborhoodOptions
-                        )
-                          .slice(0, 100)
-                          .map((name) => (
-                            <TouchableOpacity
-                              key={name}
-                              style={styles.suggestionItem}
-                              onPress={() => {
-                                setNeighborhood(name);
-                                setIsNeighborhoodOpen(false);
-                                setNeighborhoodSearchQuery('');
-                              }}
-                            >
-                              <Text style={styles.suggestionText}>{name}</Text>
-                            </TouchableOpacity>
-                          ))}
-                      </ScrollView>
                     </View>
                   ) : null}
                 </View>
@@ -622,25 +636,115 @@ export default function AddApartmentScreen() {
                   </Text>
                   <TextInput
                     style={styles.input}
-                    placeholder="רחוב ומספר בית"
+                    placeholder={selectedCity ? 'רחוב ומספר בית' : 'בחר/י עיר קודם'}
                     value={address}
-                    onChangeText={setAddress}
-                    editable={!isLoading}
+                    onChangeText={(t) => {
+                      setAddress(t);
+                      // neighborhood is derived from selected address; clear while typing
+                      if (neighborhood) setNeighborhood('');
+                    }}
+                    editable={!isLoading && !!selectedCity}
                     placeholderTextColor="#9AA0A6"
                   />
                   {addressSuggestions.length > 0 ? (
                     <View style={styles.suggestionsBox}>
-                      {addressSuggestions.map((desc) => (
+                      {addressSuggestions.map((f) => (
                         <TouchableOpacity
-                          key={desc}
+                          key={f.id}
                           style={styles.suggestionItem}
-                          onPress={() => { setAddress(desc); setAddressSuggestions([]); }}
+                          onPress={() => {
+                            const street = String(f.text || '').trim();
+                            const house = String(f.address || '').trim();
+                            const nextAddress = `${street}${house ? ` ${house}` : ''}`.trim();
+
+                            setAddress(nextAddress || street || address);
+                            setAddressSuggestions([]);
+
+                            // neighborhood derived from the address selection (auto)
+                            const inferredNeighborhood = ctxText(f, 'neighborhood.');
+                            if (inferredNeighborhood) setNeighborhood(inferredNeighborhood);
+
+                            if (Array.isArray(f.center) && f.center.length === 2) {
+                              const geo = { lng: f.center[0], lat: f.center[1] };
+                              setSelectedGeo(geo);
+
+                              // Fallback: Mapbox autocomplete doesn't always include neighborhood.
+                              // Do a reverse lookup to fetch neighborhood for the selected point.
+                              if (!inferredNeighborhood && mapboxToken) {
+                                const reqId = ++neighborhoodReqIdRef.current;
+                                setIsResolvingNeighborhood(true);
+                                setNeighborhood('');
+                                reverseGeocodeMapbox({
+                                  accessToken: mapboxToken,
+                                  lng: geo.lng,
+                                  lat: geo.lat,
+                                  country: 'il',
+                                  language: 'he',
+                                  // Important: don't filter types here. The "address" result usually contains the full context
+                                  // (including neighborhood/locality/district). Filtering types can remove this context.
+                                  limit: 5,
+                                })
+                                  .then((rev) => {
+                                    if (neighborhoodReqIdRef.current !== reqId) return;
+                                    const bestNeighborhood =
+                                      // Prefer context from the top result (often address) first
+                                      ctxTextFromFeatures(rev, 'neighborhood.') ||
+                                      ctxTextFromFeatures(rev, 'locality.') ||
+                                      ctxTextFromFeatures(rev, 'district.') ||
+                                      // fallback to feature texts by place_type
+                                      rev.find((x) => (x.place_type || []).includes('neighborhood'))?.text ||
+                                      rev.find((x) => (x.place_type || []).includes('locality'))?.text ||
+                                      rev.find((x) => (x.place_type || []).includes('district'))?.text ||
+                                      '';
+                                    if (bestNeighborhood) setNeighborhood(bestNeighborhood);
+                                  })
+                                  .catch(() => {
+                                    // ignore
+                                  })
+                                  .finally(() => {
+                                    if (neighborhoodReqIdRef.current !== reqId) return;
+                                    setIsResolvingNeighborhood(false);
+                                  });
+                              }
+                            }
+                          }}
                         >
-                          <Text style={styles.suggestionText}>{desc}</Text>
+                          <Text style={styles.suggestionText}>{f.place_name}</Text>
                         </TouchableOpacity>
                       ))}
                     </View>
                   ) : null}
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.label}>שכונה (אוטומטי)</Text>
+                  <TextInput
+                    style={[styles.input, !neighborhood ? styles.autoFieldEmpty : null]}
+                    placeholder={isResolvingNeighborhood ? 'מאתר שכונה...' : 'ייבחר אוטומטית אחרי בחירת כתובת'}
+                    value={neighborhood}
+                    editable={false}
+                    placeholderTextColor="#9AA0A6"
+                  />
+                </View>
+
+                <View style={styles.mapPreviewCard}>
+                  <View style={styles.mapPreviewHeader}>
+                    <Text style={styles.mapPreviewTitle}>תצוגה על המפה</Text>
+                    {!mapboxToken ? (
+                      <Text style={styles.mapPreviewHint}>חסר EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN</Text>
+                    ) : !selectedGeo ? (
+                      <Text style={styles.mapPreviewHint}>בחר/י כתובת כדי לראות נקודה על המפה</Text>
+                    ) : null}
+                  </View>
+                  <View style={styles.mapPreviewBody}>
+                    <MapboxMap
+                      accessToken={mapboxToken}
+                      styleUrl={mapboxStyleUrl}
+                      center={selectedGeo ? ([selectedGeo.lng, selectedGeo.lat] as const) : undefined}
+                      zoom={selectedGeo ? 15 : 11}
+                      points={previewPoints}
+                    />
+                  </View>
                 </View>
               </>
             ) : null}
@@ -1164,6 +1268,42 @@ const styles = StyleSheet.create({
     color: '#111827',
     fontSize: 14,
     textAlign: 'right',
+  },
+  mapPreviewCard: {
+    marginTop: 10,
+    borderRadius: 16,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    backgroundColor: '#FFFFFF',
+  },
+  mapPreviewHeader: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E7EB',
+    backgroundColor: '#FAFAFA',
+  },
+  mapPreviewTitle: {
+    fontSize: 14,
+    fontWeight: '900',
+    color: '#111827',
+    textAlign: 'right',
+  },
+  mapPreviewHint: {
+    marginTop: 6,
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#6B7280',
+    textAlign: 'right',
+  },
+  mapPreviewBody: {
+    height: 210,
+    backgroundColor: '#FFFFFF',
+  },
+  autoFieldEmpty: {
+    backgroundColor: '#FAFAFA',
+    color: '#6B7280',
   },
   textArea: {
     minHeight: 100,

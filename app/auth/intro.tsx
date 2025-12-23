@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Dimensions, Image as RNImage, StyleSheet, Text, View, TouchableOpacity, Platform, Pressable, ImageSourcePropType } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
+import { BlurView } from 'expo-blur';
 import { useRouter } from 'expo-router';
 import Animated, {
   Easing,
@@ -200,11 +201,12 @@ export default function IntroScreen() {
           style={({ pressed }) => [
             {
               marginTop: 16,
-              backgroundColor: '#FFFFFF',
+              backgroundColor: 'transparent',
               height: 36,
               paddingHorizontal: 22,
               borderRadius: 10,
-              borderWidth: 0,
+              borderWidth: 1,
+              borderColor: 'rgba(255,255,255,0.22)',
               justifyContent: 'center',
               alignItems: 'center',
               overflow: 'hidden',
@@ -215,20 +217,42 @@ export default function IntroScreen() {
                     outlineColor: 'transparent',
                     userSelect: 'none',
                     cursor: 'pointer',
-                    boxShadow: 'none',
+                    // Glassmorphism on web
+                    backdropFilter: 'blur(14px) saturate(170%)',
+                    WebkitBackdropFilter: 'blur(14px) saturate(170%)',
+                    boxShadow: '0px 10px 30px rgba(0,0,0,0.35)',
                   } as any)
                 : {}),
             },
-            pressed ? { opacity: 0.9 } : null,
+            pressed
+              ? {
+                  transform: [{ scale: 0.98 }],
+                }
+              : null,
           ]}>
+          {/* Glass background */}
+          <View pointerEvents="none" style={StyleSheet.absoluteFillObject}>
+            <BlurView style={StyleSheet.absoluteFillObject} intensity={22} tint="light" />
+            <View
+              style={[
+                StyleSheet.absoluteFillObject,
+                {
+                  backgroundColor: 'rgba(255,255,255,0.14)',
+                },
+              ]}
+            />
+          </View>
           <Text
             style={{
-              color: '#4C1D95',
+              color: '#FFFFFF',
               fontWeight: '700',
               fontSize: 15,
               lineHeight: 15,
               includeFontPadding: false,
               textAlignVertical: 'center',
+              textShadowColor: 'rgba(0,0,0,0.35)',
+              textShadowOffset: { width: 0, height: 1 },
+              textShadowRadius: 6,
               ...(Platform.OS === 'web' ? { marginTop: -1 } : {}),
             }}>
             בואו נתחיל

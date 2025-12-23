@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, Image, ActivityIndicator, TouchableOpacity, Alert, Dimensions } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Image, ActivityIndicator, TouchableOpacity, Alert, Dimensions, Platform } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { computeGroupAwareLabel } from '@/lib/group';
 import { supabase } from '@/lib/supabase';
 import { User } from '@/types/database';
 import { ArrowLeft, MapPin, UserPlus2, Cigarette, PawPrint, Utensils, Moon, Users, Home, Calendar, User as UserIcon, Building2, Bed, Heart, Briefcase } from 'lucide-react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuthStore } from '@/stores/authStore';
 import { fetchUserSurvey } from '@/lib/survey';
@@ -20,7 +21,7 @@ export default function UserProfileScreen() {
     return id;
   }, [id]);
   const insets = useSafeAreaInsets();
-  const contentTopPadding = insets.top ;
+  const contentTopPadding = insets.top + 12;
   const contentBottomPadding = Math.max(180, insets.bottom + 120);
 
   const [profile, setProfile] = useState<User | null>(null);
@@ -85,6 +86,7 @@ export default function UserProfileScreen() {
     if (!value) return '';
     const trimmed = value.trim();
     if (!trimmed) return '';
+    // Accept already-absolute URLs (including render/object public URLs)
     if (trimmed.includes('/storage/v1/object/public/')) {
       const [base, query] = trimmed.split('?');
       const transformed = base.replace('/storage/v1/object/public/', '/storage/v1/render/image/public/');
@@ -98,6 +100,43 @@ export default function UserProfileScreen() {
     return trimmed;
   };
 
+  const normalizeSupabasePublicUrlForFallback = (value: string): string => {
+    const trimmed = (value || '').trim();
+    if (!trimmed) return '';
+    // Convert render URL back to object/public URL for reliable fallback
+    if (trimmed.includes('/storage/v1/render/image/public/')) {
+      const base = trimmed.split('?')[0];
+      return base.replace('/storage/v1/render/image/public/', '/storage/v1/object/public/');
+    }
+    return trimmed.split('?')[0];
+  };
+
+  // Apartments may store either full public URLs OR storage object paths (e.g. "apartments/<userId>/<file>.jpg").
+  // This helper normalizes both into a displayable URL.
+  const resolveApartmentImageCandidate = (value: string): string => {
+    const trimmed = (value || '').trim();
+    if (!trimmed) return '';
+
+    // Absolute URL
+    if (/^https?:\/\//i.test(trimmed)) {
+      return normalizeSupabasePublicUrlForFallback(trimmed);
+    }
+
+    // If someone stored a bucket-prefixed path, strip the bucket name.
+    // Example: "apartment-images/apartments/..." -> "apartments/..."
+    const normalizedPath = trimmed.startsWith('apartment-images/')
+      ? trimmed.replace(/^apartment-images\//, '')
+      : trimmed;
+
+    try {
+      const { data } = supabase.storage.from('apartment-images').getPublicUrl(normalizedPath);
+      const pub = (data as any)?.publicUrl as string | undefined;
+      return pub ? normalizeSupabasePublicUrlForFallback(pub) : '';
+    } catch {
+      return '';
+    }
+  };
+
   const ApartmentImageThumb = ({
     uri,
     style,
@@ -105,14 +144,26 @@ export default function UserProfileScreen() {
     uri: string;
     style?: any;
   }) => {
-    const [failed, setFailed] = useState(false);
-    const resolved = failed ? APT_IMAGE_PLACEHOLDER : uri || APT_IMAGE_PLACEHOLDER;
+    const [candidateIdx, setCandidateIdx] = useState(0);
+    const original = normalizeSupabasePublicUrlForFallback(uri || '');
+    const transformed = original ? transformSupabaseImageUrl(original) : '';
+    const candidates = [
+      transformed,
+      original,
+      APT_IMAGE_PLACEHOLDER,
+    ].map((u) => (u || '').trim()).filter(Boolean);
+    const resolved = candidates[Math.min(candidateIdx, candidates.length - 1)] || APT_IMAGE_PLACEHOLDER;
+
+    useEffect(() => {
+      setCandidateIdx(0);
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [uri]);
     return (
       <Image
         source={{ uri: resolved }}
         style={style}
         resizeMode="cover"
-        onError={() => setFailed(true)}
+        onError={() => setCandidateIdx((i) => Math.min(i + 1, candidates.length - 1))}
       />
     );
   };
@@ -770,7 +821,7 @@ export default function UserProfileScreen() {
   if (!profile) {
     return (
       <View style={styles.center}>
-        <Text style={{ color: '#FFFFFF' }}>לא נמצא משתמש</Text>
+        <Text style={{ color: '#111827', fontWeight: '800' }}>לא נמצא משתמש</Text>
       </View>
     );
   }
@@ -800,23 +851,11 @@ export default function UserProfileScreen() {
   );
 
   return (
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={{
-        paddingTop: contentTopPadding,
-        paddingBottom: contentBottomPadding,
-      }}>
-      {!!mergeNotice ? (
-        <View style={styles.noticeWrap}>
-          <Text style={styles.noticeText} numberOfLines={3}>{mergeNotice}</Text>
-          <TouchableOpacity style={styles.noticeClose} onPress={() => setMergeNotice(null)} activeOpacity={0.85}>
-            <Text style={styles.noticeCloseText}>סגור</Text>
-          </TouchableOpacity>
-        </View>
-      ) : null}
-      <View style={styles.header}>
+    <View style={styles.container}>
+      <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
         <TouchableOpacity
-          style={styles.backBtn}
+          style={styles.iconBtn}
+          activeOpacity={0.85}
           onPress={() => {
             try {
               if (from === 'partners') {
@@ -835,62 +874,91 @@ export default function UserProfileScreen() {
             }
           }}
         >
-          <ArrowLeft size={20} color="#111827" />
+          <ArrowLeft size={18} color="#111827" />
         </TouchableOpacity>
-        {groupLoading ? null : groupContext && groupContext.members.length >= 2 ? (
-          <TouchableOpacity style={styles.mergedChip} activeOpacity={0.9}>
-            <View style={styles.mergedAvatarsRow}>
-              {groupContext.members
-                .filter((m) => m.id !== profile.id)
-                .slice(0, 3)
-                .map((m, idx) => (
-                <View
-                  key={m.id}
-                  style={[styles.mergedAvatarWrap, idx !== 0 && styles.mergedAvatarOverlap]}
-                >
-                  {m.avatar_url ? (
-                    <Image source={{ uri: m.avatar_url }} style={styles.mergedAvatarImg} />
-                  ) : (
-                    <View style={styles.mergedAvatarFallback} />
-                  )}
-                </View>
-              ))}
-            </View>
-          </TouchableOpacity>
-        ) : null}
-        {!groupLoading && me?.id && me.id !== profile.id && !isMeInViewedGroup ? (
-          <TouchableOpacity
-            style={[
-              styles.mergeHeaderBtn,
-              (inviteLoading || hasPendingMergeInvite || (meInApartment && profileInApartment)) ? styles.mergeBtnDisabled : null,
-            ]}
-            activeOpacity={0.9}
-            onPress={handleMergeHeaderPress}
-          >
-            <UserPlus2 size={16} color="#FFFFFF" />
-            <Text style={styles.mergeHeaderText}>{inviteLoading ? 'שולח...' : hasPendingMergeInvite ? 'נשלחה בקשה' : 'מיזוג'}</Text>
-          </TouchableOpacity>
-        ) : null}
-        <Image
-          source={{ uri: profile.avatar_url || 'https://cdn-icons-png.flaticon.com/512/847/847969.png' }}
-          style={styles.avatar}
-        />
-        <Text style={styles.name}>
-          {profile.full_name}{profile.age ? `, ${profile.age}` : ''}
-        </Text>
-        {!!profile.city && (
-          <View style={styles.locationRow}>
-            <MapPin size={14} color="#8B5CF6" />
-            <Text style={styles.locationText}>{profile.city}</Text>
-          </View>
-        )}
+
+        <View style={styles.topBarRight}>
+          {groupLoading ? null : groupContext && groupContext.members.length >= 2 ? (
+            <TouchableOpacity style={styles.mergedChip} activeOpacity={0.9}>
+              <View style={styles.mergedAvatarsRow}>
+                {groupContext.members
+                  .filter((m) => m.id !== profile.id)
+                  .slice(0, 3)
+                  .map((m, idx) => (
+                  <View
+                    key={m.id}
+                    style={[styles.mergedAvatarWrap, idx !== 0 && styles.mergedAvatarOverlap]}
+                  >
+                    {m.avatar_url ? (
+                      <Image source={{ uri: m.avatar_url }} style={styles.mergedAvatarImg} />
+                    ) : (
+                      <View style={styles.mergedAvatarFallback} />
+                    )}
+                  </View>
+                ))}
+              </View>
+            </TouchableOpacity>
+          ) : null}
+          {!groupLoading && me?.id && me.id !== profile.id && !isMeInViewedGroup ? (
+            <TouchableOpacity
+              style={[
+                styles.mergeHeaderBtn,
+                (inviteLoading || hasPendingMergeInvite || (meInApartment && profileInApartment)) ? styles.mergeBtnDisabled : null,
+              ]}
+              activeOpacity={0.9}
+              onPress={handleMergeHeaderPress}
+            >
+              <UserPlus2 size={16} color="#FFFFFF" />
+              <Text style={styles.mergeHeaderText}>
+                {inviteLoading ? 'שולח...' : hasPendingMergeInvite ? 'נשלחה בקשה' : 'מיזוג'}
+              </Text>
+            </TouchableOpacity>
+          ) : null}
+        </View>
       </View>
 
-      {!!profile.bio && (
-        <Text style={styles.headerBio} numberOfLines={6}>
-          {profile.bio}
-        </Text>
-      )}
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={[
+          styles.scrollContent,
+          { paddingTop: contentTopPadding, paddingBottom: contentBottomPadding },
+        ]}
+      >
+        <View style={styles.page}>
+          {!!mergeNotice ? (
+            <View style={styles.noticeWrap}>
+              <Text style={styles.noticeText} numberOfLines={3}>{mergeNotice}</Text>
+              <TouchableOpacity style={styles.noticeClose} onPress={() => setMergeNotice(null)} activeOpacity={0.85}>
+                <Text style={styles.noticeCloseText}>סגור</Text>
+              </TouchableOpacity>
+            </View>
+          ) : null}
+
+          <View style={styles.profileCard}>
+            <Image
+              source={{ uri: profile.avatar_url || 'https://cdn-icons-png.flaticon.com/512/847/847969.png' }}
+              style={styles.avatar}
+            />
+            <Text style={styles.name} numberOfLines={2}>
+              {profile.full_name}{profile.age ? `, ${profile.age}` : ''}
+            </Text>
+            {!!profile.city ? (
+              <View style={styles.locationPill}>
+                <MapPin size={14} color="#6D28D9" />
+                <Text style={styles.locationText}>{profile.city}</Text>
+              </View>
+            ) : null}
+
+            {!!profile.bio ? (
+              <Text style={styles.headerBio} numberOfLines={8}>
+                {profile.bio}
+              </Text>
+            ) : (
+              <Text style={styles.bioEmpty} numberOfLines={2}>
+                אין תיאור עדיין
+              </Text>
+            )}
+          </View>
 
       {/* Viewed user's apartment(s) */}
       {!profileAptLoading && profileApartments.length ? (
@@ -900,13 +968,15 @@ export default function UserProfileScreen() {
           </Text>
           {profileApartments.map((apt) => {
             const rawImages = normalizeImageUrls(apt.image_urls);
-            const aptImages = rawImages
-              .map(transformSupabaseImageUrl)
-              .filter((url): url is string => !!url);
+            const aptImages = Array.from(
+              new Set(rawImages.map(resolveApartmentImageCandidate).filter(Boolean))
+            );
             const firstImg = aptImages.length > 0 ? aptImages[0] : APT_IMAGE_PLACEHOLDER;
             const occupantMembers = apartmentOccupants[apt.id] || [];
             const visibleOccupants = occupantMembers.slice(0, 4);
             const overflowCount = occupantMembers.length - visibleOccupants.length;
+            const hasBedrooms = typeof apt.bedrooms === 'number' && Number.isFinite(apt.bedrooms);
+            const hasBathrooms = typeof apt.bathrooms === 'number' && Number.isFinite(apt.bathrooms);
             return (
               <TouchableOpacity
                 key={apt.id}
@@ -914,18 +984,47 @@ export default function UserProfileScreen() {
                 activeOpacity={0.9}
                 onPress={() => router.push({ pathname: '/apartment/[id]', params: { id: apt.id } })}
               >
-                <View style={styles.aptThumbWrap}>
-                  <ApartmentImageThumb uri={firstImg} style={styles.aptThumbImg} />
-                </View>
-                <View style={styles.aptInfo}>
-                  <Text style={styles.aptTitle} numberOfLines={1}>
-                    {apt.title || 'דירה'}
-                  </Text>
-                  {!!apt.city ? (
-                    <Text style={styles.aptMeta} numberOfLines={1}>
-                      {apt.city}
+                <View style={styles.aptCoverWrap}>
+                  <ApartmentImageThumb uri={firstImg} style={styles.aptCoverImg} />
+                  <LinearGradient
+                    colors={['rgba(0,0,0,0.00)', 'rgba(0,0,0,0.45)']}
+                    start={{ x: 0.5, y: 0 }}
+                    end={{ x: 0.5, y: 1 }}
+                    style={styles.aptCoverGradient}
+                  />
+                  <View style={styles.aptCoverTextWrap}>
+                    <Text style={styles.aptCoverTitle} numberOfLines={1}>
+                      {apt.title || 'דירה'}
                     </Text>
+                    {!!apt.city ? (
+                      <View style={styles.aptCoverCityRow}>
+                        <MapPin size={14} color="rgba(255,255,255,0.92)" />
+                        <Text style={styles.aptCoverCityText} numberOfLines={1}>
+                          {apt.city}
+                        </Text>
+                      </View>
+                    ) : null}
+                  </View>
+                </View>
+
+                <View style={styles.aptBody}>
+                  {(hasBedrooms || hasBathrooms) ? (
+                    <View style={styles.aptChipsRow}>
+                      {hasBedrooms ? (
+                        <View style={styles.aptChip}>
+                          <Bed size={14} color="#111827" />
+                          <Text style={styles.aptChipText}>{apt.bedrooms} חדרי שינה</Text>
+                        </View>
+                      ) : null}
+                      {hasBathrooms ? (
+                        <View style={styles.aptChip}>
+                          <Building2 size={14} color="#111827" />
+                          <Text style={styles.aptChipText}>{apt.bathrooms} חדרי רחצה</Text>
+                        </View>
+                      ) : null}
+                    </View>
                   ) : null}
+
                   {!!visibleOccupants.length ? (
                     <View style={styles.aptOccupantsRow}>
                       {visibleOccupants.map((member, idx) => {
@@ -951,8 +1050,12 @@ export default function UserProfileScreen() {
                           <Text style={styles.aptOccupantOverflowText}>+{overflowCount}</Text>
                         </View>
                       ) : null}
+                      <Text style={styles.aptOccupantsLabel} numberOfLines={1}>
+                        דיירים בדירה
+                      </Text>
                     </View>
                   ) : null}
+
                   {!!aptImages.length ? (
                     <ScrollView
                       horizontal
@@ -960,8 +1063,8 @@ export default function UserProfileScreen() {
                       style={styles.aptImagesScroll}
                       contentContainerStyle={styles.aptImagesContent}
                     >
-                      {aptImages.map((url, idx) => {
-                        const isLast = idx === aptImages.length - 1;
+                      {aptImages.slice(0, 8).map((url, idx) => {
+                        const isLast = idx === Math.min(aptImages.length, 8) - 1;
                         return (
                           <ApartmentImageThumb
                             key={`${apt.id}-img-${idx}`}
@@ -1245,7 +1348,7 @@ export default function UserProfileScreen() {
       ) : null}
 
       {galleryUrls.length ? (
-        <View style={[styles.section, { paddingHorizontal: 12 }]}>
+        <View style={styles.section}>
           <Text style={styles.sectionTitle}>גלריה</Text>
           <View
             style={styles.gallery}
@@ -1272,59 +1375,90 @@ export default function UserProfileScreen() {
           </View>
         </View>
       ) : null}
-    </ScrollView>
+        </View>
+      </ScrollView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FAFAFA',
+    backgroundColor: '#F6F7FB',
     direction: 'rtl',
-    writingDirection: 'rtl',
   },
   center: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#F6F7FB',
+    paddingHorizontal: 16,
   },
-  header: {
+  scrollContent: {
+    paddingHorizontal: 16,
     alignItems: 'center',
-    paddingTop: 104,
-    paddingBottom: 12,
+  },
+  page: {
+    width: '100%',
+    maxWidth: 560,
+  },
+  topBar: {
+    paddingHorizontal: 16,
+    paddingBottom: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  topBarRight: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 10,
+  },
+  iconBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: 'rgba(17,24,39,0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...(Platform.OS === 'android' ? { elevation: 2 } : {}),
+    ...(Platform.OS === 'ios'
+      ? ({
+          shadowColor: '#000',
+          shadowOpacity: 0.08,
+          shadowRadius: 10,
+          shadowOffset: { width: 0, height: 4 },
+        } as const)
+      : {}),
   },
   headerBio: {
     color: '#374151',
     fontSize: 15,
     lineHeight: 22,
-    marginTop: 8,
+    marginTop: 10,
     textAlign: 'center',
-    paddingHorizontal: 16,
+    opacity: 0.92,
   },
-  backBtn: {
-    position: 'absolute',
-    left: 16,
-    top: 52,
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: 'rgba(0,0,0,0.06)',
-    alignItems: 'center',
-    justifyContent: 'center',
+  bioEmpty: {
+    marginTop: 10,
+    color: '#6B7280',
+    fontSize: 13,
+    fontWeight: '700',
+    opacity: 0.9,
+    textAlign: 'center',
   },
   mergedChip: {
-    position: 'absolute',
-    left: 60,
-    top: 52,
     flexDirection: 'row-reverse',
     alignItems: 'center',
     gap: 8,
-    paddingHorizontal: 6,
-    height: 60,
-    borderRadius: 18,
-    backgroundColor: 'transparent',
-    borderWidth: 0,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: 'rgba(17,24,39,0.08)',
   },
   mergedChipText: {
     color: '#111827',
@@ -1336,16 +1470,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   mergedAvatarWrap: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
     overflow: 'hidden',
-    borderWidth: 2,
+    borderWidth: 1.5,
     borderColor: '#E9D5FF',
     backgroundColor: '#F3F4F6',
   },
   mergedAvatarOverlap: {
-    marginRight: -12,
+    marginRight: -10,
   },
   mergedAvatarImg: {
     width: '100%',
@@ -1356,30 +1490,57 @@ const styles = StyleSheet.create({
     backgroundColor: '#F3F4F6',
   },
   avatar: {
-    width: 96,
-    height: 96,
-    borderRadius: 48,
+    width: 104,
+    height: 104,
+    borderRadius: 52,
     backgroundColor: '#F3F4F6',
     marginBottom: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(17,24,39,0.08)',
   },
   name: {
     color: '#111827',
-    fontSize: 20,
+    fontSize: 22,
     fontWeight: '800',
+    textAlign: 'center',
   },
-  locationRow: {
+  locationPill: {
+    marginTop: 10,
+    alignSelf: 'center',
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    marginTop: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: 'rgba(17,24,39,0.08)',
   },
   locationText: {
     color: '#6B7280',
     fontSize: 13,
+    fontWeight: '800',
+  },
+  profileCard: {
+    padding: 18,
+    borderRadius: 22,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: 'rgba(17,24,39,0.08)',
+    alignItems: 'center',
+    ...(Platform.OS === 'android' ? { elevation: 2 } : {}),
+    ...(Platform.OS === 'ios'
+      ? ({
+          shadowColor: '#000',
+          shadowOpacity: 0.08,
+          shadowRadius: 20,
+          shadowOffset: { width: 0, height: 10 },
+        } as const)
+      : {}),
   },
   section: {
-    paddingHorizontal: 16,
-    paddingTop: 12,
+    marginTop: 14,
   },
   sectionTitle: {
     color: '#111827',
@@ -1515,21 +1676,18 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
   mergeHeaderBtn: {
-    position: 'absolute',
-    right: 16,
-    top: 52,
     height: 40,
     paddingHorizontal: 12,
     borderRadius: 18,
     borderWidth: 1,
-    borderColor: '#E5E7EB',
-    backgroundColor: '#FFFFFF',
+    borderColor: '#E9D5FF',
+    backgroundColor: '#6D28D9',
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
   },
   mergeHeaderText: {
-    color: '#8B5CF6',
+    color: '#FFFFFF',
     fontSize: 13,
     fontWeight: '800',
   },
@@ -1659,60 +1817,107 @@ const styles = StyleSheet.create({
     backgroundColor: '#F3F4F6',
   },
   aptCard: {
-    flexDirection: 'row-reverse',
-    alignItems: 'center',
-    gap: 12,
-    padding: 12,
-    borderRadius: 16,
+    borderRadius: 18,
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: '#E5E7EB',
-  },
-  aptThumbWrap: {
-    width: 84,
-    height: 84,
-    borderRadius: 12,
+    borderColor: 'rgba(17,24,39,0.08)',
     overflow: 'hidden',
-    backgroundColor: '#F3F4F6',
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
+    ...(Platform.OS === 'android' ? { elevation: 2 } : {}),
+    ...(Platform.OS === 'ios'
+      ? ({
+          shadowColor: '#000',
+          shadowOpacity: 0.08,
+          shadowRadius: 20,
+          shadowOffset: { width: 0, height: 10 },
+        } as const)
+      : {}),
   },
-  aptThumbImg: {
+  aptCoverWrap: {
+    width: '100%',
+    height: 176,
+    backgroundColor: '#F3F4F6',
+  },
+  aptCoverImg: {
     width: '100%',
     height: '100%',
   },
-  aptInfo: {
-    flex: 1,
+  aptCoverGradient: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  aptCoverTextWrap: {
+    position: 'absolute',
+    left: 14,
+    right: 14,
+    bottom: 12,
     alignItems: 'flex-end',
   },
-  aptTitle: {
-    color: '#111827',
-    fontSize: 15,
+  aptCoverTitle: {
+    color: '#FFFFFF',
+    fontSize: 17,
     fontWeight: '900',
     textAlign: 'right',
+    textShadowColor: 'rgba(0,0,0,0.35)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 10,
   },
-  aptMeta: {
-    marginTop: 4,
-    color: '#6B7280',
-    fontSize: 12,
-    textAlign: 'right',
+  aptCoverCityRow: {
+    marginTop: 6,
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 6,
   },
-  aptCta: {
-    color: '#4C1D95',
+  aptCoverCityText: {
+    color: 'rgba(255,255,255,0.92)',
     fontSize: 13,
     fontWeight: '800',
+    textAlign: 'right',
+  },
+  aptBody: {
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  aptChipsRow: {
+    flexDirection: 'row-reverse',
+    flexWrap: 'wrap',
+    justifyContent: 'flex-end',
+    gap: 8,
+    marginBottom: 10,
+  },
+  aptChip: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 999,
+    backgroundColor: 'rgba(109,40,217,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(109,40,217,0.12)',
+  },
+  aptChipText: {
+    color: '#111827',
+    fontSize: 12,
+    fontWeight: '900',
   },
   aptOccupantsRow: {
     flexDirection: 'row-reverse',
     alignItems: 'center',
     justifyContent: 'flex-end',
     gap: 6,
-    marginTop: 10,
+    marginTop: 2,
+  },
+  aptOccupantsLabel: {
+    marginRight: 8,
+    color: '#6B7280',
+    fontSize: 12,
+    fontWeight: '800',
+    flexShrink: 1,
+    textAlign: 'right',
   },
   aptOccupantAvatarWrap: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
     borderWidth: 1.5,
     borderColor: '#E5E7EB',
     backgroundColor: '#FFFFFF',
@@ -1721,7 +1926,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   aptOccupantOverlap: {
-    marginRight: -12,
+    marginRight: -10,
   },
   aptOccupantAvatarImg: {
     width: '100%',
@@ -1752,7 +1957,7 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
   },
   aptImageThumb: {
-    width: 92,
+    width: 96,
     height: 72,
     borderRadius: 10,
     backgroundColor: '#F3F4F6',
