@@ -17,6 +17,9 @@ function RequestsButtonBase({ style, badgeCount }: Props) {
   const user = useAuthStore((s) => s.user);
   const [count, setCount] = useState<number>(badgeCount || 0);
 
+  // Keep consistent with Home screen action icons (map/filter/search).
+  const ICON_COLOR = '#4C1D95';
+
   useEffect(() => {
     let isMounted = true;
     const fetchCount = async () => {
@@ -62,7 +65,7 @@ function RequestsButtonBase({ style, badgeCount }: Props) {
         onPress={() => router.push('/requests')}
         style={styles.btn}
       >
-        <Inbox size={22} color="#8B5CF6" />
+        <Inbox size={22} color={ICON_COLOR} />
         {shownCount > 0 ? (
           <View style={styles.badge}>
             <Text style={styles.badgeText}>{shownLabel}</Text>

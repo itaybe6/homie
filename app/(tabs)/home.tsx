@@ -498,7 +498,8 @@ export default function HomeScreen() {
 
   return (
     <SafeAreaView edges={['top']} style={styles.safeTop}>
-      <View style={[styles.topBar, { paddingTop: 52, backgroundColor: PAGE_BG }]} />
+      {/* Spacer to avoid content sitting under the absolute GlobalTopBar */}
+      <View style={[styles.topBar, { paddingTop: 44, paddingBottom: 0, backgroundColor: PAGE_BG }]} />
 
       {/* Page body: light grey background */}
       <View style={styles.pageBody}>

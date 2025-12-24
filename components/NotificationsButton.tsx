@@ -1,4 +1,4 @@
-import { memo, useEffect, useState } from 'react';
+import { memo, useEffect } from 'react';
 import { TouchableOpacity, StyleSheet, View, ViewStyle, Text } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Bell } from 'lucide-react-native';
@@ -18,6 +18,9 @@ function NotificationsButtonBase({ style, badgeCount }: Props) {
   const user = useAuthStore((s) => s.user);
   const unreadCount = useNotificationsStore((s) => s.unreadCount);
   const setUnreadCount = useNotificationsStore((s) => s.setUnreadCount);
+
+  // Keep consistent with Home screen action icons (map/filter/search).
+  const ICON_COLOR = '#4C1D95';
 
   useEffect(() => {
     let isMounted = true;
@@ -63,8 +66,7 @@ function NotificationsButtonBase({ style, badgeCount }: Props) {
         onPress={() => router.push('/(tabs)/notifications')}
         style={styles.btn}
       >
-        <Bell size={22} color="#8B5CF6" />
-        {/* Icon color updated to dark grey for visibility on white header */}
+        <Bell size={22} color={ICON_COLOR} />
         {shownCount > 0 ? (
           <View style={styles.badge}>
             <Text style={styles.badgeText}>{shownLabel}</Text>
