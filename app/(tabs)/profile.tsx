@@ -12,6 +12,7 @@ import {
   Image,
   Platform,
   Modal,
+  useWindowDimensions,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
@@ -32,6 +33,7 @@ export default function ProfileScreen() {
   const { user, setUser } = useAuthStore();
   const apartments = useApartmentStore((state) => state.apartments);
   const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
 
   const [profile, setProfile] = useState<User | null>(null);
   const [userApartments, setUserApartments] = useState<Apartment[]>([]);
@@ -48,6 +50,13 @@ export default function ProfileScreen() {
     { id: string; name?: string | null; members: Pick<User, 'id' | 'full_name' | 'avatar_url'>[] }[]
   >([]);
   const [surveyResponse, setSurveyResponse] = useState<UserSurveyResponse | null>(null);
+
+  const surveySheetMaxHeight = useMemo(() => {
+    const hardMax = Math.max(420, Math.round(windowHeight * 0.88));
+    // Keep a little space at the top so the sheet never "sticks" to full screen.
+    const safeMax = Math.max(420, Math.round(windowHeight - (insets.top + 24)));
+    return Math.min(hardMax, safeMax);
+  }, [windowHeight, insets.top]);
 
   const [fullName, setFullName] = useState('');
   const [age, setAge] = useState('');
@@ -1022,14 +1031,22 @@ export default function ProfileScreen() {
       <Modal visible={isSurveyOpen} animationType="slide" transparent onRequestClose={() => setIsSurveyOpen(false)}>
         <View style={styles.modalOverlay}>
           <TouchableOpacity style={styles.modalBackdrop} activeOpacity={1} onPress={() => setIsSurveyOpen(false)} />
-          <View style={styles.sheet}>
+          <View style={[styles.sheet, { height: surveySheetMaxHeight }]}>
+            <View style={styles.sheetHandleWrap}>
+              <View style={styles.sheetHandle} />
+            </View>
             <View style={styles.sheetHeader}>
               <Text style={styles.sheetTitle}>סיכום ההעדפות</Text>
               <TouchableOpacity onPress={() => setIsSurveyOpen(false)} style={styles.closeBtn}>
                 <X size={20} color="#FFFFFF" />
               </TouchableOpacity>
             </View>
-            <View style={styles.sheetContent}>
+            <ScrollView
+              style={styles.sheetScroll}
+              contentContainerStyle={[styles.sheetContent, { paddingBottom: 16 + (insets.bottom || 0) }]}
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+            >
               {!!surveyHighlights.length && (
                 <View style={styles.surveyHighlightsRow}>
                   {surveyHighlights.map((item) => (
@@ -1064,7 +1081,7 @@ export default function ProfileScreen() {
                   </Text>
                 </View>
               )}
-            </View>
+            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -1677,6 +1694,19 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 20,
     overflow: 'hidden',
   },
+  sheetHandleWrap: {
+    paddingTop: 10,
+    paddingBottom: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
+  },
+  sheetHandle: {
+    width: 46,
+    height: 5,
+    borderRadius: 999,
+    backgroundColor: '#E5E7EB',
+  },
   sheetHeader: {
     flexDirection: 'row-reverse',
     alignItems: 'center',
@@ -1684,6 +1714,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 14,
     backgroundColor: '#FFFFFF',
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E7EB',
   },
   sheetTitle: {
     color: '#111827',
@@ -1698,6 +1730,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#4C1D95',
+  },
+  sheetScroll: {
+    flex: 1,
   },
   sheetContent: {
     paddingHorizontal: 16,
