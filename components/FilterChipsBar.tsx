@@ -43,6 +43,7 @@ type Props = {
   activeBackgroundColor?: string;
   inactiveBorderColor?: string;
   activeBorderColor?: string;
+  withShadow?: boolean;
 };
 
 // Default chips configuration (RTL labels)
@@ -78,9 +79,14 @@ export default function FilterChipsBar({
   activeBackgroundColor,
   inactiveBorderColor,
   activeBorderColor,
+  withShadow = true,
 }: Props) {
   const [internalSelected, setInternalSelected] = useState<string[]>([]);
   const active = selectedIds ?? internalSelected;
+  const inactiveBg = inactiveBackgroundColor ?? '#FFFFFF';
+  const activeBg = activeBackgroundColor ?? '#FFFFFF';
+  const inactiveBd = inactiveBorderColor ?? 'transparent';
+  const activeBd = activeBorderColor ?? 'transparent';
 
   // Preserve horizontal scroll offset when toggling chips to avoid jump-to-start
   const scrollRef = useRef<ScrollView | null>(null);
@@ -188,8 +194,15 @@ export default function FilterChipsBar({
                 onPress={() => handleToggle(chip)}
                 style={[
                   styles.chipBase,
+                  withShadow ? styles.chipShadow : null,
                   activeChip ? styles.chipActive : styles.chipInactive,
                   activeChip ? activeOverrides : inactiveOverrides,
+                  // Force background/border as the last style so it matches exactly (e.g. like search input)
+                  {
+                    backgroundColor: activeChip ? activeBg : inactiveBg,
+                    borderColor: activeChip ? activeBd : inactiveBd,
+                    opacity: 1,
+                  },
                 ]}
               >
                 <View style={styles.chipInnerRow}>
@@ -242,21 +255,24 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     paddingHorizontal: 16,
     paddingVertical: 10,
-    borderWidth: 1,
+    // Floating look (no border)
+    borderWidth: 0,
+  },
+  chipShadow: {
+    // Keep shadow subtle (can be disabled per screen)
+    shadowColor: '#111827',
+    shadowOpacity: 0.05,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 2,
   },
   chipInactive: {
     backgroundColor: '#FFFFFF',
-    borderColor: '#E5E7EB',
+    borderColor: 'transparent',
   },
   chipActive: {
     backgroundColor: '#EFEAFE',
-    borderColor: '#E9D5FF',
-    // No shadow/elevation when active per request
-    shadowColor: 'transparent',
-    shadowOpacity: 0,
-    shadowRadius: 0,
-    shadowOffset: { width: 0, height: 0 },
-    elevation: 0,
+    borderColor: 'transparent',
   },
   chipInnerRow: {
     flexDirection: 'row-reverse',

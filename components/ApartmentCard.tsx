@@ -206,133 +206,135 @@ export default function ApartmentCard({
     maxRoommates !== null ? Math.max(0, maxRoommates - partnerSlotsUsed) : null;
 
   return (
-    <View style={styles.card}>
-      <View style={styles.imageWrap}>
-        <View style={styles.imageInner}>
-          <View
-            style={{ width: '100%' }}
-            onLayout={(e) => {
-              const w = e.nativeEvent.layout.width;
-              if (typeof w === 'number' && w > 0) setCarouselWidth(w);
-            }}
-          >
-            <ScrollView
-              horizontal
-              pagingEnabled
-              showsHorizontalScrollIndicator={false}
+    <View style={styles.cardOuter}>
+      <View style={styles.cardInner}>
+        <View style={styles.imageWrap}>
+          <View style={styles.imageInner}>
+            <View
               style={{ width: '100%' }}
-              nestedScrollEnabled
-              scrollEnabled={carouselImages.length > 1}
-              onMomentumScrollEnd={(e: NativeSyntheticEvent<NativeScrollEvent>) => {
-                const idx = Math.round(
-                  e.nativeEvent.contentOffset.x / e.nativeEvent.layoutMeasurement.width
-                );
-                setImageIdx(Math.max(0, Math.min(idx, carouselImages.length - 1)));
+              onLayout={(e) => {
+                const w = e.nativeEvent.layout.width;
+                if (typeof w === 'number' && w > 0) setCarouselWidth(w);
               }}
-              scrollEventThrottle={16}
             >
-              {carouselImages.map((original, idx) => {
-                const displayUri =
-                  imageUriOverrides[original] ?? transformSupabaseImageUrl(original) ?? original;
+              <ScrollView
+                horizontal
+                pagingEnabled
+                showsHorizontalScrollIndicator={false}
+                style={{ width: '100%' }}
+                nestedScrollEnabled
+                scrollEnabled={carouselImages.length > 1}
+                onMomentumScrollEnd={(e: NativeSyntheticEvent<NativeScrollEvent>) => {
+                  const idx = Math.round(
+                    e.nativeEvent.contentOffset.x / e.nativeEvent.layoutMeasurement.width
+                  );
+                  setImageIdx(Math.max(0, Math.min(idx, carouselImages.length - 1)));
+                }}
+                scrollEventThrottle={16}
+              >
+                {carouselImages.map((original, idx) => {
+                  const displayUri =
+                    imageUriOverrides[original] ?? transformSupabaseImageUrl(original) ?? original;
 
-                return (
-                  <View
-                    key={`${original}-${idx}`}
-                    style={carouselWidth ? { width: carouselWidth } : { width: '100%' }}
-                  >
-                    <TouchableOpacity
-                      activeOpacity={0.98}
-                      delayPressIn={150}
-                      onPress={onPress}
+                  return (
+                    <View
+                      key={`${original}-${idx}`}
+                      style={carouselWidth ? { width: carouselWidth } : { width: '100%' }}
                     >
-                      <Image
-                        source={{ uri: displayUri }}
-                        style={styles.image}
-                        resizeMode="cover"
-                        onError={() => {
-                          // If we tried a transformed (render) URL and it failed, fall back to the original URL.
-                          if (displayUri !== original) {
-                            setImageUriOverrides((prev) => {
-                              if (prev[original] === original) return prev;
-                              return { ...prev, [original]: original };
+                      <TouchableOpacity
+                        activeOpacity={0.98}
+                        delayPressIn={150}
+                        onPress={onPress}
+                      >
+                        <Image
+                          source={{ uri: displayUri }}
+                          style={styles.image}
+                          resizeMode="cover"
+                          onError={() => {
+                            // If we tried a transformed (render) URL and it failed, fall back to the original URL.
+                            if (displayUri !== original) {
+                              setImageUriOverrides((prev) => {
+                                if (prev[original] === original) return prev;
+                                return { ...prev, [original]: original };
+                              });
+                              return;
+                            }
+
+                            // If original also failed, mark as failed and remove it from carousel list.
+                            setFailedUris((prev) => {
+                              if (prev[original]) return prev;
+                              return { ...prev, [original]: true };
                             });
-                            return;
-                          }
-
-                          // If original also failed, mark as failed and remove it from carousel list.
-                          setFailedUris((prev) => {
-                            if (prev[original]) return prev;
-                            return { ...prev, [original]: true };
-                          });
-                        }}
-                      />
-                    </TouchableOpacity>
-                  </View>
-                );
-              })}
-            </ScrollView>
-          </View>
-          {/* gradient overlay */}
-          <LinearGradient
-            colors={['rgba(0,0,0,0.6)', 'rgba(0,0,0,0.0)']}
-            start={{ x: 0.5, y: 1 }}
-            end={{ x: 0.5, y: 0 }}
-            pointerEvents="none"
-            style={styles.gradientOverlay}
-          />
-          {/* Favorite */}
-          <FavoriteButton apartmentId={apartment.id} />
-          {/* Roommates badge */}
-          <View style={styles.roommatesBadge} pointerEvents="none">
-            <Users size={18} color="#111827" />
-            <Text style={styles.roommatesBadgeText}>
-              {typeof maxRoommates === 'number' ? `${partnerSlotsUsed}/${maxRoommates}` : `${partnerSlotsUsed}`}
-            </Text>
-          </View>
-          {/* Carousel dots */}
-          <View style={styles.dotsRow} pointerEvents="none">
-            {carouselImages.map((_, i) => (
-              <View key={`dot-${i}`} style={[styles.dot, { opacity: i === imageIdx ? 1 : 0.5 }]} />
-            ))}
-          </View>
-          {/* Price badge */}
-          <View style={styles.priceBadge}>
-            <Text style={styles.priceBadgeText}>
-              {apartment.price?.toLocaleString?.() ?? String(apartment.price ?? '')}
-              <Text style={styles.priceBadgeCurrency}>₪</Text>
-            </Text>
+                          }}
+                        />
+                      </TouchableOpacity>
+                    </View>
+                  );
+                })}
+              </ScrollView>
+            </View>
+            {/* gradient overlay */}
+            <LinearGradient
+              colors={['rgba(0,0,0,0.6)', 'rgba(0,0,0,0.0)']}
+              start={{ x: 0.5, y: 1 }}
+              end={{ x: 0.5, y: 0 }}
+              pointerEvents="none"
+              style={styles.gradientOverlay}
+            />
+            {/* Favorite */}
+            <FavoriteButton apartmentId={apartment.id} />
+            {/* Roommates badge */}
+            <View style={styles.roommatesBadge} pointerEvents="none">
+              <Users size={18} color="#111827" />
+              <Text style={styles.roommatesBadgeText}>
+                {typeof maxRoommates === 'number' ? `${partnerSlotsUsed}/${maxRoommates}` : `${partnerSlotsUsed}`}
+              </Text>
+            </View>
+            {/* Carousel dots */}
+            <View style={styles.dotsRow} pointerEvents="none">
+              {carouselImages.map((_, i) => (
+                <View key={`dot-${i}`} style={[styles.dot, { opacity: i === imageIdx ? 1 : 0.5 }]} />
+              ))}
+            </View>
+            {/* Price badge */}
+            <View style={styles.priceBadge}>
+              <Text style={styles.priceBadgeText}>
+                {apartment.price?.toLocaleString?.() ?? String(apartment.price ?? '')}
+                <Text style={styles.priceBadgeCurrency}>₪</Text>
+              </Text>
+            </View>
           </View>
         </View>
+        <TouchableOpacity style={styles.content} onPress={onPress} activeOpacity={0.9} delayPressIn={150}>
+          <View style={styles.titleRow}>
+            <Text style={styles.title} numberOfLines={1}>
+              {apartment.title}
+            </Text>
+          </View>
+
+          <View style={styles.locationRow}>
+            <MapPin size={16} color="#6B7280" />
+            <Text style={styles.location}>{apartment.city}</Text>
+          </View>
+
+          <View style={styles.bottomContainer}>
+            <View style={styles.statsRow}>
+              <View style={styles.stat}>
+                <Users size={16} color="#c084fc" />
+                <Text style={styles.statText}>שותפים {partnerSlotsUsed}</Text>
+              </View>
+              <View style={styles.stat}>
+                <Bath size={16} color="#c084fc" />
+                <Text style={styles.statText}>מקלחות {apartment.bathrooms}</Text>
+              </View>
+              <View style={styles.stat}>
+                <Bed size={16} color="#c084fc" />
+                <Text style={styles.statText}>חדרים {apartment.bedrooms}</Text>
+              </View>
+            </View>
+          </View>
+        </TouchableOpacity>
       </View>
-      <TouchableOpacity style={styles.content} onPress={onPress} activeOpacity={0.9} delayPressIn={150}>
-        <View style={styles.titleRow}>
-          <Text style={styles.title} numberOfLines={1}>
-            {apartment.title}
-          </Text>
-        </View>
-
-        <View style={styles.locationRow}>
-          <MapPin size={16} color="#6B7280" />
-          <Text style={styles.location}>{apartment.city}</Text>
-        </View>
-
-        <View style={styles.bottomContainer}>
-          <View style={styles.statsRow}>
-            <View style={styles.stat}>
-              <Users size={16} color="#c084fc" />
-              <Text style={styles.statText}>שותפים {partnerSlotsUsed}</Text>
-            </View>
-            <View style={styles.stat}>
-              <Bath size={16} color="#c084fc" />
-              <Text style={styles.statText}>מקלחות {apartment.bathrooms}</Text>
-            </View>
-            <View style={styles.stat}>
-              <Bed size={16} color="#c084fc" />
-              <Text style={styles.statText}>חדרים {apartment.bedrooms}</Text>
-            </View>
-          </View>
-        </View>
-      </TouchableOpacity>
     </View>
   );
 }
@@ -430,18 +432,23 @@ function FavoriteButton({ apartmentId }: { apartmentId: string }) {
 }
 
 const styles = StyleSheet.create({
-  card: {
-  backgroundColor: '#FFFFFF',
-  borderRadius: 20,
+  cardOuter: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
     marginBottom: 16,
+    // IMPORTANT: keep overflow visible so Android elevation shadow isn't clipped
+    overflow: 'visible',
+    // Stronger shadow for separation from background
+    shadowColor: '#111827',
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.14,
+    shadowRadius: 24,
+    elevation: 10,
+  },
+  cardInner: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
     overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  borderWidth: 1,
-  borderColor: '#E5E7EB',
   },
   imageWrap: {
     position: 'relative',
@@ -590,12 +597,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     borderTopWidth: 1,
     borderTopColor: '#E5E7EB',
+    alignItems: 'center',
   },
   statsRow: {
     flexDirection: 'row-reverse',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 16,
+    justifyContent: 'center',
+    gap: 22,
+    width: '100%',
   },
   stat: {
     flexDirection: 'row-reverse',

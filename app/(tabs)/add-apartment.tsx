@@ -45,6 +45,37 @@ export default function AddApartmentScreen() {
   const mapboxToken = process.env.EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN as string | undefined;
   const mapboxStyleUrl = process.env.EXPO_PUBLIC_MAPBOX_STYLE_URL as string | undefined;
 
+  // Guard: each user can upload max 1 apartment. If already owns one, block entry.
+  useEffect(() => {
+    let cancelled = false;
+    const checkLimit = async () => {
+      if (!user?.id) return;
+      try {
+        const { data, error } = await supabase
+          .from('apartments')
+          .select('id')
+          .eq('owner_id', user.id)
+          .limit(1);
+        if (cancelled) return;
+        if (error) throw error;
+        if (data && data.length > 0) {
+          Alert.alert(
+            'לא ניתן להוסיף דירה',
+            'אי אפשר להעלות עוד דירה כי כבר העלית דירה אחת.'
+          );
+          router.replace('/(tabs)/home');
+        }
+      } catch {
+        // If we fail to verify, don't block the whole screen automatically.
+        // The submit handler will re-check and prevent extra uploads safely.
+      }
+    };
+    checkLimit();
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id, router]);
+
   const TOTAL_STEPS = 4 as const;
   type Step = 1 | 2 | 3 | 4;
   const STEP_LABELS = ['מיקום', 'פרטים', 'חדרים', 'תמונות'] as const;
@@ -460,6 +491,23 @@ export default function AddApartmentScreen() {
       if (!authUser) {
         setError('יש להתחבר כדי להוסיף דירה');
         setIsLoading(false);
+        return;
+      }
+
+      // Enforce limit: a user can own max 1 apartment (by owner_id)
+      const { data: owned, error: ownedErr } = await supabase
+        .from('apartments')
+        .select('id')
+        .eq('owner_id', authUser.id)
+        .limit(1);
+      if (ownedErr) throw ownedErr;
+      if (owned && owned.length > 0) {
+        Alert.alert(
+          'לא ניתן להוסיף דירה',
+          'אי אפשר להעלות עוד דירה כי כבר העלית דירה אחת.'
+        );
+        setIsLoading(false);
+        router.replace('/(tabs)/home');
         return;
       }
 

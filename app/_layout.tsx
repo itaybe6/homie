@@ -19,11 +19,15 @@ export default function RootLayout() {
   const pathname = usePathname();
   const isMapRoute =
     typeof pathname === 'string' && (pathname === '/map' || pathname === '/(tabs)/map' || pathname.endsWith('/map'));
+  const isApartmentsHomeRoute =
+    typeof pathname === 'string' &&
+    (pathname === '/(tabs)/home' || pathname === '/home' || pathname.endsWith('/home'));
   const hideGlobalTopBar =
     typeof pathname === 'string' && (pathname.includes('/apartment/') || isMapRoute);
   const isAuthRoute = typeof pathname === 'string' && pathname.startsWith('/auth');
   const isAdminRoute = typeof pathname === 'string' && pathname.startsWith('/admin');
   const shouldShowGlobalTopBar = !!user && !hideGlobalTopBar && !isAuthRoute && !isAdminRoute;
+  const globalTopBarBg = isApartmentsHomeRoute ? '#F8F9FC' : '#FFFFFF';
   
 
   useEffect(() => {
@@ -94,7 +98,7 @@ export default function RootLayout() {
         <Stack.Screen name="+not-found" />
       </Stack>
       {/* Global white top bar: notifications (left), Homie (center), requests (right) */}
-      {shouldShowGlobalTopBar && <GlobalTopBar />}
+      {shouldShowGlobalTopBar && <GlobalTopBar backgroundColor={globalTopBarBg} />}
       <StatusBar style="auto" />
     </GestureHandlerRootView>
   );
