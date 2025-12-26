@@ -8,6 +8,53 @@ export interface AuthUser {
 }
 
 export const authService = {
+  async startEmailOtpSignUp(params: {
+    email: string;
+    fullName: string;
+    role: 'user' | 'owner';
+    phone?: string;
+    age?: number;
+    bio?: string;
+    gender?: 'male' | 'female';
+    city?: string;
+    avatarUrl?: string;
+  }) {
+    const { email, fullName, role, phone, age, bio, gender, city, avatarUrl } = params;
+
+    // Sends an email OTP (6-digit code) when Email OTP is enabled in Supabase Auth settings.
+    // shouldCreateUser ensures a new user is created if it doesn't exist yet.
+    const { error } = await supabase.auth.signInWithOtp({
+      email,
+      options: {
+        shouldCreateUser: true,
+        data: {
+          full_name: fullName,
+          role,
+          phone: phone || null,
+          age: typeof age === 'number' ? age : null,
+          bio: bio || null,
+          gender: gender || null,
+          city: city || null,
+          avatar_url: avatarUrl || null,
+        },
+      },
+    });
+
+    if (error) throw error;
+    return true;
+  },
+
+  async verifyEmailOtp(email: string, token: string) {
+    const cleaned = token.replace(/\s/g, '');
+    const { data, error } = await supabase.auth.verifyOtp({
+      email,
+      token: cleaned,
+      type: 'email',
+    });
+    if (error) throw error;
+    return data;
+  },
+
   async signUp(params: {
     email: string;
     password: string;
@@ -35,10 +82,23 @@ export const authService = {
       createProfile = true,
     } = params;
 
-    // Try to sign up. If the user already exists (422), fall back to sign-in
+    // Try to sign up. If the user already exists (422), fall back to sign-in.
+    // Also store basic profile fields in user metadata so a DB trigger can create the profile row.
     const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
       email,
       password,
+      options: {
+        data: {
+          full_name: fullName,
+          role,
+          phone: phone || null,
+          age: typeof age === 'number' ? age : null,
+          bio: bio || null,
+          gender: gender || null,
+          city: city || null,
+          avatar_url: avatarUrl || null,
+        },
+      },
     });
 
     let userId: string | null = null;
@@ -67,8 +127,16 @@ export const authService = {
 
     if (!userId || !userEmail) throw new Error('No user returned');
 
-    // Optionally ensure profile row exists (idempotent)
-    if (createProfile) {
+    // Some Supabase projects require email confirmation. In that case, signUp returns a user but no session yet,
+    // and RLS will block any write to protected tables (like public.users).
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    const hasSession = !!session?.user?.id;
+    const needsEmailVerification = !hasSession && !signUpError;
+
+    // Optionally ensure profile row exists (idempotent) when we have a session.
+    if (createProfile && hasSession) {
       // Always create a users row. For owners, keep minimal fields.
       const baseProfile: Record<string, unknown> = {
         id: userId,
@@ -96,10 +164,19 @@ export const authService = {
           { onConflict: 'id' }
         );
 
-      if (profileError) throw profileError;
+      if (profileError) {
+        const msg = String((profileError as any)?.message || profileError);
+        // Friendly message for the common RLS misconfiguration.
+        if (msg.toLowerCase().includes('row-level security')) {
+          throw new Error(
+            'הרשמה נחסמה בגלל הגדרת הרשאות במסד הנתונים (RLS) לטבלת users. צריך להוסיף Policy שמאפשרת ליצור פרופיל למשתמש המחובר.'
+          );
+        }
+        throw profileError;
+      }
     }
 
-    return { user: { id: userId, email: userEmail } } as any;
+    return { user: { id: userId, email: userEmail }, needsEmailVerification } as any;
   },
 
   async signIn(email: string, password: string) {

@@ -18,6 +18,7 @@ import {
 import { useRouter } from 'expo-router';
 import { authService } from '@/lib/auth';
 import { useAuthStore } from '@/stores/authStore';
+import { usePendingSignupStore } from '@/stores/pendingSignupStore';
 import { Home, Camera, Pencil, X, ChevronRight, Eye, EyeOff, Check } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
@@ -34,6 +35,7 @@ const PRIMARY = '#4C1D95';
 export default function RegisterScreen() {
   const router = useRouter();
   const setUser = useAuthStore((state) => state.setUser);
+  const setPending = usePendingSignupStore((s) => s.setPending);
   const insets = useSafeAreaInsets();
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
@@ -177,40 +179,36 @@ export default function RegisterScreen() {
       const trimmed = avatarUrl.trim();
       const safeAvatarUrl = /^https?:\/\//.test(trimmed) ? trimmed : undefined;
       const avatarForSignup = mode === 'user' ? safeAvatarUrl : undefined;
-      const { user } = await authService.signUp({
-        email,
+
+      // Store pending signup data locally (avoid passing secrets like password in the URL).
+      const pendingRole = mode === 'owner' ? 'owner' : 'user';
+      setPending({
+        email: email.trim(),
         password,
         fullName,
-        role: mode === 'owner' ? 'owner' : 'user',
+        role: pendingRole,
         phone: mode === 'user' ? (phone.trim() || undefined) : undefined,
         age: age ? Number(age) : undefined,
         city: city.trim() || undefined,
         bio: mode === 'user' ? (bio.trim() || undefined) : undefined,
         gender: mode === 'user' && (gender === 'male' || gender === 'female') ? gender : undefined,
         avatarUrl: avatarForSignup,
-        // Always create users profile so FK from apartments(owner_id) -> users(id) passes
-        createProfile: true,
       });
-      if (user) {
-        if (mode === 'user' && avatarUrl) {
-          // Try to upload avatar and update profile (best-effort)
-          await uploadAvatar(user.id, avatarUrl);
-        }
-        if (mode === 'owner') {
-          // Ensure role is explicitly stored as 'owner' even if profile upsert skipped/partial
-          try {
-            await supabase.from('users').update({ role: 'owner' as any }).eq('id', user.id);
-          } catch (e) {
-            // Non-blocking; role column may be missing until migrations are applied
-            console.warn('Failed to set owner role, check DB migrations:', e);
-          }
-          setUser({ id: user.id, email: user.email! });
-          router.push({ pathname: '/(tabs)/add-apartment', params: { from: 'register-owner' } as any });
-        } else {
-          setUser({ id: user.id, email: user.email! });
-          router.replace('/(tabs)/home');
-        }
-      }
+
+      // Send 6-digit code email (requires Email OTP enabled in Supabase Auth settings).
+      await authService.startEmailOtpSignUp({
+        email: email.trim(),
+        fullName,
+        role: pendingRole,
+        phone: mode === 'user' ? (phone.trim() || undefined) : undefined,
+        age: age ? Number(age) : undefined,
+        city: city.trim() || undefined,
+        bio: mode === 'user' ? (bio.trim() || undefined) : undefined,
+        gender: mode === 'user' && (gender === 'male' || gender === 'female') ? gender : undefined,
+        avatarUrl: avatarForSignup,
+      });
+
+      router.push('/auth/verify-email' as any);
     } catch (err: any) {
       setError(err.message || 'שגיאה ברישום');
     } finally {
