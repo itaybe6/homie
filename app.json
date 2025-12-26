@@ -20,8 +20,15 @@
     },
 
     "android": {
+<<<<<<< HEAD
       "package": "com.homie.sharedliving",
       "versionCode": 1,
+=======
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/icon.png",
+        "backgroundColor": "#FFFFFF"
+      },
+>>>>>>> a155b404d9db06023ddc8ff9939ae6f7c9c3a6bd
       "permissions": ["ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION"]
     },
 
