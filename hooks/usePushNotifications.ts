@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
-import { supabase } from '@/lib/supabase';
+import { isSupabaseConfigured, supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/authStore';
 
 async function ensurePermissions(): Promise<boolean> {
@@ -48,6 +48,7 @@ export function usePushNotifications() {
   // Register device and upsert token for the signed-in user
   useEffect(() => {
     if (Platform.OS === 'web') return;
+    if (!isSupabaseConfigured()) return;
     if (!user?.id) return;
     let cancelled = false;
     (async () => {
@@ -67,6 +68,7 @@ export function usePushNotifications() {
   // Foreground: show a local notification immediately on new DB notifications for this user
   useEffect(() => {
     if (Platform.OS === 'web') return;
+    if (!isSupabaseConfigured()) return;
     if (!user?.id) return;
     const channel = supabase
       .channel(`notifications-push:${user.id}`)

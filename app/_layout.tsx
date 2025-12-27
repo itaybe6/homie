@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { Platform } from 'react-native';
+import { Platform, View, Text, StyleSheet } from 'react-native';
 import { Stack, usePathname } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useFrameworkReady } from '@/hooks/useFrameworkReady';
@@ -9,6 +9,7 @@ import * as Notifications from 'expo-notifications';
 import { usePushNotifications } from '@/hooks/usePushNotifications';
 import GlobalTopBar from '@/components/GlobalTopBar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { isSupabaseConfigured } from '@/lib/supabase';
 
 export default function RootLayout() {
   useFrameworkReady();
@@ -16,19 +17,40 @@ export default function RootLayout() {
   const setLoading = useAuthStore((s) => s.setLoading);
   const user = useAuthStore((s) => s.user);
   usePushNotifications();
+  const supabaseOk = isSupabaseConfigured();
   const pathname = usePathname();
   const isMapRoute =
     typeof pathname === 'string' && (pathname === '/map' || pathname === '/(tabs)/map' || pathname.endsWith('/map'));
   const isApartmentsHomeRoute =
     typeof pathname === 'string' &&
     (pathname === '/(tabs)/home' || pathname === '/home' || pathname.endsWith('/home'));
+  const isSurveyRoute =
+    typeof pathname === 'string' && pathname.includes('/onboarding/survey');
   const hideGlobalTopBar =
-    typeof pathname === 'string' && (pathname.includes('/apartment/') || isMapRoute);
+    typeof pathname === 'string' && (pathname.includes('/apartment/') || isMapRoute || isSurveyRoute);
   const isAuthRoute = typeof pathname === 'string' && pathname.startsWith('/auth');
   const isAdminRoute = typeof pathname === 'string' && pathname.startsWith('/admin');
   const shouldShowGlobalTopBar = !!user && !hideGlobalTopBar && !isAuthRoute && !isAdminRoute;
   const globalTopBarBg = isApartmentsHomeRoute ? '#F8F9FC' : '#FFFFFF';
-  
+
+  if (!supabaseOk) {
+    return (
+      <GestureHandlerRootView style={{ flex: 1 }}>
+        <View style={styles.envWrap}>
+          <Text style={styles.envTitle}>חסרה הגדרת Supabase לפרודקשן</Text>
+          <Text style={styles.envBody}>
+            כדי שהאפליקציה תרוץ ב‑TestFlight צריך להגדיר ב‑EAS:
+            {'\n'}EXPO_PUBLIC_SUPABASE_URL
+            {'\n'}EXPO_PUBLIC_SUPABASE_ANON_KEY
+          </Text>
+          <Text style={styles.envHint}>
+            אחרי שמגדירים, צריך לבנות מחדש (EAS build) ולהעלות גרסה חדשה ל‑TestFlight.
+          </Text>
+        </View>
+      </GestureHandlerRootView>
+    );
+  }
+
 
   useEffect(() => {
     let isMounted = true;
@@ -93,7 +115,7 @@ export default function RootLayout() {
   }, [setUser, setLoading]);
 
   return (
-    <GestureHandlerRootView style={{ flex: 1, writingDirection: 'rtl' }}>
+    <GestureHandlerRootView style={{ flex: 1 }}>
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="+not-found" />
       </Stack>
@@ -103,3 +125,34 @@ export default function RootLayout() {
     </GestureHandlerRootView>
   );
 }
+
+const styles = StyleSheet.create({
+  envWrap: {
+    flex: 1,
+    backgroundColor: '#0B1220',
+    paddingHorizontal: 18,
+    justifyContent: 'center',
+  },
+  envTitle: {
+    color: '#FFFFFF',
+    fontSize: 20,
+    fontWeight: '900',
+    textAlign: 'right',
+    marginBottom: 12,
+  },
+  envBody: {
+    color: 'rgba(255,255,255,0.92)',
+    fontSize: 14,
+    fontWeight: '700',
+    textAlign: 'right',
+    lineHeight: 22,
+    marginBottom: 10,
+  },
+  envHint: {
+    color: 'rgba(255,255,255,0.75)',
+    fontSize: 12,
+    fontWeight: '700',
+    textAlign: 'right',
+    lineHeight: 18,
+  },
+});

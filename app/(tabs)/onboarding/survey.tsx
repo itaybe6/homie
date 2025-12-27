@@ -1,9 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  SafeAreaView,
   ScrollView,
   TouchableOpacity,
   TextInput,
@@ -11,23 +10,28 @@ import {
   Alert,
   Platform,
   Modal,
+  Animated,
+  Easing,
+  useWindowDimensions,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { Check, ChevronRight, ArrowLeft } from 'lucide-react-native';
+import { Check, ChevronRight } from 'lucide-react-native';
 import { useAuthStore } from '@/stores/authStore';
 import { UserSurveyResponse } from '@/types/database';
 import { fetchUserSurvey, upsertUserSurvey } from '@/lib/survey';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { getNeighborhoodsForCityName, searchCitiesWithNeighborhoods } from '@/lib/neighborhoods';
+import LavaLamp from '@/components/LavaLamp';
 
 type SurveyState = Partial<UserSurveyResponse>;
 
-const steps = [
-  { key: 'about', title: 'עליך' },
-  { key: 'apartment', title: 'על הדירה שאני מחפש' },
-  { key: 'partner', title: 'השותפ/ה שאני מחפש' },
-] as const;
+const PRIMARY = '#4C1D95';
+// Match the login screen purple background
+const BG = '#2E1065';
+const CARD = '#FFFFFF';
+const BORDER = '#E5E7EB';
+const TEXT = '#111827';
+const MUTED = '#6B7280';
+const PURPLE_SOFT = 'rgba(76,29,149,0.10)';
 
 const lifestyleOptions = ['רגוע', 'פעיל', 'ספונטני', 'ביתי', 'חברתי'];
 const dietOptions = ['ללא הגבלה', 'צמחוני', 'טבעוני'];
@@ -48,8 +52,7 @@ const roommateCountOptions = ['1', '2', '3', '4'];
 export default function SurveyScreen() {
   const router = useRouter();
   const { user } = useAuthStore();
-  const insets = useSafeAreaInsets();
-  const tabBarHeight = useBottomTabBarHeight();
+  const { width: screenWidth, height: screenHeight } = useWindowDimensions();
 
   const [currentStep, setCurrentStep] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -59,6 +62,12 @@ export default function SurveyScreen() {
   const [citySuggestions, setCitySuggestions] = useState<string[]>([]);
   const [neighborhoodOptions, setNeighborhoodOptions] = useState<string[]>([]);
   const [neighborhoodSearch, setNeighborhoodSearch] = useState('');
+  const scrollRef = useRef<ScrollView | null>(null);
+
+  const isTransitioningRef = useRef(false);
+  const transitionDirRef = useRef<1 | -1>(1);
+  const animOpacity = useRef(new Animated.Value(1)).current;
+  const animTranslate = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     (async () => {
@@ -124,7 +133,6 @@ export default function SurveyScreen() {
 
   // Removed Google place id resolution (local-only cities)
 
-  const progress = useMemo(() => (currentStep + 1) / steps.length, [currentStep]);
   const filteredNeighborhoods = useMemo(() => {
     if (!neighborhoodSearch.trim()) return neighborhoodOptions;
     const query = neighborhoodSearch.trim();
@@ -159,14 +167,363 @@ export default function SurveyScreen() {
     setState((prev) => ({ ...prev, [key]: value } as any));
   };
 
+  type Question = {
+    key: string;
+    title: string;
+    subtitle?: string;
+    isVisible?: () => boolean;
+    render: () => React.ReactNode;
+  };
+
+  const questions: Question[] = useMemo(() => {
+    const q: Question[] = [
+      // About you
+      {
+        key: 'occupation',
+        title: 'מה אני עושה ביומיום?',
+        subtitle: 'זה עוזר לנו להבין את הלו״ז והוייב שלך.',
+        render: () => (
+          <ChipSelect
+            options={['סטודנט', 'עובד']}
+            value={normalizeToTextChoice(state.occupation, ['סטודנט', 'עובד'])}
+            onChange={(v) => {
+              setState((prev) => {
+                const next: SurveyState = { ...prev, occupation: v || undefined };
+                if (v !== 'סטודנט') next.student_year = undefined;
+                if (v !== 'עובד') next.works_from_home = undefined;
+                return next;
+              });
+            }}
+          />
+        ),
+      },
+      {
+        key: 'student_year',
+        title: 'באיזו שנה בתואר?',
+        isVisible: () => state.occupation === 'סטודנט',
+        render: () => (
+          <ChipSelect
+            options={studentYearOptions}
+            value={
+              state.student_year && state.student_year >= 1 && state.student_year <= 7
+                ? studentYearOptions[state.student_year - 1]
+                : null
+            }
+            onChange={(label) => {
+              if (!label) {
+                setField('student_year', undefined);
+                return;
+              }
+              const index = studentYearOptions.indexOf(label);
+              setField('student_year', index >= 0 ? (index + 1) : undefined);
+            }}
+          />
+        ),
+      },
+      {
+        key: 'works_from_home',
+        title: 'עובד/ת מהבית?',
+        isVisible: () => state.occupation === 'עובד',
+        render: () => (
+          <ChipSelect
+            options={['כן', 'לא']}
+            value={
+              state.works_from_home === undefined
+                ? null
+                : state.works_from_home
+                ? 'כן'
+                : 'לא'
+            }
+            onChange={(v) => {
+              if (!v) {
+                setField('works_from_home', undefined);
+                return;
+              }
+              setField('works_from_home', v === 'כן');
+            }}
+          />
+        ),
+      },
+      { key: 'shabbat', title: 'שומר/ת שבת?', render: () => <ToggleRow label="שומר/ת שבת?" value={!!state.is_shomer_shabbat} onToggle={(v) => setField('is_shomer_shabbat', v)} /> },
+      { key: 'diet', title: 'מה התזונה שלי?', render: () => <ChipSelect options={dietOptions} value={state.diet_type || null} onChange={(v) => setField('diet_type', v || null)} /> },
+      {
+        key: 'kosher',
+        title: 'אוכל כשר?',
+        render: () => (
+          <ChipSelect
+            options={['כשר', 'לא כשר']}
+            value={state.keeps_kosher === undefined ? null : state.keeps_kosher ? 'כשר' : 'לא כשר'}
+            onChange={(v) => {
+              if (!v) {
+                setField('keeps_kosher', undefined);
+                return;
+              }
+              setField('keeps_kosher', v === 'כשר');
+            }}
+          />
+        ),
+      },
+      { key: 'smoker', title: 'מעשן/ת?', render: () => <ToggleRow label="מעשן/ת?" value={!!state.is_smoker} onToggle={(v) => setField('is_smoker', v)} /> },
+      { key: 'relationship', title: 'מצב זוגי', render: () => <ChipSelect options={relationOptions} value={state.relationship_status || null} onChange={(v) => setField('relationship_status', v || null)} /> },
+      { key: 'pet', title: 'מגיע/ה עם בעל חיים?', render: () => <ToggleRow label="מגיע/ה עם בעל חיים?" value={!!state.has_pet} onToggle={(v) => setField('has_pet', v)} /> },
+      { key: 'lifestyle', title: 'סגנון חיים', render: () => <ChipSelect options={lifestyleOptions} value={state.lifestyle || null} onChange={(v) => setField('lifestyle', v || null)} /> },
+      {
+        key: 'cleanliness',
+        title: 'כמה חשוב לי ניקיון?',
+        subtitle: 'בחר/י ערך בין 1 ל-5',
+        render: () => (
+          <View style={{ gap: 10 }}>
+            <Label text="כמה חשוב לי ניקיון? (1–5)" />
+            <Scale5 value={state.cleanliness_importance || 0} onChange={(v) => setField('cleanliness_importance', v)} />
+          </View>
+        ),
+      },
+      { key: 'cleaning_frequency', title: 'תדירות ניקיון', render: () => <ChipSelect options={cleaningFrequencyOptions} value={state.cleaning_frequency || null} onChange={(v) => setField('cleaning_frequency', v || null)} /> },
+      { key: 'hosting', title: 'אירוחים', render: () => <ChipSelect options={hostingOptions} value={state.hosting_preference || null} onChange={(v) => setField('hosting_preference', v || null)} /> },
+      { key: 'cooking', title: 'אוכל ובישולים', render: () => <ChipSelect options={cookingOptions} value={state.cooking_style || null} onChange={(v) => setField('cooking_style', v || null)} /> },
+      { key: 'home_vibe', title: 'אווירה בבית', render: () => <ChipSelect options={vibesOptions} value={state.home_vibe || null} onChange={(v) => setField('home_vibe', v || null)} /> },
+
+      // Apartment you want
+      { key: 'price', title: 'תקציב שכירות (₪)', render: () => <LabeledInput label="מחיר (₪)" keyboardType="numeric" value={state.price_range?.toString() || ''} placeholder="לדוגמה: 3500" onChangeText={(txt) => setField('price_range', toNumberOrNull(txt))} /> },
+      { key: 'bills', title: 'חשבונות כלולים?', render: () => <ChipSelect options={['כלול', 'לא כלול']} value={state.bills_included === undefined ? null : state.bills_included ? 'כלול' : 'לא כלול'} onChange={(v) => setField('bills_included', v === 'כלול')} /> },
+      {
+        key: 'preferred_city',
+        title: 'עיר מועדפת',
+        render: () => (
+          <View style={{ gap: 10 }}>
+            <Text style={styles.label}>עיר מועדפת</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="לדוגמה: תל אביב"
+              placeholderTextColor="#6B7280"
+              value={cityQuery}
+              onChangeText={(txt) => {
+                setCityQuery(txt);
+                setNeighborhoodSearch('');
+                setField('preferred_city', txt ? txt : undefined);
+                setField('preferred_neighborhoods', undefined);
+              }}
+            />
+            {citySuggestions.length > 0 ? (
+              <View style={styles.suggestionsBox}>
+                {citySuggestions.map((name, idx) => (
+                  <TouchableOpacity
+                    key={name}
+                    style={[styles.suggestionItem, idx === citySuggestions.length - 1 ? styles.suggestionItemLast : null]}
+                    onPress={() => {
+                      setCityQuery(name);
+                      setCitySuggestions([]);
+                      setNeighborhoodSearch('');
+                      setField('preferred_city', name);
+                      setField('preferred_neighborhoods', []);
+                    }}
+                  >
+                    <Text style={styles.suggestionText}>{name}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            ) : null}
+          </View>
+        ),
+      },
+      {
+        key: 'preferred_neighborhoods',
+        title: 'שכונות מועדפות',
+        isVisible: () => !!state.preferred_city,
+        render: () => (
+          <View style={{ gap: 10 }}>
+            <Text style={styles.label}>שכונות מועדפות</Text>
+            {neighborhoodOptions.length ? (
+              <MultiChipSelect
+                options={filteredNeighborhoods}
+                values={state.preferred_neighborhoods || []}
+                onToggle={(option, isActive) => {
+                  setState((prev) => {
+                    const current = prev.preferred_neighborhoods || [];
+                    const set = new Set(current);
+                    if (isActive) set.add(option);
+                    else set.delete(option);
+                    return { ...prev, preferred_neighborhoods: Array.from(set) };
+                  });
+                }}
+              />
+            ) : (
+              <Text style={styles.helperText}>בחר/י עיר כדי לראות שכונות זמינות.</Text>
+            )}
+          </View>
+        ),
+      },
+      { key: 'floor', title: 'קומה מועדפת', render: () => <ChipSelect options={floorOptions} value={state.floor_preference || null} onChange={(v) => setField('floor_preference', v || null)} /> },
+      { key: 'balcony', title: 'מרפסת / גינה', render: () => <ToggleRow label="מרפסת / גינה" value={!!state.has_balcony} onToggle={(v) => setField('has_balcony', v)} /> },
+      { key: 'elevator', title: 'מעלית', render: () => <ToggleRow label="מעלית" value={!!state.has_elevator} onToggle={(v) => setField('has_elevator', v)} /> },
+      { key: 'master', title: 'חדר מאסטר', render: () => <ToggleRow label="חדר מאסטר (שירותים צמודים)" value={!!state.wants_master_room} onToggle={(v) => setField('wants_master_room', v)} /> },
+      {
+        key: 'is_sublet',
+        title: 'סאבלט?',
+        render: () => (
+          <ToggleRow
+            label="האם מדובר בסאבלט?"
+            value={!!state.is_sublet}
+            onToggle={(v) =>
+              setState((prev) => {
+                const next: SurveyState = { ...prev, is_sublet: v };
+                if (!v) {
+                  next.sublet_month_from = undefined;
+                  next.sublet_month_to = undefined;
+                }
+                return next;
+              })
+            }
+          />
+        ),
+      },
+      {
+        key: 'sublet_period',
+        title: 'טווח סאבלט',
+        isVisible: () => !!state.is_sublet,
+        render: () => (
+          <View style={{ gap: 12 }}>
+            <LabeledInput label="חודש התחלה (YYYY-MM)" value={state.sublet_month_from || ''} placeholder="לדוגמה: 2025-07" onChangeText={(txt) => setField('sublet_month_from', txt)} />
+            <LabeledInput label="חודש סיום (YYYY-MM)" value={state.sublet_month_to || ''} placeholder="לדוגמה: 2025-09" onChangeText={(txt) => setField('sublet_month_to', txt)} />
+          </View>
+        ),
+      },
+      {
+        key: 'move_in_month',
+        title: 'חודש כניסה',
+        isVisible: () => !state.is_sublet,
+        render: () => (
+          <SelectInput label="תאריך כניסה (חודש ושנה)" options={moveInMonthSelectOptions} value={state.move_in_month || null} placeholder="בחר חודש ושנה" onChange={(option) => setField('move_in_month', option || undefined)} />
+        ),
+      },
+      {
+        key: 'roommates',
+        title: 'כמה שותפים?',
+        render: () => (
+          <SelectInput label="כמה שותפים נראה לי מתאים?" options={roommateCountOptions} value={state.preferred_roommates ? String(state.preferred_roommates) : null} placeholder="בחר מספר שותפים" onChange={(v) => setField('preferred_roommates', v ? parseInt(v, 10) : undefined)} />
+        ),
+      },
+      { key: 'pets_allowed', title: 'אפשר להביא חיות לדירה?', render: () => <ToggleRow label="אפשר להביא בעלי חיים?" value={!!state.pets_allowed} onToggle={(v) => setField('pets_allowed', v)} /> },
+      { key: 'broker', title: 'תיווך / ישירות', render: () => <ChipSelect options={['תיווך', 'ישירות']} value={state.with_broker === undefined ? null : state.with_broker ? 'תיווך' : 'ישירות'} onChange={(v) => setField('with_broker', v === 'תיווך')} /> },
+
+      // Partner you want
+      {
+        key: 'age_min',
+        title: 'גיל מינימלי לשותפ/ה',
+        render: () => (
+          <SelectInput
+            label="גיל מינימלי"
+            options={minAgeSelectOptions}
+            value={(state as any).preferred_age_min != null ? String((state as any).preferred_age_min) : null}
+            placeholder="בחר גיל"
+            onChange={(v) => setState((prev) => ({ ...(prev as any), preferred_age_min: v ? parseInt(v, 10) : undefined } as any))}
+          />
+        ),
+      },
+      {
+        key: 'age_max',
+        title: 'גיל מקסימלי לשותפ/ה',
+        render: () => (
+          <SelectInput
+            label="גיל מקסימלי"
+            options={maxAgeSelectOptions}
+            value={(state as any).preferred_age_max != null ? String((state as any).preferred_age_max) : null}
+            placeholder="בחר גיל"
+            onChange={(v) => setState((prev) => ({ ...(prev as any), preferred_age_max: v ? parseInt(v, 10) : undefined } as any))}
+          />
+        ),
+      },
+      { key: 'pref_gender', title: 'מין מועדף', render: () => <ChipSelect options={genderPrefOptions} value={state.preferred_gender || null} onChange={(v) => setField('preferred_gender', v || null)} /> },
+      { key: 'pref_occ', title: 'עיסוק מועדף', render: () => <ChipSelect options={occupationPrefOptions} value={state.preferred_occupation || null} onChange={(v) => setField('preferred_occupation', v || null)} /> },
+      { key: 'partner_shabbat', title: 'שותפים ושבת', render: () => <ChipSelect options={partnerShabbatPrefOptions} value={state.partner_shabbat_preference || null} onChange={(v) => setField('partner_shabbat_preference', v || null)} /> },
+      { key: 'partner_diet', title: 'שותפים ותזונה', render: () => <ChipSelect options={partnerDietPrefOptions} value={state.partner_diet_preference || null} onChange={(v) => setField('partner_diet_preference', v || null)} /> },
+      { key: 'partner_smoking', title: 'שותפים ועישון', render: () => <ChipSelect options={partnerSmokingPrefOptions} value={state.partner_smoking_preference || null} onChange={(v) => setField('partner_smoking_preference', v || null)} /> },
+      { key: 'partner_pets', title: 'שותפים וחיות', render: () => <ChipSelect options={['אין בעיה', 'מעדיפ/ה שלא']} value={state.partner_pets_preference || null} onChange={(v) => setField('partner_pets_preference', v || null)} /> },
+    ];
+
+    return q.filter((item) => (item.isVisible ? item.isVisible() : true));
+  }, [
+    state,
+    cityQuery,
+    citySuggestions,
+    neighborhoodOptions,
+    neighborhoodSearch,
+    filteredNeighborhoods,
+    moveInMonthSelectOptions,
+    minAgeSelectOptions,
+    maxAgeSelectOptions,
+  ]);
+
+  const totalQuestions = questions.length;
+  const clampedIndex = totalQuestions > 0 ? Math.min(currentStep, totalQuestions - 1) : 0;
+  const currentQuestion = totalQuestions > 0 ? questions[clampedIndex] : null;
+  // Keep the popup size consistent across all questions and prevent edge clipping on small screens
+  const popupCardWidth = useMemo(() => Math.min(Math.max(screenWidth - 32, 320), 420), [screenWidth]);
+  const popupCardMaxHeight = useMemo(() => Math.min(Math.max(screenHeight - 180, 520), 680), [screenHeight]);
+
+  useEffect(() => {
+    if (totalQuestions === 0) return;
+    if (currentStep > totalQuestions - 1) setCurrentStep(totalQuestions - 1);
+  }, [totalQuestions, currentStep]);
+
+  const goToStep = (nextStep: number) => {
+    if (nextStep === currentStep) return;
+    if (nextStep < 0 || nextStep > totalQuestions - 1) return;
+    if (isTransitioningRef.current) return;
+
+    isTransitioningRef.current = true;
+    transitionDirRef.current = nextStep > currentStep ? 1 : -1;
+
+    // RTL-friendly: "Next" slides in from the left (negative X), "Back" from the right (positive X)
+    const outX = transitionDirRef.current === 1 ? -18 : 18;
+    const inX = transitionDirRef.current === 1 ? 18 : -18;
+
+    Animated.parallel([
+      Animated.timing(animOpacity, {
+        toValue: 0,
+        duration: 160,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.timing(animTranslate, {
+        toValue: outX,
+        duration: 160,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+    ]).start(() => {
+      setCurrentStep(nextStep);
+      scrollRef.current?.scrollTo?.({ y: 0, animated: false });
+
+      animTranslate.setValue(inX);
+      animOpacity.setValue(0);
+
+      Animated.parallel([
+        Animated.timing(animOpacity, {
+          toValue: 1,
+          duration: 220,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+        Animated.timing(animTranslate, {
+          toValue: 0,
+          duration: 220,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+      ]).start(() => {
+        isTransitioningRef.current = false;
+      });
+    });
+  };
+
   const handleNext = () => {
-    if (currentStep < steps.length - 1) setCurrentStep((s) => s + 1);
+    if (saving) return;
+    if (currentStep < totalQuestions - 1) goToStep(currentStep + 1);
   };
   const handleBack = () => {
-    if (currentStep > 0) setCurrentStep((s) => s - 1);
-  };
-  const handleExit = () => {
-    router.back();
+    if (saving) return;
+    if (currentStep > 0) goToStep(currentStep - 1);
   };
 
   const handleSubmit = async () => {
@@ -202,422 +559,78 @@ export default function SurveyScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <View style={styles.headerTopRow} />
-        <TouchableOpacity onPress={handleExit} style={styles.backBtn} accessibilityLabel="חזור">
-          <ArrowLeft size={18} color="#FFFFFF" />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>שאלון העדפות</Text>
-        <Text style={styles.headerSubtitle}>{steps[currentStep].title}</Text>
-        <View style={styles.progressTrack}>
-          <View style={[styles.progressFill, { width: `${Math.round(progress * 100)}%` }]} />
-        </View>
-      </View>
+    <View style={styles.root}>
+      <LavaLamp hue="purple" intensity={60} count={5} duration={16000} backgroundColor={BG} />
+      <View style={styles.container}>
       {loading ? (
         <View style={styles.loaderWrap}>
-          <ActivityIndicator size="large" color="#A78BFA" />
+          <ActivityIndicator size="large" color={PRIMARY} />
         </View>
       ) : (
         <>
-          <ScrollView contentContainerStyle={styles.scrollContent}>
-            {currentStep === 0 && (
-              <View style={styles.stepCard}>
-                <Section title="מה אני עושה ביומיום">
-                  <ChipSelect
-                    options={['סטודנט', 'עובד']}
-                    value={normalizeToTextChoice(state.occupation, ['סטודנט', 'עובד'])}
-                    onChange={(v) => {
-                      setState((prev) => {
-                        const next: SurveyState = { ...prev, occupation: v || undefined };
-                        if (v !== 'סטודנט') next.student_year = undefined;
-                        if (v !== 'עובד') next.works_from_home = undefined;
-                        return next;
-                      });
-                    }}
-                  />
-                  {state.occupation === 'סטודנט' && (
-                    <ChipSelect
-                      label="שנה בתואר"
-                      options={studentYearOptions}
-                      value={
-                        state.student_year && state.student_year >= 1 && state.student_year <= 7
-                          ? studentYearOptions[state.student_year - 1]
-                          : null
-                      }
-                      onChange={(label) => {
-                        if (!label) {
-                          setField('student_year', undefined);
-                          return;
-                        }
-                        const index = studentYearOptions.indexOf(label);
-                        setField('student_year', index >= 0 ? (index + 1) : undefined);
-                      }}
-                    />
-                  )}
-                  {state.occupation === 'עובד' && (
-                    <ChipSelect
-                      label="עובד מהבית?"
-                      options={['כן', 'לא']}
-                      value={
-                        state.works_from_home === undefined
-                          ? null
-                          : state.works_from_home
-                          ? 'כן'
-                          : 'לא'
-                      }
-                      onChange={(v) => {
-                        if (!v) {
-                          setField('works_from_home', undefined);
-                          return;
-                        }
-                        setField('works_from_home', v === 'כן');
-                      }}
-                    />
-                  )}
-                </Section>
-
-                <Section title="הרגלים והעדפות">
-                  <ToggleRow
-                    label="שומר שבת?"
-                    value={!!state.is_shomer_shabbat}
-                    onToggle={(v) => setField('is_shomer_shabbat', v)}
-                  />
-                  <ChipSelect
-                    label="התזונה שלי"
-                    options={dietOptions}
-                    value={state.diet_type || null}
-                    onChange={(v) => setField('diet_type', v || null)}
-                  />
-                  <ChipSelect
-                    label="אוכל כשר"
-                    options={['כשר', 'לא כשר']}
-                    value={
-                      state.keeps_kosher === undefined
-                        ? null
-                        : state.keeps_kosher
-                        ? 'כשר'
-                        : 'לא כשר'
-                    }
-                    onChange={(v) => {
-                      if (!v) {
-                        setField('keeps_kosher', undefined);
-                        return;
-                      }
-                      setField('keeps_kosher', v === 'כשר');
-                    }}
-                  />
-                  <ToggleRow
-                    label="מעשן?"
-                    value={!!state.is_smoker}
-                    onToggle={(v) => setField('is_smoker', v)}
-                  />
-                  <ChipSelect
-                    label="מצב זוגי"
-                    options={relationOptions}
-                    value={state.relationship_status || null}
-                    onChange={(v) => setField('relationship_status', v || null)}
-                  />
-                  <ToggleRow
-                    label="מגיע עם בעל חיים?"
-                    value={!!state.has_pet}
-                    onToggle={(v) => setField('has_pet', v)}
-                  />
-                  <ChipSelect
-                    label="סגנון חיים"
-                    options={lifestyleOptions}
-                    value={state.lifestyle || null}
-                    onChange={(v) => setField('lifestyle', v || null)}
-                  />
-                </Section>
-
-                <Section title="ניקיון ואווירה">
-                  <Label text="כמה חשוב לי ניקיון? (1–5)" />
-                  <Scale5 value={state.cleanliness_importance || 0} onChange={(v) => setField('cleanliness_importance', v)} />
-                  <ChipSelect
-                    label="תדירות ניקיון"
-                    options={cleaningFrequencyOptions}
-                    value={state.cleaning_frequency || null}
-                    onChange={(v) => setField('cleaning_frequency', v || null)}
-                  />
-                  <ChipSelect
-                    label="אירוחים"
-                    options={hostingOptions}
-                    value={state.hosting_preference || null}
-                    onChange={(v) => setField('hosting_preference', v || null)}
-                  />
-                  <ChipSelect
-                    label="אוכל ובישולים"
-                    options={cookingOptions}
-                    value={state.cooking_style || null}
-                    onChange={(v) => setField('cooking_style', v || null)}
-                  />
-                  <ChipSelect
-                    label="האווירה שאני מחפש"
-                    options={vibesOptions}
-                    value={state.home_vibe || null}
-                    onChange={(v) => setField('home_vibe', v || null)}
-                  />
-                </Section>
+          <View style={styles.popupOverlay}>
+            <Animated.View style={{ opacity: animOpacity, transform: [{ translateX: animTranslate }] }}>
+              <View style={styles.bgTitleWrap}>
+                <Text style={styles.bgTitle}>שאלון העדפות</Text>
+                <Text style={styles.bgSubtitle}>מלא/י את השאלה למטה</Text>
               </View>
-            )}
+              <View style={[styles.popupCard, { width: popupCardWidth, maxHeight: popupCardMaxHeight }]}>
+                <View style={styles.popupHeader}>
+                  <Text style={styles.popupTitle}>{currentQuestion?.title || ''}</Text>
+                  <Text style={styles.popupMeta}>{`שאלה ${Math.min(clampedIndex + 1, totalQuestions)} מתוך ${totalQuestions}`}</Text>
+                </View>
+                {!!currentQuestion?.subtitle && <Text style={styles.popupSubtitle}>{currentQuestion.subtitle}</Text>}
 
-            {currentStep === 1 && (
-              <View style={styles.stepCard}>
-                <Section title="פרטי הדירה">
-                  <LabeledInput
-                    label="מחיר (₪)"
-                    keyboardType="numeric"
-                    value={state.price_range?.toString() || ''}
-                    placeholder="לדוגמה: 3500"
-                    onChangeText={(txt) => setField('price_range', toNumberOrNull(txt))}
-                  />
-                  <ChipSelect
-                    label="חשבונות"
-                    options={['כלול', 'לא כלול']}
-                    value={state.bills_included === undefined ? null : state.bills_included ? 'כלול' : 'לא כלול'}
-                    onChange={(v) => setField('bills_included', v === 'כלול')}
-                  />
-                  <View style={{ gap: 12 }}>
-                    <View style={{ gap: 8 }}>
-                      <Text style={styles.label}>עיר מועדפת</Text>
-                      <TextInput
-                        style={styles.input}
-                        placeholder="לדוגמה: תל אביב"
-                        placeholderTextColor="#6B7280"
-                        value={cityQuery}
-                        onChangeText={(txt) => {
-                          setCityQuery(txt);
-                          setNeighborhoodSearch('');
-                          setField('preferred_city', txt ? txt : undefined);
-                          setField('preferred_neighborhoods', undefined);
-                        }}
-                      />
-                      {citySuggestions.length > 0 ? (
-                        <View style={styles.suggestionsBox}>
-                          {citySuggestions.map((name, idx) => (
-                            <TouchableOpacity
-                              key={name}
-                              style={[
-                                styles.suggestionItem,
-                                idx === citySuggestions.length - 1 ? styles.suggestionItemLast : null,
-                              ]}
-                              onPress={() => {
-                                setCityQuery(name);
-                                setCitySuggestions([]);
-                                setNeighborhoodSearch('');
-                                setField('preferred_city', name);
-                                setField('preferred_neighborhoods', []);
-                              }}
-                            >
-                              <Text style={styles.suggestionText}>{name}</Text>
-                            </TouchableOpacity>
-                          ))}
-                        </View>
-                      ) : null}
-                    </View>
-                    {state.preferred_city ? (
-                      <View style={{ gap: 8 }}>
-                        <Text style={styles.label}>שכונות מועדפות</Text>
-                        {neighborhoodOptions.length ? (
-                          <MultiChipSelect
-                            options={filteredNeighborhoods}
-                            values={state.preferred_neighborhoods || []}
-                            onToggle={(option, isActive) => {
-                              setState((prev) => {
-                                const current = prev.preferred_neighborhoods || [];
-                                const set = new Set(current);
-                                if (isActive) set.add(option);
-                                else set.delete(option);
-                                return { ...prev, preferred_neighborhoods: Array.from(set) };
-                              });
-                            }}
-                          />
+                <ScrollView
+                  ref={scrollRef}
+                  style={styles.popupBody}
+                  contentContainerStyle={{ paddingBottom: 8 }}
+                  showsVerticalScrollIndicator={false}
+                >
+                  {currentQuestion?.render?.()}
+                </ScrollView>
+
+                <View style={styles.inlineFooter}>
+                  <View style={styles.footerRow}>
+                    <TouchableOpacity
+                      onPress={handleBack}
+                      disabled={clampedIndex === 0 || saving}
+                      style={[styles.navBtn, clampedIndex === 0 || saving ? styles.navBtnDisabled : null]}
+                    >
+                      <ChevronRight size={18} color={clampedIndex === 0 || saving ? MUTED : PRIMARY} />
+                      <Text style={[styles.navBtnText, clampedIndex === 0 || saving ? styles.navBtnTextDisabled : null]}>חזרה</Text>
+                    </TouchableOpacity>
+
+                    {clampedIndex < totalQuestions - 1 ? (
+                      <TouchableOpacity
+                        onPress={handleNext}
+                        disabled={saving}
+                        style={[styles.primaryBtn, saving ? styles.primaryBtnDisabled : null]}
+                      >
+                        <Text style={styles.primaryBtnText}>הבא</Text>
+                      </TouchableOpacity>
+                    ) : (
+                      <TouchableOpacity
+                        onPress={handleSubmit}
+                        disabled={saving}
+                        style={[styles.primaryBtn, saving ? styles.primaryBtnDisabled : null]}
+                      >
+                        {saving ? (
+                          <ActivityIndicator size="small" color="#FFFFFF" />
                         ) : (
-                          <Text style={styles.helperText}>בחר עיר מהרשימה כדי לראות שכונות זמינות.</Text>
+                          <Text style={styles.primaryBtnText}>סיום ושמירה</Text>
                         )}
-                      </View>
-                    ) : null}
+                      </TouchableOpacity>
+                    )}
                   </View>
-                  <ChipSelect
-                    label="קומה"
-                    options={floorOptions}
-                    value={state.floor_preference || null}
-                    onChange={(v) => setField('floor_preference', v || null)}
-                  />
-                  <ToggleRow label="מרפסת / גינה" value={!!state.has_balcony} onToggle={(v) => setField('has_balcony', v)} />
-                  <ToggleRow label="מעלית" value={!!state.has_elevator} onToggle={(v) => setField('has_elevator', v)} />
-                  <ToggleRow label="חדר מאסטר (שירותים צמודים)" value={!!state.wants_master_room} onToggle={(v) => setField('wants_master_room', v)} />
-                  <ToggleRow
-                    label="האם מדובר בסאבלט?"
-                    value={!!state.is_sublet}
-                    onToggle={(v) =>
-                      setState((prev) => {
-                        const next: SurveyState = { ...prev, is_sublet: v };
-                        if (!v) {
-                          next.sublet_month_from = undefined;
-                          next.sublet_month_to = undefined;
-                        }
-                        return next;
-                      })
-                    }
-                  />
-                  {state.is_sublet ? (
-                    <View style={{ gap: 12 }}>
-                      <LabeledInput
-                        label="חודש התחלה (YYYY-MM)"
-                        value={state.sublet_month_from || ''}
-                        placeholder="לדוגמה: 2025-07"
-                        onChangeText={(txt) => setField('sublet_month_from', txt)}
-                      />
-                      <LabeledInput
-                        label="חודש סיום (YYYY-MM)"
-                        value={state.sublet_month_to || ''}
-                        placeholder="לדוגמה: 2025-09"
-                        onChangeText={(txt) => setField('sublet_month_to', txt)}
-                      />
-                    </View>
-                  ) : (
-                    <SelectInput
-                      label="תאריך כניסה (חודש ושנה)"
-                      options={moveInMonthSelectOptions}
-                      value={state.move_in_month || null}
-                      placeholder="בחר חודש ושנה"
-                      onChange={(option) => setField('move_in_month', option || undefined)}
-                    />
-                  )}
-                  <SelectInput
-                    label="כמה שותפים נראה לי מתאים?"
-                    options={roommateCountOptions}
-                    value={state.preferred_roommates ? String(state.preferred_roommates) : null}
-                    placeholder="בחר מספר שותפים"
-                    onChange={(v) => setField('preferred_roommates', v ? parseInt(v, 10) : undefined)}
-                  />
-                  <ToggleRow label="אפשר להביא בעלי חיים?" value={!!state.pets_allowed} onToggle={(v) => setField('pets_allowed', v)} />
-                  <ChipSelect
-                    label="תיווך / ישירות"
-                    options={['תיווך', 'ישירות']}
-                    value={
-                      state.with_broker === undefined ? null : state.with_broker ? 'תיווך' : 'ישירות'
-                    }
-                    onChange={(v) => setField('with_broker', v === 'תיווך')}
-                  />
-                </Section>
+                </View>
               </View>
-            )}
-
-            {currentStep === 2 && (
-              <View style={styles.stepCard}>
-                <Section title="מאפייני השותפ/ה">
-                  <View style={{ gap: 10 }}>
-                    <SelectInput
-                      label="גיל מינימלי"
-                      options={minAgeSelectOptions}
-                      value={
-                        (state as any).preferred_age_min !== undefined && (state as any).preferred_age_min !== null
-                          ? String((state as any).preferred_age_min)
-                          : null
-                      }
-                      placeholder="בחר גיל"
-                      onChange={(v) =>
-                        setState((prev) => ({
-                          ...(prev as any),
-                          preferred_age_min: v ? parseInt(v, 10) : undefined,
-                        } as any))
-                      }
-                    />
-                    <SelectInput
-                      label="גיל מקסימלי"
-                      options={maxAgeSelectOptions}
-                      value={
-                        (state as any).preferred_age_max !== undefined && (state as any).preferred_age_max !== null
-                          ? String((state as any).preferred_age_max)
-                          : null
-                      }
-                      placeholder="בחר גיל"
-                      onChange={(v) =>
-                        setState((prev) => ({
-                          ...(prev as any),
-                          preferred_age_max: v ? parseInt(v, 10) : undefined,
-                        } as any))
-                      }
-                    />
-                  </View>
-                  <ChipSelect
-                    label="מין מועדף"
-                    options={genderPrefOptions}
-                    value={state.preferred_gender || null}
-                    onChange={(v) => setField('preferred_gender', v || null)}
-                  />
-                  <ChipSelect
-                    label="עיסוק"
-                    options={occupationPrefOptions}
-                    value={state.preferred_occupation || null}
-                    onChange={(v) => setField('preferred_occupation', v || null)}
-                  />
-                </Section>
-                <Section title="העדפות הרגלים">
-                  <ChipSelect
-                    label="שומר שבת"
-                    options={partnerShabbatPrefOptions}
-                    value={state.partner_shabbat_preference || null}
-                    onChange={(v) => setField('partner_shabbat_preference', v || null)}
-                  />
-                  <ChipSelect
-                    label="תזונה"
-                    options={partnerDietPrefOptions}
-                    value={state.partner_diet_preference || null}
-                    onChange={(v) => setField('partner_diet_preference', v || null)}
-                  />
-                  <ChipSelect
-                    label="מעשן"
-                    options={partnerSmokingPrefOptions}
-                    value={state.partner_smoking_preference || null}
-                    onChange={(v) => setField('partner_smoking_preference', v || null)}
-                  />
-                  <ChipSelect
-                    label="מגיע עם בעל חיים"
-                    options={['אין בעיה', 'מעדיפ/ה שלא']}
-                    value={state.partner_pets_preference || null}
-                    onChange={(v) => setField('partner_pets_preference', v || null)}
-                  />
-                </Section>
-              </View>
-            )}
-
-            <View style={[
-              styles.footer,
-              { marginBottom: Math.max(12, Math.ceil(tabBarHeight + insets.bottom)) }
-            ]}>
-            <View style={styles.footerRow}>
-              <TouchableOpacity
-                onPress={handleBack}
-                disabled={currentStep === 0 || saving}
-                style={[styles.navBtn, currentStep === 0 || saving ? styles.navBtnDisabled : null]}
-              >
-                <ChevronRight size={18} color={currentStep === 0 || saving ? '#9DA4AE' : '#0F0F14'} />
-                <Text style={[styles.navBtnText, currentStep === 0 || saving ? styles.navBtnTextDisabled : null]}>חזרה</Text>
-              </TouchableOpacity>
-
-              {currentStep < steps.length - 1 ? (
-                <TouchableOpacity onPress={handleNext} disabled={saving} style={styles.primaryBtn}>
-                  <Text style={styles.primaryBtnText}>הבא</Text>
-                </TouchableOpacity>
-              ) : (
-                <TouchableOpacity onPress={handleSubmit} disabled={saving} style={styles.primaryBtn}>
-                  {saving ? (
-                    <ActivityIndicator size="small" color="#0F0F14" />
-                  ) : (
-                    <Text style={styles.primaryBtnText}>סיום ושמירה</Text>
-                  )}
-                </TouchableOpacity>
-              )}
-            </View>
-            </View>
-          </ScrollView>
+            </Animated.View>
+          </View>
         </>
       )}
-    </SafeAreaView>
+      </View>
+    </View>
   );
 }
 
@@ -992,15 +1005,133 @@ function Scale5({ value, onChange }: { value: number; onChange: (v: number) => v
 }
 
 const styles = StyleSheet.create({
+  root: {
+    flex: 1,
+    backgroundColor: BG,
+  },
   container: {
     flex: 1,
-    backgroundColor: '#0F0F14',
+    backgroundColor: 'transparent',
     writingDirection: 'rtl',
+  },
+  popupOverlay: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 24,
+    backgroundColor: 'rgba(0,0,0,0.18)',
+  },
+  bgTitleWrap: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+    paddingHorizontal: 16,
+  },
+  bgTitle: {
+    color: '#FFFFFF',
+    fontSize: 24,
+    fontWeight: '900',
+    textAlign: 'center',
+  },
+  bgSubtitle: {
+    marginTop: 6,
+    color: 'rgba(255,255,255,0.88)',
+    fontSize: 14,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  popupCard: {
+    backgroundColor: 'rgba(255,255,255,0.96)',
+    borderRadius: 24,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.22)',
+    shadowColor: '#000',
+    shadowOpacity: 0.16,
+    shadowRadius: 22,
+    shadowOffset: { width: 0, height: 14 },
+    elevation: 6,
+    overflow: 'hidden',
+  },
+  popupHeader: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  popupTitle: {
+    color: PRIMARY,
+    fontSize: 20,
+    fontWeight: '900',
+    textAlign: 'center',
+  },
+  popupMeta: {
+    color: MUTED,
+    fontSize: 12,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  popupSubtitle: {
+    marginTop: 6,
+    color: '#374151',
+    fontSize: 13,
+    fontWeight: '700',
+    textAlign: 'center',
+    lineHeight: 18,
+  },
+  popupBody: {
+    marginTop: 12,
+    maxHeight: 560,
+  },
+  sheet: {
+    backgroundColor: 'rgba(255,255,255,0.96)',
+    borderRadius: 24,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.22)',
+    shadowColor: '#000',
+    shadowOpacity: 0.14,
+    shadowRadius: 22,
+    shadowOffset: { width: 0, height: 14 },
+    elevation: 6,
+  },
+  sheetHeader: {
+    flexDirection: 'row-reverse',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  sheetTitle: {
+    color: PRIMARY,
+    fontSize: 20,
+    fontWeight: '900',
+    textAlign: 'right',
+  },
+  sheetMeta: {
+    color: MUTED,
+    fontSize: 12,
+    fontWeight: '800',
+    textAlign: 'left',
+  },
+  sheetSubtitle: {
+    marginTop: 6,
+    color: '#374151',
+    fontSize: 14,
+    fontWeight: '800',
+    textAlign: 'right',
   },
   header: {
     paddingHorizontal: 16,
-    paddingTop: 52,
     paddingBottom: 8,
+    borderBottomLeftRadius: 22,
+    borderBottomRightRadius: 22,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(229,231,235,0.9)',
+    shadowColor: '#000',
+    shadowOpacity: 0.06,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 3,
   },
   headerTopRow: {
     flexDirection: 'row-reverse',
@@ -1010,30 +1141,47 @@ const styles = StyleSheet.create({
   backBtn: {
     position: 'absolute',
     left: 16,
-    top: 52,
     width: 36,
     height: 36,
     borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: 'rgba(255,255,255,0.92)',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
+    borderColor: BORDER,
+    shadowColor: '#000',
+    shadowOpacity: 0.06,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 2,
   },
   backBtnText: {
     color: '#0F0F14',
     fontWeight: '900',
     fontSize: 14,
   },
+  headerTextRow: {
+    flexDirection: 'row-reverse',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
   headerTitle: {
-    color: '#FFFFFF',
+    color: PRIMARY,
     fontSize: 22,
     fontWeight: '900',
     textAlign: 'right',
     marginTop: 10,
   },
+  headerStepMeta: {
+    color: MUTED,
+    fontSize: 12,
+    fontWeight: '800',
+    textAlign: 'left',
+    marginTop: 10,
+  },
   headerSubtitle: {
-    color: '#C7CBD1',
+    color: MUTED,
     fontSize: 14,
     fontWeight: '700',
     textAlign: 'right',
@@ -1042,13 +1190,13 @@ const styles = StyleSheet.create({
   progressTrack: {
     marginTop: 10,
     height: 8,
-    backgroundColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: 'rgba(17,24,39,0.08)',
     borderRadius: 999,
     overflow: 'hidden',
   },
   progressFill: {
     height: 8,
-    backgroundColor: '#A78BFA',
+    backgroundColor: PRIMARY,
     borderRadius: 999,
   },
   loaderWrap: {
@@ -1061,73 +1209,79 @@ const styles = StyleSheet.create({
     paddingBottom: 24,
   },
   stepCard: {
-    backgroundColor: '#15151C',
+    backgroundColor: CARD,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)',
+    borderColor: BORDER,
     padding: 14,
+    shadowColor: '#000',
+    shadowOpacity: 0.06,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 2,
   },
   section: {
     marginBottom: 18,
   },
   sectionTitle: {
-    color: '#FFFFFF',
+    color: PRIMARY,
     fontSize: 16,
     fontWeight: '900',
     marginBottom: 10,
     textAlign: 'right',
   },
   label: {
-    color: '#E5E7EB',
+    color: TEXT,
     fontSize: 14,
     fontWeight: '700',
-    textAlign: 'right',
+    textAlign: 'center',
   },
   input: {
-    backgroundColor: '#1B1C27',
+    backgroundColor: '#FFFFFF',
     paddingHorizontal: 14,
     paddingVertical: 12,
     borderRadius: 10,
-    color: '#FFFFFF',
+    color: TEXT,
     fontSize: 16,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
-    textAlign: Platform.select({ ios: 'right', android: 'right', default: 'right' }) as any,
+    borderColor: BORDER,
+    textAlign: 'center',
   },
   toggleRow: {
     flexDirection: 'column',
-    alignItems: 'flex-end',
+    alignItems: 'center',
     gap: 12,
   },
   toggleOptions: {
     flexDirection: 'row',
     gap: 8,
     writingDirection: 'rtl',
+    justifyContent: 'center',
   },
   toggleBtn: {
     flexDirection: 'row-reverse',
     alignItems: 'center',
     gap: 8,
-    backgroundColor: '#1E1F2A',
+    backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)',
+    borderColor: BORDER,
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 999,
   },
   toggleActive: {
-    backgroundColor: '#A78BFA',
-    borderColor: 'rgba(167,139,250,0.8)',
+    backgroundColor: PURPLE_SOFT,
+    borderColor: 'rgba(76,29,149,0.35)',
   },
   toggleText: {
-    color: '#C7CBD1',
+    color: MUTED,
     fontWeight: '800',
   },
   toggleTextActive: {
-    color: '#0F0F14',
+    color: PRIMARY,
   },
   helperText: {
-    color: '#9DA4AE',
+    color: MUTED,
     fontSize: 13,
     textAlign: 'right',
   },
@@ -1135,38 +1289,39 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
-    justifyContent: 'flex-start',
+    justifyContent: 'center',
     writingDirection: 'rtl',
   },
   chip: {
-    backgroundColor: '#1E1F2A',
+    backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)',
+    borderColor: BORDER,
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 999,
   },
   chipActive: {
-    backgroundColor: '#4C1D95',
-    borderColor: 'rgba(124,92,255,0.8)',
+    backgroundColor: PURPLE_SOFT,
+    borderColor: 'rgba(76,29,149,0.35)',
   },
   chipText: {
-    color: '#C7CBD1',
+    color: TEXT,
     fontWeight: '800',
     fontSize: 13,
+    textAlign: 'center',
   },
   chipTextActive: {
-    color: '#0F0F14',
+    color: PRIMARY,
   },
   selectText: {
-    color: '#FFFFFF',
+    color: TEXT,
     fontSize: 16,
-    textAlign: Platform.select({ ios: 'right', android: 'right', default: 'right' }) as any,
+    textAlign: 'center',
   },
   selectPlaceholder: {
-    color: '#6B7280',
+    color: MUTED,
     fontSize: 16,
-    textAlign: Platform.select({ ios: 'right', android: 'right', default: 'right' }) as any,
+    textAlign: 'center',
   },
   pickerOverlay: {
     position: 'absolute',
@@ -1174,7 +1329,7 @@ const styles = StyleSheet.create({
     right: 0,
     top: 0,
     bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.55)',
+    backgroundColor: 'rgba(17,24,39,0.45)',
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 16,
@@ -1182,14 +1337,14 @@ const styles = StyleSheet.create({
   pickerSheet: {
     width: '100%',
     maxHeight: '80%',
-    backgroundColor: '#15151C',
+    backgroundColor: CARD,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
+    borderColor: BORDER,
     borderRadius: 12,
     padding: 12,
   },
   pickerTitle: {
-    color: '#FFFFFF',
+    color: PRIMARY,
     fontSize: 16,
     fontWeight: '800',
     textAlign: 'center',
@@ -1199,53 +1354,53 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 12,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.06)',
+    borderBottomColor: '#F3F4F6',
   },
   pickerOptionActive: {
-    backgroundColor: 'rgba(124,92,255,0.12)',
+    backgroundColor: PURPLE_SOFT,
   },
   pickerOptionText: {
-    color: '#E5E7EB',
+    color: TEXT,
     fontSize: 16,
     textAlign: 'right',
     fontWeight: '700',
   },
   pickerOptionTextActive: {
-    color: '#A78BFA',
+    color: PRIMARY,
   },
   pickerCancel: {
     marginTop: 8,
     alignSelf: 'center',
-    backgroundColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: '#FFFFFF',
     paddingHorizontal: 16,
     paddingVertical: 10,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.18)',
+    borderColor: BORDER,
   },
   pickerCancelText: {
-    color: '#E5E7EB',
+    color: PRIMARY,
     fontWeight: '800',
   },
   suggestionsBox: {
     marginTop: 4,
-    backgroundColor: '#1E1F2A',
+    backgroundColor: '#FFFFFF',
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
+    borderColor: BORDER,
     overflow: 'hidden',
   },
   suggestionItem: {
     paddingHorizontal: 12,
     paddingVertical: 10,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.06)',
+    borderBottomColor: '#F3F4F6',
   },
   suggestionItemLast: {
     borderBottomWidth: 0,
   },
   suggestionText: {
-    color: '#E5E7EB',
+    color: TEXT,
     fontSize: 14,
     fontWeight: '700',
     textAlign: 'right',
@@ -1261,27 +1416,24 @@ const styles = StyleSheet.create({
     height: 44,
     borderRadius: 22,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
-    backgroundColor: '#1E1F2A',
+    borderColor: BORDER,
+    backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
   },
   scaleDotActive: {
-    backgroundColor: '#34D399',
-    borderColor: 'rgba(52,211,153,0.7)',
+    backgroundColor: PURPLE_SOFT,
+    borderColor: 'rgba(76,29,149,0.35)',
   },
   scaleDotText: {
-    color: '#E5E7EB',
+    color: TEXT,
     fontWeight: '900',
   },
   scaleDotTextActive: {
-    color: '#0F0F14',
+    color: PRIMARY,
   },
-  footer: {
-    padding: 16,
-    backgroundColor: 'rgba(15,15,20,0.9)',
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255,255,255,0.06)',
+  inlineFooter: {
+    marginTop: 14,
   },
   footerRow: {
     flexDirection: 'row-reverse',
@@ -1293,33 +1445,38 @@ const styles = StyleSheet.create({
     flexDirection: 'row-reverse',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: '#E5E7EB',
+    backgroundColor: '#FFFFFF',
     paddingHorizontal: 14,
     paddingVertical: 10,
     borderRadius: 10,
     flex: 1,
+    borderWidth: 1,
+    borderColor: BORDER,
   },
   navBtnDisabled: {
-    backgroundColor: 'rgba(229,231,235,0.4)',
+    opacity: 0.55,
   },
   navBtnText: {
-    color: '#0F0F14',
+    color: PRIMARY,
     fontWeight: '900',
     fontSize: 14,
   },
   navBtnTextDisabled: {
-    color: '#9DA4AE',
+    color: MUTED,
   },
   primaryBtn: {
-    backgroundColor: '#4C1D95',
+    backgroundColor: PRIMARY,
     paddingHorizontal: 18,
     paddingVertical: 12,
     borderRadius: 12,
     minWidth: 140,
     alignItems: 'center',
   },
+  primaryBtnDisabled: {
+    opacity: 0.65,
+  },
   primaryBtnText: {
-    color: '#0F0F14',
+    color: '#FFFFFF',
     fontWeight: '900',
     fontSize: 16,
   },

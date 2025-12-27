@@ -710,6 +710,8 @@ export default function ProfileScreen() {
       : styles.surveyBadgePending
     : styles.surveyBadgeMuted;
 
+  const isSurveyCompleted = !!surveyResponse?.is_completed;
+
   if (isLoading) {
     return (
       <View style={styles.centerContainer}>
@@ -951,7 +953,13 @@ export default function ProfileScreen() {
           <TouchableOpacity
             style={styles.surveyCTA}
             activeOpacity={0.9}
-            onPress={() => setIsSurveyOpen(true)}
+            onPress={() => {
+              if (isSurveyCompleted) {
+                setIsSurveyOpen(true);
+              } else {
+                router.push('/(tabs)/onboarding/survey' as any);
+              }
+            }}
           >
             {profile ? (
               <LinearGradient
@@ -969,9 +977,11 @@ export default function ProfileScreen() {
               </LinearGradient>
             ) : null}
             <View style={styles.surveyCTATexts}>
-              <Text style={styles.surveyCTATitle}>תוצאות הסקר</Text>
+              <Text style={styles.surveyCTATitle}>
+                {isSurveyCompleted ? 'תוצאות הסקר' : 'מילוי שאלון'}
+              </Text>
               <Text style={styles.surveyCTASubtitle} numberOfLines={1}>
-                {profile?.full_name || ''}
+                {isSurveyCompleted ? surveySubtitle : 'לחיצה למילוי שאלון ההעדפות'}
               </Text>
             </View>
             <View style={styles.surveyCTABadge}>
@@ -985,6 +995,11 @@ export default function ProfileScreen() {
               </LinearGradient>
             </View>
           </TouchableOpacity>
+          {!isSurveyCompleted && (
+            <Text style={styles.surveyCTAHint}>
+              מלא/י את השאלון כדי שנוכל לחפש לך התאמות טובות יותר.
+            </Text>
+          )}
         </View>
 
         {/* moved logout and delete actions to /profile/settings */}
@@ -1653,6 +1668,14 @@ const styles = StyleSheet.create({
     color: '#6B7280',
     fontSize: 13,
     textAlign: 'right',
+  },
+  surveyCTAHint: {
+    marginTop: 10,
+    color: '#6B7280',
+    fontSize: 13,
+    lineHeight: 18,
+    textAlign: 'right',
+    alignSelf: 'stretch',
   },
   surveyCTABadge: {
     width: 56,

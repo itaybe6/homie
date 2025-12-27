@@ -15,6 +15,9 @@
       "buildNumber": "1",
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "אנחנו משתמשים במיקום שלך כדי להציג דירות ושותפים קרובים אליך.",
+        "NSCameraUsageDescription": "נשתמש במצלמה כדי להעלות תמונות לדירה.",
+        "NSPhotoLibraryUsageDescription": "נשתמש בגלריה כדי לבחור תמונות לדירה.",
+        "NSPhotoLibraryAddUsageDescription": "נוכל לשמור תמונות לדירה בגלריה לפי הצורך.",
         "ITSAppUsesNonExemptEncryption": false
       }
     },

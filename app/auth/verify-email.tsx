@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, Platform } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import LavaLamp from '@/components/LavaLamp';
+import OtpCodeInput from '@/components/OtpCodeInput';
 import { authService } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/authStore';
@@ -14,6 +15,7 @@ export default function VerifyEmailScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const setUser = useAuthStore((s) => s.setUser);
+  const user = useAuthStore((s) => s.user);
   const { pending, clearPending } = usePendingSignupStore();
 
   const [code, setCode] = useState('');
@@ -29,11 +31,13 @@ export default function VerifyEmailScreen() {
   }, [email]);
 
   useEffect(() => {
-    if (!pending?.email) {
+    // If user refreshed/arrived directly without pending AND not authenticated, go back to register.
+    // Important: after successful verification we clear pending, so we must not redirect when a session exists.
+    if (!pending?.email && !user) {
       // If user refreshed or arrived here directly, go back to register.
       router.replace('/auth/register' as any);
     }
-  }, [pending?.email, router]);
+  }, [pending?.email, user, router]);
 
   const handleVerify = async () => {
     if (!pending?.email) return;
@@ -52,7 +56,15 @@ export default function VerifyEmailScreen() {
       // 2) Set password for future logins (since OTP flow is passwordless by default)
       if (pending.password) {
         const { error: pwErr } = await supabase.auth.updateUser({ password: pending.password });
-        if (pwErr) throw pwErr;
+        if (pwErr) {
+          // If the user already had the same password (re-register / repeat OTP), Supabase may return:
+          // "New password should be different from the old password."
+          // This is not fatal for the OTP verification flow, so we treat it as non-blocking.
+          const msg = String((pwErr as any)?.message || pwErr);
+          if (!msg.toLowerCase().includes('new password should be different')) {
+            throw pwErr;
+          }
+        }
       }
 
       // 3) Best-effort: ensure role is set for owners if column exists
@@ -70,7 +82,7 @@ export default function VerifyEmailScreen() {
       if (pending.role === 'owner') {
         router.replace('/(tabs)/add-apartment' as any);
       } else {
-        router.replace('/(tabs)/home' as any);
+        router.replace('/(tabs)/onboarding/survey' as any);
       }
     } catch (e: any) {
       const msg = String(e?.message || e);
@@ -121,16 +133,13 @@ export default function VerifyEmailScreen() {
 
           {error ? <Text style={styles.error}>{error}</Text> : null}
 
-          <TextInput
+          <OtpCodeInput
             value={code}
-            onChangeText={(t) => setCode(t.replace(/[^\d]/g, '').slice(0, 6))}
-            placeholder="הקלד/י קוד (6 ספרות)"
-            placeholderTextColor="#9DA4AE"
-            keyboardType={Platform.OS === 'ios' ? 'number-pad' : 'numeric'}
-            textContentType="oneTimeCode"
+            onChange={(t) => setCode(t.replace(/[^\d]/g, '').slice(0, 6))}
+            length={6}
             autoFocus
-            editable={!isLoading}
-            style={styles.input}
+            disabled={isLoading}
+            accentColor={PRIMARY}
           />
 
           <TouchableOpacity
@@ -188,19 +197,6 @@ const styles = StyleSheet.create({
   email: {
     color: PRIMARY,
     fontWeight: '700',
-  },
-  input: {
-    marginTop: 18,
-    backgroundColor: '#FFFFFF',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    borderRadius: 12,
-    fontSize: 18,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    color: '#111827',
-    textAlign: 'center',
-    letterSpacing: 6,
   },
   button: {
     marginTop: 14,

@@ -9,8 +9,7 @@ import type { Apartment } from '@/types/database';
 import type { MapboxFeatureCollection } from '@/lib/mapboxHtml';
 import FilterChipsBar, { defaultFilterChips, selectedFiltersFromIds, type FilterChip } from '@/components/FilterChipsBar';
 import { Search, X, MapPin, LocateFixed } from 'lucide-react-native';
-import * as Location from 'expo-location/build/Location';
-import { LocationAccuracy } from 'expo-location/build/Location.types';
+import * as Location from 'expo-location';
 
 function chunk<T>(arr: T[], size: number): T[][] {
   const out: T[][] = [];
@@ -112,7 +111,7 @@ export default function MapTabScreen() {
         return null;
       }
       const pos = await Location.getCurrentPositionAsync({
-        accuracy: LocationAccuracy.Balanced,
+        accuracy: Location.Accuracy.Balanced,
       });
       const lng = pos?.coords?.longitude;
       const lat = pos?.coords?.latitude;

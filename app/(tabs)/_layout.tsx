@@ -51,6 +51,8 @@ export default function TabLayout() {
   const isCheckingSurveyRef = useRef(false);
   const isCheckingOwnedApartmentRef = useRef(false);
   const insets = useSafeAreaInsets();
+  const isSurveyRoute =
+    typeof pathname === 'string' && pathname.includes('/onboarding/survey');
   const [ownedApartmentId, setOwnedApartmentId] = useState<string | null | undefined>(
     user?.id ? undefined : null
   );
@@ -155,7 +157,9 @@ export default function TabLayout() {
         tabBarHideOnKeyboard: true,
         tabBarActiveTintColor: '#4C1D95',
         tabBarInactiveTintColor: '#6B7280',
-        tabBarStyle: {
+        tabBarStyle: isSurveyRoute
+          ? ({ display: 'none' } as any)
+          : ({
           backgroundColor: '#FFFFFF',
           borderTopColor: '#E5E7EB',
           borderTopWidth: StyleSheet.hairlineWidth,
@@ -169,7 +173,7 @@ export default function TabLayout() {
           shadowRadius: 12,
           shadowOffset: { width: 0, height: -2 },
           elevation: 10,
-        } as any,
+        } as any),
         tabBarLabelStyle: { fontSize: 12, fontWeight: '600' },
       }}>
       <Tabs.Screen
