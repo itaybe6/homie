@@ -6,6 +6,7 @@ export interface User {
   age?: number;
   phone?: string;
   city?: string;
+  address?: string;
   bio?: string;
   gender?: 'male' | 'female';
   avatar_url?: string;
@@ -70,6 +71,7 @@ export interface Apartment {
   bedrooms: number;
   bathrooms: number;
   roommate_capacity?: number;
+  image_url?: string; // legacy: single image url (some environments still use it)
   image_urls?: string[]; // new: multiple images
   partner_ids?: string[]; // national IDs of roommates associated to the apartment
 

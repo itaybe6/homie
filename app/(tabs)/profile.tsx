@@ -611,14 +611,16 @@ export default function ProfileScreen() {
       highlights.push({ label: 'סאבלט', value: 'כן' });
     }
 
-    return highlights.slice(0, 4);
+    return highlights;
   }, [surveyResponse]);
+
+  type SurveySectionKey = 'about' | 'apartment' | 'partner';
 
   const surveyItems = useMemo(() => {
     if (!surveyResponse) return [];
-    const items: { label: string; value: string }[] = [];
+    const items: { section: SurveySectionKey; label: string; value: string }[] = [];
 
-    const add = (label: string, raw?: string | number | null) => {
+    const add = (section: SurveySectionKey, label: string, raw?: string | number | null) => {
       if (raw === undefined || raw === null) return;
       const value =
         typeof raw === 'string'
@@ -627,66 +629,82 @@ export default function ProfileScreen() {
             ? `${raw}`
             : '';
       if (!value) return;
-      items.push({ label, value });
+      items.push({ section, label, value });
     };
 
-    const addBool = (label: string, raw?: boolean | null) => {
+    const addBool = (section: SurveySectionKey, label: string, raw?: boolean | null) => {
       const formatted = formatYesNo(raw);
       if (!formatted) return;
-      items.push({ label, value: formatted });
+      items.push({ section, label, value: formatted });
     };
 
-    add('עיסוק', surveyResponse.occupation);
+    // עליי
+    add('about', 'עיסוק', surveyResponse.occupation);
     if (typeof surveyResponse.student_year === 'number' && surveyResponse.student_year > 0) {
-      add('שנת לימודים', `שנה ${surveyResponse.student_year}`);
+      add('about', 'שנת לימודים', `שנה ${surveyResponse.student_year}`);
     }
-    addBool('עבודה מהבית', surveyResponse.works_from_home);
-    addBool('שומר/ת כשרות', surveyResponse.keeps_kosher);
-    addBool('שומר/ת שבת', surveyResponse.is_shomer_shabbat);
-    add('תזונה', surveyResponse.diet_type);
-    addBool('מעשן/ת', surveyResponse.is_smoker);
-    add('מצב זוגי', surveyResponse.relationship_status);
-    addBool('חיית מחמד בבית', surveyResponse.has_pet);
+    addBool('about', 'עבודה מהבית', surveyResponse.works_from_home);
+    addBool('about', 'שומר/ת כשרות', surveyResponse.keeps_kosher);
+    addBool('about', 'שומר/ת שבת', surveyResponse.is_shomer_shabbat);
+    add('about', 'תזונה', surveyResponse.diet_type);
+    addBool('about', 'מעשן/ת', surveyResponse.is_smoker);
+    add('about', 'מצב זוגי', surveyResponse.relationship_status);
+    addBool('about', 'חיית מחמד בבית', surveyResponse.has_pet);
     if (typeof surveyResponse.cleanliness_importance === 'number') {
-      add('חשיבות ניקיון', `${surveyResponse.cleanliness_importance}/5`);
+      add('about', 'חשיבות ניקיון', `${surveyResponse.cleanliness_importance}/5`);
     }
-    add('תדירות ניקיון', surveyResponse.cleaning_frequency);
-    add('העדפת אירוח', surveyResponse.hosting_preference);
-    add('סטייל בישול', surveyResponse.cooking_style);
-    add('וייב בבית', surveyResponse.home_vibe);
-    addBool('תת-השכרה', surveyResponse.is_sublet);
+    add('about', 'תדירות ניקיון', surveyResponse.cleaning_frequency);
+    add('about', 'העדפת אירוח', surveyResponse.hosting_preference);
+    add('about', 'סטייל בישול', surveyResponse.cooking_style);
+    add('about', 'וייב בבית', surveyResponse.home_vibe);
+    add('about', 'סגנון חיים', (surveyResponse as any).lifestyle);
+
+    // הדירה שאני מחפש/ת
+    addBool('apartment', 'תת-השכרה', surveyResponse.is_sublet);
     if (surveyResponse.sublet_month_from || surveyResponse.sublet_month_to) {
       const period = [formatMonthLabel(surveyResponse.sublet_month_from), formatMonthLabel(surveyResponse.sublet_month_to)]
         .filter(Boolean)
         .join(' → ');
-      add('טווח סאבלט', period);
+      add('apartment', 'טווח סאבלט', period);
     }
     if (typeof surveyResponse.price_range === 'number') {
-      add('תקציב שכירות', formatCurrency(surveyResponse.price_range));
+      add('apartment', 'תקציב שכירות', formatCurrency(surveyResponse.price_range));
     }
-    addBool('חשבונות כלולים', surveyResponse.bills_included);
-    add('עיר מועדפת', surveyResponse.preferred_city);
+    addBool('apartment', 'חשבונות כלולים', surveyResponse.bills_included);
+    add('apartment', 'עיר מועדפת', surveyResponse.preferred_city);
     const neighborhoodsJoined = normalizeNeighborhoods((surveyResponse.preferred_neighborhoods as unknown) ?? null);
     if (neighborhoodsJoined) {
-      add('שכונות מועדפות', neighborhoodsJoined);
+      add('apartment', 'שכונות מועדפות', neighborhoodsJoined);
     }
-    add('קומה מועדפת', surveyResponse.floor_preference);
-    addBool('מרפסת', surveyResponse.has_balcony);
-    addBool('מעלית', surveyResponse.has_elevator);
-    addBool('חדר מאסטר', surveyResponse.wants_master_room);
-    add('חודש כניסה', formatMonthLabel(surveyResponse.move_in_month));
+    add('apartment', 'קומה מועדפת', surveyResponse.floor_preference);
+    addBool('apartment', 'מרפסת', surveyResponse.has_balcony);
+    addBool('apartment', 'מעלית', surveyResponse.has_elevator);
+    addBool('apartment', 'חדר מאסטר', surveyResponse.wants_master_room);
+    add('apartment', 'חודש כניסה', formatMonthLabel(surveyResponse.move_in_month));
     if (typeof surveyResponse.preferred_roommates === 'number') {
-      add('מספר שותפים מועדף', `${surveyResponse.preferred_roommates}`);
+      add('apartment', 'מספר שותפים מועדף', `${surveyResponse.preferred_roommates}`);
     }
-    addBool('חיות מורשות', surveyResponse.pets_allowed);
-    addBool('עם מתווך', surveyResponse.with_broker);
-    add('טווח גילאים רצוי', surveyResponse.preferred_age_range);
-    add('מגדר שותפים', surveyResponse.preferred_gender);
-    add('עיסוק שותפים', surveyResponse.preferred_occupation);
-    add('שותפים ושבת', surveyResponse.partner_shabbat_preference);
-    add('שותפים ותזונה', surveyResponse.partner_diet_preference);
-    add('שותפים ועישון', surveyResponse.partner_smoking_preference);
-    add('שותפים וחיות', surveyResponse.partner_pets_preference);
+    addBool('apartment', 'חיות מורשות', surveyResponse.pets_allowed);
+    addBool('apartment', 'עם מתווך', surveyResponse.with_broker);
+    // Some schemas store min/max instead of preferred_age_range; derive when missing.
+    const minAge = (surveyResponse as any).preferred_age_min;
+    const maxAge = (surveyResponse as any).preferred_age_max;
+    const derivedAgeRange =
+      typeof minAge === 'number' && typeof maxAge === 'number'
+        ? `${minAge}–${maxAge}`
+        : typeof minAge === 'number'
+          ? `${minAge}+`
+          : typeof maxAge === 'number'
+            ? `עד ${maxAge}`
+            : null;
+    // השותפ/ה שאני מחפש/ת
+    add('partner', 'טווח גילאים רצוי', surveyResponse.preferred_age_range || derivedAgeRange);
+    add('partner', 'מגדר שותפים', surveyResponse.preferred_gender);
+    add('partner', 'עיסוק שותפים', surveyResponse.preferred_occupation);
+    add('partner', 'שותפים ושבת', surveyResponse.partner_shabbat_preference);
+    add('partner', 'שותפים ותזונה', surveyResponse.partner_diet_preference);
+    add('partner', 'שותפים ועישון', surveyResponse.partner_smoking_preference);
+    add('partner', 'שותפים וחיות', surveyResponse.partner_pets_preference);
 
     return items;
   }, [surveyResponse]);
@@ -750,6 +768,7 @@ export default function ProfileScreen() {
         ]}>
 
         {!isEditing ? (
+          <View style={styles.profileCardShadow}>
           <View style={styles.profileCard}>
             <View style={styles.photoWrap}>
               <Image
@@ -804,6 +823,7 @@ export default function ProfileScreen() {
 
               {/* gallery grid moved to its own section below */}
             </View>
+          </View>
           </View>
         ) : (
           <View style={styles.editCard}>
@@ -1074,14 +1094,54 @@ export default function ProfileScreen() {
               )}
               {surveyResponse ? (
                 surveyItems.length ? (
-                  <View style={styles.surveyGrid}>
-                    {surveyItems.map((item) => (
-                      <View key={`${item.label}-${item.value}`} style={styles.surveyCell}>
-                        <Text style={styles.surveyCellLabel}>{item.label}</Text>
-                        <Text style={styles.surveyCellValue}>{item.value}</Text>
-                      </View>
-                    ))}
-                  </View>
+                  <>
+                    <Text style={styles.surveyAllAnswersTitle}>{`סיכום מלא (${surveyItems.length})`}</Text>
+
+                    <View style={styles.surveySectionCard}>
+                      <Text style={styles.surveySectionTitle}>עליי</Text>
+                      {surveyItems.filter((i) => i.section === 'about').map((item, idx, arr) => (
+                        <View key={`${item.section}-${item.label}-${item.value}`}>
+                          <View style={styles.surveyRow}>
+                            <Text style={styles.surveyRowLabel}>{item.label}</Text>
+                            <View style={styles.surveyRowValuePill}>
+                              <Text style={styles.surveyRowValueText}>{item.value}</Text>
+                            </View>
+                          </View>
+                          {idx < arr.length - 1 ? <View style={styles.surveyRowDivider} /> : null}
+                        </View>
+                      ))}
+                    </View>
+
+                    <View style={styles.surveySectionCard}>
+                      <Text style={styles.surveySectionTitle}>הדירה שאני מחפש/ת</Text>
+                      {surveyItems.filter((i) => i.section === 'apartment').map((item, idx, arr) => (
+                        <View key={`${item.section}-${item.label}-${item.value}`}>
+                          <View style={styles.surveyRow}>
+                            <Text style={styles.surveyRowLabel}>{item.label}</Text>
+                            <View style={styles.surveyRowValuePill}>
+                              <Text style={styles.surveyRowValueText}>{item.value}</Text>
+                            </View>
+                          </View>
+                          {idx < arr.length - 1 ? <View style={styles.surveyRowDivider} /> : null}
+                        </View>
+                      ))}
+                    </View>
+
+                    <View style={styles.surveySectionCard}>
+                      <Text style={styles.surveySectionTitle}>השותפ/ה שאני מחפש/ת</Text>
+                      {surveyItems.filter((i) => i.section === 'partner').map((item, idx, arr) => (
+                        <View key={`${item.section}-${item.label}-${item.value}`}>
+                          <View style={styles.surveyRow}>
+                            <Text style={styles.surveyRowLabel}>{item.label}</Text>
+                            <View style={styles.surveyRowValuePill}>
+                              <Text style={styles.surveyRowValueText}>{item.value}</Text>
+                            </View>
+                          </View>
+                          {idx < arr.length - 1 ? <View style={styles.surveyRowDivider} /> : null}
+                        </View>
+                      ))}
+                    </View>
+                  </>
                 ) : (
                   <View style={styles.surveyEmptyState}>
                     <Text style={styles.surveyEmptyText}>
@@ -1153,13 +1213,25 @@ const styles = StyleSheet.create({
     letterSpacing: 0.3,
   },
   profileCard: {
-    marginHorizontal: 16,
-    marginTop: 16,
     borderRadius: 24,
     overflow: 'hidden',
     backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderWidth: 0,
+    borderColor: 'transparent',
+  },
+  profileCardShadow: {
+    marginHorizontal: 16,
+    marginTop: 16,
+    borderRadius: 24,
+    backgroundColor: '#FFFFFF',
+    shadowColor: '#000000',
+    shadowOpacity: 0.10,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 4,
+    ...(Platform.OS === 'web'
+      ? ({ boxShadow: '0 14px 32px rgba(0,0,0,0.10)' } as any)
+      : null),
   },
   photoWrap: {
     position: 'relative',
@@ -1374,11 +1446,19 @@ const styles = StyleSheet.create({
   },
   galleryCard: {
     backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderWidth: 0,
+    borderColor: 'transparent',
     borderRadius: 16,
     padding: 12,
     marginTop: 8,
+    shadowColor: '#000000',
+    shadowOpacity: 0.08,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 3,
+    ...(Platform.OS === 'web'
+      ? ({ boxShadow: '0 12px 28px rgba(0,0,0,0.10)' } as any)
+      : null),
   },
   galleryHeaderTitle: {
     color: '#111827',
@@ -1420,14 +1500,15 @@ const styles = StyleSheet.create({
     aspectRatio: 1,
     borderRadius: 18,
     overflow: 'hidden',
-    backgroundColor: '#F3F4F6',
+    backgroundColor: '#FFFFFF',
     position: 'relative',
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderWidth: 0,
+    borderColor: 'transparent',
     shadowColor: '#000000',
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.12,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 4,
   },
   galleryAddTile: {
     width: '31%',
@@ -1439,12 +1520,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#F9FAFB',
+    paddingTop: 14,
+    paddingBottom: 16,
+    paddingHorizontal: 10,
   },
   galleryAddTileText: {
-    marginTop: 6,
+    marginTop: 10,
     color: '#4C1D95',
     fontWeight: '800',
     fontSize: 12,
+    lineHeight: 16,
+    includeFontPadding: false,
   },
   galleryItemTall: {
     aspectRatio: 0.8,
@@ -1577,6 +1663,64 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 10,
     marginBottom: 12,
+  },
+  surveyAllAnswersTitle: {
+    color: '#111827',
+    fontSize: 14,
+    fontWeight: '900',
+    textAlign: 'right',
+    marginTop: 4,
+    marginBottom: 8,
+  },
+  surveySectionCard: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 18,
+    padding: 14,
+    marginBottom: 12,
+  },
+  surveySectionTitle: {
+    color: '#4C1D95',
+    fontSize: 14,
+    fontWeight: '900',
+    textAlign: 'right',
+    marginBottom: 10,
+  },
+  surveyRow: {
+    flexDirection: 'row-reverse',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  surveyRowLabel: {
+    flex: 1,
+    color: '#6B7280',
+    fontSize: 13,
+    fontWeight: '700',
+    textAlign: 'right',
+    lineHeight: 18,
+  },
+  surveyRowValuePill: {
+    maxWidth: '55%',
+    backgroundColor: 'rgba(76,29,149,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(76,29,149,0.18)',
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 14,
+  },
+  surveyRowValueText: {
+    color: '#111827',
+    fontSize: 13,
+    fontWeight: '900',
+    textAlign: 'right',
+    lineHeight: 18,
+  },
+  surveyRowDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: '#EEF2F7',
+    marginVertical: 10,
   },
   surveyHighlightPill: {
     backgroundColor: '#F9FAFB',

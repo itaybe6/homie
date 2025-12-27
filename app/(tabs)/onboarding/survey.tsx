@@ -1234,7 +1234,7 @@ const styles = StyleSheet.create({
     color: TEXT,
     fontSize: 14,
     fontWeight: '700',
-    textAlign: 'center',
+    textAlign: 'right',
   },
   input: {
     backgroundColor: '#FFFFFF',
@@ -1245,18 +1245,18 @@ const styles = StyleSheet.create({
     fontSize: 16,
     borderWidth: 1,
     borderColor: BORDER,
-    textAlign: 'center',
+    textAlign: 'right',
   },
   toggleRow: {
     flexDirection: 'column',
-    alignItems: 'center',
+    alignItems: 'flex-end',
     gap: 12,
   },
   toggleOptions: {
     flexDirection: 'row',
     gap: 8,
     writingDirection: 'rtl',
-    justifyContent: 'center',
+    justifyContent: 'flex-end',
   },
   toggleBtn: {
     flexDirection: 'row-reverse',
@@ -1289,7 +1289,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
-    justifyContent: 'center',
+    justifyContent: 'flex-end',
     writingDirection: 'rtl',
   },
   chip: {
@@ -1308,7 +1308,7 @@ const styles = StyleSheet.create({
     color: TEXT,
     fontWeight: '800',
     fontSize: 13,
-    textAlign: 'center',
+    textAlign: 'right',
   },
   chipTextActive: {
     color: PRIMARY,
@@ -1316,12 +1316,12 @@ const styles = StyleSheet.create({
   selectText: {
     color: TEXT,
     fontSize: 16,
-    textAlign: 'center',
+    textAlign: 'right',
   },
   selectPlaceholder: {
     color: MUTED,
     fontSize: 16,
-    textAlign: 'center',
+    textAlign: 'right',
   },
   pickerOverlay: {
     position: 'absolute',
