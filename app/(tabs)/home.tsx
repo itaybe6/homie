@@ -263,7 +263,7 @@ export default function HomeScreen() {
             <Search size={20} color="#4C1D95" style={styles.searchIcon} />
             <TextInput
               style={styles.topSearchInput}
-              placeholder="חיפוש לפי עיר, שכונה או כתובת..."
+              placeholder="חיפוש לפי עיר או שכונה..."
               placeholderTextColor="#9DA4AE"
               value={searchQuery}
               onChangeText={setSearchQuery}
@@ -383,9 +383,7 @@ export default function HomeScreen() {
 
       // search query
       const matchesSearch = !query
-        || apartment.title.toLowerCase().includes(query)
         || apartment.city.toLowerCase().includes(query)
-        || apartment.address.toLowerCase().includes(query)
         || (apartment as any).neighborhood?.toLowerCase?.().includes(query);
 
       if (!matchesSearch) return false;

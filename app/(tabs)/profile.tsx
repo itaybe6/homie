@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -17,7 +17,7 @@ import {
 import { useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { LogOut, Edit, Save, X, Plus, MapPin, Inbox, Trash2, Settings, ClipboardList } from 'lucide-react-native';
+import { LogOut, Edit, Save, X, Plus, MapPin, Inbox, Trash2, Settings, ClipboardList, Camera } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
@@ -50,6 +50,7 @@ export default function ProfileScreen() {
     { id: string; name?: string | null; members: Pick<User, 'id' | 'full_name' | 'avatar_url'>[] }[]
   >([]);
   const [surveyResponse, setSurveyResponse] = useState<UserSurveyResponse | null>(null);
+  const ignoreNextGalleryPressRef = useRef(false);
 
   const surveySheetMaxHeight = useMemo(() => {
     const hardMax = Math.max(420, Math.round(windowHeight * 0.88));
@@ -469,36 +470,26 @@ export default function ProfileScreen() {
   };
 
   const pickAndUploadAvatar = async () => {
+    // Backwards compat: default to gallery
+    return pickAndUploadAvatarFrom('library');
+  };
+
+  const uploadAvatarFromUri = async (uri: string) => {
+    if (!user?.id) return;
+    setIsSaving(true);
     try {
-      const perms = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!perms.granted) {
-        Alert.alert('הרשאה נדרשת', 'יש לאפשר גישה לגלריה כדי להעלות תמונה');
-        return;
-      }
-
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true,
-        aspect: [1, 1],
-        quality: 0.9,
-      });
-
-      if (result.canceled || !result.assets?.length || !user) return;
-
-      setIsSaving(true);
-      const asset = result.assets[0];
       // Check image dimensions and only resize if larger than 800px
-      const imageInfo = await ImageManipulator.manipulateAsync(asset.uri, []);
+      const imageInfo = await ImageManipulator.manipulateAsync(uri, []);
       const actions: ImageManipulator.Action[] = [];
       if (imageInfo.width > 800) {
         actions.push({ resize: { width: 800 } });
       }
       // Compress the image
-      const compressed = await ImageManipulator.manipulateAsync(
-        asset.uri,
-        actions,
-        { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG }
-      );
+      const compressed = await ImageManipulator.manipulateAsync(uri, actions, {
+        compress: 0.8,
+        format: ImageManipulator.SaveFormat.JPEG,
+      });
+
       const response = await fetch(compressed.uri);
       const arrayBuffer = await response.arrayBuffer();
       const fileName = `${user.id}-${Date.now()}.jpg`;
@@ -521,12 +512,71 @@ export default function ProfileScreen() {
       if (updateError) throw updateError;
 
       setProfile((prev) => (prev ? { ...prev, avatar_url: publicUrl } : prev));
-      Alert.alert('הצלחה', 'התמונה עודכנה');
+      Alert.alert('הצלחה', profile?.avatar_url ? 'תמונת הפרופיל עודכנה' : 'תמונת הפרופיל נוספה');
     } catch (e: any) {
-      Alert.alert('שגיאה', e.message || 'לא ניתן להעלות תמונה');
+      Alert.alert('שגיאה', e?.message || 'לא ניתן להעלות תמונה');
     } finally {
       setIsSaving(false);
     }
+  };
+
+  const pickAndUploadAvatarFrom = async (source: 'camera' | 'library') => {
+    try {
+      if (!user?.id) return;
+
+      if (Platform.OS === 'web') {
+        // Web: camera flow isn't reliable; fallback to file picker
+        source = 'library';
+      }
+
+      if (source === 'camera') {
+        const perms = await ImagePicker.requestCameraPermissionsAsync();
+        if (!perms.granted) {
+          Alert.alert('הרשאה נדרשת', 'יש לאפשר גישה למצלמה כדי לצלם תמונה');
+          return;
+        }
+
+        const result = await ImagePicker.launchCameraAsync({
+          mediaTypes: ImagePicker.MediaTypeOptions.Images,
+          allowsEditing: true,
+          aspect: [1, 1],
+          quality: 0.9,
+        });
+        if (result.canceled || !result.assets?.length) return;
+        await uploadAvatarFromUri(result.assets[0].uri);
+        return;
+      }
+
+      const perms = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perms.granted) {
+        Alert.alert('הרשאה נדרשת', 'יש לאפשר גישה לגלריה כדי להעלות תמונה');
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.9,
+      });
+
+      if (result.canceled || !result.assets?.length) return;
+      await uploadAvatarFromUri(result.assets[0].uri);
+    } catch (e: any) {
+      Alert.alert('שגיאה', e?.message || 'לא ניתן לעדכן את תמונת הפרופיל');
+    }
+  };
+
+  const openAvatarActions = () => {
+    const hasAvatar = !!profile?.avatar_url;
+    const title = hasAvatar ? 'תמונת פרופיל' : 'הוספת תמונת פרופיל';
+    const message = hasAvatar ? 'בחר/י איך לעדכן את התמונה (כולל חיתוך/עריכה).' : 'בחר/י צילום או העלאה.';
+
+    Alert.alert(title, message, [
+      { text: 'ביטול', style: 'cancel' },
+      { text: 'צלם/י', onPress: () => pickAndUploadAvatarFrom('camera') },
+      { text: hasAvatar ? 'החלף/ערוך מהגלריה' : 'בחר/י מהגלריה', onPress: () => pickAndUploadAvatarFrom('library') },
+    ]);
   };
 
   // moved extra-photos upload to edit profile screen
@@ -785,18 +835,14 @@ export default function ProfileScreen() {
               />
 
               <TouchableOpacity
-                style={styles.settingsBtn}
-                onPress={() => router.push('/(tabs)/profile/settings')}
+                style={[styles.avatarCameraBtn, isSaving ? { opacity: 0.7 } : null]}
+                onPress={isSaving ? undefined : openAvatarActions}
                 activeOpacity={0.9}
+                accessibilityRole="button"
+                accessibilityLabel="עריכת תמונת פרופיל"
               >
-                <Settings size={18} color="#FFFFFF" />
+                <Camera size={18} color="#4C1D95" />
               </TouchableOpacity>
-
-              {!profile?.avatar_url ? (
-                <TouchableOpacity style={styles.addPhotoBtn} onPress={pickAndUploadAvatar} activeOpacity={0.9} disabled={isSaving}>
-                  <Plus size={20} color="#FFFFFF" />
-                </TouchableOpacity>
-              ) : null}
             </View>
 
             <View style={styles.infoPanel}>
@@ -876,24 +922,52 @@ export default function ProfileScreen() {
         {/* Shared profile (if any) */}
         {sharedGroups.length > 0 && (
           <View style={styles.sectionDark}>
-            <Text style={styles.sectionTitleDark}>
-              {sharedGroups.length > 1 ? 'פרופילים משותפים' : 'פרופיל משותף'}
-            </Text>
             {sharedGroups.map((g) => (
               <View key={g.id} style={styles.sharedCard}>
-                <View style={styles.sharedAvatarsRow}>
+                <View style={styles.sharedCardHeaderRow}>
+                  <Text style={styles.sharedCardTitle} numberOfLines={1}>
+                    {(g.name || 'פרופיל משותף').toString()}
+                  </Text>
+                  <Text style={styles.sharedCardMeta} numberOfLines={1}>
+                    {`${g.members.length} משתתפים`}
+                  </Text>
+                </View>
+
+                <View style={styles.sharedMembersGrid}>
                   {g.members.map((m) => (
-                    <View key={m.id} style={styles.sharedAvatarWrap}>
-                      <Image
-                        source={{ uri: m.avatar_url || 'https://cdn-icons-png.flaticon.com/512/847/847969.png' }}
-                        style={styles.sharedAvatar}
-                      />
-                    </View>
+                    <TouchableOpacity
+                      key={m.id}
+                      style={styles.sharedMemberTile}
+                      activeOpacity={0.9}
+                      onPress={() => {
+                        if (!m?.id) return;
+                        router.push({ pathname: '/user/[id]', params: { id: m.id } });
+                      }}
+                      disabled={String((user as any)?.id || '') === String(m?.id || '')}
+                      accessibilityRole="button"
+                      accessibilityLabel={
+                        String((user as any)?.id || '') === String(m?.id || '')
+                          ? 'זה הפרופיל שלך'
+                          : `פתח פרופיל של ${(m.full_name || 'משתמש/ת').toString()}`
+                      }
+                      accessibilityState={
+                        String((user as any)?.id || '') === String(m?.id || '')
+                          ? ({ disabled: true } as any)
+                          : undefined
+                      }
+                    >
+                      <View style={styles.sharedMemberAvatarWrap}>
+                        <Image
+                          source={{ uri: m.avatar_url || 'https://cdn-icons-png.flaticon.com/512/847/847969.png' }}
+                          style={styles.sharedMemberAvatar}
+                        />
+                      </View>
+                      <Text style={styles.sharedMemberName} numberOfLines={1}>
+                        {m.full_name || 'משתמש/ת'}
+                      </Text>
+                    </TouchableOpacity>
                   ))}
                 </View>
-                <Text style={styles.sharedMembersLine} numberOfLines={2}>
-                  {g.members.map((m) => m.full_name || 'חבר').join(' • ')}
-                </Text>
               </View>
             ))}
           </View>
@@ -901,11 +975,11 @@ export default function ProfileScreen() {
 
         {/* Gallery section */}
         <View style={styles.sectionDark}>
-          <View style={styles.galleryHeaderRow}>
-            <Text style={styles.galleryHeaderTitle}>תמונות</Text>
-            <Text style={styles.galleryCountText}>{(profile?.image_urls?.length || 0)}/6</Text>
-          </View>
           <View style={styles.galleryCard}>
+            <View style={styles.galleryHeaderRow}>
+              <Text style={styles.galleryHeaderTitle}>תמונות</Text>
+              <Text style={styles.galleryCountText}>{(profile?.image_urls?.length || 0)}/6</Text>
+            </View>
             {profile?.image_urls?.length ? (
               <View style={styles.galleryGrid}>
                 {profile.image_urls.map((url, idx) => (
@@ -913,7 +987,19 @@ export default function ProfileScreen() {
                     key={url + idx}
                     style={styles.galleryItem}
                     activeOpacity={0.9}
-                    onPress={() => setViewerIndex(idx)}
+                    onPress={() => {
+                      if (ignoreNextGalleryPressRef.current) {
+                        ignoreNextGalleryPressRef.current = false;
+                        return;
+                      }
+                      setViewerIndex(idx);
+                    }}
+                    delayLongPress={350}
+                    onLongPress={() => {
+                      // Prevent the subsequent onPress from opening the viewer after long-press.
+                      ignoreNextGalleryPressRef.current = true;
+                      removeImageAt(idx);
+                    }}
                   >
                     <Image source={{ uri: url }} style={styles.galleryImg} />
                   </TouchableOpacity>
@@ -946,26 +1032,47 @@ export default function ProfileScreen() {
 
         {userApartments.length > 0 && (
           <View style={styles.sectionDark}>
-            <Text style={styles.sectionTitleDark}>הדירות שלי</Text>
-            {userApartments.map((apt) => {
-              const thumb = getApartmentPrimaryImage(apt);
-              return (
-                <TouchableOpacity
-                  key={apt.id}
-                  style={styles.apartmentRow}
-                  onPress={() => router.push({ pathname: '/apartment/[id]', params: { id: apt.id } })}
-                >
-                  <Image source={{ uri: thumb }} style={styles.aptThumb} />
-                  <View style={styles.aptTextWrap}>
-                    <Text style={styles.aptTitle} numberOfLines={1}>{apt.title}</Text>
-                    <Text style={styles.aptSub} numberOfLines={1}>
-                      {([apt.city, (apt as any).address].filter(Boolean) as string[]).join(' • ')}
-                    </Text>
-                    <Text style={styles.aptPricePurple}>₪{apt.price}/חודש</Text>
+            <View style={styles.apartmentsCard}>
+              {(() => {
+                const uid = (user as any)?.id as string | undefined;
+                const anyOwned = !!uid && userApartments.some((a: any) => String(a?.owner_id || '') === String(uid));
+                const anyPartner =
+                  !!uid &&
+                  userApartments.some((a: any) => Array.isArray(a?.partner_ids) && (a.partner_ids as any[]).includes(uid));
+                const headerTag = anyOwned && anyPartner ? 'בעל דירה / שותף' : anyOwned ? 'בעל דירה' : 'שותף';
+                return (
+                  <View style={styles.apartmentsHeaderRow}>
+                    <Text style={styles.apartmentsHeaderTitle}>הדירות שלי</Text>
+                    <View style={styles.apartmentsHeaderTag}>
+                      <Text style={styles.apartmentsHeaderTagText}>{headerTag}</Text>
+                    </View>
                   </View>
-                </TouchableOpacity>
-              );
-            })}
+                );
+              })()}
+
+              <View style={{ paddingTop: 12 }}>
+                {userApartments.map((apt, idx) => {
+                  const thumb = getApartmentPrimaryImage(apt);
+                  const isLast = idx === userApartments.length - 1;
+                  return (
+                    <TouchableOpacity
+                      key={apt.id}
+                      style={[styles.apartmentRow, isLast ? { marginBottom: 0 } : null]}
+                      onPress={() => router.push({ pathname: '/apartment/[id]', params: { id: apt.id } })}
+                    >
+                      <Image source={{ uri: thumb }} style={styles.aptThumb} />
+                      <View style={styles.aptTextWrap}>
+                        <Text style={styles.aptTitle} numberOfLines={1}>{apt.title}</Text>
+                        <Text style={styles.aptSub} numberOfLines={1}>
+                          {([apt.city, (apt as any).address].filter(Boolean) as string[]).join(' • ')}
+                        </Text>
+                        <Text style={styles.aptPricePurple}>₪{apt.price}/חודש</Text>
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </View>
           </View>
         )}
 
@@ -1020,6 +1127,30 @@ export default function ProfileScreen() {
               מלא/י את השאלון כדי שנוכל לחפש לך התאמות טובות יותר.
             </Text>
           )}
+
+          <TouchableOpacity
+            style={[styles.surveyCTA, { marginTop: 12 }]}
+            activeOpacity={0.9}
+            onPress={() => router.push('/(tabs)/profile/settings')}
+          >
+            <View style={styles.surveyCTATexts}>
+              <Text style={styles.surveyCTATitle}>הגדרות</Text>
+              <Text style={styles.surveyCTASubtitle} numberOfLines={1}>
+                ניהול חשבון, פרופיל ותמונות
+              </Text>
+            </View>
+
+            <View style={styles.surveyCTABadge}>
+              <LinearGradient
+                colors={['#A78BFA', '#4C1D95']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.surveyCTABadgeInner}
+              >
+                <Settings size={24} color="#FFFFFF" />
+              </LinearGradient>
+            </View>
+          </TouchableOpacity>
         </View>
 
         {/* moved logout and delete actions to /profile/settings */}
@@ -1270,23 +1401,26 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  settingsBtn: {
+  avatarCameraBtn: {
     position: 'absolute',
     right: 16,
-    top: 16,
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#4C1D95',
+    bottom: 16,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(255,255,255,0.82)',
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 0,
-    borderColor: 'transparent',
+    borderWidth: 1,
+    borderColor: 'rgba(76, 29, 149, 0.16)',
     shadowColor: '#000000',
-    shadowOpacity: 0.2,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 3 },
-    elevation: 4,
+    shadowOpacity: 0.18,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 6,
+  },
+  settingsBtn: {
+    // removed: settings button moved below survey results
   },
   viewerOverlay: {
     flex: 1,
@@ -1439,10 +1573,12 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
   },
   galleryHeaderRow: {
-    marginTop: 8,
     flexDirection: 'row-reverse',
     alignItems: 'center',
     justifyContent: 'space-between',
+    paddingBottom: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#EEF2F7',
   },
   galleryCard: {
     backgroundColor: '#FFFFFF',
@@ -1450,7 +1586,6 @@ const styles = StyleSheet.create({
     borderColor: 'transparent',
     borderRadius: 16,
     padding: 12,
-    marginTop: 8,
     shadowColor: '#000000',
     shadowOpacity: 0.08,
     shadowRadius: 16,
@@ -1514,15 +1649,19 @@ const styles = StyleSheet.create({
     width: '31%',
     aspectRatio: 1,
     borderRadius: 18,
-    borderWidth: 2,
-    borderStyle: 'dashed',
-    borderColor: '#A78BFA',
+    borderWidth: 0,
+    borderColor: 'transparent',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#F9FAFB',
+    backgroundColor: '#E5E7EB',
     paddingTop: 14,
     paddingBottom: 16,
     paddingHorizontal: 10,
+    shadowColor: '#000000',
+    shadowOpacity: 0.06,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 2,
   },
   galleryAddTileText: {
     marginTop: 10,
@@ -1612,6 +1751,50 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     marginBottom: 10,
     textAlign: 'right',
+  },
+  apartmentsCard: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 0,
+    borderColor: 'transparent',
+    borderRadius: 16,
+    padding: 12,
+    shadowColor: '#000000',
+    shadowOpacity: 0.08,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 3,
+    ...(Platform.OS === 'web'
+      ? ({ boxShadow: '0 12px 28px rgba(0,0,0,0.10)' } as any)
+      : null),
+  },
+  apartmentsHeaderRow: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingBottom: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#EEF2F7',
+    gap: 10,
+  },
+  apartmentsHeaderTitle: {
+    color: '#111827',
+    fontSize: 16,
+    fontWeight: '800',
+    textAlign: 'right',
+    flex: 1,
+  },
+  apartmentsHeaderTag: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: 'rgba(76,29,149,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(76,29,149,0.16)',
+  },
+  apartmentsHeaderTagText: {
+    color: '#4C1D95',
+    fontSize: 12,
+    fontWeight: '900',
   },
   surveyCard: {
     borderRadius: 20,
@@ -1937,12 +2120,89 @@ const styles = StyleSheet.create({
   },
   sharedCard: {
     backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
     borderRadius: 16,
     padding: 12,
     marginTop: 4,
     alignItems: 'center',
+    borderWidth: 0,
+    borderColor: 'transparent',
+    shadowColor: '#000000',
+    shadowOpacity: 0.08,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 3,
+    ...(Platform.OS === 'web'
+      ? ({ boxShadow: '0 12px 28px rgba(0,0,0,0.10)' } as any)
+      : null),
+  },
+  sharedCardHeaderRow: {
+    width: '100%',
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+    marginBottom: 10,
+  },
+  sharedCardTitle: {
+    color: '#111827',
+    fontSize: 15,
+    fontWeight: '900',
+    textAlign: 'right',
+    flex: 1,
+  },
+  sharedCardMeta: {
+    color: '#6B7280',
+    fontSize: 12,
+    fontWeight: '700',
+    textAlign: 'left',
+  },
+  sharedMembersGrid: {
+    width: '100%',
+    flexDirection: 'row-reverse',
+    flexWrap: 'wrap',
+    gap: 10,
+    justifyContent: 'flex-start',
+  },
+  sharedMemberTile: {
+    width: '31%',
+    minWidth: 92,
+    borderRadius: 16,
+    backgroundColor: '#E5E7EB',
+    borderWidth: 0,
+    borderColor: 'transparent',
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+    alignItems: 'center',
+    shadowColor: '#000000',
+    shadowOpacity: 0.10,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 4,
+    ...(Platform.OS === 'web'
+      ? ({ boxShadow: '0 10px 22px rgba(0,0,0,0.10)' } as any)
+      : null),
+  },
+  sharedMemberAvatarWrap: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    overflow: 'hidden',
+    backgroundColor: '#F3F4F6',
+    borderWidth: 2,
+    borderColor: '#FFFFFF',
+    marginBottom: 8,
+  },
+  sharedMemberAvatar: {
+    width: '100%',
+    height: '100%',
+  },
+  sharedMemberName: {
+    color: '#111827',
+    fontSize: 12,
+    fontWeight: '800',
+    textAlign: 'center',
+    lineHeight: 16,
+    includeFontPadding: false,
   },
   sharedAvatarsRow: {
     flexDirection: 'row-reverse',
@@ -1969,24 +2229,32 @@ const styles = StyleSheet.create({
     textAlign: 'right',
   },
   apartmentRow: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#E5E7EB',
     padding: 14,
     borderRadius: 16,
     marginBottom: 12,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderWidth: 0,
+    borderColor: 'transparent',
     flexDirection: 'row-reverse',
     alignItems: 'center',
     gap: 14,
     minHeight: 120,
+    shadowColor: '#000000',
+    shadowOpacity: 0.08,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 3,
+    ...(Platform.OS === 'web'
+      ? ({ boxShadow: '0 12px 28px rgba(0,0,0,0.10)' } as any)
+      : null),
   },
   aptThumb: {
     width: 120,
     height: 90,
     borderRadius: 14,
     backgroundColor: '#F3F4F6',
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderWidth: 0,
+    borderColor: 'transparent',
   },
   aptTextWrap: {
     flex: 1,

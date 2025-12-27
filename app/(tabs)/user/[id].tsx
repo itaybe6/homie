@@ -1,16 +1,173 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, Image, ActivityIndicator, TouchableOpacity, Alert, Dimensions, Platform } from 'react-native';
+import React, { useEffect, useMemo, useState } from 'react';
+import { View, Text, StyleSheet, ScrollView, Image, ActivityIndicator, TouchableOpacity, Alert, Dimensions, Platform, Modal } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { computeGroupAwareLabel } from '@/lib/group';
 import { supabase } from '@/lib/supabase';
 import { User } from '@/types/database';
-import { ArrowLeft, MapPin, UserPlus2, Cigarette, PawPrint, Utensils, Moon, Users, Home, Calendar, User as UserIcon, Building2, Bed, Heart, Briefcase } from 'lucide-react-native';
+import { ArrowLeft, MapPin, UserPlus2, Cigarette, PawPrint, Utensils, Moon, Users, Home, Calendar, User as UserIcon, Building2, Bed, Heart, Briefcase, ClipboardList, Images, X } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuthStore } from '@/stores/authStore';
 import { fetchUserSurvey } from '@/lib/survey';
 import { UserSurveyResponse } from '@/types/database';
+import Ticker from '@/components/Ticker';
+import {
+  calculateMatchScore,
+  CompatUserSurvey,
+  DietType,
+  Lifestyle,
+  CleaningFrequency,
+  HostingPreference,
+  CookingStyle,
+  HomeVibe,
+  PartnerSmokingPref,
+  PartnerShabbatPref,
+  PartnerDietPref,
+  PartnerPetsPref,
+} from '@/utils/matchCalculator';
+
+const genderAliasMap: Record<string, 'male' | 'female'> = {
+  male: 'male',
+  men: 'male',
+  גבר: 'male',
+  זכר: 'male',
+  בנים: 'male',
+  female: 'female',
+  women: 'female',
+  נקבה: 'female',
+  אישה: 'female',
+  נשים: 'female',
+  בנות: 'female',
+};
+
+const genderPrefAliasMap: Record<string, 'male' | 'female' | 'any'> = {
+  ...genderAliasMap,
+  any: 'any',
+  'לא משנה': 'any',
+  'לא משנה לי': 'any',
+};
+
+const occupationAliasMap: Record<string, 'student' | 'worker'> = {
+  student: 'student',
+  סטודנט: 'student',
+  סטודנטית: 'student',
+  worker: 'worker',
+  עובד: 'worker',
+  עובדת: 'worker',
+  'עובד - מהבית': 'worker',
+};
+
+const occupationPrefAliasMap: Record<string, 'student' | 'worker' | 'any'> = {
+  ...occupationAliasMap,
+  any: 'any',
+  'לא משנה': 'any',
+  'לא משנה לי': 'any',
+};
+
+function normalizeKey<T extends string>(value: string | null | undefined, map: Record<string, T>): T | null {
+  if (!value) return null;
+  const key = value.trim().toLowerCase();
+  return map[key] ?? null;
+}
+
+function normalizeGenderValue(value?: string | null): 'male' | 'female' | null {
+  return normalizeKey(value, genderAliasMap);
+}
+
+function normalizeGenderPreference(value?: string | null): 'male' | 'female' | 'any' | null {
+  return normalizeKey(value, genderPrefAliasMap);
+}
+
+function normalizeOccupationValue(value?: string | null): 'student' | 'worker' | null {
+  const normalized = normalizeKey(value, occupationAliasMap);
+  if (normalized) return normalized;
+  if (value && value.includes('סטודנט')) return 'student';
+  if (value && value.includes('student')) return 'student';
+  if (value && value.includes('עובד')) return 'worker';
+  if (value && value.includes('worker')) return 'worker';
+  return null;
+}
+
+function normalizeOccupationPreference(value?: string | null): 'student' | 'worker' | 'any' | null {
+  const normalized = normalizeKey(value, occupationPrefAliasMap);
+  if (normalized) return normalized;
+  if (value && value.includes('סטודנט')) return 'student';
+  if (value && value.includes('עובד')) return 'worker';
+  return null;
+}
+
+function parsePreferredAgeRange(value?: string | null): { min: number | null; max: number | null } {
+  if (!value) return { min: null, max: null };
+  const matches = (value.match(/\d+/g) || []).map((n) => parseInt(n, 10)).filter((n) => !Number.isNaN(n));
+  if (!matches.length) return { min: null, max: null };
+  if (matches.length === 1) return { min: matches[0], max: null };
+  const [first, second] = matches;
+  if (second !== undefined) return { min: Math.min(first, second), max: Math.max(first, second) };
+  return { min: first, max: null };
+}
+
+function buildCompatSurvey(
+  userEntry: User | undefined | null,
+  survey?: UserSurveyResponse | null,
+): Partial<CompatUserSurvey> {
+  const compat: Partial<CompatUserSurvey> = {};
+  if (typeof userEntry?.age === 'number') compat.age = userEntry.age;
+  compat.gender = normalizeGenderValue((userEntry as any)?.gender);
+  if (userEntry?.city) compat.city = userEntry.city;
+
+  if (typeof survey?.is_smoker === 'boolean') compat.is_smoker = survey.is_smoker;
+  if (typeof survey?.has_pet === 'boolean') compat.has_pet = survey.has_pet;
+  if (typeof survey?.is_shomer_shabbat === 'boolean') compat.is_shomer_shabbat = survey.is_shomer_shabbat;
+  if (typeof survey?.keeps_kosher === 'boolean') compat.keeps_kosher = survey.keeps_kosher;
+  if (survey?.diet_type) compat.diet_type = survey.diet_type as DietType;
+  if (survey?.lifestyle) compat.lifestyle = survey.lifestyle as Lifestyle;
+  if (typeof survey?.cleanliness_importance === 'number') compat.cleanliness_importance = survey.cleanliness_importance;
+  if (survey?.cleaning_frequency) compat.cleaning_frequency = survey.cleaning_frequency as CleaningFrequency;
+  if (survey?.hosting_preference) compat.hosting_preference = survey.hosting_preference as HostingPreference;
+  if (survey?.cooking_style) compat.cooking_style = survey.cooking_style as CookingStyle;
+  if (survey?.home_vibe) compat.home_vibe = survey.home_vibe as HomeVibe;
+  if (survey?.preferred_city) compat.preferred_city = survey.preferred_city;
+  if (Array.isArray((survey as any)?.preferred_neighborhoods))
+    compat.preferred_neighborhoods = (survey as any).preferred_neighborhoods;
+  if (Number.isFinite(survey?.price_range as number)) compat.price_range = Number(survey?.price_range);
+  if (typeof survey?.bills_included === 'boolean') compat.bills_included = survey.bills_included;
+  if (survey?.floor_preference) compat.floor_preference = survey.floor_preference;
+  if (typeof survey?.has_balcony === 'boolean') compat.has_balcony = survey.has_balcony;
+  if (typeof survey?.has_elevator === 'boolean') compat.has_elevator = survey.has_elevator;
+  if (typeof survey?.wants_master_room === 'boolean') compat.wants_master_room = survey.wants_master_room;
+  if (typeof survey?.pets_allowed === 'boolean') compat.pets_allowed = survey.pets_allowed;
+  if (typeof survey?.with_broker === 'boolean') compat.with_broker = survey.with_broker;
+  if (typeof survey?.preferred_roommates === 'number') compat.preferred_roommates = survey.preferred_roommates;
+  if (survey?.move_in_month) compat.move_in_month = survey.move_in_month;
+  if (typeof survey?.is_sublet === 'boolean') compat.is_sublet = survey.is_sublet;
+  if (survey?.sublet_month_from) compat.sublet_month_from = survey.sublet_month_from;
+  if (survey?.sublet_month_to) compat.sublet_month_to = survey.sublet_month_to;
+  if (survey?.relationship_status) compat.relationship_status = survey.relationship_status;
+  const occupationValue = normalizeOccupationValue(survey?.occupation);
+  if (occupationValue) compat.occupation = occupationValue;
+  if (typeof survey?.works_from_home === 'boolean') compat.works_from_home = survey.works_from_home;
+
+  if (survey?.partner_smoking_preference)
+    compat.partner_smoking_preference = survey.partner_smoking_preference as PartnerSmokingPref;
+  if (survey?.partner_pets_preference)
+    compat.partner_pets_preference = survey.partner_pets_preference as PartnerPetsPref;
+  if (survey?.partner_diet_preference)
+    compat.partner_diet_preference = survey.partner_diet_preference as PartnerDietPref;
+  if (survey?.partner_shabbat_preference)
+    compat.partner_shabbat_preference = survey.partner_shabbat_preference as PartnerShabbatPref;
+
+  const preferredGender = normalizeGenderPreference(survey?.preferred_gender);
+  if (preferredGender) compat.preferred_gender = preferredGender;
+  const preferredOccupation = normalizeOccupationPreference(survey?.preferred_occupation);
+  if (preferredOccupation) compat.preferred_occupation = preferredOccupation;
+
+  const { min, max } = parsePreferredAgeRange(survey?.preferred_age_range);
+  if (typeof min === 'number') compat.preferred_age_min = min;
+  if (typeof max === 'number') compat.preferred_age_max = max;
+
+  return compat;
+}
 
 export default function UserProfileScreen() {
   const router = useRouter();
@@ -21,12 +178,14 @@ export default function UserProfileScreen() {
     return id;
   }, [id]);
   const insets = useSafeAreaInsets();
-  const contentTopPadding = insets.top + 12;
+  const contentTopPadding = 12;
   const contentBottomPadding = Math.max(180, insets.bottom + 120);
 
   const [profile, setProfile] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [inviteLoading, setInviteLoading] = useState(false);
+  const [isSurveyOpen, setIsSurveyOpen] = useState(false);
+  const [viewerIndex, setViewerIndex] = useState<number | null>(null);
   const me = useAuthStore((s) => s.user);
   type GroupMember = Pick<User, 'id' | 'full_name' | 'avatar_url'>;
   const [groupContext, setGroupContext] = useState<{ name?: string | null; members: GroupMember[] } | null>(null);
@@ -34,6 +193,10 @@ export default function UserProfileScreen() {
   const [galleryWidth, setGalleryWidth] = useState(0);
   const [survey, setSurvey] = useState<UserSurveyResponse | null>(null);
   const [surveyLoading, setSurveyLoading] = useState(false);
+  const [surveyError, setSurveyError] = useState<string | null>(null);
+  const [matchPercent, setMatchPercent] = useState<number | null>(null);
+  const [matchPercentDisplay, setMatchPercentDisplay] = useState<string>('--%');
+  const [matchTickerReady, setMatchTickerReady] = useState(false);
   const [hasPendingMergeInvite, setHasPendingMergeInvite] = useState(false);
   const [meInApartment, setMeInApartment] = useState(false);
   const [profileInApartment, setProfileInApartment] = useState(false);
@@ -58,6 +221,14 @@ export default function UserProfileScreen() {
       profileId: profile?.id,
     });
   }, [routeUserId, profile?.id]);
+
+  // Delay the match % animation a bit after the screen mounts (feels nicer)
+  useEffect(() => {
+    // Reset per profile so it always feels intentional when navigating between users
+    setMatchTickerReady(false);
+    const t = setTimeout(() => setMatchTickerReady(true), 2700);
+    return () => clearTimeout(t);
+  }, [profile?.id]);
   const showMergeBlockedAlert = () => {
     const title = 'לא ניתן למזג פרופילים';
     const msg =
@@ -241,14 +412,18 @@ export default function UserProfileScreen() {
   useEffect(() => {
     (async () => {
       try {
-        const { data, error } = await supabase.from('users').select('*').eq('id', id).maybeSingle();
+        if (!routeUserId) {
+          setProfile(null);
+          return;
+        }
+        const { data, error } = await supabase.from('users').select('*').eq('id', routeUserId).maybeSingle();
         if (error) throw error;
         setProfile(data);
       } finally {
         setIsLoading(false);
       }
     })();
-  }, [id]);
+  }, [routeUserId]);
 
   // Re-fetch group context when screen regains focus (after approvals, etc.)
   useFocusEffect(
@@ -371,16 +546,21 @@ export default function UserProfileScreen() {
     (async () => {
       if (!profile?.id) {
         setSurvey(null);
+        setSurveyError(null);
         return;
       }
       try {
         setSurveyLoading(true);
+        setSurveyError(null);
         const s = await fetchUserSurvey(profile.id);
         if (!cancelled) setSurvey(s);
       } catch (e) {
         // eslint-disable-next-line no-console
         console.error('Failed to load survey', e);
-        if (!cancelled) setSurvey(null);
+        if (!cancelled) {
+          setSurvey(null);
+          setSurveyError((e as any)?.message || 'לא ניתן לטעון את השאלון');
+        }
       } finally {
         if (!cancelled) setSurveyLoading(false);
       }
@@ -389,6 +569,237 @@ export default function UserProfileScreen() {
       cancelled = true;
     };
   }, [profile?.id]);
+
+  // Match % (reuse the same logic as the partners screen)
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const myId = me?.id ? String(me.id) : '';
+      const otherId = profile?.id ? String(profile.id) : '';
+      if (!myId || !otherId || myId === otherId) {
+        if (!cancelled) setMatchPercent(null);
+        return;
+      }
+      try {
+        const { data: rows, error } = await supabase
+          .from('user_survey_responses')
+          .select('*')
+          .in('user_id', [myId, otherId]);
+        if (error) throw error;
+        const byId = Object.fromEntries((rows || []).map((r: any) => [String(r.user_id), r])) as Record<
+          string,
+          UserSurveyResponse
+        >;
+        const mySurvey = byId[myId];
+        const theirSurvey = byId[otherId];
+        if (!mySurvey || !theirSurvey) {
+          if (!cancelled) setMatchPercent(null);
+          return;
+        }
+        const myCompat = buildCompatSurvey(me as any, mySurvey);
+        const theirCompat = buildCompatSurvey(profile as any, theirSurvey);
+        const score = calculateMatchScore(myCompat, theirCompat);
+        const rounded =
+          Number.isFinite(score) && !Number.isNaN(score) ? Math.max(0, Math.min(100, Math.round(score))) : null;
+        if (!cancelled) setMatchPercent(rounded);
+      } catch (e) {
+        console.error('[profile-screen] failed to compute match %', e);
+        if (!cancelled) setMatchPercent(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [me?.id, profile?.id]);
+
+  // Animate the displayed % so it "counts" from 0 -> target (odometer style), after a short delay.
+  useEffect(() => {
+    let t: any;
+    if (typeof matchPercent !== 'number' || !Number.isFinite(matchPercent)) {
+      setMatchPercentDisplay('--%');
+      return () => {};
+    }
+    const digitsLen = String(matchPercent).length;
+    const start = `${'0'.repeat(digitsLen)}%`;
+    const end = `${matchPercent}%`;
+    // Before we're "ready", keep it at 00% (or 000%) and wait.
+    setMatchPercentDisplay(start);
+    if (!matchTickerReady) return () => {};
+    t = setTimeout(() => setMatchPercentDisplay(end), 120);
+    return () => {
+      try {
+        clearTimeout(t);
+      } catch {}
+    };
+  }, [matchPercent, matchTickerReady]);
+
+  const formatYesNo = (value?: boolean | null): string => {
+    if (value === undefined || value === null) return '';
+    return value ? 'כן' : 'לא';
+  };
+
+  const formatMonthLabel = (value?: string | null): string => {
+    if (!value) return '';
+    const [year, month] = value.split('-');
+    if (year && month) {
+      const yearNum = parseInt(year, 10);
+      const monthNum = parseInt(month, 10) - 1;
+      if (!Number.isNaN(yearNum) && !Number.isNaN(monthNum)) {
+        const date = new Date(yearNum, monthNum, 1);
+        if (!Number.isNaN(date.getTime())) {
+          try {
+            return date.toLocaleDateString('he-IL', { month: 'short', year: 'numeric' });
+          } catch {
+            return `${month}/${year.slice(-2)}`;
+          }
+        }
+      }
+    }
+    return value;
+  };
+
+  const formatCurrency = (value?: number | null): string => {
+    if (typeof value !== 'number' || Number.isNaN(value)) return '';
+    try {
+      return new Intl.NumberFormat('he-IL', {
+        style: 'currency',
+        currency: 'ILS',
+        maximumFractionDigits: 0,
+      }).format(value);
+    } catch {
+      return `₪${value}`;
+    }
+  };
+
+  const normalizeNeighborhoods = (value: any): string => {
+    if (!value) return '';
+    if (Array.isArray(value)) return value.filter(Boolean).join(' • ');
+    if (typeof value === 'string') {
+      try {
+        const parsed = JSON.parse(value);
+        if (Array.isArray(parsed)) return parsed.filter(Boolean).join(' • ');
+      } catch {}
+      return value
+        .replace(/[{}\[\]"]/g, ' ')
+        .split(',')
+        .map((segment) => segment.trim())
+        .filter(Boolean)
+        .join(' • ');
+    }
+    return '';
+  };
+
+  const surveyHighlights = useMemo(() => {
+    if (!survey) return [];
+    const highlights: { label: string; value: string }[] = [];
+    const push = (label: string, raw?: string) => {
+      if (!raw) return;
+      const trimmed = raw.trim();
+      if (!trimmed) return;
+      highlights.push({ label, value: trimmed });
+    };
+
+    push('עיר מועדפת', survey.preferred_city || undefined);
+    if (typeof survey.price_range === 'number') {
+      const formatted = formatCurrency(survey.price_range);
+      push('תקציב חודשי', formatted);
+    }
+    push('כניסה מתוכננת', formatMonthLabel(survey.move_in_month));
+    push('וייב יומיומי', survey.lifestyle || survey.home_vibe || undefined);
+    if (survey.is_sublet) highlights.push({ label: 'סאבלט', value: 'כן' });
+    return highlights;
+  }, [survey]);
+
+  type SurveySectionKey = 'about' | 'apartment' | 'partner';
+
+  const surveyItems = useMemo(() => {
+    if (!survey) return [];
+    const items: { section: SurveySectionKey; label: string; value: string }[] = [];
+
+    const add = (section: SurveySectionKey, label: string, raw?: string | number | null) => {
+      if (raw === undefined || raw === null) return;
+      const value =
+        typeof raw === 'string'
+          ? raw.trim()
+          : typeof raw === 'number' && Number.isFinite(raw)
+            ? `${raw}`
+            : '';
+      if (!value) return;
+      items.push({ section, label, value });
+    };
+
+    const addBool = (section: SurveySectionKey, label: string, raw?: boolean | null) => {
+      const formatted = formatYesNo(raw);
+      if (!formatted) return;
+      items.push({ section, label, value: formatted });
+    };
+
+    // עליי
+    add('about', 'עיסוק', survey.occupation);
+    if (typeof survey.student_year === 'number' && survey.student_year > 0) add('about', 'שנת לימודים', `שנה ${survey.student_year}`);
+    addBool('about', 'עבודה מהבית', survey.works_from_home);
+    addBool('about', 'שומר/ת כשרות', survey.keeps_kosher);
+    addBool('about', 'שומר/ת שבת', survey.is_shomer_shabbat);
+    add('about', 'תזונה', survey.diet_type);
+    addBool('about', 'מעשן/ת', survey.is_smoker);
+    add('about', 'מצב זוגי', survey.relationship_status);
+    addBool('about', 'חיית מחמד בבית', survey.has_pet);
+    if (typeof survey.cleanliness_importance === 'number') add('about', 'חשיבות ניקיון', `${survey.cleanliness_importance}/5`);
+    add('about', 'תדירות ניקיון', survey.cleaning_frequency);
+    add('about', 'העדפת אירוח', survey.hosting_preference);
+    add('about', 'סטייל בישול', survey.cooking_style);
+    add('about', 'וייב בבית', survey.home_vibe);
+    add('about', 'סגנון חיים', (survey as any).lifestyle);
+
+    // הדירה שאני מחפש/ת
+    addBool('apartment', 'תת-השכרה', survey.is_sublet);
+    if (survey.sublet_month_from || survey.sublet_month_to) {
+      const period = [formatMonthLabel(survey.sublet_month_from), formatMonthLabel(survey.sublet_month_to)]
+        .filter(Boolean)
+        .join(' → ');
+      add('apartment', 'טווח סאבלט', period);
+    }
+    if (typeof survey.price_range === 'number') add('apartment', 'תקציב שכירות', formatCurrency(survey.price_range));
+    addBool('apartment', 'חשבונות כלולים', survey.bills_included);
+    add('apartment', 'עיר מועדפת', survey.preferred_city);
+    const neighborhoodsJoined = normalizeNeighborhoods((survey.preferred_neighborhoods as unknown) ?? null);
+    if (neighborhoodsJoined) add('apartment', 'שכונות מועדפות', neighborhoodsJoined);
+    add('apartment', 'קומה מועדפת', survey.floor_preference);
+    addBool('apartment', 'מרפסת', survey.has_balcony);
+    addBool('apartment', 'מעלית', survey.has_elevator);
+    addBool('apartment', 'חדר מאסטר', survey.wants_master_room);
+    add('apartment', 'חודש כניסה', formatMonthLabel(survey.move_in_month));
+    if (typeof survey.preferred_roommates === 'number') add('apartment', 'מספר שותפים מועדף', `${survey.preferred_roommates}`);
+    addBool('apartment', 'חיות מורשות', survey.pets_allowed);
+    addBool('apartment', 'עם מתווך', survey.with_broker);
+
+    // השותפ/ה שאני מחפש/ת
+    const minAge = (survey as any).preferred_age_min;
+    const maxAge = (survey as any).preferred_age_max;
+    const derivedAgeRange =
+      typeof minAge === 'number' && typeof maxAge === 'number'
+        ? `${minAge}–${maxAge}`
+        : typeof minAge === 'number'
+          ? `${minAge}+`
+          : typeof maxAge === 'number'
+            ? `עד ${maxAge}`
+            : null;
+    add('partner', 'טווח גילאים רצוי', survey.preferred_age_range || derivedAgeRange);
+    add('partner', 'מגדר שותפים', survey.preferred_gender);
+    add('partner', 'עיסוק שותפים', survey.preferred_occupation);
+    add('partner', 'שותפים ושבת', survey.partner_shabbat_preference);
+    add('partner', 'שותפים ותזונה', survey.partner_diet_preference);
+    add('partner', 'שותפים ועישון', survey.partner_smoking_preference);
+    add('partner', 'שותפים וחיות', survey.partner_pets_preference);
+
+    return items;
+  }, [survey]);
+
+  const surveySubtitle = useMemo(() => {
+    if (!survey || !surveyHighlights.length) return 'לחיצה להצגת סיכום ההעדפות';
+    const values = surveyHighlights.map((h) => h.value).filter(Boolean);
+    return values.slice(0, 2).join(' • ') || 'לחיצה להצגת סיכום ההעדפות';
+  }, [survey, surveyHighlights]);
 
   // Detect if I already sent a pending merge invite to this user
   useEffect(() => {
@@ -851,8 +1262,8 @@ export default function UserProfileScreen() {
   );
 
   return (
-    <View style={styles.container}>
-      <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
+    <SafeAreaView edges={['top']} style={styles.container}>
+      <View style={styles.topBar}>
         <TouchableOpacity
           style={styles.iconBtn}
           activeOpacity={0.85}
@@ -944,7 +1355,7 @@ export default function UserProfileScreen() {
             </Text>
             {!!profile.city ? (
               <View style={styles.locationPill}>
-                <MapPin size={14} color="#6D28D9" />
+                <MapPin size={14} color="#4C1D95" />
                 <Text style={styles.locationText}>{profile.city}</Text>
               </View>
             ) : null}
@@ -960,438 +1371,454 @@ export default function UserProfileScreen() {
             )}
           </View>
 
-      {/* Viewed user's apartment(s) */}
-      {!profileAptLoading && profileApartments.length ? (
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>
-            הדירה של {profile.full_name?.split(' ')?.[0] || 'המשתמש/ת'}
-          </Text>
-          {profileApartments.map((apt) => {
-            const rawImages = normalizeImageUrls(apt.image_urls);
-            const aptImages = Array.from(
-              new Set(rawImages.map(resolveApartmentImageCandidate).filter(Boolean))
-            );
-            const firstImg = aptImages.length > 0 ? aptImages[0] : APT_IMAGE_PLACEHOLDER;
-            const occupantMembers = apartmentOccupants[apt.id] || [];
-            const visibleOccupants = occupantMembers.slice(0, 4);
-            const overflowCount = occupantMembers.length - visibleOccupants.length;
-            const hasBedrooms = typeof apt.bedrooms === 'number' && Number.isFinite(apt.bedrooms);
-            const hasBathrooms = typeof apt.bathrooms === 'number' && Number.isFinite(apt.bathrooms);
-            return (
-              <TouchableOpacity
-                key={apt.id}
-                style={styles.aptCard}
-                activeOpacity={0.9}
-                onPress={() => router.push({ pathname: '/apartment/[id]', params: { id: apt.id } })}
-              >
-                <View style={styles.aptCoverWrap}>
-                  <ApartmentImageThumb uri={firstImg} style={styles.aptCoverImg} />
-                  <LinearGradient
-                    colors={['rgba(0,0,0,0.00)', 'rgba(0,0,0,0.45)']}
-                    start={{ x: 0.5, y: 0 }}
-                    end={{ x: 0.5, y: 1 }}
-                    style={styles.aptCoverGradient}
-                  />
-                  <View style={styles.aptCoverTextWrap}>
-                    <Text style={styles.aptCoverTitle} numberOfLines={1}>
-                      {apt.title || 'דירה'}
-                    </Text>
-                    {!!apt.city ? (
-                      <View style={styles.aptCoverCityRow}>
-                        <MapPin size={14} color="rgba(255,255,255,0.92)" />
-                        <Text style={styles.aptCoverCityText} numberOfLines={1}>
-                          {apt.city}
-                        </Text>
-                      </View>
-                    ) : null}
-                  </View>
-                </View>
-
-                <View style={styles.aptBody}>
-                  {(hasBedrooms || hasBathrooms) ? (
-                    <View style={styles.aptChipsRow}>
-                      {hasBedrooms ? (
-                        <View style={styles.aptChip}>
-                          <Bed size={14} color="#111827" />
-                          <Text style={styles.aptChipText}>{apt.bedrooms} חדרי שינה</Text>
-                        </View>
-                      ) : null}
-                      {hasBathrooms ? (
-                        <View style={styles.aptChip}>
-                          <Building2 size={14} color="#111827" />
-                          <Text style={styles.aptChipText}>{apt.bathrooms} חדרי רחצה</Text>
-                        </View>
-                      ) : null}
-                    </View>
-                  ) : null}
-
-                  {!!visibleOccupants.length ? (
-                    <View style={styles.aptOccupantsRow}>
-                      {visibleOccupants.map((member, idx) => {
-                        const fallbackInitial = ((member.full_name || '').trim().charAt(0) || '?').toUpperCase();
-                        return (
-                          <View
-                            key={member.id}
-                            style={[
-                              styles.aptOccupantAvatarWrap,
-                              idx !== 0 && styles.aptOccupantOverlap,
-                            ]}
-                          >
-                            {member.avatar_url ? (
-                              <Image source={{ uri: member.avatar_url }} style={styles.aptOccupantAvatarImg} />
-                            ) : (
-                              <Text style={styles.aptOccupantFallback}>{fallbackInitial}</Text>
-                            )}
-                          </View>
-                        );
-                      })}
-                      {overflowCount > 0 ? (
-                        <View style={[styles.aptOccupantAvatarWrap, styles.aptOccupantOverflow]}>
-                          <Text style={styles.aptOccupantOverflowText}>+{overflowCount}</Text>
-                        </View>
-                      ) : null}
-                      <Text style={styles.aptOccupantsLabel} numberOfLines={1}>
-                        דיירים בדירה
-                      </Text>
-                    </View>
-                  ) : null}
-
-                  {!!aptImages.length ? (
-                    <ScrollView
-                      horizontal
-                      showsHorizontalScrollIndicator={false}
-                      style={styles.aptImagesScroll}
-                      contentContainerStyle={styles.aptImagesContent}
-                    >
-                      {aptImages.slice(0, 8).map((url, idx) => {
-                        const isLast = idx === Math.min(aptImages.length, 8) - 1;
-                        return (
-                          <ApartmentImageThumb
-                            key={`${apt.id}-img-${idx}`}
-                            uri={url}
-                            style={[styles.aptImageThumb, !isLast ? styles.aptImageThumbSpacing : null]}
-                          />
-                        );
-                      })}
-                    </ScrollView>
-                  ) : null}
-                </View>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
-      ) : null}
-
-      {/* Survey Preview - Personal */}
-      {!surveyLoading && survey ? (
-        <View style={styles.section}>
-          <View style={styles.surveyCard}>
-            <View style={styles.surveyBadgeRow}>
-              <UserIcon size={14} color="#8B5CF6" />
-              <Text style={[styles.surveyBadgeText, { color: '#8B5CF6' }]}>עליו</Text>
-            </View>
-            <View style={styles.pillsRow}>
-              {'is_smoker' in survey && survey.is_smoker !== undefined && survey.is_smoker !== null ? (
-                <SurveyPill icon={<Cigarette size={14} color="#6B7280" />}>
-                  {survey.is_smoker ? 'מעשנ/ית' : 'לא מעשנ/ית'}
-                </SurveyPill>
-              ) : null}
-              {'has_pet' in survey && survey.has_pet !== undefined && survey.has_pet !== null ? (
-                <SurveyPill icon={<PawPrint size={14} color="#6B7280" />}>
-                  {survey.has_pet ? 'עם חיית מחמד' : 'בלי חיית מחמד'}
-                </SurveyPill>
-              ) : null}
-              {'is_shomer_shabbat' in survey && survey.is_shomer_shabbat !== undefined && survey.is_shomer_shabbat !== null ? (
-                <SurveyPill icon={<Moon size={14} color="#6B7280" />}>
-                  {survey.is_shomer_shabbat ? 'שומר/ת שבת' : 'לא שומר/ת שבת'}
-                </SurveyPill>
-              ) : null}
-              {'keeps_kosher' in survey && survey.keeps_kosher !== undefined && survey.keeps_kosher !== null ? (
-                <SurveyPill icon={<Utensils size={14} color="#6B7280" />}>
-                  {survey.keeps_kosher ? 'כשר/ה' : 'גמיש/ה בכשרות'}
-                </SurveyPill>
-              ) : null}
-              {survey.diet_type ? (
-                <SurveyPill icon={<Utensils size={14} color="#6B7280" />}>
-                  {survey.diet_type}
-                </SurveyPill>
-              ) : null}
-              {survey.lifestyle ? (
-                <SurveyPill icon={<Users size={14} color="#6B7280" />}>
-                  {survey.lifestyle}
-                </SurveyPill>
-              ) : null}
-              {Number.isFinite(survey.cleanliness_importance as number) ? (
-                <SurveyPill icon={<Home size={14} color="#6B7280" />}>
-                  נקיון: {String(survey.cleanliness_importance)}/5
-                </SurveyPill>
-              ) : null}
-              {survey.cleaning_frequency ? (
-                <SurveyPill icon={<Home size={14} color="#6B7280" />}>
-                  {survey.cleaning_frequency}
-                </SurveyPill>
-              ) : null}
-              {survey.hosting_preference ? (
-                <SurveyPill icon={<Users size={14} color="#6B7280" />}>
-                  אירוח: {survey.hosting_preference}
-                </SurveyPill>
-              ) : null}
-              {survey.cooking_style ? (
-                <SurveyPill icon={<Utensils size={14} color="#6B7280" />}>
-                  {survey.cooking_style}
-                </SurveyPill>
-              ) : null}
-              {survey.home_vibe ? (
-                <SurveyPill icon={<Home size={14} color="#6B7280" />}>
-                  {survey.home_vibe}
-                </SurveyPill>
-              ) : null}
-            </View>
-
-            {survey.is_sublet ? (
-              <View style={styles.subletTag}>
-                <Calendar size={14} color="#8B5CF6" />
-                <Text style={[styles.subletTagText, { color: '#111827' }]}>
-                  סאבלט{survey.sublet_month_from || survey.sublet_month_to ? ': ' : ''}
-                  {survey.sublet_month_from ? survey.sublet_month_from : ''}
-                  {survey.sublet_month_from && survey.sublet_month_to ? ' – ' : ''}
-                  {survey.sublet_month_to ? survey.sublet_month_to : ''}
+          {/* Partners / shared profile (always show section; show empty state when none) */}
+          <View style={styles.section}>
+            <View style={styles.sharedCard}>
+              <View style={styles.sharedCardHeaderRow}>
+                <Text style={styles.sharedCardTitle} numberOfLines={1}>
+                  {((groupContext?.name || 'שותפים') as any).toString()}
+                </Text>
+                <Text style={styles.sharedCardMeta} numberOfLines={1}>
+                  {groupLoading
+                    ? 'טוען...'
+                    : `${(groupContext?.members?.length || 0).toString()} שותפים`}
                 </Text>
               </View>
-            ) : null}
-          </View>
-        </View>
-      ) : null}
 
-      {/* Apartment preferences */}
-      {!surveyLoading && survey ? (
-        <View style={styles.section}>
-          <View style={styles.surveyCard}>
-            <View style={styles.surveyBadgeRow}>
-              <Home size={14} color="#8B5CF6" />
-              <Text style={[styles.surveyBadgeText, { color: '#8B5CF6' }]}>על הדירה</Text>
-            </View>
-            {/* עיר */}
-            {survey.preferred_city ? (
-              <View style={styles.apGroupSection}>
-                <Text style={styles.apGroupLabel}>עיר</Text>
-                <View style={styles.apGroupRow}>
-                  <SurveyPill icon={<MapPin size={14} color="#6B7280" />}>
-                    {survey.preferred_city}
-                  </SurveyPill>
+              {groupLoading ? (
+                <View style={styles.sectionEmptyWrap}>
+                  <ActivityIndicator size="small" color="#4C1D95" />
+                  <Text style={styles.sectionEmptyText}>טוען שותפים...</Text>
                 </View>
-              </View>
-            ) : null}
-
-            {/* שכונות */}
-            {Array.isArray(survey.preferred_neighborhoods) && survey.preferred_neighborhoods.filter(Boolean).length > 0 ? (
-              <View style={styles.apGroupSection}>
-                <Text style={styles.apGroupLabel}>שכונות</Text>
-                <View style={styles.apGroupRow}>
-                  {!!survey.preferred_city ? (
-                    <SurveyPill icon={<MapPin size={14} color="#6B7280" />}>
-                      {`ב־${survey.preferred_city}`}
-                    </SurveyPill>
-                  ) : null}
-                  {survey.preferred_neighborhoods.filter(Boolean).map((n, idx) => (
-                    <SurveyPill key={`neigh-${idx}-${n}`} icon={<MapPin size={14} color="#6B7280" />}>
-                      {n}
-                    </SurveyPill>
-                  ))}
+              ) : groupContext && groupContext.members.length >= 2 ? (
+                <View style={styles.sharedMembersGrid}>
+                  {groupContext.members.map((m) => {
+                    const isCurrent = String(m?.id || '') === String(profile?.id || '');
+                    return (
+                      <TouchableOpacity
+                        key={m.id}
+                        style={[styles.sharedMemberTile, isCurrent ? { opacity: 0.7 } : null]}
+                        activeOpacity={0.9}
+                        disabled={isCurrent}
+                        onPress={() => {
+                          if (!m?.id || isCurrent) return;
+                          router.push({ pathname: '/user/[id]', params: { id: m.id } });
+                        }}
+                        accessibilityRole="button"
+                        accessibilityLabel={
+                          isCurrent
+                            ? 'זה הפרופיל הנוכחי'
+                            : `פתח פרופיל של ${(m.full_name || 'משתמש/ת').toString()}`
+                        }
+                        accessibilityState={isCurrent ? ({ disabled: true } as any) : undefined}
+                      >
+                        <View style={styles.sharedMemberAvatarWrap}>
+                          <Image
+                            source={{ uri: m.avatar_url || 'https://cdn-icons-png.flaticon.com/512/847/847969.png' }}
+                            style={styles.sharedMemberAvatar}
+                          />
+                        </View>
+                        <Text style={styles.sharedMemberName} numberOfLines={1}>
+                          {m.full_name || 'משתמש/ת'}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
                 </View>
-              </View>
-            ) : null}
-
-            {/* תקציב */}
-            {Number.isFinite(survey.price_range as number) || (survey.bills_included !== undefined && survey.bills_included !== null) ? (
-              <View style={styles.apGroupSection}>
-                <Text style={styles.apGroupLabel}>תקציב</Text>
-                <View style={styles.apGroupRow}>
-                  {Number.isFinite(survey.price_range as number) ? (
-                    <SurveyPill icon={<Text style={styles.currencyIcon}>₪</Text>}>
-                      {`₪${Number(survey.price_range).toLocaleString('he-IL')}`}
-                    </SurveyPill>
-                  ) : null}
-                  {survey.bills_included !== undefined && survey.bills_included !== null ? (
-                    <SurveyPill icon={<Text style={styles.currencyIcon}>₪</Text>}>
-                      {survey.bills_included ? 'כולל חשבונות' : 'בלי חשבונות'}
-                    </SurveyPill>
-                  ) : null}
+              ) : (
+                <View style={styles.sectionEmptyWrap}>
+                  <View style={styles.sectionEmptyIconPill}>
+                    <Users size={18} color="#4C1D95" />
+                  </View>
+                  <Text style={styles.sectionEmptyTitle}>עדיין אין שותפים</Text>
+                  <Text style={styles.sectionEmptyText}>
+                    כשיהיו שותפים מקושרים לפרופיל, הם יופיעו כאן.
+                  </Text>
                 </View>
-              </View>
-            ) : null}
-
-            {/* קומה / מעלית / מרפסת */}
-            {survey.floor_preference || (survey.has_elevator !== undefined && survey.has_elevator !== null) || (survey.has_balcony !== undefined && survey.has_balcony !== null) ? (
-              <View style={styles.apGroupSection}>
-                <Text style={styles.apGroupLabel}>קומה / מעלית / מרפסת</Text>
-                <View style={styles.apGroupRow}>
-                  {survey.floor_preference ? (
-                    <SurveyPill icon={<Building2 size={14} color="#6B7280" />}>
-                      קומה: {survey.floor_preference}
-                    </SurveyPill>
-                  ) : null}
-                  {survey.has_elevator !== undefined && survey.has_elevator !== null ? (
-                    <SurveyPill icon={<Building2 size={14} color="#6B7280" />}>
-                      {survey.has_elevator ? 'עם מעלית' : 'בלי מעלית'}
-                    </SurveyPill>
-                  ) : null}
-                  {survey.has_balcony !== undefined && survey.has_balcony !== null ? (
-                    <SurveyPill icon={<Home size={14} color="#6B7280" />}>
-                      {survey.has_balcony ? 'עם מרפסת' : 'בלי מרפסת'}
-                    </SurveyPill>
-                  ) : null}
-                </View>
-              </View>
-            ) : null}
-
-            {/* כניסה */}
-            {survey.move_in_month ? (
-              <View style={styles.apGroupSection}>
-                <Text style={styles.apGroupLabel}>כניסה</Text>
-                <View style={styles.apGroupRow}>
-                  <SurveyPill icon={<Calendar size={14} color="#6B7280" />}>
-                    {survey.move_in_month}
-                  </SurveyPill>
-                </View>
-              </View>
-            ) : null}
-
-            {/* מספר שותפים */}
-            {Number.isFinite(survey.preferred_roommates as number) ? (
-              <View style={styles.apGroupSection}>
-                <Text style={styles.apGroupLabel}>מספר שותפים</Text>
-                <View style={styles.apGroupRow}>
-                  <SurveyPill icon={<Users size={14} color="#6B7280" />}>
-                    {survey.preferred_roommates}
-                  </SurveyPill>
-                </View>
-              </View>
-            ) : null}
-
-            {/* כללי/נוסף */}
-            {(survey.pets_allowed !== undefined && survey.pets_allowed !== null) || (survey.with_broker !== undefined && survey.with_broker !== null) || (survey.wants_master_room !== undefined && survey.wants_master_room !== null) ? (
-              <View style={styles.apGroupSection}>
-                <Text style={styles.apGroupLabel}>תוספות</Text>
-                <View style={styles.apGroupRow}>
-                  {survey.pets_allowed !== undefined && survey.pets_allowed !== null ? (
-                    <SurveyPill icon={<PawPrint size={14} color="#6B7280" />}>
-                      חיות בדירה: {survey.pets_allowed ? 'מותר' : 'לא מותר'}
-                    </SurveyPill>
-                  ) : null}
-                  {survey.with_broker !== undefined && survey.with_broker !== null ? (
-                    <SurveyPill icon={<Briefcase size={14} color="#6B7280" />}>
-                      {survey.with_broker ? 'עם מתווך/ת' : 'ללא מתווך/ת'}
-                    </SurveyPill>
-                  ) : null}
-                  {survey.wants_master_room !== undefined && survey.wants_master_room !== null ? (
-                    <SurveyPill icon={<Bed size={14} color="#6B7280" />}>
-                      {survey.wants_master_room ? 'מחפש/ת מאסטר' : 'לא חובה מאסטר'}
-                    </SurveyPill>
-                  ) : null}
-                </View>
-              </View>
-            ) : null}
-          </View>
-        </View>
-      ) : null}
-
-      {/* Partner preferences */}
-      {!surveyLoading && survey ? (
-        <View style={styles.section}>
-          <View style={styles.surveyCard}>
-            <View style={styles.surveyBadgeRow}>
-              <Heart size={14} color="#8B5CF6" />
-              <Text style={[styles.surveyBadgeText, { color: '#8B5CF6' }]}>על השותף</Text>
-            </View>
-            <View style={styles.pillsRow}>
-              {Number.isFinite((survey as any).preferred_age_min as number) || Number.isFinite((survey as any).preferred_age_max as number) ? (
-                <SurveyPill icon={<Users size={14} color="#6B7280" />}>
-                  גיל מועדף: {Number.isFinite((survey as any).preferred_age_min as number) ? (survey as any).preferred_age_min : '?'}
-                  {' – '}
-                  {Number.isFinite((survey as any).preferred_age_max as number) ? (survey as any).preferred_age_max : '?'}
-                </SurveyPill>
-              ) : null}
-              {survey.preferred_gender ? (
-                <SurveyPill icon={<Users size={14} color="#6B7280" />}>
-                  מגדר מועדף: {survey.preferred_gender}
-                </SurveyPill>
-              ) : null}
-              {survey.preferred_occupation ? (
-                <SurveyPill icon={<Briefcase size={14} color="#6B7280" />}>
-                  עיסוק מועדף: {survey.preferred_occupation}
-                </SurveyPill>
-              ) : null}
-              {survey.partner_shabbat_preference ? (
-                <SurveyPill icon={<Moon size={14} color="#6B7280" />}>
-                  שבת: {survey.partner_shabbat_preference}
-                </SurveyPill>
-              ) : null}
-              {survey.partner_diet_preference ? (
-                <SurveyPill icon={<Utensils size={14} color="#6B7280" />}>
-                  תזונה: {survey.partner_diet_preference}
-                </SurveyPill>
-              ) : null}
-              {survey.partner_smoking_preference ? (
-                <SurveyPill icon={<Cigarette size={14} color="#6B7280" />}>
-                  עישון: {survey.partner_smoking_preference}
-                </SurveyPill>
-              ) : null}
-              {survey.partner_pets_preference ? (
-                <SurveyPill icon={<PawPrint size={14} color="#6B7280" />}>
-                  חיות: {survey.partner_pets_preference}
-                </SurveyPill>
-              ) : null}
+              )}
             </View>
           </View>
-        </View>
-      ) : null}
 
-      {galleryUrls.length ? (
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>גלריה</Text>
-          <View
-            style={styles.gallery}
-            onLayout={(e) => {
-              const w = e.nativeEvent.layout.width;
-              if (w && Math.abs(w - galleryWidth) > 1) setGalleryWidth(w);
-            }}
-          >
-            {galleryUrls.map((url, idx) => (
-              <Image
-                key={url + idx}
-                source={{ uri: url }}
+      {/* Viewed user's apartment(s) (always show section; show empty state when none) */}
+      <View style={styles.section}>
+        <View style={styles.apartmentsCard}>
+          <View style={styles.apartmentsHeaderRow}>
+            {(() => {
+              const firstName = profile.full_name?.split(' ')?.[0] || 'המשתמש/ת';
+              const pid = String(profile?.id || '').trim();
+              const anyOwned = !!pid && profileApartments.some((a: any) => String(a?.owner_id || '') === pid);
+              const anyPartner =
+                !!pid &&
+                profileApartments.some(
+                  (a: any) => Array.isArray(a?.partner_ids) && (a.partner_ids as any[]).map(String).includes(pid)
+                );
+              const hasAny = !!profileApartments.length;
+              const headerTag = !hasAny
+                ? 'אין דירה'
+                : anyOwned && anyPartner
+                  ? 'בעל דירה / שותף'
+                  : anyOwned
+                    ? 'בעל דירה'
+                    : 'שותף';
+              return (
+                <>
+                  <Text style={styles.apartmentsHeaderTitle}>{`הדירה של ${firstName}`}</Text>
+                  <View style={styles.apartmentsHeaderTag}>
+                    <Text style={styles.apartmentsHeaderTagText}>{headerTag}</Text>
+                  </View>
+                </>
+              );
+            })()}
+          </View>
+
+          <View style={{ paddingTop: 12 }}>
+            {profileAptLoading ? (
+              <View style={styles.sectionEmptyWrap}>
+                <ActivityIndicator size="small" color="#4C1D95" />
+                <Text style={styles.sectionEmptyText}>טוען דירה...</Text>
+              </View>
+            ) : profileApartments.length ? (
+              profileApartments.map((apt, idx) => {
+                const rawImages = normalizeImageUrls(apt.image_urls);
+                const aptImages = Array.from(new Set(rawImages.map(resolveApartmentImageCandidate).filter(Boolean)));
+                const firstImg = aptImages.length > 0 ? aptImages[0] : APT_IMAGE_PLACEHOLDER;
+                const occupantMembers = apartmentOccupants[apt.id] || [];
+                const visibleOccupants = occupantMembers.slice(0, 4);
+                const overflowCount = occupantMembers.length - visibleOccupants.length;
+                const isLast = idx === profileApartments.length - 1;
+                return (
+                  <TouchableOpacity
+                    key={apt.id}
+                    style={[styles.aptCard, !isLast ? styles.aptCardSpacing : null]}
+                    activeOpacity={0.9}
+                    onPress={() => router.push({ pathname: '/apartment/[id]', params: { id: apt.id } })}
+                  >
+                    <View style={styles.aptCoverWrap}>
+                      <ApartmentImageThumb uri={firstImg} style={styles.aptCoverImg} />
+                      <LinearGradient
+                        colors={['rgba(0,0,0,0.00)', 'rgba(0,0,0,0.92)']}
+                        start={{ x: 0.5, y: 0 }}
+                        end={{ x: 0.5, y: 1 }}
+                        style={styles.aptCoverGradient}
+                      />
+                      <View style={styles.aptCoverTextWrap}>
+                        <Text style={styles.aptCoverTitle} numberOfLines={1}>
+                          {apt.title || 'דירה'}
+                        </Text>
+                        {!!apt.city ? (
+                          <View style={styles.aptCoverCityRow}>
+                            <MapPin size={14} color="rgba(255,255,255,0.92)" />
+                            <Text style={styles.aptCoverCityText} numberOfLines={1}>
+                              {apt.city}
+                            </Text>
+                          </View>
+                        ) : null}
+                      </View>
+
+                      {!!visibleOccupants.length ? (
+                        <View style={styles.aptCoverOccupantsRow} pointerEvents="none">
+                          {visibleOccupants.map((member, idx2) => {
+                            const fallbackInitial = ((member.full_name || '').trim().charAt(0) || '?').toUpperCase();
+                            return (
+                              <View
+                                key={member.id}
+                                style={[
+                                  styles.aptOccupantAvatarWrap,
+                                  styles.aptCoverOccupantAvatarShadow,
+                                  idx2 !== 0 && styles.aptOccupantOverlap,
+                                ]}
+                              >
+                                {member.avatar_url ? (
+                                  <Image source={{ uri: member.avatar_url }} style={styles.aptOccupantAvatarImg} />
+                                ) : (
+                                  <Text style={styles.aptOccupantFallback}>{fallbackInitial}</Text>
+                                )}
+                              </View>
+                            );
+                          })}
+                          {overflowCount > 0 ? (
+                            <View
+                              style={[
+                                styles.aptOccupantAvatarWrap,
+                                styles.aptCoverOccupantAvatarShadow,
+                                styles.aptOccupantOverflow,
+                              ]}
+                            >
+                              <Text style={styles.aptOccupantOverflowText}>+{overflowCount}</Text>
+                            </View>
+                          ) : null}
+                        </View>
+                      ) : null}
+                    </View>
+                  </TouchableOpacity>
+                );
+              })
+            ) : (
+              <View style={styles.sectionEmptyWrap}>
+                <View style={styles.sectionEmptyIconPill}>
+                  <Building2 size={18} color="#4C1D95" />
+                </View>
+                <Text style={styles.sectionEmptyTitle}>עדיין אין דירה</Text>
+                <Text style={styles.sectionEmptyText}>
+                  המשתמש/ת עדיין לא בחר/ה דירה להצגה בפרופיל.
+                </Text>
+              </View>
+            )}
+          </View>
+        </View>
+      </View>
+
+          {/* Survey CTA (match + questionnaire) — placed under the apartment section */}
+          <View style={styles.section}>
+            <View style={styles.surveyCTAOuter}>
+              <TouchableOpacity
                 style={[
-                  styles.galleryImg,
-                  {
-                    width: galleryItemSize,
-                    height: galleryItemSize,
-                    marginRight: idx % 3 === 2 ? 0 : gap,
-                    marginBottom: gap,
-                  },
+                  styles.surveyCTA,
+                  (surveyLoading || !survey) ? styles.surveyCTADisabled : null,
                 ]}
-              />
-            ))}
+                activeOpacity={0.9}
+                onPress={() => {
+                  if (surveyLoading) return;
+                  if (!survey) return;
+                  setIsSurveyOpen(true);
+                }}
+                disabled={surveyLoading || !survey}
+              >
+                <LinearGradient
+                  colors={(surveyLoading || !survey) ? ['#D1D5DB', '#9CA3AF'] : ['#A78BFA', '#4C1D95']}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 0, y: 1 }}
+                  style={styles.surveyCTAMatchTab}
+                >
+                  <Ticker
+                    value={matchPercentDisplay}
+                    fontSize={15}
+                    staggerDuration={55}
+                    style={styles.surveyCTAMatchTabValue}
+                  />
+                  <Text style={styles.surveyCTAMatchTabLabel}>התאמה</Text>
+                </LinearGradient>
+
+                <View style={styles.surveyCTATexts}>
+                  <Text style={styles.surveyCTATitle}>
+                    {`קצת על ${profile.full_name?.split(' ')?.[0] || 'המשתמש/ת'}`}
+                  </Text>
+                  <Text style={styles.surveyCTASubtitle} numberOfLines={1}>
+                    {(() => {
+                      const firstName = profile.full_name?.split(' ')?.[0] || 'המשתמש/ת';
+                      if (surveyLoading) return 'טוען...';
+                      if (surveyError) return surveyError;
+                      if (!survey) return `${firstName} עדיין לא מילא/ה את השאלון`;
+                      return `הכירו את ${firstName} יותר טוב`;
+                    })()}
+                  </Text>
+                </View>
+
+                <View style={styles.surveyCTABadge}>
+                  <LinearGradient
+                    colors={(surveyLoading || !survey) ? ['#D1D5DB', '#9CA3AF'] : ['#A78BFA', '#4C1D95']}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={styles.surveyCTABadgeInner}
+                  >
+                    <ClipboardList size={22} color="#FFFFFF" />
+                  </LinearGradient>
+                </View>
+              </TouchableOpacity>
+            </View>
           </View>
+
+          {/* Survey modal */}
+          <Modal visible={isSurveyOpen} animationType="slide" transparent onRequestClose={() => setIsSurveyOpen(false)}>
+            <View style={styles.modalOverlay}>
+              <TouchableOpacity style={styles.modalBackdrop} activeOpacity={1} onPress={() => setIsSurveyOpen(false)} />
+              <View style={styles.sheet}>
+                <View style={styles.sheetHeader}>
+                  <Text style={styles.sheetTitle}>סיכום ההעדפות</Text>
+                  <TouchableOpacity onPress={() => setIsSurveyOpen(false)} style={styles.closeBtn}>
+                    <X size={20} color="#FFFFFF" />
+                  </TouchableOpacity>
+                </View>
+                <ScrollView
+                  style={styles.sheetScroll}
+                  contentContainerStyle={styles.sheetContent}
+                  showsVerticalScrollIndicator={false}
+                >
+                  {!!surveyHighlights.length && (
+                    <View style={styles.surveyHighlightsRow}>
+                      {surveyHighlights.map((item) => (
+                        <View key={`${item.label}-${item.value}`} style={styles.surveyHighlightPill}>
+                          <Text style={styles.surveyHighlightLabel}>{item.label}</Text>
+                          <Text style={styles.surveyHighlightValue}>{item.value}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+
+                  {survey ? (
+                    surveyItems.length ? (
+                      <>
+                        <Text style={styles.surveyAllAnswersTitle}>{`סיכום מלא (${surveyItems.length})`}</Text>
+
+                        <View style={styles.surveySectionCard}>
+                          <Text style={styles.surveySectionTitle}>עליי</Text>
+                          {surveyItems.filter((i) => i.section === 'about').map((item, idx, arr) => (
+                            <View key={`${item.section}-${item.label}-${item.value}`}>
+                              <View style={styles.surveyRow}>
+                                <Text style={styles.surveyRowLabel}>{item.label}</Text>
+                                <View style={styles.surveyRowValuePill}>
+                                  <Text style={styles.surveyRowValueText}>{item.value}</Text>
+                                </View>
+                              </View>
+                              {idx < arr.length - 1 ? <View style={styles.surveyRowDivider} /> : null}
+                            </View>
+                          ))}
+                        </View>
+
+                        <View style={styles.surveySectionCard}>
+                          <Text style={styles.surveySectionTitle}>הדירה שאני מחפש/ת</Text>
+                          {surveyItems.filter((i) => i.section === 'apartment').map((item, idx, arr) => (
+                            <View key={`${item.section}-${item.label}-${item.value}`}>
+                              <View style={styles.surveyRow}>
+                                <Text style={styles.surveyRowLabel}>{item.label}</Text>
+                                <View style={styles.surveyRowValuePill}>
+                                  <Text style={styles.surveyRowValueText}>{item.value}</Text>
+                                </View>
+                              </View>
+                              {idx < arr.length - 1 ? <View style={styles.surveyRowDivider} /> : null}
+                            </View>
+                          ))}
+                        </View>
+
+                        <View style={styles.surveySectionCard}>
+                          <Text style={styles.surveySectionTitle}>השותפ/ה שאני מחפש/ת</Text>
+                          {surveyItems.filter((i) => i.section === 'partner').map((item, idx, arr) => (
+                            <View key={`${item.section}-${item.label}-${item.value}`}>
+                              <View style={styles.surveyRow}>
+                                <Text style={styles.surveyRowLabel}>{item.label}</Text>
+                                <View style={styles.surveyRowValuePill}>
+                                  <Text style={styles.surveyRowValueText}>{item.value}</Text>
+                                </View>
+                              </View>
+                              {idx < arr.length - 1 ? <View style={styles.surveyRowDivider} /> : null}
+                            </View>
+                          ))}
+                        </View>
+                      </>
+                    ) : (
+                      <View style={styles.surveyEmptyState}>
+                        <Text style={styles.surveyEmptyText}>
+                          סקר ההעדפות הושלם אך אין עדיין נתונים להצגה.
+                        </Text>
+                      </View>
+                    )
+                  ) : (
+                    <View style={styles.surveyEmptyState}>
+                      <Text style={styles.surveyEmptyText}>
+                        אין נתונים להצגה.
+                      </Text>
+                    </View>
+                  )}
+                </ScrollView>
+              </View>
+            </View>
+          </Modal>
+
+      <View style={styles.section}>
+        <View style={styles.galleryCard}>
+          <View style={styles.galleryHeaderRow}>
+            <Text style={styles.galleryHeaderTitle}>תמונות</Text>
+            <Text style={styles.galleryCountText}>{galleryUrls.length}/6</Text>
+          </View>
+
+          {galleryUrls.length ? (
+            <View
+              style={styles.galleryGrid}
+              onLayout={(e) => {
+                const w = e.nativeEvent.layout.width;
+                if (w && Math.abs(w - galleryWidth) > 1) setGalleryWidth(w);
+              }}
+            >
+              {galleryUrls.map((url, idx) => (
+                <TouchableOpacity
+                  key={url + idx}
+                  activeOpacity={0.9}
+                  onPress={() => setViewerIndex(idx)}
+                  style={[
+                    styles.galleryItem,
+                    {
+                      width: galleryItemSize,
+                      height: galleryItemSize,
+                      // galleryGrid is row-reverse, so spacing should be on the LEFT of each item
+                      marginLeft: idx % 3 === 2 ? 0 : gap,
+                      marginBottom: gap,
+                    },
+                  ]}
+                >
+                  <Image source={{ uri: url }} style={styles.galleryImg} />
+                </TouchableOpacity>
+              ))}
+            </View>
+          ) : (
+            <View style={styles.sectionEmptyWrap}>
+              <View style={styles.sectionEmptyIconPill}>
+                <Images size={18} color="#4C1D95" />
+              </View>
+              <Text style={styles.sectionEmptyTitle}>עדיין אין תמונות</Text>
+              <Text style={styles.sectionEmptyText}>
+                כשהמשתמש/ת יוסיף/תוסיף תמונות לפרופיל, הן יופיעו כאן.
+              </Text>
+            </View>
+          )}
         </View>
-      ) : null}
+      </View>
+
+      {viewerIndex !== null && (
+        <Modal
+          visible
+          transparent
+          animationType="fade"
+          onRequestClose={() => setViewerIndex(null)}
+        >
+          <View style={styles.viewerOverlay}>
+            <TouchableOpacity
+              style={styles.viewerBackdrop}
+              activeOpacity={1}
+              onPress={() => setViewerIndex(null)}
+            />
+            <TouchableOpacity
+              style={[styles.viewerCloseBtn, { top: 20 }]}
+              onPress={() => setViewerIndex(null)}
+              activeOpacity={0.9}
+            >
+              <X size={18} color="#E5E7EB" />
+            </TouchableOpacity>
+            <Image
+              source={{ uri: galleryUrls[viewerIndex] || '' }}
+              style={styles.viewerImage}
+              resizeMode="contain"
+            />
+          </View>
+        </Modal>
+      )}
         </View>
       </ScrollView>
-    </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F6F7FB',
-    direction: 'rtl',
+    backgroundColor: '#FFFFFF',
+    // Keep text RTL, but avoid flipping the entire layout on web (which can cause double-inversion with row-reverse).
+    writingDirection: 'rtl',
   },
   center: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#F6F7FB',
+    backgroundColor: '#FFFFFF',
     paddingHorizontal: 16,
   },
   scrollContent: {
@@ -1404,10 +1831,12 @@ const styles = StyleSheet.create({
   },
   topBar: {
     paddingHorizontal: 16,
+    paddingTop: 8,
     paddingBottom: 10,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    backgroundColor: '#FFFFFF',
   },
   topBarRight: {
     flexDirection: 'row-reverse',
@@ -1419,19 +1848,16 @@ const styles = StyleSheet.create({
     height: 38,
     borderRadius: 19,
     backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: 'rgba(17,24,39,0.08)',
+    borderWidth: 0,
+    borderColor: 'transparent',
     alignItems: 'center',
     justifyContent: 'center',
-    ...(Platform.OS === 'android' ? { elevation: 2 } : {}),
-    ...(Platform.OS === 'ios'
-      ? ({
-          shadowColor: '#000',
-          shadowOpacity: 0.08,
-          shadowRadius: 10,
-          shadowOffset: { width: 0, height: 4 },
-        } as const)
-      : {}),
+    shadowColor: '#000',
+    shadowOpacity: 0.06,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 2,
+    ...(Platform.OS === 'web' ? ({ boxShadow: '0 10px 22px rgba(0,0,0,0.08)' } as any) : null),
   },
   headerBio: {
     color: '#374151',
@@ -1457,8 +1883,14 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: 999,
     backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: 'rgba(17,24,39,0.08)',
+    borderWidth: 0,
+    borderColor: 'transparent',
+    shadowColor: '#000',
+    shadowOpacity: 0.06,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 2,
+    ...(Platform.OS === 'web' ? ({ boxShadow: '0 10px 22px rgba(0,0,0,0.08)' } as any) : null),
   },
   mergedChipText: {
     color: '#111827',
@@ -1495,8 +1927,8 @@ const styles = StyleSheet.create({
     borderRadius: 52,
     backgroundColor: '#F3F4F6',
     marginBottom: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(17,24,39,0.08)',
+    borderWidth: 0,
+    borderColor: 'transparent',
   },
   name: {
     color: '#111827',
@@ -1513,31 +1945,28 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 999,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: 'rgba(76,29,149,0.08)',
     borderWidth: 1,
-    borderColor: 'rgba(17,24,39,0.08)',
+    borderColor: 'rgba(76,29,149,0.16)',
   },
   locationText: {
-    color: '#6B7280',
+    color: '#4C1D95',
     fontSize: 13,
-    fontWeight: '800',
+    fontWeight: '900',
   },
   profileCard: {
     padding: 18,
     borderRadius: 22,
     backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: 'rgba(17,24,39,0.08)',
     alignItems: 'center',
-    ...(Platform.OS === 'android' ? { elevation: 2 } : {}),
-    ...(Platform.OS === 'ios'
-      ? ({
-          shadowColor: '#000',
-          shadowOpacity: 0.08,
-          shadowRadius: 20,
-          shadowOffset: { width: 0, height: 10 },
-        } as const)
-      : {}),
+    borderWidth: 0,
+    borderColor: 'transparent',
+    shadowColor: '#000',
+    shadowOpacity: 0.10,
+    shadowRadius: 22,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 4,
+    ...(Platform.OS === 'web' ? ({ boxShadow: '0 12px 28px rgba(0,0,0,0.10)' } as any) : null),
   },
   section: {
     marginTop: 14,
@@ -1554,12 +1983,270 @@ const styles = StyleSheet.create({
     padding: 18,
     borderRadius: 20,
     backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderWidth: 0,
+    borderColor: 'transparent',
     shadowColor: '#000000',
-    shadowOpacity: 0.2,
+    shadowOpacity: 0.08,
     shadowRadius: 16,
     shadowOffset: { width: 0, height: 8 },
+    elevation: 3,
+    ...(Platform.OS === 'web' ? ({ boxShadow: '0 12px 28px rgba(0,0,0,0.10)' } as any) : null),
+  },
+  surveyCTA: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 0,
+    borderColor: 'transparent',
+    borderRadius: 20,
+    overflow: 'hidden',
+    paddingLeft: 16,
+    paddingRight: 92,
+    paddingVertical: 14,
+  },
+  surveyCTADisabled: {
+    backgroundColor: '#F3F4F6',
+  },
+  surveyCTAOuter: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    shadowColor: '#000000',
+    shadowOpacity: 0.10,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 4,
+    ...(Platform.OS === 'web' ? ({ boxShadow: '0 12px 28px rgba(0,0,0,0.12)' } as any) : null),
+  },
+  surveyCTATexts: {
+    flex: 1,
+    marginRight: 8,
+  },
+  surveyCTATitle: {
+    color: '#111827',
+    fontSize: 16,
+    fontWeight: '800',
+    textAlign: 'right',
+    marginBottom: 4,
+  },
+  surveyCTASubtitle: {
+    color: '#6B7280',
+    fontSize: 13,
+    textAlign: 'right',
+  },
+  surveyCTAHint: {
+    marginTop: 10,
+    color: '#6B7280',
+    fontSize: 13,
+    lineHeight: 18,
+    textAlign: 'right',
+    alignSelf: 'stretch',
+  },
+  surveyCTAMatchTab: {
+    position: 'absolute',
+    right: 0,
+    top: 0,
+    bottom: 0,
+    width: 78,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderTopRightRadius: 20,
+    borderBottomRightRadius: 20,
+    // Inner edge stays straight to look like "attached" to the card
+    borderTopLeftRadius: 0,
+    borderBottomLeftRadius: 0,
+  },
+  surveyCTAMatchTabValue: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '900',
+    lineHeight: 18,
+    includeFontPadding: false,
+    textAlign: 'center',
+    writingDirection: 'ltr',
+  },
+  surveyCTAMatchTabLabel: {
+    marginTop: 2,
+    color: 'rgba(255,255,255,0.92)',
+    fontSize: 10,
+    fontWeight: '800',
+    lineHeight: 12,
+    includeFontPadding: false,
+    textAlign: 'center',
+  },
+  surveyCTABadge: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 2,
+    borderColor: '#E5E7EB',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000000',
+    shadowOpacity: 0.12,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 6 },
+  },
+  surveyCTABadgeInner: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#4C1D95',
+    shadowColor: '#4C1D95',
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+  },
+  modalOverlay: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(0,0,0,0.4)',
+  },
+  modalBackdrop: {
+    flex: 1,
+  },
+  sheet: {
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    overflow: 'hidden',
+    // Use a fixed relative height so the sheet reliably "rises up" and shows content nicely.
+    // (maxHeight can leave the sheet too short on some platforms/web layouts)
+    height: '92%',
+    width: '100%',
+  },
+  sheetHeader: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    backgroundColor: '#FFFFFF',
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E7EB',
+  },
+  sheetTitle: {
+    color: '#111827',
+    fontSize: 16,
+    fontWeight: '800',
+    textAlign: 'right',
+  },
+  closeBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#4C1D95',
+  },
+  sheetScroll: {
+    flex: 1,
+  },
+  sheetContent: {
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 20,
+    gap: 12,
+  },
+  surveyHighlightsRow: {
+    flexDirection: 'row-reverse',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginBottom: 6,
+  },
+  surveyHighlightPill: {
+    backgroundColor: '#F9FAFB',
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    width: '48%',
+  },
+  surveyHighlightLabel: {
+    color: '#6B7280',
+    fontSize: 12,
+    marginBottom: 2,
+    textAlign: 'right',
+    fontWeight: '600',
+  },
+  surveyHighlightValue: {
+    color: '#111827',
+    fontSize: 14,
+    fontWeight: '800',
+    textAlign: 'right',
+  },
+  surveyAllAnswersTitle: {
+    color: '#111827',
+    fontSize: 14,
+    fontWeight: '900',
+    textAlign: 'right',
+    marginTop: 4,
+    marginBottom: 8,
+  },
+  surveySectionCard: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 18,
+    padding: 14,
+    marginBottom: 12,
+  },
+  surveySectionTitle: {
+    color: '#4C1D95',
+    fontSize: 14,
+    fontWeight: '900',
+    textAlign: 'right',
+    marginBottom: 10,
+  },
+  surveyRow: {
+    flexDirection: 'row-reverse',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  surveyRowLabel: {
+    flex: 1,
+    color: '#6B7280',
+    fontSize: 13,
+    fontWeight: '700',
+    textAlign: 'right',
+    lineHeight: 18,
+  },
+  surveyRowValuePill: {
+    maxWidth: '55%',
+    backgroundColor: 'rgba(76,29,149,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(76,29,149,0.18)',
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 14,
+  },
+  surveyRowValueText: {
+    color: '#111827',
+    fontSize: 13,
+    fontWeight: '900',
+    textAlign: 'right',
+    lineHeight: 18,
+  },
+  surveyRowDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: '#EEF2F7',
+    marginVertical: 10,
+  },
+  surveyEmptyState: {
+    paddingVertical: 18,
+    paddingHorizontal: 4,
+    gap: 8,
+  },
+  surveyEmptyText: {
+    color: '#6B7280',
+    fontSize: 14,
+    lineHeight: 20,
+    textAlign: 'right',
   },
   surveyBadgeRow: {
     flexDirection: 'row',
@@ -1697,13 +2384,15 @@ const styles = StyleSheet.create({
     padding: 16,
     borderRadius: 18,
     backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderWidth: 0,
+    borderColor: 'transparent',
     shadowColor: '#000000',
-    shadowOpacity: 0.18,
+    shadowOpacity: 0.08,
     shadowRadius: 16,
     shadowOffset: { width: 0, height: 8 },
     alignItems: 'center',
+    elevation: 3,
+    ...(Platform.OS === 'web' ? ({ boxShadow: '0 12px 28px rgba(0,0,0,0.10)' } as any) : null),
   },
   groupBadge: {
     flexDirection: 'row',
@@ -1803,34 +2492,276 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     textAlign: 'center',
   },
-  gallery: {
-    marginTop: 8,
-    flexDirection: 'row',
+  sharedCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 12,
+    alignItems: 'center',
+    borderWidth: 0,
+    borderColor: 'transparent',
+    shadowColor: '#000000',
+    shadowOpacity: 0.08,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 3,
+    ...(Platform.OS === 'web'
+      ? ({ boxShadow: '0 12px 28px rgba(0,0,0,0.10)' } as any)
+      : null),
+  },
+  sharedCardHeaderRow: {
+    width: '100%',
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+    paddingBottom: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#EEF2F7',
+    marginBottom: 12,
+  },
+  sharedCardTitle: {
+    color: '#111827',
+    fontSize: 15,
+    fontWeight: '900',
+    textAlign: 'right',
+    flex: 1,
+  },
+  sharedCardMeta: {
+    color: '#6B7280',
+    fontSize: 12,
+    fontWeight: '700',
+    textAlign: 'left',
+  },
+  sharedMembersGrid: {
+    width: '100%',
+    flexDirection: 'row-reverse',
     flexWrap: 'wrap',
-    // gaps handled via per-item margins to ensure precise 3-per-row layout
+    gap: 10,
     justifyContent: 'flex-start',
   },
-  galleryImg: {
-    width: '30%',
-    aspectRatio: 1,
-    borderRadius: 10,
+  sharedMemberTile: {
+    width: '31%',
+    minWidth: 92,
+    borderRadius: 16,
+    backgroundColor: '#E5E7EB',
+    borderWidth: 0,
+    borderColor: 'transparent',
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+    alignItems: 'center',
+    shadowColor: '#000000',
+    shadowOpacity: 0.10,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 4,
+    ...(Platform.OS === 'web'
+      ? ({ boxShadow: '0 10px 22px rgba(0,0,0,0.10)' } as any)
+      : null),
+  },
+  sharedMemberAvatarWrap: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    overflow: 'hidden',
     backgroundColor: '#F3F4F6',
+    borderWidth: 2,
+    borderColor: 'rgba(255,255,255,0.95)',
+    marginBottom: 8,
+  },
+  sharedMemberAvatar: {
+    width: '100%',
+    height: '100%',
+  },
+  sharedMemberName: {
+    color: '#111827',
+    fontSize: 12,
+    fontWeight: '800',
+    textAlign: 'center',
+    lineHeight: 16,
+    includeFontPadding: false,
+  },
+  sectionEmptyWrap: {
+    paddingVertical: 18,
+    paddingHorizontal: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  sectionEmptyIconPill: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(76,29,149,0.10)',
+    borderWidth: 1,
+    borderColor: 'rgba(76,29,149,0.16)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sectionEmptyTitle: {
+    color: '#111827',
+    fontSize: 14,
+    fontWeight: '900',
+    textAlign: 'center',
+  },
+  sectionEmptyText: {
+    color: '#6B7280',
+    fontSize: 13,
+    fontWeight: '700',
+    textAlign: 'center',
+    lineHeight: 18,
+    maxWidth: 320,
+  },
+  apartmentsCard: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 0,
+    borderColor: 'transparent',
+    borderRadius: 16,
+    padding: 12,
+    shadowColor: '#000000',
+    shadowOpacity: 0.08,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 3,
+    ...(Platform.OS === 'web'
+      ? ({ boxShadow: '0 12px 28px rgba(0,0,0,0.10)' } as any)
+      : null),
+  },
+  apartmentsHeaderRow: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingBottom: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#EEF2F7',
+    gap: 10,
+  },
+  apartmentsHeaderTitle: {
+    color: '#111827',
+    fontSize: 16,
+    fontWeight: '800',
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    flex: 1,
+  },
+  apartmentsHeaderTag: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: 'rgba(76,29,149,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(76,29,149,0.16)',
+  },
+  apartmentsHeaderTagText: {
+    color: '#4C1D95',
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  aptCardSpacing: {
+    marginBottom: 12,
+  },
+  gallery: {
+    // removed (replaced by galleryCard/galleryGrid)
+  },
+  galleryImg: {
+    width: '100%',
+    height: '100%',
+  },
+  galleryCard: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 0,
+    borderColor: 'transparent',
+    borderRadius: 16,
+    padding: 12,
+    shadowColor: '#000000',
+    shadowOpacity: 0.08,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 3,
+    ...(Platform.OS === 'web'
+      ? ({ boxShadow: '0 12px 28px rgba(0,0,0,0.10)' } as any)
+      : null),
+  },
+  galleryHeaderRow: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingBottom: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#EEF2F7',
+  },
+  galleryHeaderTitle: {
+    color: '#111827',
+    fontSize: 16,
+    fontWeight: '800',
+    textAlign: 'right',
+  },
+  galleryCountText: {
+    color: '#6B7280',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  galleryGrid: {
+    marginTop: 12,
+    flexDirection: 'row-reverse',
+    flexWrap: 'wrap',
+    justifyContent: 'flex-start',
+    // Keep layout consistent (esp. on web) so margins produce uniform spacing
+    direction: 'ltr',
+  },
+  galleryItem: {
+    borderRadius: 14,
+    overflow: 'hidden',
+    backgroundColor: '#E5E7EB',
+    shadowColor: '#000000',
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 3,
+  },
+  viewerOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.95)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  viewerBackdrop: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+  },
+  viewerImage: {
+    width: '92%',
+    height: '70%',
+    borderRadius: 12,
+    backgroundColor: '#111827',
+  },
+  viewerCloseBtn: {
+    position: 'absolute',
+    left: 16,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 2,
   },
   aptCard: {
     borderRadius: 18,
     backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: 'rgba(17,24,39,0.08)',
+    borderWidth: 0,
+    borderColor: 'transparent',
     overflow: 'hidden',
-    ...(Platform.OS === 'android' ? { elevation: 2 } : {}),
-    ...(Platform.OS === 'ios'
-      ? ({
-          shadowColor: '#000',
-          shadowOpacity: 0.08,
-          shadowRadius: 20,
-          shadowOffset: { width: 0, height: 10 },
-        } as const)
-      : {}),
+    shadowColor: '#000',
+    shadowOpacity: 0.08,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 3,
+    ...(Platform.OS === 'web' ? ({ boxShadow: '0 12px 28px rgba(0,0,0,0.10)' } as any) : null),
   },
   aptCoverWrap: {
     width: '100%',
@@ -1842,7 +2773,11 @@ const styles = StyleSheet.create({
     height: '100%',
   },
   aptCoverGradient: {
-    ...StyleSheet.absoluteFillObject,
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: 130,
   },
   aptCoverTextWrap: {
     position: 'absolute',
@@ -1850,12 +2785,33 @@ const styles = StyleSheet.create({
     right: 14,
     bottom: 12,
     alignItems: 'flex-end',
+    // In RTL screens on web, flex-end may map to the visual left. Force LTR so "end" stays right.
+    direction: 'ltr',
+  },
+  aptCoverOccupantsRow: {
+    position: 'absolute',
+    top: 12,
+    left: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    // Force LTR layout for consistent spacing/overlap even when the screen is RTL (esp. on web)
+    direction: 'ltr',
+  },
+  aptCoverOccupantAvatarShadow: {
+    shadowColor: '#000000',
+    shadowOpacity: 0.18,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 4,
+    ...(Platform.OS === 'web' ? ({ boxShadow: '0 10px 22px rgba(0,0,0,0.18)' } as any) : null),
   },
   aptCoverTitle: {
     color: '#FFFFFF',
     fontSize: 17,
     fontWeight: '900',
     textAlign: 'right',
+    writingDirection: 'rtl',
     textShadowColor: 'rgba(0,0,0,0.35)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 10,
@@ -1871,6 +2827,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '800',
     textAlign: 'right',
+    writingDirection: 'rtl',
   },
   aptBody: {
     paddingHorizontal: 14,
@@ -1918,15 +2875,16 @@ const styles = StyleSheet.create({
     width: 34,
     height: 34,
     borderRadius: 17,
-    borderWidth: 1.5,
-    borderColor: '#E5E7EB',
+    borderWidth: 2,
+    borderColor: 'rgba(255,255,255,0.95)',
     backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
   },
   aptOccupantOverlap: {
-    marginRight: -10,
+    // Overlap avatars so each one slightly covers the previous one
+    marginLeft: -8,
   },
   aptOccupantAvatarImg: {
     width: '100%',
