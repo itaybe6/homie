@@ -215,7 +215,7 @@ export default function TabLayout() {
                       setOwnedApartmentId(firstId);
 
                       if (firstId) {
-                        Alert.alert(
+                        alert(
                           'לא ניתן להוסיף דירה',
                           'אי אפשר להעלות עוד דירה כי כבר העלית דירה אחת.'
                         );

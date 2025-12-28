@@ -1479,27 +1479,29 @@ export default function ProfileScreen() {
           onRequestClose={() => setViewerIndex(null)}
         >
           <View style={styles.viewerOverlay}>
-            <TouchableOpacity
-              style={[styles.viewerCloseBtn, { top: 36 + insets.top }]}
-              onPress={() => setViewerIndex(null)}
-              activeOpacity={0.9}
-            >
-              <X size={18} color="#E5E7EB" />
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.viewerDeleteBtn, { top: 36 + insets.top }]}
-              onPress={() => {
-                if (viewerIndex !== null) removeImageAt(viewerIndex);
-              }}
-              disabled={isDeletingImage}
-              activeOpacity={0.9}
-            >
-              {isDeletingImage ? (
-                <ActivityIndicator size="small" color="#F87171" />
-              ) : (
-                <Trash2 size={18} color="#F87171" />
-              )}
-            </TouchableOpacity>
+            <View style={[styles.viewerTopBar, { top: 12 + (insets.top || 0) }]}>
+              <TouchableOpacity
+                style={styles.viewerCloseBtn}
+                onPress={() => setViewerIndex(null)}
+                activeOpacity={0.9}
+              >
+                <X size={18} color="#E5E7EB" />
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.viewerDeleteBtn}
+                onPress={() => {
+                  if (viewerIndex !== null) removeImageAt(viewerIndex);
+                }}
+                disabled={isDeletingImage}
+                activeOpacity={0.9}
+              >
+                {isDeletingImage ? (
+                  <ActivityIndicator size="small" color="#F87171" />
+                ) : (
+                  <Trash2 size={18} color="#F87171" />
+                )}
+              </TouchableOpacity>
+            </View>
             {viewerIndex !== null && (
               <Image
                 source={{ uri: profile?.image_urls?.[viewerIndex] || '' }}
@@ -1750,10 +1752,17 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     backgroundColor: '#FFFFFF',
   },
-  viewerDeleteBtn: {
+  viewerTopBar: {
     position: 'absolute',
-    right: 16,
-    top: 16,
+    left: 0,
+    right: 0,
+    paddingHorizontal: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    zIndex: 3,
+  },
+  viewerDeleteBtn: {
     width: 40,
     height: 40,
     borderRadius: 20,
@@ -1765,9 +1774,6 @@ const styles = StyleSheet.create({
     zIndex: 2,
   },
   viewerCloseBtn: {
-    position: 'absolute',
-    left: 16,
-    top: 16,
     width: 40,
     height: 40,
     borderRadius: 20,

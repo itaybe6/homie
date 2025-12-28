@@ -10,6 +10,7 @@ import { usePushNotifications } from '@/hooks/usePushNotifications';
 import GlobalTopBar from '@/components/GlobalTopBar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { isSupabaseConfigured } from '@/lib/supabase';
+import { AppAlertProvider } from '@/components/AppAlertProvider';
 
 export default function RootLayout() {
   useFrameworkReady();
@@ -116,12 +117,14 @@ export default function RootLayout() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <Stack screenOptions={{ headerShown: false }}>
-        <Stack.Screen name="+not-found" />
-      </Stack>
-      {/* Global white top bar: notifications (left), Homie (center), requests (right) */}
-      {shouldShowGlobalTopBar && <GlobalTopBar backgroundColor={globalTopBarBg} />}
-      <StatusBar style="auto" />
+      <AppAlertProvider>
+        <Stack screenOptions={{ headerShown: false }}>
+          <Stack.Screen name="+not-found" />
+        </Stack>
+        {/* Global white top bar: notifications (left), Homie (center), requests (right) */}
+        {shouldShowGlobalTopBar && <GlobalTopBar backgroundColor={globalTopBarBg} />}
+        <StatusBar style="auto" />
+      </AppAlertProvider>
     </GestureHandlerRootView>
   );
 }

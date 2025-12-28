@@ -58,8 +58,6 @@ export default function ProfileSettingsScreen() {
   const [editPhone, setEditPhone] = useState('');
   const [editCity, setEditCity] = useState('');
   const [editSaving, setEditSaving] = useState(false);
-  const [editImages, setEditImages] = useState<string[]>([]);
-  const [editUpdatingImages, setEditUpdatingImages] = useState(false);
   // Animation values for edit sheet
   const sheetTranslateY = useRef(new Animated.Value(600)).current;
   const backdropOpacity = useRef(new Animated.Value(0)).current;
@@ -745,8 +743,6 @@ export default function ProfileSettingsScreen() {
                 setEditEmail((profile as any).email || '');
                 setEditPhone((profile as any).phone || '');
                 setEditCity((profile as any).city || '');
-                const imgs = Array.isArray((profile as any).image_urls) ? ((profile as any).image_urls as string[]).filter(Boolean) : [];
-                setEditImages(imgs);
               }
               setShowEditModal(true);
             }}
@@ -757,7 +753,7 @@ export default function ProfileSettingsScreen() {
             </View>
             <View style={styles.itemTextWrap}>
               <Text style={styles.groupItemTitle}>עריכת פרופיל</Text>
-              <Text style={styles.groupItemSub}>עדכון פרטים ותמונות</Text>
+              <Text style={styles.groupItemSub}>עדכון פרטים</Text>
             </View>
             <ChevronLeft size={18} color="#4C1D95" />
           </TouchableOpacity>
@@ -1637,124 +1633,6 @@ export default function ProfileSettingsScreen() {
                   />
                 </View>
 
-                {/* Photos section */}
-                <View style={{ gap: 6 }}>
-                  <View style={styles.subsectionHeader}>
-                    <Text style={styles.subsectionTitle}>תמונות</Text>
-                    <Text style={styles.subsectionHint}>{editImages.length}/6</Text>
-                  </View>
-                  <View style={styles.galleryGridLight}>
-                    {/* Existing images */}
-                    {editImages.map((url, idx) => (
-                      <View key={url + idx} style={styles.galleryItemLight}>
-                        <Image source={{ uri: url }} style={styles.galleryImg} />
-                        <TouchableOpacity
-                          onPress={async () => {
-                            try {
-                              if (!user?.id) return;
-                              const removing = editImages[idx];
-                              if (!removing) return;
-                              const confirm = Platform.OS === 'web'
-                                ? (typeof confirm === 'function' ? (confirm as any)('למחוק את התמונה הזו?') : true)
-                                : await new Promise<boolean>((resolve) => {
-                                    Alert.alert('מחיקת תמונה', 'למחוק את התמונה הזו?', [
-                                      { text: 'ביטול', style: 'cancel', onPress: () => resolve(false) },
-                                      { text: 'מחק', style: 'destructive', onPress: () => resolve(true) },
-                                    ]);
-                                  });
-                              if (!confirm) return;
-                              setEditUpdatingImages(true);
-                              const next = editImages.filter((_, i) => i !== idx);
-                              const { error: updateErr } = await supabase
-                                .from('users')
-                                .update({ image_urls: next, updated_at: new Date().toISOString() })
-                                .eq('id', user.id);
-                              if (updateErr) throw updateErr;
-                              setEditImages(next);
-                            } catch (e: any) {
-                              Alert.alert('שגיאה', e?.message || 'לא ניתן למחוק את התמונה');
-                            } finally {
-                              setEditUpdatingImages(false);
-                            }
-                          }}
-                          style={styles.removeLightBtn}
-                          disabled={editUpdatingImages}
-                          activeOpacity={0.85}
-                        >
-                          <Trash2 size={16} color="#F87171" />
-                        </TouchableOpacity>
-                      </View>
-                    ))}
-                {/* Add tile – placed last so it appears left of images in RTL */}
-                {editImages.length < 6 && (
-                  <TouchableOpacity
-                    style={styles.galleryAddTile}
-                    onPress={async () => {
-                      try {
-                        if (!user?.id) return;
-                        const current = editImages.filter(Boolean);
-                        const remaining = Math.max(0, 6 - current.length);
-                        const perms = await ImagePicker.requestMediaLibraryPermissionsAsync();
-                        if (!perms.granted) { Alert.alert('הרשאה נדרשת', 'יש לאפשר גישה לגלריה כדי להעלות תמונות'); return; }
-                        const result: any = await ImagePicker.launchImageLibraryAsync({
-                          mediaTypes: ImagePicker.MediaTypeOptions.Images,
-                          allowsEditing: false,
-                          allowsMultipleSelection: true,
-                          selectionLimit: remaining,
-                          quality: 0.9,
-                        } as any);
-                        if (result.canceled || !result.assets?.length) return;
-                        setEditUpdatingImages(true);
-                        const newUrls: string[] = [];
-                        for (const asset of result.assets) {
-                          // Check image dimensions and only resize if larger than 1200px
-                          const imageInfo = await ImageManipulator.manipulateAsync(asset.uri, []);
-                          const actions: ImageManipulator.Action[] = [];
-                          if (imageInfo.width > 1200) {
-                            actions.push({ resize: { width: 1200 } });
-                          }
-                          // Compress the image
-                          const compressed = await ImageManipulator.manipulateAsync(
-                            asset.uri,
-                            actions,
-                            { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG }
-                          );
-                          const response = await fetch(compressed.uri);
-                          const arrayBuffer = await response.arrayBuffer();
-                          const fileName = `${user.id}-${Date.now()}-${Math.random().toString(36).slice(2)}.jpg`;
-                          const filePath = `users/${user.id}/gallery/${fileName}`;
-                          const filePayload: any = arrayBuffer as any;
-                          const { error: upErr } = await supabase.storage
-                            .from('user-images')
-                            .upload(filePath, filePayload, { contentType: 'image/jpeg', upsert: true });
-                          if (upErr) throw upErr;
-                          const { data } = supabase.storage.from('user-images').getPublicUrl(filePath);
-                          newUrls.push(data.publicUrl);
-                        }
-                        const merged = [...current, ...newUrls].slice(0, 6);
-                        const { error: updateErr } = await supabase
-                          .from('users')
-                          .update({ image_urls: merged, updated_at: new Date().toISOString() })
-                          .eq('id', user.id);
-                        if (updateErr) throw updateErr;
-                        setEditImages(merged);
-                        Alert.alert('הצלחה', 'התמונות נוספו');
-                      } catch (e: any) {
-                        Alert.alert('שגיאה', e?.message || 'לא ניתן להעלות תמונות');
-                      } finally {
-                        setEditUpdatingImages(false);
-                      }
-                    }}
-                    activeOpacity={0.9}
-                    disabled={editUpdatingImages || editSaving}
-                  >
-                    <Plus size={18} color="#4C1D95" />
-                    <Text style={styles.galleryAddTileText}>הוסף</Text>
-                  </TouchableOpacity>
-                )}
-                  </View>
-                </View>
-
                 <View style={styles.editActionsRow}>
                   <TouchableOpacity
                     style={[styles.clearBtn]}
@@ -1782,7 +1660,6 @@ export default function ProfileSettingsScreen() {
                             email: editEmail || null,
                             phone: editPhone || null,
                             city: editCity || null,
-                            image_urls: editImages,
                             updated_at: new Date().toISOString(),
                           })
                           .eq('id', user.id);
