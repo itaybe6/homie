@@ -46,7 +46,6 @@ import {
   Hammer,
   PawPrint,
   ArrowUpDown,
-  Navigation2,
   Info,
 } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -722,6 +721,47 @@ export default function ApartmentDetailsScreen() {
     }
   };
 
+  const cancelJoinRequest = async () => {
+    try {
+      if (!user?.id) {
+        Alert.alert('שגיאה', 'יש להתחבר כדי לבצע פעולה זו');
+        return;
+      }
+      if (!apartment?.id) return;
+
+      setIsRequestingJoin(true);
+
+      // Cancel ALL pending JOIN_APT rows for this apartment (there may be multiple recipients)
+      const { error: updErr } = await supabase
+        .from('apartments_request')
+        .update({ status: 'CANCELLED', updated_at: new Date().toISOString() } as any)
+        .eq('sender_id', user.id)
+        .eq('apartment_id', apartment.id)
+        .eq('type', 'JOIN_APT')
+        .eq('status', 'PENDING');
+
+      if (updErr) {
+        // Fallback for schemas without CANCELLED enum/value: delete pending rows
+        const { error: delErr } = await supabase
+          .from('apartments_request')
+          .delete()
+          .eq('sender_id', user.id)
+          .eq('apartment_id', apartment.id)
+          .eq('type', 'JOIN_APT')
+          .eq('status', 'PENDING');
+        if (delErr) throw delErr;
+      }
+
+      setHasRequestedJoin(false);
+      Alert.alert('בוטל', 'הבקשה בוטלה בהצלחה');
+    } catch (e: any) {
+      console.error('cancel join request failed', e);
+      Alert.alert('שגיאה', e?.message || 'לא ניתן לבטל את הבקשה כעת');
+    } finally {
+      setIsRequestingJoin(false);
+    }
+  };
+
   const filteredCandidates = (() => {
     const q = (addSearch || '').trim().toLowerCase();
     const excludeIds = new Set<string>([
@@ -1334,7 +1374,9 @@ export default function ApartmentDetailsScreen() {
                   accessibilityRole="button"
                   accessibilityLabel="פתח ניווט"
                 >
-                  <Navigation2 size={14} color="#4C1D95" style={{ marginLeft: 6 }} />
+                  <View style={styles.navIconWrap}>
+                    <MapPin size={16} color="#FFFFFF" />
+                  </View>
                   <Text style={styles.navPillText}>ניווט</Text>
                 </TouchableOpacity>
               </View>
@@ -1479,18 +1521,43 @@ export default function ApartmentDetailsScreen() {
                 <Text style={styles.priceValue}>
                   <Text style={styles.currencySign}>₪</Text>
                   {apartment.price.toLocaleString?.() ?? String(apartment.price)}
+                  <Text style={styles.pricePerInline}> /חודש</Text>
                 </Text>
-                <View style={styles.greenChip}>
-                  <Text style={styles.greenChipText}>זמין מיידית</Text>
+                <View style={[styles.statusChip, hasRequestedJoin ? styles.statusChipPending : styles.statusChipGreen]}>
+                  <Text
+                    style={[styles.statusChipText, hasRequestedJoin ? styles.statusChipTextPending : styles.statusChipTextGreen]}
+                    numberOfLines={1}
+                    ellipsizeMode="clip"
+                  >
+                    {hasRequestedJoin ? 'מחכים לאישור של בעל הדירה' : 'הגישו בקשה והצטרפו לדירה'}
+                  </Text>
                 </View>
               </View>
               <TouchableOpacity
                 activeOpacity={0.9}
-                onPress={handleRequestJoin}
-                disabled={isOwner || isMember || isAssignedAnywhere !== false || isRequestingJoin || hasRequestedJoin}
+                onPress={() => {
+                  if (hasRequestedJoin) {
+                    Alert.alert('ביטול בקשה', 'לבטל את הבקשה להצטרף לדירה?', [
+                      { text: 'חזור', style: 'cancel' },
+                      { text: 'בטל בקשה', style: 'destructive', onPress: cancelJoinRequest },
+                    ]);
+                    return;
+                  }
+                  handleRequestJoin();
+                }}
+                disabled={
+                  isOwner ||
+                  isMember ||
+                  isRequestingJoin ||
+                  // Only block "submit" if already assigned elsewhere; allow cancel regardless.
+                  (!hasRequestedJoin && isAssignedAnywhere !== false)
+                }
                 style={[
                   styles.availabilityBtn,
-                  (isOwner || isMember || isAssignedAnywhere !== false || isRequestingJoin || hasRequestedJoin)
+                  (isOwner ||
+                    isMember ||
+                    isRequestingJoin ||
+                    (!hasRequestedJoin && isAssignedAnywhere !== false))
                     ? { opacity: 0.6 }
                     : null,
                 ]}
@@ -1498,12 +1565,14 @@ export default function ApartmentDetailsScreen() {
                 <Text style={styles.availabilityBtnText}>
                   {isOwner || isMember
                     ? 'בדוק זמינות'
-                    : isAssignedAnywhere !== false
+                    : !hasRequestedJoin && isAssignedAnywhere !== false
                       ? 'לא זמין'
                       : isRequestingJoin
-                        ? 'שולח...'
+                        ? hasRequestedJoin
+                          ? 'מבטל...'
+                          : 'שולח...'
                         : hasRequestedJoin
-                          ? 'נשלחה בקשה'
+                          ? 'בטל בקשה'
                           : 'הגש בקשה'}
                 </Text>
               </TouchableOpacity>
@@ -2248,17 +2317,43 @@ const styles = StyleSheet.create({
         }
       : { elevation: 4 }),
   },
-  priceRight: { alignItems: 'flex-end', gap: 6 },
+  priceRight: { flex: 1, alignItems: 'flex-end', gap: 6 },
   priceValue: { color: '#0B1220', fontSize: 20, fontWeight: '800' },
   currencySign: { color: '#0B1220', fontSize: 18, fontWeight: '800' },
   pricePerUnit: { color: '#6B7280', fontSize: 13, marginTop: 2, marginBottom: 6 },
   pricePerInline: { color: '#6B7280', fontSize: 13, fontWeight: '600', marginLeft: 6 },
-  greenChip: { backgroundColor: '#DCFCE7', borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4 },
-  greenChipText: { color: '#16A34A', fontSize: 12, fontWeight: '800' },
+  statusChip: {
+    borderRadius: 14,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    flexShrink: 1,
+    maxWidth: 260,
+  },
+  statusChipGreen: {
+    backgroundColor: '#DCFCE7',
+  },
+  statusChipPending: {
+    backgroundColor: '#E5E7EB',
+  },
+  statusChipText: {
+    fontSize: 11,
+    fontWeight: '900',
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    lineHeight: 15,
+    includeFontPadding: false,
+    flexShrink: 1,
+  },
+  statusChipTextGreen: {
+    color: '#16A34A',
+  },
+  statusChipTextPending: {
+    color: '#374151',
+  },
   availabilityBtn: {
     backgroundColor: '#8B5CF6',
-    height: 44,
-    paddingHorizontal: 18,
+    height: 42,
+    paddingHorizontal: 12,
     borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
@@ -2271,7 +2366,7 @@ const styles = StyleSheet.create({
         }
       : { elevation: 6 }),
   },
-  availabilityBtnText: { color: '#FFFFFF', fontSize: 15, fontWeight: '900' },
+  availabilityBtnText: { color: '#FFFFFF', fontSize: 13, fontWeight: '900', includeFontPadding: false, lineHeight: 16 },
   section: {
     marginTop: 12,
     marginBottom: 16,
@@ -2309,20 +2404,37 @@ const styles = StyleSheet.create({
     writingDirection: 'ltr',
   },
   navPill: {
-    backgroundColor: '#EFEAFE',
-    borderRadius: 999,
+    backgroundColor: '#8B5CF6',
+    borderRadius: 12,
     paddingHorizontal: 12,
-    paddingVertical: 7,
-    borderWidth: 1,
-    borderColor: 'rgba(76, 29, 149, 0.18)',
+    paddingVertical: 8,
     flexDirection: 'row-reverse',
     alignItems: 'center',
+    justifyContent: 'center',
+    ...(Platform.OS === 'ios'
+      ? {
+          shadowColor: '#8B5CF6',
+          shadowOpacity: 0.22,
+          shadowRadius: 8,
+          shadowOffset: { width: 0, height: 5 },
+        }
+      : { elevation: 5 }),
   },
   navPillText: {
-    color: '#4C1D95',
+    color: '#FFFFFF',
     fontSize: 12,
     fontWeight: '900',
     textAlign: 'center',
+    includeFontPadding: false,
+    lineHeight: 16,
+  },
+  navIconWrap: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 8,
   },
   navOverlay: {
     flex: 1,
