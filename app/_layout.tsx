@@ -32,7 +32,7 @@ export default function RootLayout() {
   const isAuthRoute = typeof pathname === 'string' && pathname.startsWith('/auth');
   const isAdminRoute = typeof pathname === 'string' && pathname.startsWith('/admin');
   const shouldShowGlobalTopBar = !!user && !hideGlobalTopBar && !isAuthRoute && !isAdminRoute;
-  const globalTopBarBg = isApartmentsHomeRoute ? '#F8F9FC' : '#FFFFFF';
+  const globalTopBarBg = isApartmentsHomeRoute ? '#FFFFFF' : '#FFFFFF';
 
   if (!supabaseOk) {
     return (

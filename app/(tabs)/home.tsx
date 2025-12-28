@@ -151,7 +151,7 @@ function GaugeStepper({
 export default function HomeScreen() {
   const router = useRouter();
   const { height: screenHeight } = useWindowDimensions();
-  const PAGE_BG = '#F8F9FC';
+  const PAGE_BG = '#FFFFFF';
   const { apartments, setApartments, isLoading, setLoading } =
     useApartmentStore();
   const { user } = useAuthStore();
@@ -294,8 +294,10 @@ export default function HomeScreen() {
           selectedIds={chipSelected}
           onChange={setChipSelected}
           withShadow={false}
-          inactiveBackgroundColor="#FFFFFF"
-          activeBackgroundColor="#FFFFFF"
+          inactiveBackgroundColor="#F3F4F6"
+          inactiveBorderColor="#E5E7EB"
+          activeBackgroundColor="#EFEAFE"
+          activeBorderColor="rgba(76, 29, 149, 0.28)"
           onOpenDropdown={(chip) => {
             if (chip.id === 'price' || chip.id === 'rooms') {
               setIsFilterOpen(true);
@@ -820,17 +822,17 @@ const styles = StyleSheet.create({
   },
   safeTop: {
     flex: 1,
-    backgroundColor: '#F8F9FC',
+    backgroundColor: '#FFFFFF',
   },
   centerContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#F8F9FC',
+    backgroundColor: '#FFFFFF',
   },
   pageBody: {
     flex: 1,
-    backgroundColor: '#F8F9FC',
+    backgroundColor: '#FFFFFF',
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     overflow: 'visible',
@@ -962,7 +964,7 @@ const styles = StyleSheet.create({
   listContent: {
     padding: 16,
     paddingBottom: 140, // Leave room for floating tab bar
-    backgroundColor: '#F8F9FC',
+    backgroundColor: '#FFFFFF',
   },
   modalOverlay: {
     flex: 1,

@@ -725,8 +725,10 @@ export default function MapTabScreen() {
             onOpenDropdown={(chip) => {
               if (chip.id === 'distance') setDistancePickerOpen(true);
             }}
-            inactiveBackgroundColor="#FAFAFA"
-            activeBackgroundColor="#FAFAFA"
+            inactiveBackgroundColor="#F3F4F6"
+            inactiveBorderColor="#E5E7EB"
+            activeBackgroundColor="#EFEAFE"
+            activeBorderColor="rgba(76, 29, 149, 0.28)"
             style={{ marginTop: 8 }}
           />
 

@@ -192,7 +192,7 @@ export function AppAlertProvider({ children }: { children: React.ReactNode }) {
             <Text style={styles.title}>{state.title}</Text>
             {!!state.message ? <Text style={styles.message}>{state.message}</Text> : null}
             <View style={styles.divider} />
-            <View style={styles.buttonsRow}>
+            <View style={state.buttons.length > 2 ? styles.buttonsColumn : styles.buttonsRow}>
               {state.buttons.map((b, idx) => {
                 const key = `${b.text}-${idx}`;
                 const isDestructive = b.style === 'destructive';
@@ -203,7 +203,9 @@ export function AppAlertProvider({ children }: { children: React.ReactNode }) {
                     onPress={() => handleButtonPress(b)}
                     style={({ pressed }) => [
                       styles.btn,
-                      idx !== state.buttons.length - 1 ? styles.btnDivider : null,
+                      state.buttons.length > 2
+                        ? (idx !== state.buttons.length - 1 ? styles.btnDividerColumn : null)
+                        : (idx !== state.buttons.length - 1 ? styles.btnDivider : null),
                       pressed ? { backgroundColor: 'rgba(0,0,0,0.04)' } : null,
                     ]}
                     accessibilityRole="button"
@@ -272,6 +274,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row-reverse',
     alignItems: 'stretch',
   },
+  buttonsColumn: {
+    flexDirection: 'column',
+    alignItems: 'stretch',
+  },
   btn: {
     flex: 1,
     paddingVertical: 12,
@@ -282,6 +288,10 @@ const styles = StyleSheet.create({
   btnDivider: {
     borderLeftWidth: StyleSheet.hairlineWidth,
     borderLeftColor: 'rgba(60,60,67,0.18)',
+  },
+  btnDividerColumn: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(60,60,67,0.18)',
   },
   btnText: {
     fontWeight: '800',
