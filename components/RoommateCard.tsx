@@ -1,10 +1,11 @@
-import React, { memo, useEffect, useState } from 'react';
+import React, { memo, useEffect, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Image, ViewStyle } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Heart, X, MapPin } from 'lucide-react-native';
+import { User as UserIcon } from 'lucide-react-native';
 import { User } from '@/types/database';
 import { supabase } from '@/lib/supabase';
 import { useRouter } from 'expo-router';
+import MatchPercentBadge from '@/components/MatchPercentBadge';
 
 type RoommateCardProps = {
   user: User;
@@ -20,6 +21,7 @@ function RoommateCardBase({ user, onLike, onPass, onOpen, style, matchPercent, m
   const DEFAULT_AVATAR = 'https://cdn-icons-png.flaticon.com/512/847/847969.png';
   const router = useRouter();
   const resolvedMediaHeight = typeof mediaHeight === 'number' && Number.isFinite(mediaHeight) ? mediaHeight : 520;
+  const hasAvatar = useMemo(() => !!(user?.avatar_url && String(user.avatar_url).trim()), [user?.avatar_url]);
   type ProfileApartment = {
     id: string;
     title?: string | null;
@@ -96,15 +98,22 @@ function RoommateCardBase({ user, onLike, onPass, onOpen, style, matchPercent, m
     <View style={[styles.card, style]}>
       <TouchableOpacity activeOpacity={0.9} onPress={() => onOpen?.(user)}>
         <View style={[styles.imageWrap, { height: resolvedMediaHeight }]}>
-          <Image
-            source={{ uri: user.avatar_url || DEFAULT_AVATAR }}
-            style={styles.image}
-            resizeMode="cover"
+          {hasAvatar ? (
+            <Image source={{ uri: user.avatar_url || DEFAULT_AVATAR }} style={styles.image} resizeMode="cover" />
+          ) : (
+            <View style={styles.placeholderWrap}>
+              <UserIcon size={164} color="#9CA3AF" />
+              <Text style={styles.placeholderText} numberOfLines={2}>
+                למשתמש זה אין תמונות עדיין
+              </Text>
+            </View>
+          )}
+          <MatchPercentBadge
+            value={matchPercent}
+            triggerKey={user?.id || null}
+            size={74}
+            style={styles.matchBadge}
           />
-          <View style={styles.matchBadge}>
-            <Text style={styles.matchBadgeValue}>{formattedMatch}</Text>
-            <Text style={styles.matchBadgeLabel}>התאמה</Text>
-          </View>
           <View style={styles.bottomOverlayWrap}>
             <LinearGradient
               colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.6)']}
@@ -172,6 +181,22 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
   },
+  placeholderWrap: {
+    width: '100%',
+    height: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F3F4F6',
+  },
+  placeholderText: {
+    marginTop: 14,
+    paddingHorizontal: 18,
+    color: '#6B7280',
+    fontSize: 14,
+    fontWeight: '800',
+    textAlign: 'center',
+    writingDirection: 'rtl',
+  },
   bottomOverlayWrap: {
     position: 'absolute',
     left: 0,
@@ -214,26 +239,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 16,
     right: 16,
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(15,15,20,0.78)',
-    borderWidth: 1,
-    borderColor: 'rgba(124,92,255,0.35)',
     zIndex: 2,
-  },
-  matchBadgeValue: {
-    color: '#FFFFFF',
-    fontSize: 20,
-    fontWeight: '800',
-  },
-  matchBadgeLabel: {
-    color: '#C9CDD6',
-    fontSize: 12,
-    fontWeight: '600',
-    marginTop: 2,
   },
   content: {
     paddingHorizontal: 16,

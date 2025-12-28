@@ -17,7 +17,8 @@ import {
 import KeyboardAwareScrollView from 'react-native-keyboard-aware-scroll-view/lib/KeyboardAwareScrollView';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { Edit, FileText, LogOut, Trash2, ChevronLeft, Pencil, Inbox, MapPin, UserPlus2, X, Home, Plus, User as UserIcon, Mail, Phone, Hash, Calendar } from 'lucide-react-native';
+import { Edit, FileText, LogOut, Trash2, ChevronLeft, Inbox, MapPin, UserPlus2, X, Home, Plus, User as UserIcon, Mail, Phone, Hash, Calendar } from 'lucide-react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useAuthStore } from '@/stores/authStore';
 import { authService } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
@@ -716,17 +717,6 @@ export default function ProfileSettingsScreen() {
               }}
               style={styles.avatar}
             />
-            <TouchableOpacity
-              onPress={isUploadingAvatar ? undefined : pickAndUploadAvatar}
-              style={styles.avatarEditBtn}
-              activeOpacity={0.9}
-            >
-              {isUploadingAvatar ? (
-                <ActivityIndicator size="small" color="#FFFFFF" />
-              ) : (
-                <Pencil size={14} color="#FFFFFF" />
-              )}
-            </TouchableOpacity>
           </View>
           <Text style={styles.profileName} numberOfLines={1}>
             {profile?.full_name || 'משתמש/ת'}
@@ -952,54 +942,118 @@ export default function ProfileSettingsScreen() {
                 <Text style={styles.sharedEmptyText}>לא נמצאה דירה משויכת.</Text>
               ) : (
                 <ScrollView contentContainerStyle={{ paddingBottom: 8 }}>
-                  <View style={styles.aptCard}>
-                    <TouchableOpacity
-                      style={styles.aptRowCompact}
-                      activeOpacity={0.9}
-                      onPress={() => {
-                        try {
-                          setShowAptModal(false);
-                          const id = (myApartment as any)?.id;
-                          if (id) router.push({ pathname: '/apartment/[id]', params: { id } });
-                        } catch {}
-                      }}
-                    >
-                      <Image
-                        source={{ uri: getApartmentPrimaryImage(myApartment as any) }}
-                        style={styles.aptThumbSmall}
-                      />
-                      <View style={styles.aptMetaWrap}>
-                        <Text style={styles.aptMetaTitle} numberOfLines={1}>
-                          {(myApartment as any).title || 'דירה'}
-                        </Text>
-                        <Text style={styles.aptMetaLine} numberOfLines={1}>
-                          {(myApartment as any).address || (myApartment as any).city || ''}
-                        </Text>
-                        <Text style={styles.aptMetaPrice} numberOfLines={1}>
-                          {(myApartment as any).price?.toLocaleString?.() || (myApartment as any).price}₪
-                        </Text>
-                      </View>
-                    </TouchableOpacity>
-                    {user?.id &&
-                    Array.isArray((myApartment as any).partner_ids) &&
-                    (myApartment as any).partner_ids.includes(user.id) &&
-                    user.id !== (myApartment as any).owner_id ? (
+                  <View style={styles.aptHeroCard}>
+                    <View style={styles.aptCoverWrap}>
                       <TouchableOpacity
-                        style={[styles.sharedLeaveBtn, { alignSelf: 'center', marginTop: 6 }]}
-                        onPress={isLeavingApartment ? undefined : leaveApartment}
+                        style={styles.aptCoverPressable}
                         activeOpacity={0.9}
+                        onPress={() => {
+                          try {
+                            setShowAptModal(false);
+                            const id = (myApartment as any)?.id;
+                            if (id) router.push({ pathname: '/apartment/[id]', params: { id } });
+                          } catch {}
+                        }}
                       >
-                        {isLeavingApartment ? (
-                          <ActivityIndicator size="small" color="#4C1D95" />
-                        ) : (
-                          <>
-                            <LogOut size={16} color="#4C1D95" />
-                            <Text style={styles.sharedLeaveBtnText}>צא/י מהדירה</Text>
-                          </>
-                        )}
+                        <Image
+                          source={{ uri: getApartmentPrimaryImage(myApartment as any) }}
+                          style={styles.aptCoverImg}
+                        />
+                        <LinearGradient
+                          colors={['rgba(0,0,0,0.00)', 'rgba(0,0,0,0.92)']}
+                          start={{ x: 0.5, y: 0 }}
+                          end={{ x: 0.5, y: 1 }}
+                          style={styles.aptCoverGradient}
+                        />
+                        <View style={styles.aptCoverTextWrap}>
+                          <Text style={styles.aptCoverTitle} numberOfLines={1}>
+                            {(myApartment as any).title || 'דירה'}
+                          </Text>
+                          {!!((myApartment as any).city || (myApartment as any).address) ? (
+                            <View style={styles.aptCoverCityRow}>
+                              <MapPin size={14} color="rgba(255,255,255,0.92)" />
+                              <Text style={styles.aptCoverCityText} numberOfLines={1}>
+                                {(myApartment as any).city || (myApartment as any).address}
+                              </Text>
+                            </View>
+                          ) : null}
+                        </View>
                       </TouchableOpacity>
-                    ) : null}
+
+                      {(() => {
+                        const occupants = [aptOwner, ...(aptMembers || [])].filter(Boolean) as any[];
+                        const unique: any[] = [];
+                        const seen = new Set<string>();
+                        for (const o of occupants) {
+                          const id = String(o?.id || '');
+                          if (!id || seen.has(id)) continue;
+                          seen.add(id);
+                          unique.push(o);
+                        }
+                        const visible = unique.slice(0, 4);
+                        const overflow = unique.length - visible.length;
+                        if (!visible.length) return null;
+                        return (
+                          <View style={styles.aptCoverOccupantsRow} pointerEvents="none">
+                            {visible.map((m, idx2) => {
+                              const fallbackInitial = ((m.full_name || '').trim().charAt(0) || '?').toUpperCase();
+                              return (
+                                <View key={m.id} style={[styles.aptOccupantAvatarWrap, idx2 !== 0 && styles.aptOccupantOverlap]}>
+                                  {m.avatar_url ? (
+                                    <Image source={{ uri: m.avatar_url }} style={styles.aptOccupantAvatarImg} />
+                                  ) : (
+                                    <Text style={styles.aptOccupantFallback}>{fallbackInitial}</Text>
+                                  )}
+                                </View>
+                              );
+                            })}
+                            {overflow > 0 ? (
+                              <View style={[styles.aptOccupantAvatarWrap, styles.aptOccupantOverflow]}>
+                                <Text style={styles.aptOccupantOverflowText}>+{overflow}</Text>
+                              </View>
+                            ) : null}
+                          </View>
+                        );
+                      })()}
+                    </View>
                   </View>
+
+                  {(() => {
+                    const canLeave =
+                      !!user?.id &&
+                      Array.isArray((myApartment as any).partner_ids) &&
+                      (myApartment as any).partner_ids.includes(user.id) &&
+                      user.id !== (myApartment as any).owner_id;
+                    if (!canLeave) return null;
+                    return (
+                      <View style={{ alignItems: 'center', marginTop: 10 }}>
+                        <TouchableOpacity
+                          style={[styles.aptLeaveBtnOuter, isLeavingApartment ? { opacity: 0.75 } : null]}
+                          onPress={isLeavingApartment ? undefined : leaveApartment}
+                          activeOpacity={0.9}
+                          disabled={isLeavingApartment}
+                          accessibilityRole="button"
+                          accessibilityLabel="עזוב דירה"
+                        >
+                          <LinearGradient
+                            colors={['#EF4444', '#B91C1C']}
+                            start={{ x: 0, y: 0 }}
+                            end={{ x: 1, y: 1 }}
+                            style={styles.aptLeaveBtnInner}
+                          >
+                            {isLeavingApartment ? (
+                              <ActivityIndicator size="small" color="#FFFFFF" />
+                            ) : (
+                              <>
+                                <LogOut size={16} color="#FFFFFF" />
+                                <Text style={styles.aptLeaveBtnText}>עזוב/י דירה</Text>
+                              </>
+                            )}
+                          </LinearGradient>
+                        </TouchableOpacity>
+                      </View>
+                    );
+                  })()}
                 </ScrollView>
               )}
             </View>
@@ -1405,39 +1459,64 @@ export default function ProfileSettingsScreen() {
               ) : (
                 <ScrollView contentContainerStyle={{ paddingBottom: 8 }}>
                   {sharedGroups.map((g) => (
-                    <View key={g.id} style={styles.sharedGroupCard}>
-                      <View style={styles.sharedCardTopRow}>
-                        <Text style={styles.sharedGroupTitle} numberOfLines={1}>
-                          {(g.name || 'שותפים').toString()}
-                        </Text>
-                        <TouchableOpacity
-                          style={[styles.sharedLeaveBtn, leavingGroupId === g.id ? { opacity: 0.7 } : null]}
-                          onPress={leavingGroupId ? undefined : () => leaveGroup(g.id)}
-                          activeOpacity={0.9}
-                        >
-                          {leavingGroupId === g.id ? (
-                            <ActivityIndicator size="small" color="#4C1D95" />
-                          ) : (
-                            <>
-                              <LogOut size={16} color="#4C1D95" />
-                              <Text style={styles.sharedLeaveBtnText}>עזוב/י קבוצה</Text>
-                            </>
-                          )}
-                        </TouchableOpacity>
-                      </View>
-                      <View style={styles.sharedAvatarsRow}>
+                    <View key={g.id} style={styles.sharedProfileCard}>
+                      <View style={styles.sharedMembersGrid}>
                         {g.members.map((m) => (
-                          <View key={m.id} style={styles.sharedAvatarWrap}>
-                            <Image
-                              source={{ uri: m.avatar_url || 'https://cdn-icons-png.flaticon.com/512/847/847969.png' }}
-                              style={styles.sharedAvatar}
-                            />
-                          </View>
+                          <TouchableOpacity
+                            key={m.id}
+                            style={styles.sharedMemberTile}
+                            activeOpacity={0.9}
+                            onPress={() => {
+                              try {
+                                if (!m?.id) return;
+                                setShowSharedModal(false);
+                                router.push({ pathname: '/user/[id]', params: { id: m.id } } as any);
+                              } catch {}
+                            }}
+                            disabled={String(user?.id || '') === String(m?.id || '')}
+                            accessibilityRole="button"
+                            accessibilityLabel={String(user?.id || '') === String(m?.id || '') ? 'זה הפרופיל שלך' : `פתח פרופיל של ${(m.full_name || 'משתמש/ת').toString()}`}
+                            accessibilityState={String(user?.id || '') === String(m?.id || '') ? ({ disabled: true } as any) : undefined}
+                          >
+                            <View style={styles.sharedMemberAvatarWrap}>
+                              <Image
+                                source={{ uri: m.avatar_url || 'https://cdn-icons-png.flaticon.com/512/847/847969.png' }}
+                                style={styles.sharedMemberAvatar}
+                              />
+                            </View>
+                            <Text style={styles.sharedMemberName} numberOfLines={1}>
+                              {m.full_name || 'משתמש/ת'}
+                            </Text>
+                          </TouchableOpacity>
                         ))}
                       </View>
-                      <Text style={styles.sharedMembersLine} numberOfLines={2}>
-                        {g.members.map((m) => m.full_name || 'חבר').join(' • ')}
-                      </Text>
+
+                      <View style={styles.sharedLeaveBtnRow}>
+                        <TouchableOpacity
+                          style={[styles.sharedLeaveBtnOuter, leavingGroupId === g.id ? { opacity: 0.75 } : null]}
+                          onPress={leavingGroupId ? undefined : () => leaveGroup(g.id)}
+                          activeOpacity={0.9}
+                          disabled={!!leavingGroupId}
+                          accessibilityRole="button"
+                          accessibilityLabel="עזוב קבוצה"
+                        >
+                          <LinearGradient
+                            colors={['#EF4444', '#B91C1C']}
+                            start={{ x: 0, y: 0 }}
+                            end={{ x: 1, y: 1 }}
+                            style={styles.sharedLeaveBtnInner}
+                          >
+                            {leavingGroupId === g.id ? (
+                              <ActivityIndicator size="small" color="#FFFFFF" />
+                            ) : (
+                              <>
+                                <LogOut size={16} color="#FFFFFF" />
+                                <Text style={styles.sharedLeaveBtnTextNew}>עזוב/י קבוצה</Text>
+                              </>
+                            )}
+                          </LinearGradient>
+                        </TouchableOpacity>
+                      </View>
                     </View>
                   ))}
                 </ScrollView>
@@ -1820,25 +1899,20 @@ const styles = StyleSheet.create({
   avatarWrap: {
     position: 'relative',
     marginBottom: 12,
+    // Make the avatar border clearly visible: create an outer ring
+    padding: 2,
+    borderRadius: 999,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 2,
+    borderColor: '#D1D5DB',
   },
   avatar: {
     width: 88,
     height: 88,
     borderRadius: 44,
     backgroundColor: '#F3F4F6',
-  },
-  avatarEditBtn: {
-    position: 'absolute',
-    right: -2,
-    bottom: -2,
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: '#4C1D95',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: '#FFFFFF',
+    borderWidth: 0,
+    borderColor: 'transparent',
   },
   profileName: {
     color: '#111827',
@@ -2099,6 +2173,108 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     paddingVertical: 12,
   },
+  sharedProfileCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 12,
+    marginTop: 12,
+    borderWidth: 0,
+    borderColor: 'transparent',
+    shadowColor: 'transparent',
+    shadowOpacity: 0,
+    shadowRadius: 0,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 0,
+    ...(Platform.OS === 'web' ? ({ boxShadow: 'none' } as any) : null),
+  },
+  sharedProfileHeaderRow: {
+    width: '100%',
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+    marginBottom: 10,
+  },
+  sharedProfileTitle: {
+    color: '#111827',
+    fontSize: 15,
+    fontWeight: '900',
+    textAlign: 'right',
+    flex: 1,
+  },
+  sharedMembersGrid: {
+    width: '100%',
+    flexDirection: 'row-reverse',
+    flexWrap: 'wrap',
+    gap: 10,
+    justifyContent: 'flex-start',
+  },
+  sharedLeaveBtnRow: {
+    marginTop: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sharedMemberTile: {
+    width: '31%',
+    minWidth: 92,
+    borderRadius: 16,
+    backgroundColor: '#E5E7EB',
+    borderWidth: 0,
+    borderColor: 'transparent',
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+    alignItems: 'center',
+    shadowColor: 'transparent',
+    shadowOpacity: 0.10,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 3,
+    ...(Platform.OS === 'web' ? ({ boxShadow: '0 10px 22px rgba(0,0,0,0.10)' } as any) : null),
+  },
+  sharedMemberAvatarWrap: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    overflow: 'hidden',
+    backgroundColor: '#F3F4F6',
+    borderWidth: 2,
+    borderColor: '#FFFFFF',
+    marginBottom: 8,
+  },
+  sharedMemberAvatar: {
+    width: '100%',
+    height: '100%',
+  },
+  sharedMemberName: {
+    color: '#111827',
+    fontSize: 12,
+    fontWeight: '800',
+    textAlign: 'center',
+    lineHeight: 16,
+    includeFontPadding: false,
+  },
+  sharedLeaveBtnOuter: {
+    borderRadius: 14,
+    overflow: 'hidden',
+    shadowColor: '#000000',
+    shadowOpacity: 0.12,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 4,
+  },
+  sharedLeaveBtnInner: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  sharedLeaveBtnTextNew: {
+    color: '#FFFFFF',
+    fontWeight: '900',
+    fontSize: 13,
+  },
   sharedLeaveBtn: {
     flexDirection: 'row-reverse',
     alignItems: 'center',
@@ -2123,6 +2299,136 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#E5E7EB',
     alignItems: 'center',
+  },
+  aptHeroCard: {
+    marginTop: 8,
+    borderRadius: 18,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 0,
+    borderColor: 'transparent',
+    overflow: 'hidden',
+    shadowColor: '#000000',
+    shadowOpacity: 0.08,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 3,
+  },
+  aptCoverWrap: {
+    width: '100%',
+    height: 176,
+    backgroundColor: '#F3F4F6',
+  },
+  aptCoverPressable: {
+    width: '100%',
+    height: '100%',
+  },
+  aptCoverImg: {
+    width: '100%',
+    height: '100%',
+  },
+  aptCoverGradient: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: 130,
+  },
+  aptCoverTextWrap: {
+    position: 'absolute',
+    left: 14,
+    right: 14,
+    bottom: 12,
+    alignItems: 'flex-end',
+    // Force LTR so "end" stays visually right on web RTL screens
+    direction: 'ltr',
+  },
+  aptCoverTitle: {
+    color: '#FFFFFF',
+    fontSize: 17,
+    fontWeight: '900',
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    textShadowColor: 'rgba(0,0,0,0.35)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 10,
+  },
+  aptCoverCityRow: {
+    marginTop: 6,
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 6,
+  },
+  aptCoverCityText: {
+    color: 'rgba(255,255,255,0.92)',
+    fontSize: 13,
+    fontWeight: '800',
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
+  aptCoverOccupantsRow: {
+    position: 'absolute',
+    top: 12,
+    left: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    direction: 'ltr',
+  },
+  aptOccupantAvatarWrap: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    borderWidth: 2,
+    borderColor: 'rgba(255,255,255,0.95)',
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  aptOccupantOverlap: {
+    // overlap avatars
+    marginLeft: -8,
+  },
+  aptOccupantAvatarImg: {
+    width: '100%',
+    height: '100%',
+  },
+  aptOccupantFallback: {
+    color: '#6B7280',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  aptOccupantOverflow: {
+    borderColor: '#E9D5FF',
+    backgroundColor: 'rgba(139,92,246,0.10)',
+  },
+  aptOccupantOverflowText: {
+    color: '#8B5CF6',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  aptLeaveBtnOuter: {
+    borderRadius: 14,
+    overflow: 'hidden',
+    shadowColor: '#000000',
+    shadowOpacity: 0.12,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 4,
+  },
+  aptLeaveBtnInner: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    minWidth: 170,
+  },
+  aptLeaveBtnText: {
+    color: '#FFFFFF',
+    fontWeight: '900',
+    fontSize: 13,
   },
   aptCover: {
     width: '100%',

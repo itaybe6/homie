@@ -17,7 +17,7 @@ import {
 import { useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { LogOut, Edit, Save, X, Plus, MapPin, Inbox, Trash2, Settings, ClipboardList, Camera } from 'lucide-react-native';
+import { LogOut, Edit, Save, X, Plus, MapPin, Inbox, Trash2, Settings, ClipboardList, Camera, Building2, Calendar } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
@@ -41,6 +41,8 @@ export default function ProfileScreen() {
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [leavingGroupId, setLeavingGroupId] = useState<string | null>(null);
+  const [leavingApartmentId, setLeavingApartmentId] = useState<string | null>(null);
   const [aptMembers, setAptMembers] = useState<Record<string, User[]>>({});
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);
   const [isDeletingImage, setIsDeletingImage] = useState(false);
@@ -97,6 +99,114 @@ export default function ProfileScreen() {
       // ignore
     }
   }, [user?.id]);
+
+  const APT_IMAGE_PLACEHOLDER = 'https://images.pexels.com/photos/1457842/pexels-photo-1457842.jpeg';
+
+  const transformSupabaseImageUrl = (value: string): string => {
+    const trimmed = (value || '').trim();
+    if (!trimmed) return '';
+    // Prefer render endpoint for speed/size, keep query params (if any) and append our own.
+    if (trimmed.includes('/storage/v1/object/public/')) {
+      const [base, query] = trimmed.split('?');
+      const transformed = base.replace('/storage/v1/object/public/', '/storage/v1/render/image/public/');
+      const params: string[] = [];
+      if (query) params.push(query);
+      params.push('width=800', 'quality=85');
+      return `${transformed}?${params.join('&')}`;
+    }
+    return trimmed;
+  };
+
+  const normalizeSupabasePublicUrlForFallback = (value: string): string => {
+    const trimmed = (value || '').trim();
+    if (!trimmed) return '';
+    // Convert render URL back to object/public URL for reliable fallback
+    if (trimmed.includes('/storage/v1/render/image/public/')) {
+      const base = trimmed.split('?')[0];
+      return base.replace('/storage/v1/render/image/public/', '/storage/v1/object/public/');
+    }
+    return trimmed.split('?')[0];
+  };
+
+  // Apartments may store either full public URLs OR storage object paths (e.g. "apartments/<aptId>/<file>.jpg").
+  // This helper normalizes both into a displayable public URL (object/public).
+  const resolveApartmentImageCandidate = (value: string): string => {
+    const trimmed = (value || '').trim();
+    if (!trimmed) return '';
+
+    // Absolute URL
+    if (/^https?:\/\//i.test(trimmed)) {
+      return normalizeSupabasePublicUrlForFallback(trimmed);
+    }
+
+    // If someone stored a bucket-prefixed path, strip the bucket name.
+    // Example: "apartment-images/apartments/..." -> "apartments/..."
+    const normalizedPath = trimmed.startsWith('apartment-images/')
+      ? trimmed.replace(/^apartment-images\//, '')
+      : trimmed;
+
+    try {
+      const { data } = supabase.storage.from('apartment-images').getPublicUrl(normalizedPath);
+      const pub = (data as any)?.publicUrl as string | undefined;
+      return pub ? normalizeSupabasePublicUrlForFallback(pub) : '';
+    } catch {
+      return '';
+    }
+  };
+
+  const normalizeApartmentImageUrls = (value: unknown): string[] => {
+    if (!value) return [];
+    if (Array.isArray(value)) {
+      return (value as unknown[])
+        .filter((u) => typeof u === 'string' && !!(u as string).trim()) as string[];
+    }
+    if (typeof value === 'string') {
+      // Try JSON first
+      try {
+        const parsed = JSON.parse(value);
+        if (Array.isArray(parsed)) {
+          return parsed.filter((u: any) => typeof u === 'string' && !!u.trim());
+        }
+      } catch {
+        // Not JSON – try Postgres array literal format: {"a","b"} or {a,b}
+        try {
+          const cleaned = value.replace(/^\s*\{|\}\s*$/g, '');
+          if (!cleaned) return [];
+          return cleaned
+            .split(',')
+            .map((s) => s.replace(/^"+|"+$/g, '').trim())
+            .filter(Boolean);
+        } catch {
+          return [];
+        }
+      }
+    }
+    return [];
+  };
+
+  const ApartmentImageThumb = ({ uri, style }: { uri: string; style?: any }) => {
+    const [candidateIdx, setCandidateIdx] = useState(0);
+    const original = normalizeSupabasePublicUrlForFallback(uri || '');
+    const transformed = original ? transformSupabaseImageUrl(original) : '';
+    const candidates = [transformed, original, APT_IMAGE_PLACEHOLDER]
+      .map((u) => (u || '').trim())
+      .filter(Boolean);
+    const resolved = candidates[Math.min(candidateIdx, candidates.length - 1)] || APT_IMAGE_PLACEHOLDER;
+
+    useEffect(() => {
+      setCandidateIdx(0);
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [uri]);
+
+    return (
+      <Image
+        source={{ uri: resolved }}
+        style={style}
+        resizeMode="cover"
+        onError={() => setCandidateIdx((i) => Math.min(i + 1, candidates.length - 1))}
+      />
+    );
+  };
   const getApartmentPrimaryImage = (apartment: Apartment): string => {
     const PLACEHOLDER = 'https://images.pexels.com/photos/1457842/pexels-photo-1457842.jpeg';
     const anyValue: any = (apartment as any).image_urls;
@@ -225,6 +335,85 @@ export default function ProfileScreen() {
       Alert.alert('שגיאה', e?.message || 'לא ניתן למחוק את התמונה');
     } finally {
       setIsDeletingImage(false);
+    }
+  };
+
+  const confirmLeaveGroup = async (groupId: string) => {
+    if (!user?.id || !groupId) return;
+    if (leavingGroupId) return;
+    try {
+      const shouldProceed =
+        Platform.OS === 'web'
+          ? (typeof confirm === 'function'
+              ? confirm('לעזוב את קבוצת השותפים? אפשר להצטרף שוב רק בהזמנה.')
+              : true)
+          : await new Promise<boolean>((resolve) => {
+              Alert.alert('עזיבת קבוצה', 'לעזוב את קבוצת השותפים? אפשר להצטרף שוב רק בהזמנה.', [
+                { text: 'ביטול', style: 'cancel', onPress: () => resolve(false) },
+                { text: 'עזוב/י קבוצה', style: 'destructive', onPress: () => resolve(true) },
+              ]);
+            });
+      if (!shouldProceed) return;
+
+      setLeavingGroupId(groupId);
+      const { error } = await supabase
+        .from('profile_group_members')
+        .update({ status: 'LEFT' } as any)
+        .eq('group_id', groupId)
+        .eq('user_id', user.id);
+      if (error) throw error;
+
+      Alert.alert('הצלחה', 'עזבת את הקבוצה.');
+      fetchProfile();
+    } catch (e: any) {
+      Alert.alert('שגיאה', e?.message || 'לא ניתן לעזוב את הקבוצה כעת');
+    } finally {
+      setLeavingGroupId(null);
+    }
+  };
+
+  const confirmLeaveApartment = async (apt: Apartment) => {
+    if (!user?.id || !apt?.id) return;
+    if (leavingApartmentId) return;
+
+    const currentPartners: string[] = Array.isArray((apt as any).partner_ids) ? ((apt as any).partner_ids as string[]) : [];
+    const isOwner = String(user.id) === String((apt as any).owner_id || '');
+    const isPartner = currentPartners.map(String).includes(String(user.id));
+
+    if (isOwner) {
+      Alert.alert('לא ניתן לעזוב', 'בעל/ת הדירה לא יכול/ה לעזוב את הדירה. אפשר לנהל את הדירה בעמוד הדירה או בהגדרות.');
+      return;
+    }
+    if (!isPartner) {
+      Alert.alert('שגיאה', 'אינך משויך/ה כשותף/ה לדירה זו');
+      return;
+    }
+
+    try {
+      const shouldProceed =
+        Platform.OS === 'web'
+          ? (typeof confirm === 'function'
+              ? confirm('לעזוב את הדירה? ניתן להצטרף שוב בהזמנה.')
+              : true)
+          : await new Promise<boolean>((resolve) => {
+              Alert.alert('עזיבת דירה', 'לעזוב את הדירה? ניתן להצטרף שוב בהזמנה.', [
+                { text: 'ביטול', style: 'cancel', onPress: () => resolve(false) },
+                { text: 'עזוב/י דירה', style: 'destructive', onPress: () => resolve(true) },
+              ]);
+            });
+      if (!shouldProceed) return;
+
+      setLeavingApartmentId(apt.id);
+      const nextPartners = currentPartners.filter((pid) => String(pid) !== String(user.id));
+      const { error } = await supabase.from('apartments').update({ partner_ids: nextPartners } as any).eq('id', apt.id);
+      if (error) throw error;
+
+      Alert.alert('הצלחה', 'עזבת את הדירה.');
+      fetchProfile();
+    } catch (e: any) {
+      Alert.alert('שגיאה', e?.message || 'לא ניתן לעזוב את הדירה כעת');
+    } finally {
+      setLeavingApartmentId(null);
     }
   };
 
@@ -849,20 +1038,30 @@ export default function ProfileScreen() {
               <Text style={styles.nameText}>
                 {profile?.full_name || 'משתמש/ת'}
               </Text>
-              {(profile?.address || profile?.city) ? (
-                <View style={styles.locationRow}>
-                  <MapPin size={16} color="#6B7280" style={{ marginLeft: 6 }} />
-                  <Text style={styles.locationText}>
-                    {profile?.address || profile?.city}
-                  </Text>
+              {(profile?.address || profile?.city || profile?.age) ? (
+                <View style={styles.metaChipsRow}>
+                  {(profile?.address || profile?.city) ? (
+                    <View style={styles.metaChip}>
+                      <MapPin size={14} color="#4C1D95" />
+                      <Text style={styles.metaChipText} numberOfLines={1}>
+                        {profile?.address || profile?.city}
+                      </Text>
+                    </View>
+                  ) : null}
+                  {profile?.age ? (
+                    <View style={styles.metaChip}>
+                      <Calendar size={14} color="#4C1D95" />
+                      <Text style={styles.metaChipText}>גיל {profile.age}</Text>
+                    </View>
+                  ) : null}
                 </View>
-              ) : null}
-              {profile?.age ? (
-                <Text style={styles.ageText}>גיל {profile.age}</Text>
               ) : null}
 
               {profile?.bio ? (
-                <Text style={styles.bioText}>{profile.bio}</Text>
+                <View style={styles.bioCard}>
+                  <Text style={styles.bioTitle}>אודות</Text>
+                  <Text style={styles.bioText}>{profile.bio}</Text>
+                </View>
               ) : null}
 
               {/* per design, action buttons moved to settings screen */}
@@ -928,9 +1127,24 @@ export default function ProfileScreen() {
                   <Text style={styles.sharedCardTitle} numberOfLines={1}>
                     {(g.name || 'פרופיל משותף').toString()}
                   </Text>
-                  <Text style={styles.sharedCardMeta} numberOfLines={1}>
-                    {`${g.members.length} משתתפים`}
-                  </Text>
+                  <TouchableOpacity
+                    style={[
+                      styles.sectionActionPill,
+                      styles.sectionActionPillDanger,
+                      leavingGroupId === g.id ? { opacity: 0.7 } : null,
+                    ]}
+                    activeOpacity={0.9}
+                    onPress={() => confirmLeaveGroup(g.id)}
+                    disabled={!!leavingGroupId}
+                    accessibilityRole="button"
+                    accessibilityLabel="עזוב קבוצה"
+                  >
+                    {leavingGroupId === g.id ? (
+                      <ActivityIndicator size="small" color="#DC2626" />
+                    ) : (
+                      <Text style={styles.sectionActionPillTextDanger}>עזוב/י</Text>
+                    )}
+                  </TouchableOpacity>
                 </View>
 
                 <View style={styles.sharedMembersGrid}>
@@ -972,6 +1186,205 @@ export default function ProfileScreen() {
             ))}
           </View>
         )}
+
+        {/* My apartment(s) — match the card style used on other user's profile */}
+        <View style={styles.sectionDark}>
+          <View style={styles.apartmentsCard}>
+            {(() => {
+              const uid = (user as any)?.id as string | undefined;
+              const leaveableApts =
+                !!uid
+                  ? userApartments.filter((a: any) => {
+                      const isOwner = String(a?.owner_id || '') === String(uid);
+                      const isPartner =
+                        Array.isArray(a?.partner_ids) && (a.partner_ids as any[]).map(String).includes(String(uid));
+                      return !isOwner && isPartner;
+                    })
+                  : [];
+              return (
+                <View style={styles.apartmentsHeaderRow}>
+                  <Text style={styles.apartmentsHeaderTitle}>הדירה שלי</Text>
+                  {leaveableApts.length ? (
+                    <TouchableOpacity
+                      style={[styles.sectionActionPill, styles.sectionActionPillDanger, leavingApartmentId ? { opacity: 0.7 } : null]}
+                      activeOpacity={0.9}
+                      disabled={!!leavingApartmentId}
+                      onPress={async () => {
+                        if (leavingApartmentId) return;
+                        if (leaveableApts.length === 1) {
+                          confirmLeaveApartment(leaveableApts[0] as any);
+                          return;
+                        }
+                        // Multiple apartments: ask which one to leave (native). On web fallback to first.
+                        if (Platform.OS === 'web') {
+                          confirmLeaveApartment(leaveableApts[0] as any);
+                          return;
+                        }
+                        const options = leaveableApts.slice(0, 6).map((apt: any) => ({
+                          text: String(apt?.title || 'דירה'),
+                          onPress: () => confirmLeaveApartment(apt as any),
+                        }));
+                        Alert.alert('איזו דירה לעזוב?', 'בחר/י דירה לעזיבה:', [
+                          { text: 'ביטול', style: 'cancel' },
+                          ...options,
+                        ]);
+                      }}
+                      accessibilityRole="button"
+                      accessibilityLabel="עזוב דירה"
+                    >
+                      {leavingApartmentId ? (
+                        <ActivityIndicator size="small" color="#DC2626" />
+                      ) : (
+                        <Text style={styles.sectionActionPillTextDanger}>עזוב/י דירה</Text>
+                      )}
+                    </TouchableOpacity>
+                  ) : null}
+                </View>
+              );
+            })()}
+
+            <View style={{ paddingTop: 12 }}>
+              {userApartments.length ? (
+                userApartments.map((apt, idx) => {
+                  const rawImages = normalizeApartmentImageUrls((apt as any).image_urls);
+                  const aptImages = Array.from(new Set(rawImages.map(resolveApartmentImageCandidate).filter(Boolean)));
+                  const firstImg = aptImages.length > 0 ? aptImages[0] : APT_IMAGE_PLACEHOLDER;
+                  const occupantMembers = aptMembers[apt.id] || [];
+                  const visibleOccupants = occupantMembers.slice(0, 4);
+                  const overflowCount = occupantMembers.length - visibleOccupants.length;
+                  const isLast = idx === userApartments.length - 1;
+                  return (
+                    <TouchableOpacity
+                      key={apt.id}
+                      style={[styles.aptCard, !isLast ? styles.aptCardSpacing : null]}
+                      activeOpacity={0.9}
+                      onPress={() => router.push({ pathname: '/apartment/[id]', params: { id: apt.id } })}
+                    >
+                      <View style={styles.aptCoverWrap}>
+                        <ApartmentImageThumb uri={firstImg} style={styles.aptCoverImg} />
+                        <LinearGradient
+                          colors={['rgba(0,0,0,0.00)', 'rgba(0,0,0,0.92)']}
+                          start={{ x: 0.5, y: 0 }}
+                          end={{ x: 0.5, y: 1 }}
+                          style={styles.aptCoverGradient}
+                        />
+                        <View style={styles.aptCoverTextWrap}>
+                          <Text style={styles.aptCoverTitle} numberOfLines={1}>
+                            {apt.title || 'דירה'}
+                          </Text>
+                          {!!apt.city ? (
+                            <View style={styles.aptCoverCityRow}>
+                              <MapPin size={14} color="rgba(255,255,255,0.92)" />
+                              <Text style={styles.aptCoverCityText} numberOfLines={1}>
+                                {apt.city}
+                              </Text>
+                            </View>
+                          ) : null}
+                        </View>
+
+                        {!!visibleOccupants.length ? (
+                          <View style={styles.aptCoverOccupantsRow} pointerEvents="none">
+                            {visibleOccupants.map((member, idx2) => {
+                              const fallbackInitial = ((member.full_name || '').trim().charAt(0) || '?').toUpperCase();
+                              return (
+                                <View
+                                  key={member.id}
+                                  style={[
+                                    styles.aptOccupantAvatarWrap,
+                                    styles.aptCoverOccupantAvatarShadow,
+                                    idx2 !== 0 && styles.aptOccupantOverlap,
+                                  ]}
+                                >
+                                  {member.avatar_url ? (
+                                    <Image source={{ uri: member.avatar_url }} style={styles.aptOccupantAvatarImg} />
+                                  ) : (
+                                    <Text style={styles.aptOccupantFallback}>{fallbackInitial}</Text>
+                                  )}
+                                </View>
+                              );
+                            })}
+                            {overflowCount > 0 ? (
+                              <View
+                                style={[
+                                  styles.aptOccupantAvatarWrap,
+                                  styles.aptCoverOccupantAvatarShadow,
+                                  styles.aptOccupantOverflow,
+                                ]}
+                              >
+                                <Text style={styles.aptOccupantOverflowText}>+{overflowCount}</Text>
+                              </View>
+                            ) : null}
+                          </View>
+                        ) : null}
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })
+              ) : (
+                <View style={styles.sectionEmptyWrap}>
+                  <View style={styles.sectionEmptyIconPill}>
+                    <Building2 size={18} color="#4C1D95" />
+                  </View>
+                  <Text style={styles.sectionEmptyTitle}>עדיין אין דירה</Text>
+                  <Text style={styles.sectionEmptyText}>עדיין לא בחרת דירה להצגה בפרופיל.</Text>
+                </View>
+              )}
+            </View>
+          </View>
+        </View>
+
+        <View style={styles.sectionDark}>
+          <TouchableOpacity
+            style={styles.surveyCTA}
+            activeOpacity={0.9}
+            onPress={() => {
+              if (isSurveyCompleted) {
+                setIsSurveyOpen(true);
+              } else {
+                router.push('/(tabs)/onboarding/survey' as any);
+              }
+            }}
+          >
+            {profile ? (
+              <LinearGradient
+                colors={['#A78BFA', '#4C1D95']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.surveyCTAAvatarRing}
+              >
+                <View style={styles.surveyCTAAvatarInner}>
+                  <Image
+                    source={{ uri: profile.avatar_url || 'https://cdn-icons-png.flaticon.com/512/847/847969.png' }}
+                    style={styles.surveyCTAAvatar}
+                  />
+                </View>
+              </LinearGradient>
+            ) : null}
+            <View style={styles.surveyCTATexts}>
+              <Text style={styles.surveyCTATitle}>
+                {`השאלון של ${(profile?.full_name || '').split(' ')?.[0] || 'אני'}`}
+              </Text>
+              <Text style={styles.surveyCTASubtitle} numberOfLines={1}>
+                {isSurveyCompleted ? 'לחצו לצפייה בסיכום קצר של השאלון' : 'לחצו למילוי שאלון קצר'}
+              </Text>
+            </View>
+            <View style={styles.surveyCTABadge}>
+              <LinearGradient
+                colors={['#A78BFA', '#4C1D95']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.surveyCTABadgeInner}
+              >
+                <ClipboardList size={24} color="#FFFFFF" />
+              </LinearGradient>
+            </View>
+          </TouchableOpacity>
+          {!isSurveyCompleted && (
+            <Text style={styles.surveyCTAHint}>
+              מלא/י את השאלון כדי שנוכל לחפש לך התאמות טובות יותר.
+            </Text>
+          )}
+        </View>
 
         {/* Gallery section */}
         <View style={styles.sectionDark}>
@@ -1030,106 +1443,9 @@ export default function ProfileScreen() {
           </View>
         </View>
 
-        {userApartments.length > 0 && (
-          <View style={styles.sectionDark}>
-            <View style={styles.apartmentsCard}>
-              {(() => {
-                const uid = (user as any)?.id as string | undefined;
-                const anyOwned = !!uid && userApartments.some((a: any) => String(a?.owner_id || '') === String(uid));
-                const anyPartner =
-                  !!uid &&
-                  userApartments.some((a: any) => Array.isArray(a?.partner_ids) && (a.partner_ids as any[]).includes(uid));
-                const headerTag = anyOwned && anyPartner ? 'בעל דירה / שותף' : anyOwned ? 'בעל דירה' : 'שותף';
-                return (
-                  <View style={styles.apartmentsHeaderRow}>
-                    <Text style={styles.apartmentsHeaderTitle}>הדירות שלי</Text>
-                    <View style={styles.apartmentsHeaderTag}>
-                      <Text style={styles.apartmentsHeaderTagText}>{headerTag}</Text>
-                    </View>
-                  </View>
-                );
-              })()}
-
-              <View style={{ paddingTop: 12 }}>
-                {userApartments.map((apt, idx) => {
-                  const thumb = getApartmentPrimaryImage(apt);
-                  const isLast = idx === userApartments.length - 1;
-                  return (
-                    <TouchableOpacity
-                      key={apt.id}
-                      style={[styles.apartmentRow, isLast ? { marginBottom: 0 } : null]}
-                      onPress={() => router.push({ pathname: '/apartment/[id]', params: { id: apt.id } })}
-                    >
-                      <Image source={{ uri: thumb }} style={styles.aptThumb} />
-                      <View style={styles.aptTextWrap}>
-                        <Text style={styles.aptTitle} numberOfLines={1}>{apt.title}</Text>
-                        <Text style={styles.aptSub} numberOfLines={1}>
-                          {([apt.city, (apt as any).address].filter(Boolean) as string[]).join(' • ')}
-                        </Text>
-                        <Text style={styles.aptPricePurple}>₪{apt.price}/חודש</Text>
-                      </View>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-            </View>
-          </View>
-        )}
-
         <View style={styles.sectionDark}>
           <TouchableOpacity
             style={styles.surveyCTA}
-            activeOpacity={0.9}
-            onPress={() => {
-              if (isSurveyCompleted) {
-                setIsSurveyOpen(true);
-              } else {
-                router.push('/(tabs)/onboarding/survey' as any);
-              }
-            }}
-          >
-            {profile ? (
-              <LinearGradient
-                colors={['#A78BFA', '#4C1D95']}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={styles.surveyCTAAvatarRing}
-              >
-                <View style={styles.surveyCTAAvatarInner}>
-                  <Image
-                    source={{ uri: profile.avatar_url || 'https://cdn-icons-png.flaticon.com/512/847/847969.png' }}
-                    style={styles.surveyCTAAvatar}
-                  />
-                </View>
-              </LinearGradient>
-            ) : null}
-            <View style={styles.surveyCTATexts}>
-              <Text style={styles.surveyCTATitle}>
-                {isSurveyCompleted ? 'תוצאות הסקר' : 'מילוי שאלון'}
-              </Text>
-              <Text style={styles.surveyCTASubtitle} numberOfLines={1}>
-                {isSurveyCompleted ? surveySubtitle : 'לחיצה למילוי שאלון ההעדפות'}
-              </Text>
-            </View>
-            <View style={styles.surveyCTABadge}>
-              <LinearGradient
-                colors={['#A78BFA', '#4C1D95']}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={styles.surveyCTABadgeInner}
-              >
-                <ClipboardList size={24} color="#FFFFFF" />
-              </LinearGradient>
-            </View>
-          </TouchableOpacity>
-          {!isSurveyCompleted && (
-            <Text style={styles.surveyCTAHint}>
-              מלא/י את השאלון כדי שנוכל לחפש לך התאמות טובות יותר.
-            </Text>
-          )}
-
-          <TouchableOpacity
-            style={[styles.surveyCTA, { marginTop: 12 }]}
             activeOpacity={0.9}
             onPress={() => router.push('/(tabs)/profile/settings')}
           >
@@ -1499,6 +1815,44 @@ const styles = StyleSheet.create({
     marginBottom: 6,
     textAlign: 'right',
   },
+  metaChipsRow: {
+    flexDirection: 'row-reverse',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginBottom: 12,
+  },
+  metaChip: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: 'rgba(76,29,149,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(76,29,149,0.12)',
+    maxWidth: '100%',
+  },
+  metaChipText: {
+    color: '#111827',
+    fontSize: 13,
+    fontWeight: '800',
+    textAlign: 'right',
+  },
+  bioCard: {
+    backgroundColor: '#F9FAFB',
+    borderRadius: 16,
+    padding: 12,
+    borderWidth: 0,
+    borderColor: 'transparent',
+  },
+  bioTitle: {
+    color: '#4C1D95',
+    fontSize: 13,
+    fontWeight: '900',
+    textAlign: 'right',
+    marginBottom: 6,
+  },
   locationRow: {
     flexDirection: 'row-reverse',
     alignItems: 'center',
@@ -1795,6 +2149,152 @@ const styles = StyleSheet.create({
     color: '#4C1D95',
     fontSize: 12,
     fontWeight: '900',
+  },
+  sectionEmptyWrap: {
+    paddingVertical: 18,
+    paddingHorizontal: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  sectionEmptyIconPill: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(76,29,149,0.10)',
+    borderWidth: 1,
+    borderColor: 'rgba(76,29,149,0.16)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sectionEmptyTitle: {
+    color: '#111827',
+    fontSize: 14,
+    fontWeight: '900',
+    textAlign: 'center',
+  },
+  sectionEmptyText: {
+    color: '#6B7280',
+    fontSize: 13,
+    fontWeight: '700',
+    textAlign: 'center',
+    lineHeight: 18,
+    maxWidth: 320,
+  },
+  aptCardSpacing: {
+    marginBottom: 12,
+  },
+  aptCard: {
+    borderRadius: 18,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 0,
+    borderColor: 'transparent',
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOpacity: 0.08,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 3,
+    ...(Platform.OS === 'web' ? ({ boxShadow: '0 12px 28px rgba(0,0,0,0.10)' } as any) : null),
+  },
+  aptCoverWrap: {
+    width: '100%',
+    height: 176,
+    backgroundColor: '#F3F4F6',
+  },
+  aptCoverImg: {
+    width: '100%',
+    height: '100%',
+  },
+  aptCoverGradient: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: 130,
+  },
+  aptCoverTextWrap: {
+    position: 'absolute',
+    left: 14,
+    right: 14,
+    bottom: 12,
+    alignItems: 'flex-end',
+    // In RTL screens on web, flex-end may map to the visual left. Force LTR so "end" stays right.
+    direction: 'ltr',
+  },
+  aptCoverOccupantsRow: {
+    position: 'absolute',
+    top: 12,
+    left: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    // Force LTR layout for consistent spacing/overlap even when the screen is RTL (esp. on web)
+    direction: 'ltr',
+  },
+  aptCoverOccupantAvatarShadow: {
+    shadowColor: '#000000',
+    shadowOpacity: 0.18,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 4,
+    ...(Platform.OS === 'web' ? ({ boxShadow: '0 10px 22px rgba(0,0,0,0.18)' } as any) : null),
+  },
+  aptCoverTitle: {
+    color: '#FFFFFF',
+    fontSize: 17,
+    fontWeight: '900',
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    textShadowColor: 'rgba(0,0,0,0.35)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 10,
+  },
+  aptCoverCityRow: {
+    marginTop: 6,
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 6,
+  },
+  aptCoverCityText: {
+    color: 'rgba(255,255,255,0.92)',
+    fontSize: 13,
+    fontWeight: '800',
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
+  aptOccupantAvatarWrap: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    borderWidth: 2,
+    borderColor: 'rgba(255,255,255,0.95)',
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  aptOccupantOverlap: {
+    // Overlap avatars so each one slightly covers the previous one
+    marginLeft: -8,
+  },
+  aptOccupantAvatarImg: {
+    width: '100%',
+    height: '100%',
+  },
+  aptOccupantFallback: {
+    color: '#6B7280',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  aptOccupantOverflow: {
+    borderColor: '#E9D5FF',
+    backgroundColor: 'rgba(139,92,246,0.10)',
+  },
+  aptOccupantOverflowText: {
+    color: '#8B5CF6',
+    fontSize: 12,
+    fontWeight: '800',
   },
   surveyCard: {
     borderRadius: 20,
@@ -2155,6 +2655,46 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
     textAlign: 'left',
+  },
+  sectionActionPill: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 74,
+  },
+  sectionActionPillDanger: {
+    backgroundColor: 'rgba(220,38,38,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(220,38,38,0.18)',
+  },
+  sectionActionPillTextDanger: {
+    color: '#DC2626',
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  mediaActionPill: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  mediaActionPillDanger: {
+    backgroundColor: 'rgba(0,0,0,0.35)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
+  },
+  mediaActionPillTextDanger: {
+    color: '#FCA5A5',
+    fontSize: 12,
+    fontWeight: '900',
   },
   sharedMembersGrid: {
     width: '100%',

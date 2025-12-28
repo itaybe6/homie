@@ -27,7 +27,7 @@ import Animated, {
   runOnJS,
 } from 'react-native-reanimated';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import { SlidersHorizontal, ChevronLeft, ChevronRight, Heart, X, MapPin, Share2, Users, RefreshCw } from 'lucide-react-native';
+import { SlidersHorizontal, ChevronLeft, ChevronRight, Heart, X, MapPin, Share2, Users, RefreshCw, User as UserIcon } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
@@ -39,6 +39,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { cityNeighborhoods, canonicalizeCityName } from '@/assets/data/neighborhoods';
 import { Apartment } from '@/types/database';
 // GroupCard implemented inline below
+import MatchPercentBadge from '@/components/MatchPercentBadge';
 
 import {
   calculateMatchScore,
@@ -1920,11 +1921,26 @@ function GroupCard({
               ]}
             >
               <View style={groupStyles.cellImageWrap}>
-                <Image source={{ uri: u.avatar_url || DEFAULT_AVATAR }} style={groupStyles.cellImage} resizeMode="cover" />
-                <View style={[groupStyles.matchBadge, groupStyles.matchBadgeLarge]}>
-                  <Text style={groupStyles.matchBadgeValue}>{formatMatchPercent(matchPercent)}</Text>
-                  <Text style={groupStyles.matchBadgeLabel}>התאמה</Text>
-                </View>
+                {u.avatar_url ? (
+                  <Image
+                    source={{ uri: u.avatar_url || DEFAULT_AVATAR }}
+                    style={groupStyles.cellImage}
+                    resizeMode="cover"
+                  />
+                ) : (
+                  <View style={groupStyles.cellPlaceholder}>
+                    <UserIcon size={56} color="#9CA3AF" />
+                    <Text style={groupStyles.cellPlaceholderText} numberOfLines={2}>
+                      למשתמש זה אין תמונות עדיין
+                    </Text>
+                  </View>
+                )}
+                <MatchPercentBadge
+                  value={matchPercent}
+                  triggerKey={`${groupId}-${u.id}`}
+                  size={58}
+                  style={[groupStyles.matchBadge, groupStyles.matchBadgeLarge]}
+                />
                 <View style={groupStyles.cellBottomOverlay}>
                   <LinearGradient
                     colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.55)']}
@@ -1996,6 +2012,22 @@ const groupStyles = StyleSheet.create({
     width: '100%',
     height: '100%',
   },
+  cellPlaceholder: {
+    width: '100%',
+    height: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F3F4F6',
+  },
+  cellPlaceholderText: {
+    marginTop: 8,
+    paddingHorizontal: 10,
+    color: '#6B7280',
+    fontSize: 11,
+    fontWeight: '800',
+    textAlign: 'center',
+    writingDirection: 'rtl',
+  },
   cellBottomOverlay: {
     position: 'absolute',
     left: 0,
@@ -2035,19 +2067,11 @@ const groupStyles = StyleSheet.create({
   },
   matchBadge: {
     position: 'absolute',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(15,15,20,0.78)',
-    borderWidth: 1,
-    borderColor: 'rgba(124,92,255,0.35)',
     zIndex: 3,
   },
   matchBadgeLarge: {
     top: 12,
     right: 12,
-    width: 58,
-    height: 58,
-    borderRadius: 29,
   },
   matchBadgeSmall: {
     bottom: -6,
@@ -2055,22 +2079,6 @@ const groupStyles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-  },
-  matchBadgeValue: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '800',
-  },
-  matchBadgeValueSmall: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '800',
-  },
-  matchBadgeLabel: {
-    color: '#C9CDD6',
-    fontSize: 11,
-    fontWeight: '600',
-    marginTop: 2,
   },
   extraOverlay: {
     position: 'absolute',

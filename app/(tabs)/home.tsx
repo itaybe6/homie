@@ -181,10 +181,26 @@ export default function HomeScreen() {
         : null;
   }
 
+  function getNormalizedPartnerIds(apartment: Apartment): string[] {
+    const anyApt = apartment as any;
+    const ownerId = String(anyApt?.owner_id || '').trim();
+    const raw = normalizeIds(anyApt?.partner_ids);
+    const uniq = Array.from(
+      new Set(
+        raw
+          .map((x) => String(x || '').trim())
+          .filter(Boolean)
+          // Prevent counting the owner as a partner if bad data includes it
+          .filter((id) => !ownerId || id !== ownerId)
+      )
+    );
+    return uniq;
+  }
+
   function getAvailableRoommateSlots(apartment: Apartment): number | null {
     const max = getMaxRoommates(apartment);
     if (max === null) return null;
-    const used = normalizeIds((apartment as any)?.partner_ids).length;
+    const used = getNormalizedPartnerIds(apartment).length;
     return Math.max(0, max - used);
   }
   const [searchQuery, setSearchQuery] = useState('');
