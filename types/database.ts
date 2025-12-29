@@ -78,6 +78,12 @@ export interface Apartment {
   image_urls?: string[]; // new: multiple images
   partner_ids?: string[]; // national IDs of roommates associated to the apartment
 
+  // Apartment details (פרטי דירה)
+  apartment_type?: 'REGULAR' | 'GARDEN'; // סוג הדירה
+  square_meters?: number; // מטר מרובע של הדירה
+  floor?: number; // קומה
+  garden_square_meters?: number; // מטר מרובע של הגינה (רק אם apartment_type === 'GARDEN')
+
   // Property features (מאפייני הנכס)
   balcony_count?: number; // 0-3
   wheelchair_accessible?: boolean; // גישה לנכים
