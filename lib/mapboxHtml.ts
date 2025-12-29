@@ -116,6 +116,18 @@ export function buildMapboxHtml(params: {
           }
           mapboxgl.accessToken = token;
 
+          // Enable proper RTL shaping/ordering for Hebrew (and other RTL scripts).
+          // Without this, Hebrew labels can appear left-to-right or with broken glyph ordering.
+          try {
+            if (mapboxgl && typeof mapboxgl.setRTLTextPlugin === 'function') {
+              mapboxgl.setRTLTextPlugin(
+                'https://api.mapbox.com/mapbox-gl-js/plugins/mapbox-gl-rtl-text/v0.2.3/mapbox-gl-rtl-text.js',
+                null,
+                true
+              );
+            }
+          } catch (_) {}
+
           var center = ${JSON.stringify(center)};
           var zoom = ${JSON.stringify(zoom)};
           var styleUrl = ${JSON.stringify(styleUrl)};
@@ -134,6 +146,39 @@ export function buildMapboxHtml(params: {
           // Some styles keep mutating layers after load, so we also retry on idle/styledata.
           var __labelsApplied = false;
           var __applyScheduled = false;
+          var __heApplied = false;
+
+          function applyHebrewLabels() {
+            try {
+              var style = map.getStyle && map.getStyle();
+              if (!style || !style.layers) return;
+              var changed = 0;
+              for (var i = 0; i < style.layers.length; i++) {
+                var layer = style.layers[i];
+                if (!layer || layer.type !== 'symbol') continue;
+                var layout = layer.layout || {};
+                // Only touch layers that actually render text.
+                if (!layout || typeof layout !== 'object') continue;
+                if (!('text-field' in layout)) continue;
+                var tf = layout['text-field'];
+                // Avoid clobbering complex formatted expressions (icons+text etc.)
+                if (Array.isArray(tf) && tf.length > 0 && tf[0] === 'format') continue;
+
+                try {
+                  map.setLayoutProperty(layer.id, 'text-field', [
+                    'coalesce',
+                    ['get', 'name_he'],
+                    ['get', 'name:he'],
+                    ['get', 'name'],
+                    ['get', 'name_en'],
+                  ]);
+                  changed++;
+                } catch (_) {}
+              }
+              if (changed > 0) __heApplied = true;
+            } catch (_) {}
+          }
+
           function applyPurpleLabels() {
             __applyScheduled = false;
             try {
@@ -153,12 +198,22 @@ export function buildMapboxHtml(params: {
             } catch (_) {}
           }
           function scheduleApply() {
-            if (__labelsApplied || __applyScheduled) return;
+            if ((__labelsApplied && __heApplied) || __applyScheduled) return;
             __applyScheduled = true;
-            try { requestAnimationFrame(applyPurpleLabels); } catch (_) { setTimeout(applyPurpleLabels, 0); }
+            try {
+              requestAnimationFrame(function () {
+                applyHebrewLabels();
+                applyPurpleLabels();
+              });
+            } catch (_) {
+              setTimeout(function () {
+                applyHebrewLabels();
+                applyPurpleLabels();
+              }, 0);
+            }
           }
-          map.on('style.load', function () { __labelsApplied = false; scheduleApply(); });
-          map.on('styledata', function () { __labelsApplied = false; scheduleApply(); });
+          map.on('style.load', function () { __labelsApplied = false; __heApplied = false; scheduleApply(); });
+          map.on('styledata', function () { __labelsApplied = false; __heApplied = false; scheduleApply(); });
           map.on('idle', function () { scheduleApply(); });
 
           map.on('load', function () {

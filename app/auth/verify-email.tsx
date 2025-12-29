@@ -80,7 +80,7 @@ export default function VerifyEmailScreen() {
       setUser({ id: user.id, email: user.email! } as any);
       clearPending();
       if (pending.role === 'owner') {
-        router.replace('/(tabs)/add-apartment' as any);
+        router.replace('/add-apartment' as any);
       } else {
         router.replace('/(tabs)/onboarding/survey' as any);
       }

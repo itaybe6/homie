@@ -501,7 +501,7 @@ export default function HomeScreen() {
       Alert.alert('שגיאה', 'אירעה שגיאה בבדיקת השיוך לדירה. נסה שוב.');
       return;
     }
-    router.push('/(tabs)/add-apartment');
+    router.push('/add-apartment' as any);
   };
 
   if (isLoading && !refreshing) {

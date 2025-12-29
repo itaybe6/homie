@@ -27,12 +27,19 @@ export default function RootLayout() {
     (pathname === '/(tabs)/home' || pathname === '/home' || pathname.endsWith('/home'));
   const isSurveyRoute =
     typeof pathname === 'string' && pathname.includes('/onboarding/survey');
+  const isStandaloneAddApartmentRoute =
+    typeof pathname === 'string' && (pathname === '/add-apartment' || pathname.endsWith('/add-apartment'));
   const hideGlobalTopBar =
-    typeof pathname === 'string' && (pathname.includes('/apartment/') || isMapRoute || isSurveyRoute);
+    typeof pathname === 'string' &&
+    (pathname.includes('/apartment/') || isMapRoute || isSurveyRoute || isStandaloneAddApartmentRoute);
   const isAuthRoute = typeof pathname === 'string' && pathname.startsWith('/auth');
   const isAdminRoute = typeof pathname === 'string' && pathname.startsWith('/admin');
   const shouldShowGlobalTopBar = !!user && !hideGlobalTopBar && !isAuthRoute && !isAdminRoute;
-  const globalTopBarBg = isApartmentsHomeRoute ? '#FFFFFF' : '#FFFFFF';
+  const isAddApartmentRoute =
+    typeof pathname === 'string' &&
+    (pathname === '/(tabs)/add-apartment' || pathname === '/add-apartment' || pathname.endsWith('/add-apartment'));
+  // Match the screen background per-route so the Safe Area + global header blend in cleanly.
+  const globalTopBarBg = isAddApartmentRoute ? '#FAFAFA' : '#FFFFFF';
 
   if (!supabaseOk) {
     return (

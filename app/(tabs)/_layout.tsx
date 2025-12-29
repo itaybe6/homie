@@ -53,6 +53,8 @@ export default function TabLayout() {
   const insets = useSafeAreaInsets();
   const isSurveyRoute =
     typeof pathname === 'string' && pathname.includes('/onboarding/survey');
+  const isAddApartmentTabRoute =
+    typeof pathname === 'string' && (pathname === '/(tabs)/add-apartment' || pathname.includes('/add-apartment'));
   const [ownedApartmentId, setOwnedApartmentId] = useState<string | null | undefined>(
     user?.id ? undefined : null
   );
@@ -157,7 +159,7 @@ export default function TabLayout() {
         tabBarHideOnKeyboard: true,
         tabBarActiveTintColor: '#4C1D95',
         tabBarInactiveTintColor: '#6B7280',
-        tabBarStyle: isSurveyRoute
+        tabBarStyle: isSurveyRoute || isAddApartmentTabRoute
           ? ({ display: 'none' } as any)
           : ({
           backgroundColor: '#FFFFFF',
@@ -215,13 +217,13 @@ export default function TabLayout() {
                       setOwnedApartmentId(firstId);
 
                       if (firstId) {
-                        alert(
+                        Alert.alert(
                           'לא ניתן להוסיף דירה',
                           'אי אפשר להעלות עוד דירה כי כבר העלית דירה אחת.'
                         );
                         return;
                       }
-                      props.onPress?.(e);
+                      router.push('/add-apartment' as any);
                       return;
                     } catch {
                       Alert.alert('שגיאה', 'לא הצלחנו לבדוק אם כבר העלית דירה. נסה שוב.');
@@ -238,7 +240,7 @@ export default function TabLayout() {
                     return;
                   }
                 }
-                props.onPress?.(e);
+                router.push('/add-apartment' as any);
               }}
               accessibilityLabel={props.accessibilityLabel}
               accessibilityState={props.accessibilityState as any}
