@@ -199,12 +199,13 @@ export default function ApartmentCard({
     () => normalizePartnerIds((apartment as any).partner_ids),
     [apartment]
   );
-  // Prefer max_roommates (new schema), fallback to roommate_capacity (legacy schema).
+  // Prefer roommate_capacity (value set in upload/edit apartment),
+  // fallback to max_roommates if it exists in some environments.
   const maxRoommates: number | null =
-    typeof (apartment as any)?.max_roommates === 'number'
-      ? ((apartment as any).max_roommates as number)
-      : typeof (apartment as any)?.roommate_capacity === 'number'
-        ? ((apartment as any).roommate_capacity as number)
+    typeof (apartment as any)?.roommate_capacity === 'number'
+      ? ((apartment as any).roommate_capacity as number)
+      : typeof (apartment as any)?.max_roommates === 'number'
+        ? ((apartment as any).max_roommates as number)
         : null;
 
   const partnerSlotsUsed = partnerIds.length;
@@ -347,11 +348,11 @@ export default function ApartmentCard({
                 </Text>
               </View>
             ) : null}
-            {isHome && typeof maxRoommates === 'number' ? (
+            {isHome ? (
               <View style={styles.roommatesBadgeHome} pointerEvents="none">
                 <Users size={14} color="#111827" />
                 <Text style={styles.roommatesBadgeHomeText}>
-                  {partnerSlotsUsed}/{maxRoommates}
+                  {typeof maxRoommates === 'number' ? `${partnerSlotsUsed}/${maxRoommates}` : `${partnerSlotsUsed}`}
                 </Text>
               </View>
             ) : null}

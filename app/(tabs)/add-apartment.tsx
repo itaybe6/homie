@@ -18,7 +18,7 @@ import {
   Pressable,
   Dimensions,
 } from 'react-native';
-import { usePathname, useRouter } from 'expo-router';
+import { useLocalSearchParams, usePathname, useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/authStore';
 import { useApartmentStore } from '@/stores/apartmentStore';
@@ -31,6 +31,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { getNeighborhoodsForCityName } from '@/lib/neighborhoods';
+import type { Apartment } from '@/types/database';
 import {
   Accessibility,
   Snowflake,
@@ -57,11 +58,15 @@ import {
 } from 'lucide-react-native';
 
 
-export default function AddApartmentScreen() {
+type UpsertMode = 'create' | 'edit';
+
+export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmentId?: string }) {
   const router = useRouter();
   const pathname = usePathname();
+  const params = useLocalSearchParams();
   const { user } = useAuthStore();
   const addApartment = useApartmentStore((state) => state.addApartment);
+  const updateApartment = useApartmentStore((state) => state.updateApartment);
   const mapboxToken = process.env.EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN as string | undefined;
   const mapboxStyleUrl = process.env.EXPO_PUBLIC_MAPBOX_STYLE_URL as string | undefined;
   const insets = useSafeAreaInsets();
@@ -69,16 +74,27 @@ export default function AddApartmentScreen() {
   const previewGalleryRef = useRef<ScrollView>(null);
   const [previewActiveIdx, setPreviewActiveIdx] = useState(0);
 
+  const inferredMode: UpsertMode =
+    props?.mode ?? (typeof pathname === 'string' && pathname.includes('/apartment/edit') ? 'edit' : 'create');
+
+  const routeIdRaw = (params as any)?.id;
+  const routeId = Array.isArray(routeIdRaw) ? routeIdRaw[0] : routeIdRaw;
+
+  const mode: UpsertMode = inferredMode;
+  const editingApartmentId =
+    mode === 'edit' ? String(props?.apartmentId || routeId || '') : '';
+
   // This screen should be fullscreen (no bottom tabs). If we somehow landed in the tabs group,
   // immediately forward to the standalone route.
   useEffect(() => {
-    if (pathname === '/(tabs)/add-apartment') {
+    if (mode === 'create' && pathname === '/(tabs)/add-apartment') {
       router.replace('/add-apartment' as any);
     }
-  }, [pathname, router]);
+  }, [pathname, router, mode]);
 
   // Guard: each user can upload max 1 apartment. If already owns one, block entry.
   useEffect(() => {
+    if (mode !== 'create') return;
     let cancelled = false;
     const checkLimit = async () => {
       if (!user?.id) return;
@@ -106,7 +122,7 @@ export default function AddApartmentScreen() {
     return () => {
       cancelled = true;
     };
-  }, [user?.id, router]);
+  }, [user?.id, router, mode]);
 
   const TOTAL_STEPS = 3 as const;
   type Step = 1 | 2 | 3;
@@ -146,6 +162,7 @@ export default function AddApartmentScreen() {
   const [includeAsPartner, setIncludeAsPartner] = useState(false);
   const [roommateCapacity, setRoommateCapacity] = useState<number | null>(null);
   const roommateCapacityOptions = [2, 3, 4, 5];
+  const [existingPartnerIds, setExistingPartnerIds] = useState<string[]>([]);
 
   // Property features (מאפייני הנכס)
   const [balconyCount, setBalconyCount] = useState<0 | 1 | 2 | 3>(0);
@@ -245,10 +262,140 @@ export default function AddApartmentScreen() {
     };
   }, [address, city, mapboxToken]);
 
+  // EDIT MODE: load apartment and hydrate the same form UI.
+  useEffect(() => {
+    if (mode !== 'edit') return;
+    if (!editingApartmentId) return;
+
+    let cancelled = false;
+    const run = async () => {
+      setIsLoading(true);
+      setError('');
+      try {
+        const { data: userResp } = await supabase.auth.getUser();
+        const authUser = user ?? userResp.user ?? null;
+        if (!authUser?.id) throw new Error('יש להתחבר כדי לערוך דירה');
+
+        const { data: apt, error: aptErr } = await supabase
+          .from('apartments')
+          .select('*')
+          .eq('id', editingApartmentId)
+          .maybeSingle();
+        if (aptErr) throw aptErr;
+        if (!apt) throw new Error('הדירה לא נמצאה');
+        if (apt.owner_id !== authUser.id) throw new Error('אין לך הרשאה לערוך דירה זו');
+
+        if (cancelled) return;
+        const a = apt as Apartment;
+
+        setTitle(a.title || '');
+        setDescription(a.description || '');
+        setAddress(a.address || '');
+        setCity(a.city || '');
+        setNeighborhood(a.neighborhood || '');
+        setPrice(String(a.price ?? ''));
+        setBedrooms(String(a.bedrooms ?? ''));
+        setBathrooms(String(a.bathrooms ?? ''));
+
+        const aptType = (a as any)?.apartment_type as Apartment['apartment_type'] | undefined;
+        setPropertyType(aptType === 'GARDEN' ? 'garden' : 'building');
+
+        const sqm = (a as any)?.square_meters;
+        setSizeSqm(typeof sqm === 'number' && sqm > 0 ? String(Math.round(sqm)) : '');
+
+        const gardenSqm = (a as any)?.garden_square_meters;
+        setGardenSizeSqm(typeof gardenSqm === 'number' && gardenSqm > 0 ? String(Math.round(gardenSqm)) : '');
+
+        const fl = (a as any)?.floor;
+        setFloor(typeof fl === 'number' && Number.isFinite(fl) ? fl : 0);
+
+        const cap = (a as any)?.roommate_capacity;
+        setRoommateCapacity(typeof cap === 'number' && cap > 0 ? cap : null);
+
+        // Property features
+        const bc =
+          typeof (a as any)?.balcony_count === 'number'
+            ? Math.max(0, Math.min(3, (a as any).balcony_count as number))
+            : 0;
+        setBalconyCount(bc as 0 | 1 | 2 | 3);
+        setWheelchairAccessible(!!(a as any)?.wheelchair_accessible);
+        setHasAirConditioning(!!(a as any)?.has_air_conditioning);
+        setHasBars(!!(a as any)?.has_bars);
+        setHasSolarHeater(!!(a as any)?.has_solar_heater);
+        setIsFurnished(!!(a as any)?.is_furnished);
+        setHasSafeRoom(!!(a as any)?.has_safe_room);
+        setIsRenovated(!!(a as any)?.is_renovated);
+        setPetsAllowed(!!(a as any)?.pets_allowed);
+        setHasElevator(!!(a as any)?.has_elevator);
+        setKosherKitchen(!!(a as any)?.kosher_kitchen);
+
+        const partnerIds = normalizeIds((a as any)?.partner_ids);
+        setExistingPartnerIds(partnerIds);
+        setIncludeAsPartner(partnerIds.includes(authUser.id));
+
+        const existingUrls = [
+          ...normalizeImagesValue((a as any)?.image_urls),
+          ...(a as any)?.image_url ? [String((a as any).image_url)] : [],
+        ].filter(Boolean);
+        setImages(Array.from(new Set(existingUrls)));
+      } catch (e: any) {
+        Alert.alert('שגיאה', e?.message || 'טעינת הדירה נכשלה');
+        router.back();
+      } finally {
+        if (!cancelled) setIsLoading(false);
+      }
+    };
+
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, [mode, editingApartmentId, user, router]);
+
   const closeOverlays = () => {
     setCitySuggestions([]);
     setAddressSuggestions([]);
   };
+
+  const normalizeIds = (value: any): string[] => {
+    if (!value) return [];
+    if (Array.isArray(value)) return value.map(String).filter(Boolean);
+    if (typeof value === 'string') {
+      try {
+        const parsed = JSON.parse(value);
+        if (Array.isArray(parsed)) return parsed.map(String).filter(Boolean);
+      } catch {
+        // ignore
+      }
+      return value
+        .replace(/^{|}$/g, '')
+        .split(',')
+        .map((s) => s.replace(/^"+|"+$/g, '').trim())
+        .filter(Boolean);
+    }
+    return [];
+  };
+
+  const normalizeImagesValue = (value: any): string[] => {
+    if (!value) return [];
+    if (Array.isArray(value)) return value.filter(Boolean);
+    if (typeof value === 'string') {
+      try {
+        const parsed = JSON.parse(value);
+        if (Array.isArray(parsed)) return parsed.filter(Boolean);
+      } catch {
+        // ignore
+      }
+      return value
+        .replace(/^{|}$/g, '')
+        .split(',')
+        .map((s: string) => s.replace(/^"+|"+$/g, '').trim())
+        .filter(Boolean);
+    }
+    return [];
+  };
+
+  const isRemoteUrl = (uri: string) => /^https?:\/\//i.test(String(uri || ''));
 
   function ctxText(feature: MapboxGeocodingFeature, prefix: string): string {
     const ctx = feature?.context || [];
@@ -706,92 +853,151 @@ export default function AddApartmentScreen() {
         return;
       }
 
-      // Enforce limit: a user can own max 1 apartment (by owner_id)
-      const { data: owned, error: ownedErr } = await supabase
-        .from('apartments')
-        .select('id')
-        .eq('owner_id', authUser.id)
-        .limit(1);
-      if (ownedErr) throw ownedErr;
-      if (owned && owned.length > 0) {
-        Alert.alert(
-          'לא ניתן להוסיף דירה',
-          'אי אפשר להעלות עוד דירה כי כבר העלית דירה אחת.'
-        );
-        setIsLoading(false);
-        router.replace('/(tabs)/home');
-        return;
+      if (mode === 'create') {
+        // Enforce limit: a user can own max 1 apartment (by owner_id)
+        const { data: owned, error: ownedErr } = await supabase
+          .from('apartments')
+          .select('id')
+          .eq('owner_id', authUser.id)
+          .limit(1);
+        if (ownedErr) throw ownedErr;
+        if (owned && owned.length > 0) {
+          Alert.alert('לא ניתן להוסיף דירה', 'אי אפשר להעלות עוד דירה כי כבר העלית דירה אחת.');
+          setIsLoading(false);
+          router.replace('/(tabs)/home');
+          return;
+        }
       }
 
       // Make sure a users-row exists for FK
       await ensureUserProfileRow(authUser.id, authUser.email ?? null);
 
-      // Upload images first (best-effort; stop if any upload fails)
+      // Upload images:
+      // - In create: all images are local URIs.
+      // - In edit: we may have existing remote URLs + new local URIs.
+      const existingRemote = mode === 'edit' ? images.filter((u) => isRemoteUrl(u)) : [];
+      const localUris = mode === 'edit' ? images.filter((u) => !isRemoteUrl(u)) : images;
+
       const uploadedUrls: string[] = [];
-      for (const uri of images) {
+      for (const uri of localUris) {
         const url = await uploadImage(authUser.id, uri);
         uploadedUrls.push(url);
       }
 
-      const { data, error: insertError } = await supabase
-        .from('apartments')
-        .insert({
-          owner_id: authUser.id,
-          partner_ids: includeAsPartner ? [authUser.id] : [],
-          title,
-          description: description || null,
-          address,
-          city,
-          neighborhood: neighborhood || null,
-          price: priceNum,
-          // New schema fields
-          apartment_type: propertyType === 'garden' ? 'GARDEN' : 'REGULAR',
-          bedrooms: bedroomsNum,
-          bathrooms: bathroomsNum,
-          square_meters: Number.isFinite(sizeSqmNum) && sizeSqmNum > 0 ? sizeSqmNum : null,
-          floor: propertyType === 'building' ? floor : null,
-          garden_square_meters:
-            propertyType === 'garden' && Number.isFinite(gardenSizeSqmNum) && gardenSizeSqmNum > 0
-              ? gardenSizeSqmNum
-              : null,
-          roommate_capacity: roommatesNum,
-          image_urls: uploadedUrls.length ? uploadedUrls : null,
+      const finalImageUrls = Array.from(new Set([...(existingRemote || []), ...uploadedUrls].filter(Boolean)));
 
-          // Property features
-          balcony_count: balconyCount,
-          wheelchair_accessible: wheelchairAccessible,
-          has_air_conditioning: hasAirConditioning,
-          has_bars: hasBars,
-          has_solar_heater: hasSolarHeater,
-          is_furnished: isFurnished,
-          has_safe_room: hasSafeRoom,
-          is_renovated: isRenovated,
-          pets_allowed: petsAllowed,
-          has_elevator: hasElevator,
-          kosher_kitchen: kosherKitchen,
-        })
-        .select()
-        .single();
+      if (mode === 'edit') {
+        if (!editingApartmentId) throw new Error('חסר מזהה דירה לעריכה');
 
-      if (insertError) throw insertError;
+        // Preserve existing partner_ids; only toggle owner inclusion if user changed it
+        const base = normalizeIds(existingPartnerIds);
+        const withoutOwner = base.filter((pid) => pid !== authUser.id);
+        const nextPartnerIds = includeAsPartner ? Array.from(new Set([...withoutOwner, authUser.id])) : withoutOwner;
 
-      // Ensure partner_ids contains the creator if user chose to be a partner (fallback if DB ignored the field)
-      let apartmentRow = data;
-      if (includeAsPartner && (!apartmentRow.partner_ids || apartmentRow.partner_ids.length === 0)) {
-        const { data: fixed, error: fixErr } = await supabase
+        const { data: updated, error: updateErr } = await supabase
           .from('apartments')
-          .update({ partner_ids: [authUser.id] })
-          .eq('id', apartmentRow.id)
+          .update({
+            partner_ids: nextPartnerIds,
+            title,
+            description: description || null,
+            address,
+            city,
+            neighborhood: neighborhood || null,
+            price: priceNum,
+            apartment_type: propertyType === 'garden' ? 'GARDEN' : 'REGULAR',
+            bedrooms: bedroomsNum,
+            bathrooms: bathroomsNum,
+            square_meters: Number.isFinite(sizeSqmNum) && sizeSqmNum > 0 ? sizeSqmNum : null,
+            floor: propertyType === 'building' ? floor : null,
+            garden_square_meters:
+              propertyType === 'garden' && Number.isFinite(gardenSizeSqmNum) && gardenSizeSqmNum > 0
+                ? gardenSizeSqmNum
+                : null,
+            roommate_capacity: roommatesNum,
+            image_urls: finalImageUrls.length ? finalImageUrls : null,
+
+            // Property features
+            balcony_count: balconyCount,
+            wheelchair_accessible: wheelchairAccessible,
+            has_air_conditioning: hasAirConditioning,
+            has_bars: hasBars,
+            has_solar_heater: hasSolarHeater,
+            is_furnished: isFurnished,
+            has_safe_room: hasSafeRoom,
+            is_renovated: isRenovated,
+            pets_allowed: petsAllowed,
+            has_elevator: hasElevator,
+            kosher_kitchen: kosherKitchen,
+          })
+          .eq('id', editingApartmentId)
           .select()
           .single();
-        if (!fixErr && fixed) {
-          apartmentRow = fixed;
-        }
-      }
 
-      addApartment(apartmentRow);
-      Alert.alert('הצלחה', 'הדירה נוספה בהצלחה');
-      router.replace('/(tabs)/home');
+        if (updateErr) throw updateErr;
+        updateApartment(updated as Apartment);
+        Alert.alert('הצלחה', 'הדירה עודכנה בהצלחה');
+        router.replace(`/apartment/${editingApartmentId}` as any);
+      } else {
+        const { data, error: insertError } = await supabase
+          .from('apartments')
+          .insert({
+            owner_id: authUser.id,
+            partner_ids: includeAsPartner ? [authUser.id] : [],
+            title,
+            description: description || null,
+            address,
+            city,
+            neighborhood: neighborhood || null,
+            price: priceNum,
+            // New schema fields
+            apartment_type: propertyType === 'garden' ? 'GARDEN' : 'REGULAR',
+            bedrooms: bedroomsNum,
+            bathrooms: bathroomsNum,
+            square_meters: Number.isFinite(sizeSqmNum) && sizeSqmNum > 0 ? sizeSqmNum : null,
+            floor: propertyType === 'building' ? floor : null,
+            garden_square_meters:
+              propertyType === 'garden' && Number.isFinite(gardenSizeSqmNum) && gardenSizeSqmNum > 0
+                ? gardenSizeSqmNum
+                : null,
+            roommate_capacity: roommatesNum,
+            image_urls: finalImageUrls.length ? finalImageUrls : null,
+
+            // Property features
+            balcony_count: balconyCount,
+            wheelchair_accessible: wheelchairAccessible,
+            has_air_conditioning: hasAirConditioning,
+            has_bars: hasBars,
+            has_solar_heater: hasSolarHeater,
+            is_furnished: isFurnished,
+            has_safe_room: hasSafeRoom,
+            is_renovated: isRenovated,
+            pets_allowed: petsAllowed,
+            has_elevator: hasElevator,
+            kosher_kitchen: kosherKitchen,
+          })
+          .select()
+          .single();
+
+        if (insertError) throw insertError;
+
+        // Ensure partner_ids contains the creator if user chose to be a partner (fallback if DB ignored the field)
+        let apartmentRow = data;
+        if (includeAsPartner && (!apartmentRow.partner_ids || apartmentRow.partner_ids.length === 0)) {
+          const { data: fixed, error: fixErr } = await supabase
+            .from('apartments')
+            .update({ partner_ids: [authUser.id] })
+            .eq('id', apartmentRow.id)
+            .select()
+            .single();
+          if (!fixErr && fixed) {
+            apartmentRow = fixed;
+          }
+        }
+
+        addApartment(apartmentRow);
+        Alert.alert('הצלחה', 'הדירה נוספה בהצלחה');
+        router.replace('/(tabs)/home');
+      }
     } catch (err: any) {
       setError(err.message || 'שגיאה בהוספת דירה');
     } finally {
@@ -809,7 +1015,7 @@ export default function AddApartmentScreen() {
             <TouchableOpacity style={styles.headerBack} onPress={() => router.back()}>
               <ArrowRight size={22} color="#111827" />
             </TouchableOpacity>
-            <Text style={styles.headerTitle}>הוספת דירה חדשה</Text>
+            <Text style={styles.headerTitle}>{mode === 'edit' ? 'עריכת דירה' : 'הוספת דירה חדשה'}</Text>
             {/* Spacer to keep the title centered */}
             <View style={styles.headerSideSpacer} />
           </View>
@@ -1438,7 +1644,7 @@ export default function AddApartmentScreen() {
             {step === 3 ? (
               <>
                 <View style={styles.previewHeader}>
-                  <Text style={styles.step2Title}>סיכום ופרסום</Text>
+                  <Text style={styles.step2Title}>{mode === 'edit' ? 'סיכום ועדכון' : 'סיכום ופרסום'}</Text>
                   <Text style={styles.step2Subtitle}>תצוגה מקדימה כמו עמוד דירה רגיל.</Text>
                 </View>
 
@@ -1748,7 +1954,7 @@ export default function AddApartmentScreen() {
                   activeOpacity={0.92}
                 >
                   {isLoading ? <ActivityIndicator color="#FFFFFF" /> : <ArrowLeft size={20} color="#FFFFFF" />}
-                  <Text style={styles.footerCtaText}>פרסם דירה</Text>
+                  <Text style={styles.footerCtaText}>{mode === 'edit' ? 'עדכן דירה' : 'פרסם דירה'}</Text>
                 </TouchableOpacity>
               )}
 

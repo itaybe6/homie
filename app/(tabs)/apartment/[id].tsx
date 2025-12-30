@@ -34,6 +34,8 @@ import {
   Pencil,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
+  ChevronUp,
   X,
   UserPlus,
   Search,
@@ -570,12 +572,13 @@ export default function ApartmentDetailsScreen() {
   const roommatesCount = currentPartnerIds.length;
   const partnerSlotsUsed = currentPartnerIds.length;
 
-  // Prefer max_roommates (new schema), fallback to roommate_capacity (legacy schema).
+  // Prefer roommate_capacity (the value set in "upload/edit apartment"),
+  // fallback to max_roommates if it exists in some environments.
   const maxRoommates: number | null =
-    typeof (apartment as any)?.max_roommates === 'number'
-      ? ((apartment as any).max_roommates as number)
-      : typeof apartment.roommate_capacity === 'number'
-        ? apartment.roommate_capacity
+    typeof apartment.roommate_capacity === 'number'
+      ? apartment.roommate_capacity
+      : typeof (apartment as any)?.max_roommates === 'number'
+        ? ((apartment as any).max_roommates as number)
         : null;
 
   const capacityLabel =
@@ -851,7 +854,11 @@ export default function ApartmentDetailsScreen() {
         .eq('role', 'user')
         .order('created_at', { ascending: false });
       if (error) throw error;
-      const all = (data || []) as User[];
+      const all = ((data || []) as User[]).filter((u) => {
+        // Exclude "deleted" / invalid profiles: in some environments the auth user may be gone
+        // while the profile row lingers; treat empty names as deleted/inactive.
+        return String((u as any)?.full_name || '').trim().length > 0;
+      });
       // Exclude users who are already assigned to ANY apartment (owners or partners)
       let assignedIds = new Set<string>();
       try {
@@ -901,7 +908,9 @@ export default function ApartmentDetailsScreen() {
               .in('id', Array.from(groupedMemberIdSet));
             const byId: Record<string, Pick<User, 'id' | 'full_name' | 'avatar_url'>> = {};
             (usersRows || []).forEach((u: any) => {
-              if (u?.id) byId[u.id] = { id: u.id, full_name: u.full_name, avatar_url: u.avatar_url };
+              if (!u?.id) return;
+              if (String(u?.full_name || '').trim().length === 0) return;
+              byId[u.id] = { id: u.id, full_name: u.full_name, avatar_url: u.avatar_url };
             });
             grouped = groupedIds.map((gid) => ({
               id: gid,
@@ -909,7 +918,8 @@ export default function ApartmentDetailsScreen() {
                 .map((uid) => byId[uid])
                 .filter(Boolean),
             }));
-            setSharedGroups(grouped);
+            // Only show groups that still have 2+ active profiles after filtering
+            setSharedGroups(grouped.filter((g) => (g.members || []).length >= 2));
           } else {
             setAddCandidates(candidates);
             setSharedGroups([]);
@@ -1193,73 +1203,71 @@ export default function ApartmentDetailsScreen() {
                     }}
                   />
                 </TouchableOpacity>
-                {/* top overlay controls */}
-                <View style={[styles.topControlsRow, isOwner ? { top: 70 } : null]}>
-                  <View style={styles.leftControls}>
-                    <TouchableOpacity style={styles.circleBtnLight} activeOpacity={0.9}>
-                      <Heart size={18} color="#111827" />
-                    </TouchableOpacity>
-                    <TouchableOpacity style={styles.circleBtnLight} activeOpacity={0.9}>
-                      <Share2 size={18} color="#111827" />
-                    </TouchableOpacity>
-                    {isOwner ? (
-                      <TouchableOpacity
-                        style={[styles.circleBtnLight, (isAdding || isAddPartnerDisabled) ? { opacity: 0.55 } : null]}
-                        activeOpacity={0.9}
-                        disabled={isAdding || isAddPartnerDisabled}
-                        onPress={() => {
-                          if (isAddPartnerDisabled) {
-                            Alert.alert('אין מקום', 'הגעת למספר השותפים המקסימלי בדירה זו');
-                            return;
-                          }
-                          openAddPartnerModal();
-                        }}
-                      >
-                        <UserPlus size={18} color="#111827" />
-                      </TouchableOpacity>
-                    ) : null}
-                    {isOwner ? (
-                      <TouchableOpacity
-                        style={styles.circleBtnLight}
-                        activeOpacity={0.9}
-                        onPress={() => router.push({ pathname: '/apartment/edit/[id]', params: { id: apartment.id } })}
-                      >
-                        <Pencil size={18} color="#111827" />
-                      </TouchableOpacity>
-                    ) : null}
-                    {isOwner ? (
-                      <TouchableOpacity
-                        style={styles.circleBtnLight}
-                        activeOpacity={0.9}
-                        onPress={handleDeleteApartment}
-                      >
-                        <Trash2 size={18} color="#111827" />
-                      </TouchableOpacity>
-                    ) : null}
-                  </View>
-                  <TouchableOpacity
-                    style={styles.circleBtnLight}
-                    onPress={() => {
-                      const returnToStr = Array.isArray(returnTo) ? returnTo[0] : returnTo;
-                      if (typeof returnToStr === 'string' && returnToStr.trim()) {
-                        router.replace(returnToStr as any);
-                        return;
-                      }
-                      // Go back to the previous screen (map/home), fallback to home if no history
-                      if (navigation.canGoBack()) {
-                        navigation.goBack();
-                      } else {
-                        router.replace('/(tabs)/home');
-                      }
-                    }}
-                    activeOpacity={0.9}
-                  >
-                    <ArrowRight size={18} color="#111827" />
-                  </TouchableOpacity>
-                </View>
               </View>
             );})}
           </ScrollView>
+
+          {/* top overlay controls (fixed over the whole gallery) */}
+          <View style={[styles.topControlsRow, isOwner ? { top: 70 } : null]}>
+            <View style={styles.leftControls}>
+              <TouchableOpacity style={styles.circleBtnLight} activeOpacity={0.9}>
+                <Share2 size={18} color="#111827" />
+              </TouchableOpacity>
+              {isOwner ? (
+                <TouchableOpacity
+                  style={[styles.circleBtnLight, (isAdding || isAddPartnerDisabled) ? { opacity: 0.55 } : null]}
+                  activeOpacity={0.9}
+                  disabled={isAdding || isAddPartnerDisabled}
+                  onPress={() => {
+                    if (isAddPartnerDisabled) {
+                      Alert.alert('אין מקום', 'הגעת למספר השותפים המקסימלי בדירה זו');
+                      return;
+                    }
+                    openAddPartnerModal();
+                  }}
+                >
+                  <UserPlus size={18} color="#111827" />
+                </TouchableOpacity>
+              ) : null}
+              {isOwner ? (
+                <TouchableOpacity
+                  style={styles.circleBtnLight}
+                  activeOpacity={0.9}
+                  onPress={() => router.push({ pathname: '/apartment/edit/[id]', params: { id: apartment.id } })}
+                >
+                  <Pencil size={18} color="#111827" />
+                </TouchableOpacity>
+              ) : null}
+              {isOwner ? (
+                <TouchableOpacity
+                  style={styles.circleBtnLight}
+                  activeOpacity={0.9}
+                  onPress={handleDeleteApartment}
+                >
+                  <Trash2 size={18} color="#111827" />
+                </TouchableOpacity>
+              ) : null}
+            </View>
+            <TouchableOpacity
+              style={styles.circleBtnLight}
+              onPress={() => {
+                const returnToStr = Array.isArray(returnTo) ? returnTo[0] : returnTo;
+                if (typeof returnToStr === 'string' && returnToStr.trim()) {
+                  router.replace(returnToStr as any);
+                  return;
+                }
+                // Go back to the previous screen (map/home), fallback to home if no history
+                if (navigation.canGoBack()) {
+                  navigation.goBack();
+                } else {
+                  router.replace('/(tabs)/home');
+                }
+              }}
+              activeOpacity={0.9}
+            >
+              <ArrowRight size={18} color="#111827" />
+            </TouchableOpacity>
+          </View>
 
           {galleryImages.length > 1 ? (
             <View style={styles.dotsWrap} pointerEvents="none">
@@ -1275,11 +1283,22 @@ export default function ApartmentDetailsScreen() {
         {/* Header under image (price -> title -> location) */}
         <View style={styles.topHeader}>
           <View style={styles.heroPriceRow}>
-            <Text style={styles.heroPriceValue}>
-              <Text style={styles.heroCurrency}>₪</Text>
-              {apartment.price?.toLocaleString?.() ?? String(apartment.price ?? '')}
-            </Text>
-            <Text style={styles.heroPricePer}>/חודש</Text>
+            <View style={styles.heroPriceMeta}>
+              <Text style={styles.heroPriceValue}>
+                <Text style={styles.heroCurrency}>₪</Text>
+                {apartment.price?.toLocaleString?.() ?? String(apartment.price ?? '')}
+              </Text>
+              <Text style={styles.heroPricePer}>/חודש</Text>
+            </View>
+
+            <TouchableOpacity
+              style={[styles.circleBtnLight, styles.heroFavBtn]}
+              activeOpacity={0.9}
+              accessibilityRole="button"
+              accessibilityLabel="סמן כמועדף"
+            >
+              <Heart size={18} color="#4C1D95" />
+            </TouchableOpacity>
           </View>
 
           <Text style={styles.heroTitle} numberOfLines={2}>
@@ -1289,7 +1308,7 @@ export default function ApartmentDetailsScreen() {
           {locationLabel ? (
             <View style={styles.heroLocationRow}>
               <View style={styles.heroLocationIcon}>
-                <MapPin size={14} color="#4C1D95" />
+                <MapPin size={16} color="#6B7280" />
               </View>
               <Text style={styles.heroLocationText} numberOfLines={1}>
                 {locationLabel}
@@ -1344,62 +1363,71 @@ export default function ApartmentDetailsScreen() {
             </View>
           </View>
 
-          {/* Type / floor / sqm tags */}
-          {typeTagLabel || floorTagLabel || gardenSqmTagLabel || sqmTagLabel ? (
-            <View style={styles.tagsRow}>
-              {sqmTagLabel ? (
-                <View style={styles.tagPill}>
-                  <Ruler size={14} color="#4C1D95" />
-                  <Text style={styles.tagText}>{sqmTagLabel}</Text>
-                </View>
-              ) : null}
-              {gardenSqmTagLabel ? (
-                <View style={styles.tagPill}>
-                  <Trees size={14} color="#4C1D95" />
-                  <Text style={styles.tagText}>{gardenSqmTagLabel}</Text>
-                </View>
-              ) : null}
-              {floorTagLabel ? (
-                <View style={styles.tagPill}>
-                  <Layers size={14} color="#4C1D95" />
-                  <Text style={styles.tagText}>{floorTagLabel}</Text>
-                </View>
-              ) : null}
-              {typeTagLabel ? (
-                <View style={styles.tagPill}>
-                  {apartmentType === 'GARDEN' ? (
-                    <Trees size={14} color="#4C1D95" />
-                  ) : (
-                    <Building2 size={14} color="#4C1D95" />
-                  )}
-                  <Text style={styles.tagText}>{typeTagLabel}</Text>
-                </View>
-              ) : null}
-            </View>
-          ) : null}
-
           {/* Description ("על המקום") */}
-          {descriptionText ? (
+          {descriptionText || typeTagLabel || floorTagLabel || gardenSqmTagLabel || sqmTagLabel ? (
             <View style={styles.section}>
               <View style={styles.whiteCard}>
                 <Text style={styles.sectionTitle}>על המקום</Text>
-                <Text
-                  style={styles.descriptionLight}
-                  numberOfLines={isDescExpanded ? undefined : 6}
-                  ellipsizeMode="tail"
-                >
-                  {descriptionText}
-                </Text>
-                {shouldShowReadMore ? (
-                  <TouchableOpacity
-                    onPress={() => setIsDescExpanded((v) => !v)}
-                    activeOpacity={0.85}
-                    style={styles.readMoreBtn}
-                    accessibilityRole="button"
-                    accessibilityLabel={isDescExpanded ? 'קרא פחות' : 'קרא עוד'}
-                  >
-                    <Text style={styles.readMoreText}>{isDescExpanded ? 'קרא פחות' : 'קרא עוד'}</Text>
-                  </TouchableOpacity>
+                {/* Type / floor / sqm tags (moved inside "About" card) */}
+                {typeTagLabel || floorTagLabel || gardenSqmTagLabel || sqmTagLabel ? (
+                  <View style={styles.tagsRow}>
+                    {typeTagLabel ? (
+                      <View style={styles.tagPill}>
+                        {apartmentType === 'GARDEN' ? (
+                          <Trees size={14} color="#4C1D95" />
+                        ) : (
+                          <Building2 size={14} color="#4C1D95" />
+                        )}
+                        <Text style={styles.tagText}>{typeTagLabel}</Text>
+                      </View>
+                    ) : null}
+                    {floorTagLabel ? (
+                      <View style={styles.tagPill}>
+                        <Layers size={14} color="#4C1D95" />
+                        <Text style={styles.tagText}>{floorTagLabel}</Text>
+                      </View>
+                    ) : null}
+                    {gardenSqmTagLabel ? (
+                      <View style={styles.tagPill}>
+                        <Trees size={14} color="#4C1D95" />
+                        <Text style={styles.tagText}>{gardenSqmTagLabel}</Text>
+                      </View>
+                    ) : null}
+                    {sqmTagLabel ? (
+                      <View style={styles.tagPill}>
+                        <Ruler size={14} color="#4C1D95" />
+                        <Text style={styles.tagText}>{sqmTagLabel}</Text>
+                      </View>
+                    ) : null}
+                  </View>
+                ) : null}
+
+                {descriptionText ? (
+                  <>
+                    <Text
+                      style={styles.descriptionLight}
+                      numberOfLines={isDescExpanded ? undefined : 6}
+                      ellipsizeMode="tail"
+                    >
+                      {descriptionText}
+                    </Text>
+                    {shouldShowReadMore ? (
+                      <TouchableOpacity
+                        onPress={() => setIsDescExpanded((v) => !v)}
+                        activeOpacity={0.85}
+                        style={styles.readMoreBtn}
+                        accessibilityRole="button"
+                        accessibilityLabel={isDescExpanded ? 'קרא פחות' : 'קרא עוד'}
+                      >
+                        <Text style={styles.readMoreText}>{isDescExpanded ? 'קרא פחות' : 'קרא עוד'}</Text>
+                        {isDescExpanded ? (
+                          <ChevronUp size={16} color="#4C1D95" />
+                        ) : (
+                          <ChevronDown size={16} color="#4C1D95" />
+                        )}
+                      </TouchableOpacity>
+                    ) : null}
+                  </>
                 ) : null}
               </View>
             </View>
@@ -1480,7 +1508,7 @@ export default function ApartmentDetailsScreen() {
 
                   return items.map(({ key, label, Icon }) => (
                     <View key={`feat-${key}`} style={styles.featureLine}>
-                      <Icon size={18} color="#6B7280" style={{ marginLeft: 6 }} />
+                      <Icon size={20} color="#4C1D95" />
                       <Text style={styles.featureText}>{label}</Text>
                     </View>
                   ));
@@ -1493,18 +1521,6 @@ export default function ApartmentDetailsScreen() {
             <View style={styles.whiteCard}>
               <View style={styles.cardHeaderRow}>
                 <Text style={[styles.sectionTitle, { marginBottom: 0 }]}>מיקום</Text>
-                <TouchableOpacity
-                  style={styles.navPill}
-                  onPress={openNavigationPicker}
-                  activeOpacity={0.9}
-                  accessibilityRole="button"
-                  accessibilityLabel="פתח ניווט"
-                >
-                  <View style={styles.navIconWrap}>
-                    <MapPin size={16} color="#FFFFFF" />
-                  </View>
-                  <Text style={styles.navPillText}>ניווט</Text>
-                </TouchableOpacity>
               </View>
               <View style={[styles.mapCard, { height: mapCardHeight }]}>
                 {!mapboxToken ? (
@@ -1528,17 +1544,17 @@ export default function ApartmentDetailsScreen() {
                         accessToken={mapboxToken}
                         styleUrl={mapboxStyleUrl}
                         center={aptGeo ? ([aptGeo.lng, aptGeo.lat] as const) : undefined}
-                        zoom={aptGeo ? 15 : 11}
+                        zoom={aptGeo ? 16.5 : 11}
                         points={aptGeo ? aptMapPoints : { type: 'FeatureCollection', features: [] }}
                       />
                     </View>
                     {/* City + address overlay (bottom-right) */}
                     {(String((apartment as any)?.city || '').trim() || String((apartment as any)?.address || '').trim()) ? (
-                      <View pointerEvents="none" style={styles.mapLocationBadge}>
+                      <View style={styles.mapLocationBadge}>
                         <View style={styles.mapLocationIconPill}>
                           <MapPin size={14} color="#4C1D95" />
                         </View>
-                        <View style={{ flex: 1, alignItems: 'flex-end' }}>
+                        <View style={styles.mapLocationTextWrap}>
                           <Text style={styles.mapLocationCity} numberOfLines={1}>
                             {String((apartment as any)?.city || '').trim()}
                           </Text>
@@ -1546,6 +1562,18 @@ export default function ApartmentDetailsScreen() {
                             {String((apartment as any)?.address || '').trim()}
                           </Text>
                         </View>
+                        <TouchableOpacity
+                          style={styles.mapNavPill}
+                          onPress={openNavigationPicker}
+                          activeOpacity={0.9}
+                          accessibilityRole="button"
+                          accessibilityLabel="פתח ניווט"
+                        >
+                          <View style={styles.mapNavIconWrap}>
+                            <MapPin size={14} color="#FFFFFF" />
+                          </View>
+                          <Text style={styles.mapNavPillText}>ניווט</Text>
+                        </TouchableOpacity>
                       </View>
                     ) : null}
                     {!aptGeo ? (
@@ -1796,13 +1824,15 @@ export default function ApartmentDetailsScreen() {
           <TouchableOpacity style={styles.modalBackdrop} activeOpacity={1} onPress={() => setIsAddOpen(false)} />
           <View style={styles.sheet}>
             <View style={styles.sheetHeader}>
-              <Text style={styles.sheetTitle}>הוסף שותף</Text>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                <Text style={styles.sheetCount}>{filteredCandidates.length} מועמדים</Text>
                 <TouchableOpacity onPress={() => setIsAddOpen(false)} style={styles.closeBtn}>
                   <X size={18} color="#FFFFFF" />
                 </TouchableOpacity>
+                <View style={styles.sheetCountPill}>
+                  <Text style={styles.sheetCountText}>{filteredCandidates.length} מועמדים</Text>
+                </View>
               </View>
+              <Text style={styles.sheetTitle}>הוסף שותף</Text>
             </View>
             <View style={styles.searchWrap}>
               <Search size={16} color="#9DA4AE" style={{ marginRight: 8 }} />
@@ -1814,7 +1844,11 @@ export default function ApartmentDetailsScreen() {
                 style={styles.searchInput}
               />
             </View>
-            <ScrollView contentContainerStyle={styles.sheetContent}>
+            <ScrollView
+              style={styles.sheetScroll}
+              contentContainerStyle={styles.sheetContent}
+              keyboardShouldPersistTaps="handled"
+            >
               {isAdding ? (
                 <View style={{ paddingVertical: 20, alignItems: 'center' }}>
                   <ActivityIndicator size="small" color="#4C1D95" />
@@ -1850,6 +1884,28 @@ export default function ApartmentDetailsScreen() {
                                 })
                               }
                             >
+                              <TouchableOpacity
+                                style={styles.candidateRight}
+                                activeOpacity={0.85}
+                                onPress={() =>
+                                  setConfirmState({
+                                    visible: true,
+                                    title: 'שליחת הזמנה לקבוצה',
+                                    message: `לשלוח הזמנה לפרופיל המשותף (${names}) להצטרף כדיירים?`,
+                                    confirmLabel: 'שלח הזמנה',
+                                    cancelLabel: 'ביטול',
+                                    onConfirm: () =>
+                                      handleAddSharedGroup(
+                                        g.id,
+                                        (g.members || []).map((m) => m.id).filter(Boolean) as string[]
+                                      ),
+                                  })
+                                }
+                                accessibilityRole="button"
+                                accessibilityLabel="שלח הזמנה לפרופיל משותף"
+                              >
+                                <UserPlus size={16} color="#4C1D95" />
+                              </TouchableOpacity>
                               <View style={styles.groupAvatarLeft}>
                                 <View style={styles.groupAvatarStack}>
                                   {third ? (
@@ -1878,9 +1934,7 @@ export default function ApartmentDetailsScreen() {
                                   <View style={styles.candidateBadge}><Text style={styles.candidateBadgeText}>פרופיל משותף</Text></View>
                                 </View>
                               </View>
-                              <View style={styles.candidateRight}>
-                                <UserPlus size={16} color="#4C1D95" />
-                              </View>
+                              
                             </TouchableOpacity>
                           );
                         })}
@@ -1895,12 +1949,15 @@ export default function ApartmentDetailsScreen() {
                         activeOpacity={0.9}
                         onPress={() => confirmAddPartner(u)}
                       >
-                        <View style={styles.candidateLeft}>
-                          <Image
-                            source={{ uri: (u as any).avatar_url || 'https://cdn-icons-png.flaticon.com/512/847/847969.png' }}
-                            style={styles.candidateAvatar}
-                          />
-                        </View>
+                        <TouchableOpacity
+                          style={styles.candidateRight}
+                          activeOpacity={0.85}
+                          onPress={() => confirmAddPartner(u)}
+                          accessibilityRole="button"
+                          accessibilityLabel="שלח הזמנה"
+                        >
+                          <UserPlus size={16} color="#4C1D95" />
+                        </TouchableOpacity>
                         <View style={{ flex: 1 }}>
                           <Text style={styles.candidateName} numberOfLines={1}>{u.full_name}</Text>
                           <View style={styles.candidateBadges}>
@@ -1908,8 +1965,11 @@ export default function ApartmentDetailsScreen() {
                             <View style={styles.candidateBadge}><Text style={styles.candidateBadgeText}>מתאים</Text></View>
                           </View>
                         </View>
-                        <View style={styles.candidateRight}>
-                          <UserPlus size={16} color="#4C1D95" />
+                        <View style={styles.candidateLeft}>
+                          <Image
+                            source={{ uri: (u as any).avatar_url || 'https://cdn-icons-png.flaticon.com/512/847/847969.png' }}
+                            style={styles.candidateAvatar}
+                          />
                         </View>
                       </TouchableOpacity>
                     ))
@@ -2148,25 +2208,34 @@ const styles = StyleSheet.create({
   },
   heroPriceRow: {
     flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 6,
+  },
+  heroPriceMeta: {
+    flexDirection: 'row-reverse',
     alignItems: 'baseline',
     justifyContent: 'flex-start',
     gap: 8,
-    marginBottom: 6,
+  },
+  heroFavBtn: {
+    backgroundColor: '#FFFFFF',
   },
   heroPriceValue: {
-    color: '#0B1220',
-    fontSize: 22,
+    color: '#4C1D95',
+    fontSize: 34,
     fontWeight: '900',
+    letterSpacing: -0.5,
     writingDirection: 'ltr',
   },
   heroCurrency: {
-    color: '#0B1220',
-    fontSize: 18,
+    color: '#4C1D95',
+    fontSize: 22,
     fontWeight: '900',
   },
   heroPricePer: {
     color: '#6B7280',
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: '700',
     writingDirection: 'rtl',
   },
@@ -2174,21 +2243,20 @@ const styles = StyleSheet.create({
     marginTop: 8,
     flexDirection: 'row-reverse',
     alignItems: 'center',
-    gap: 8,
+    gap: 4,
   },
   heroLocationIcon: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#F5F3FF',
-    borderWidth: 1,
-    borderColor: 'rgba(76, 29, 149, 0.18)',
+    backgroundColor: 'transparent',
+    borderWidth: 0,
   },
   heroLocationText: {
     flex: 1,
-    color: '#4C1D95',
+    color: '#6B7280',
     fontSize: 13,
     fontWeight: '800',
     textAlign: 'right',
@@ -2301,9 +2369,9 @@ const styles = StyleSheet.create({
   },
   heroTitle: {
     color: '#111827',
-    fontSize: 24,
+    fontSize: 20,
     fontWeight: '800',
-    lineHeight: 32,
+    lineHeight: 26,
     textAlign: 'right',
     writingDirection: 'rtl',
   },
@@ -2319,8 +2387,6 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
     borderRadius: 999,
     backgroundColor: '#F5F3FF',
-    borderWidth: 1,
-    borderColor: 'rgba(76, 29, 149, 0.18)',
     flexDirection: 'row-reverse',
     alignItems: 'center',
     gap: 6,
@@ -2335,10 +2401,13 @@ const styles = StyleSheet.create({
   readMoreBtn: {
     alignSelf: 'flex-end',
     marginTop: 10,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
+    paddingHorizontal: 2,
+    paddingVertical: 6,
     borderRadius: 10,
-    backgroundColor: '#F3F4F6',
+    backgroundColor: 'transparent',
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 6,
   },
   readMoreText: {
     color: '#4C1D95',
@@ -2749,16 +2818,23 @@ const styles = StyleSheet.create({
     flexDirection: 'row-reverse',
     flexWrap: 'wrap',
     justifyContent: 'space-between',
-    marginTop: 6,
+    marginTop: 10,
     marginBottom: 10,
+    gap: 12,
   },
   featureLine: {
     width: '48%',
     flexDirection: 'row-reverse',
     alignItems: 'center',
-    marginBottom: 16,
+    justifyContent: 'flex-start',
+    gap: 10,
+    minHeight: 56,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    borderRadius: 16,
+    backgroundColor: '#F3F4F6',
   },
-  featureText: { color: '#6B7280', fontSize: 14, fontWeight: '600' },
+  featureText: { color: '#111827', fontSize: 14, fontWeight: '800', textAlign: 'right', writingDirection: 'rtl' },
   featuresEmpty: {
     color: '#6B7280',
     fontSize: 14,
@@ -2856,6 +2932,11 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(76, 29, 149, 0.14)',
   },
+  mapLocationTextWrap: {
+    flex: 1,
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+  },
   mapLocationCity: {
     color: '#111827',
     fontSize: 13,
@@ -2870,6 +2951,31 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     textAlign: 'right',
     writingDirection: 'rtl',
+  },
+  mapNavPill: {
+    backgroundColor: '#8B5CF6',
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  mapNavPillText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '900',
+    textAlign: 'center',
+    includeFontPadding: false,
+    lineHeight: 16,
+  },
+  mapNavIconWrap: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 6,
   },
   mapOverlayHintText: {
     color: '#FFFFFF',
@@ -2989,10 +3095,9 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     overflow: 'hidden',
-    maxHeight: '75%',
+    height: '75%',
     writingDirection: 'rtl',
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderWidth: 0,
     ...(Platform.OS === 'android'
       ? { elevation: 18 }
       : {
@@ -3001,6 +3106,9 @@ const styles = StyleSheet.create({
           shadowRadius: 18,
           shadowOffset: { width: 0, height: -8 },
         }),
+  },
+  sheetScroll: {
+    flex: 1,
   },
   sheetHeader: {
     flexDirection: 'row',
@@ -3019,6 +3127,19 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.85)',
     fontSize: 13,
     fontWeight: '700',
+  },
+  sheetCountPill: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.22)',
+  },
+  sheetCountText: {
+    color: 'rgba(255,255,255,0.92)',
+    fontSize: 12,
+    fontWeight: '900',
   },
   sectionHeading: {
     color: '#6B7280',
@@ -3049,9 +3170,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     height: 40,
     borderRadius: 10,
-    backgroundColor: '#F3F4F6',
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 0,
+    ...(Platform.OS === 'android'
+      ? { elevation: 2 }
+      : {
+          shadowColor: '#111827',
+          shadowOpacity: 0.08,
+          shadowRadius: 10,
+          shadowOffset: { width: 0, height: 4 },
+        }),
   },
   searchInput: {
     flex: 1,
@@ -3064,8 +3192,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 12,
     paddingVertical: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: '#1F2030',
+    borderBottomWidth: 0,
   },
   candidateRow: {
     flexDirection: 'row',
@@ -3074,8 +3201,7 @@ const styles = StyleSheet.create({
     padding: 12,
     backgroundColor: '#FFFFFF',
     borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderWidth: 0,
     ...(Platform.OS === 'android'
       ? { elevation: 2 }
       : {
