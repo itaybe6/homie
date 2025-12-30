@@ -26,6 +26,10 @@ import {
   Bed,
   Bath,
   Users,
+  Building2,
+  Trees,
+  Ruler,
+  Layers,
   Trash2,
   Pencil,
   ChevronLeft,
@@ -111,6 +115,7 @@ export default function ApartmentDetailsScreen() {
   const [aptGeo, setAptGeo] = useState<{ lng: number; lat: number } | null>(null);
   const [isGeocoding, setIsGeocoding] = useState(false);
   const [geoError, setGeoError] = useState<string>('');
+  const [isDescExpanded, setIsDescExpanded] = useState(false);
 
   useEffect(() => {
     fetchApartmentDetails();
@@ -585,6 +590,50 @@ export default function ApartmentDetailsScreen() {
     currentPartnerIds.map((v) => String(v).toLowerCase()).includes(String(user.id).toLowerCase())
   );
   const isAddPartnerDisabled = availableRoommateSlots !== null && availableRoommateSlots <= 0;
+
+  const address = String((apartment as any)?.address || '').trim();
+  const city = String((apartment as any)?.city || '').trim();
+  const neighborhood = String((apartment as any)?.neighborhood || '').trim();
+  const locationLabel = (() => {
+    const primary = (address || neighborhood || '').trim();
+    if (!primary && !city) return '';
+    if (primary && !city) return primary;
+    if (!primary && city) return city;
+    const a = primary.toLowerCase();
+    const c = city.toLowerCase();
+    if (c && a.includes(c)) return primary;
+    return `${city} · ${primary}`;
+  })();
+
+  const apartmentType = String((apartment as any)?.apartment_type || '').toUpperCase();
+  const floorRaw = (apartment as any)?.floor;
+  const floor = typeof floorRaw === 'number' && Number.isFinite(floorRaw) ? floorRaw : null;
+  const sqmRaw = (apartment as any)?.square_meters;
+  const sqm = typeof sqmRaw === 'number' && Number.isFinite(sqmRaw) ? sqmRaw : null;
+  const gardenSqmRaw = (apartment as any)?.garden_square_meters;
+  const gardenSqm = typeof gardenSqmRaw === 'number' && Number.isFinite(gardenSqmRaw) ? gardenSqmRaw : null;
+
+  const formatSqm = (n: number) => {
+    if (!Number.isFinite(n) || n <= 0) return '';
+    const rounded = Math.round(n);
+    if (Math.abs(n - rounded) < 0.01) return String(rounded);
+    return n.toFixed(1).replace(/\.0$/, '');
+  };
+
+  const typeTagLabel =
+    apartmentType === 'GARDEN'
+      ? 'דירת גן'
+      : apartmentType === 'REGULAR' || !apartmentType
+        ? 'בניין'
+        : null;
+
+  const sqmTagLabel = sqm !== null && sqm > 0 ? `${formatSqm(sqm)} מ״ר` : null;
+  const gardenSqmTagLabel =
+    apartmentType === 'GARDEN' && gardenSqm !== null && gardenSqm > 0 ? `${formatSqm(gardenSqm)} מ״ר גינה` : null;
+  const floorTagLabel = floor !== null ? `קומה ${floor}` : null;
+
+  const descriptionText = String((apartment as any)?.description || '').trim();
+  const shouldShowReadMore = descriptionText.length > 260;
   
 
   // Compute a human-friendly sender label: if user is part of an ACTIVE merged profile,
@@ -1223,13 +1272,29 @@ export default function ApartmentDetailsScreen() {
           ) : null}
         </View>
 
-        {/* Title and location directly under image */}
+        {/* Header under image (price -> title -> location) */}
         <View style={styles.topHeader}>
+          <View style={styles.heroPriceRow}>
+            <Text style={styles.heroPriceValue}>
+              <Text style={styles.heroCurrency}>₪</Text>
+              {apartment.price?.toLocaleString?.() ?? String(apartment.price ?? '')}
+            </Text>
+            <Text style={styles.heroPricePer}>/חודש</Text>
+          </View>
+
           <Text style={styles.heroTitle} numberOfLines={2}>
             {apartment.title}
           </Text>
-          {apartment.description ? (
-            <Text style={styles.heroDescription}>{apartment.description}</Text>
+
+          {locationLabel ? (
+            <View style={styles.heroLocationRow}>
+              <View style={styles.heroLocationIcon}>
+                <MapPin size={14} color="#4C1D95" />
+              </View>
+              <Text style={styles.heroLocationText} numberOfLines={1}>
+                {locationLabel}
+              </Text>
+            </View>
           ) : null}
         </View>
 
@@ -1278,6 +1343,67 @@ export default function ApartmentDetailsScreen() {
               </View>
             </View>
           </View>
+
+          {/* Type / floor / sqm tags */}
+          {typeTagLabel || floorTagLabel || gardenSqmTagLabel || sqmTagLabel ? (
+            <View style={styles.tagsRow}>
+              {sqmTagLabel ? (
+                <View style={styles.tagPill}>
+                  <Ruler size={14} color="#4C1D95" />
+                  <Text style={styles.tagText}>{sqmTagLabel}</Text>
+                </View>
+              ) : null}
+              {gardenSqmTagLabel ? (
+                <View style={styles.tagPill}>
+                  <Trees size={14} color="#4C1D95" />
+                  <Text style={styles.tagText}>{gardenSqmTagLabel}</Text>
+                </View>
+              ) : null}
+              {floorTagLabel ? (
+                <View style={styles.tagPill}>
+                  <Layers size={14} color="#4C1D95" />
+                  <Text style={styles.tagText}>{floorTagLabel}</Text>
+                </View>
+              ) : null}
+              {typeTagLabel ? (
+                <View style={styles.tagPill}>
+                  {apartmentType === 'GARDEN' ? (
+                    <Trees size={14} color="#4C1D95" />
+                  ) : (
+                    <Building2 size={14} color="#4C1D95" />
+                  )}
+                  <Text style={styles.tagText}>{typeTagLabel}</Text>
+                </View>
+              ) : null}
+            </View>
+          ) : null}
+
+          {/* Description ("על המקום") */}
+          {descriptionText ? (
+            <View style={styles.section}>
+              <View style={styles.whiteCard}>
+                <Text style={styles.sectionTitle}>על המקום</Text>
+                <Text
+                  style={styles.descriptionLight}
+                  numberOfLines={isDescExpanded ? undefined : 6}
+                  ellipsizeMode="tail"
+                >
+                  {descriptionText}
+                </Text>
+                {shouldShowReadMore ? (
+                  <TouchableOpacity
+                    onPress={() => setIsDescExpanded((v) => !v)}
+                    activeOpacity={0.85}
+                    style={styles.readMoreBtn}
+                    accessibilityRole="button"
+                    accessibilityLabel={isDescExpanded ? 'קרא פחות' : 'קרא עוד'}
+                  >
+                    <Text style={styles.readMoreText}>{isDescExpanded ? 'קרא פחות' : 'קרא עוד'}</Text>
+                  </TouchableOpacity>
+                ) : null}
+              </View>
+            </View>
+          ) : null}
 
           {/* host card */}
           <View style={styles.hostCard}>
@@ -1518,11 +1644,6 @@ export default function ApartmentDetailsScreen() {
           <View style={{ paddingBottom: (insets.bottom || 0) + 8 }}>
             <View style={styles.priceCard}>
               <View style={styles.priceRight}>
-                <Text style={styles.priceValue}>
-                  <Text style={styles.currencySign}>₪</Text>
-                  {apartment.price.toLocaleString?.() ?? String(apartment.price)}
-                  <Text style={styles.pricePerInline}> /חודש</Text>
-                </Text>
                 <View style={[styles.statusChip, hasRequestedJoin ? styles.statusChipPending : styles.statusChipGreen]}>
                   <Text
                     style={[styles.statusChipText, hasRequestedJoin ? styles.statusChipTextPending : styles.statusChipTextGreen]}
@@ -2025,6 +2146,54 @@ const styles = StyleSheet.create({
     paddingBottom: 8,
     writingDirection: 'rtl',
   },
+  heroPriceRow: {
+    flexDirection: 'row-reverse',
+    alignItems: 'baseline',
+    justifyContent: 'flex-start',
+    gap: 8,
+    marginBottom: 6,
+  },
+  heroPriceValue: {
+    color: '#0B1220',
+    fontSize: 22,
+    fontWeight: '900',
+    writingDirection: 'ltr',
+  },
+  heroCurrency: {
+    color: '#0B1220',
+    fontSize: 18,
+    fontWeight: '900',
+  },
+  heroPricePer: {
+    color: '#6B7280',
+    fontSize: 13,
+    fontWeight: '700',
+    writingDirection: 'rtl',
+  },
+  heroLocationRow: {
+    marginTop: 8,
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 8,
+  },
+  heroLocationIcon: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F5F3FF',
+    borderWidth: 1,
+    borderColor: 'rgba(76, 29, 149, 0.18)',
+  },
+  heroLocationText: {
+    flex: 1,
+    color: '#4C1D95',
+    fontSize: 13,
+    fontWeight: '800',
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
   avatar: {
     width: 44,
     height: 44,
@@ -2138,11 +2307,43 @@ const styles = StyleSheet.create({
     textAlign: 'right',
     writingDirection: 'rtl',
   },
-  heroDescription: {
-    color: '#374151',
-    fontSize: 14,
-    lineHeight: 20,
-    marginTop: 8,
+  tagsRow: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 12,
+  },
+  tagPill: {
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 999,
+    backgroundColor: '#F5F3FF',
+    borderWidth: 1,
+    borderColor: 'rgba(76, 29, 149, 0.18)',
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 6,
+  },
+  tagText: {
+    color: '#4C1D95',
+    fontSize: 12,
+    fontWeight: '900',
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
+  readMoreBtn: {
+    alignSelf: 'flex-end',
+    marginTop: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 10,
+    backgroundColor: '#F3F4F6',
+  },
+  readMoreText: {
+    color: '#4C1D95',
+    fontSize: 13,
+    fontWeight: '900',
     textAlign: 'right',
     writingDirection: 'rtl',
   },

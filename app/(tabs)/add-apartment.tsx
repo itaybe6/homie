@@ -4,6 +4,8 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
+  Animated,
+  Easing,
   StyleSheet,
   ScrollView,
   ActivityIndicator,
@@ -127,6 +129,9 @@ export default function AddApartmentScreen() {
   const [gardenSizeSqm, setGardenSizeSqm] = useState(''); // garden size in square meters (digits) - only for garden apartments
   const [floor, setFloor] = useState<number>(0);
   const [propertyType, setPropertyType] = useState<'building' | 'garden'>('building');
+  const [propertyTypeSegmentWidth, setPropertyTypeSegmentWidth] = useState(0);
+  const propertyTypeThumbX = useRef(new Animated.Value(0)).current;
+  const didMeasurePropertyTypeSegment = useRef(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [citySuggestions, setCitySuggestions] = useState<MapboxGeocodingFeature[]>([]);
@@ -442,6 +447,26 @@ export default function AddApartmentScreen() {
     if (propertyType !== 'building') return;
     setGardenSizeSqm('');
   }, [propertyType]);
+
+  useEffect(() => {
+    if (!propertyTypeSegmentWidth) return;
+    const innerWidth = Math.max(0, propertyTypeSegmentWidth - 8); // segmentWrap padding (4*2)
+    const half = innerWidth / 2;
+    const targetX = propertyType === 'building' ? half : 0; // row-reverse => "building" is right side
+
+    if (!didMeasurePropertyTypeSegment.current) {
+      propertyTypeThumbX.setValue(targetX);
+      didMeasurePropertyTypeSegment.current = true;
+      return;
+    }
+
+    Animated.timing(propertyTypeThumbX, {
+      toValue: targetX,
+      duration: 220,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [propertyType, propertyTypeSegmentWidth, propertyTypeThumbX]);
 
   const validateCurrentStep = (): boolean => {
     // Close overlays so the UI doesn't get stuck with an open dropdown
@@ -866,7 +891,20 @@ export default function AddApartmentScreen() {
                   <Text style={styles.label}>
                     סוג הנכס <Text style={styles.required}>*</Text>
                   </Text>
-                  <View style={styles.segmentWrap}>
+                  <View
+                    style={styles.segmentWrap}
+                    onLayout={(e) => setPropertyTypeSegmentWidth(e.nativeEvent.layout.width)}
+                  >
+                    <Animated.View
+                      pointerEvents="none"
+                      style={[
+                        styles.segmentThumb,
+                        {
+                          width: Math.max(0, (propertyTypeSegmentWidth - 8) / 2),
+                          transform: [{ translateX: propertyTypeThumbX }],
+                        },
+                      ]}
+                    />
                     <TouchableOpacity
                       style={[
                         styles.segmentBtn,
@@ -1947,8 +1985,17 @@ const styles = StyleSheet.create({
     backgroundColor: '#F3F4F6',
     borderRadius: 16,
     padding: 4,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderWidth: 0,
+    borderColor: 'transparent',
+    overflow: 'hidden',
+  },
+  segmentThumb: {
+    position: 'absolute',
+    top: 4,
+    bottom: 4,
+    left: 4,
+    borderRadius: 14,
+    backgroundColor: '#FFFFFF',
   },
   segmentBtn: {
     flex: 1,
@@ -1962,14 +2009,9 @@ const styles = StyleSheet.create({
     marginHorizontal: 2,
   },
   segmentBtnActive: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: 'transparent',
     borderWidth: 0,
     borderColor: 'transparent',
-    shadowColor: '#000000',
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 3 },
-    elevation: 3,
   },
   segmentText: {
     fontSize: 14,

@@ -527,6 +527,7 @@ export default function HomeScreen() {
             <ApartmentCard
               apartment={item}
               onPress={() => handleApartmentPress(item)}
+              variant="home"
             />
           )}
           keyExtractor={(item: Apartment) => item.id}
