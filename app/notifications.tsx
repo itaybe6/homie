@@ -18,6 +18,7 @@ import { Notification } from '@/types/database';
 import { computeGroupAwareLabel } from '@/lib/group';
 import { useNotificationsStore } from '@/stores/notificationsStore';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { formatTimeAgoHe } from '@/utils/time';
 
 export default function NotificationsScreen() {
   const router = useRouter();
@@ -74,11 +75,10 @@ export default function NotificationsScreen() {
         .in('recipient_id', recipientIds as any)
         .order('created_at', { ascending: false });
       if (error) throw error;
-      const notifications = ((data || []) as Notification[]);
-      setItems(notifications);
+      let notifications = ((data || []) as Notification[]);
 
       // Fetch sender profiles for avatars
-      const uniqueSenderIds = Array.from(
+      const allSenderIds = Array.from(
         new Set(
           notifications
             .map((n) => n.sender_id)
@@ -86,14 +86,39 @@ export default function NotificationsScreen() {
         )
       );
       let initialUsersMap: Record<string, { id: string; full_name?: string; avatar_url?: string }> = {};
-      if (uniqueSenderIds.length > 0) {
+      if (allSenderIds.length > 0) {
         const { data: usersData, error: usersErr } = await supabase
           .from('users')
           .select('id, full_name, avatar_url')
-          .in('id', uniqueSenderIds);
+          .in('id', allSenderIds);
         if (usersErr) throw usersErr;
         (usersData || []).forEach((u: any) => { initialUsersMap[u.id] = u; });
+
+        // If a sender user was deleted, remove their notifications too.
+        const missingSenderIds = allSenderIds.filter((id) => !initialUsersMap[id]);
+        if (missingSenderIds.length > 0) {
+          const missingSet = new Set(missingSenderIds);
+          const orphanNotifIds = notifications
+            .filter((n) => typeof n.sender_id === 'string' && missingSet.has(n.sender_id))
+            .map((n) => n.id);
+
+          if (orphanNotifIds.length > 0) {
+            try {
+              await supabase.from('notifications').delete().in('id', orphanNotifIds as any);
+            } catch {}
+            notifications = notifications.filter((n) => !orphanNotifIds.includes(n.id));
+          }
+        }
       }
+
+      // Recompute sender ids after pruning orphan notifications.
+      const uniqueSenderIds = Array.from(
+        new Set(
+          notifications
+            .map((n) => n.sender_id)
+            .filter((id): id is string => typeof id === 'string' && id.length > 0)
+        )
+      );
 
       // Find if any sender belongs to an ACTIVE merged profile (group)
       let senderToGroup: Record<string, string> = {};
@@ -161,6 +186,9 @@ export default function NotificationsScreen() {
         setApartmentsById({});
       }
 
+      // Finally set the list after pruning + enrichment
+      setItems(notifications);
+
       // Mark all as read once fetched
       await supabase
         .from('notifications')
@@ -185,6 +213,12 @@ export default function NotificationsScreen() {
   const isPartnerRequestNotification = (n: Notification): boolean => {
     const t = (n?.title || '').trim();
     return t.includes('בקשת שותפות חדשה');
+  };
+
+  const isMergeProfileNotification = (n: Notification): boolean => {
+    const t = (n?.title || '').trim();
+    // Covers: 'בקשת מיזוג פרופילים חדשה', 'אישרת מיזוג פרופילים', etc.
+    return t.includes('מיזוג פרופילים');
   };
 
   const extractInviteApartmentId = (description: string): string | null => {
@@ -311,8 +345,10 @@ export default function NotificationsScreen() {
                 : null;
               const senderGroupId = senderGroupIdByUserId[item.sender_id];
               const isPartnerRequest = isPartnerRequestNotification(item);
+              const isMergeProfile = isMergeProfileNotification(item);
               const groupMemberIds = senderGroupId ? (groupMembersByGroupId[senderGroupId] || []) : [];
               const groupMembers = groupMemberIds.map((id) => sendersById[id]).filter(Boolean);
+              const descText = displayDescription(item.description);
               return (
                 <View style={styles.rowRtl}>
                   <TouchableOpacity
@@ -321,7 +357,9 @@ export default function NotificationsScreen() {
                     onPress={() => {
                       if (aptId) {
                         router.push({ pathname: '/apartment/[id]', params: { id: aptId } });
-                      } else if (isPartnerRequestNotification(item)) {
+                        return;
+                      }
+                      if (isPartnerRequest) {
                         router.push({
                           pathname: '/(tabs)/requests',
                           params: {
@@ -330,6 +368,7 @@ export default function NotificationsScreen() {
                             status: 'PENDING',
                           },
                         });
+                        return;
                       }
                     }}
                   >
@@ -338,7 +377,7 @@ export default function NotificationsScreen() {
                         <View style={styles.thumbWrap}>
                           <Image source={{ uri: aptImage }} style={styles.thumbImg} />
                         </View>
-                      ) : senderGroupId && groupMembers.length ? (
+                      ) : senderGroupId && groupMembers.length && !isMergeProfile ? (
                         (() => {
                           const gridMembers = groupMembers.slice(0, 4);
                           if (gridMembers.length === 1) {
@@ -385,9 +424,11 @@ export default function NotificationsScreen() {
                           <Text style={styles.senderName} numberOfLines={1}>{sender.full_name}</Text>
                         ) : null)
                       }
-                        <Text style={styles.cardDesc} numberOfLines={2}>{displayDescription(item.description)}</Text>
+                        <Text style={styles.cardDesc}>
+                          {descText}
+                        </Text>
                         <Text style={styles.cardMeta}>
-                          {new Date(item.created_at).toLocaleString()}
+                          {formatTimeAgoHe(item.created_at)}
                         </Text>
                         {aptId && !isInviteApproved(item.description) ? (
                           <View style={styles.actionsRow}>
@@ -483,13 +524,14 @@ export default function NotificationsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
+    // Keep the entire screen (including the area behind the global top bar) in the same gray.
+    backgroundColor: '#FAFAFA',
   },
   centerContainer: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#FAFAFA',
   },
   header: {
     flexDirection: 'row',
@@ -643,9 +685,9 @@ const styles = StyleSheet.create({
     writingDirection: 'rtl',
   },
   senderName: {
-    color: '#6B7280',
+    color: '#4C1D95',
     fontSize: 15,
-    fontWeight: '900',
+    fontWeight: '700',
     marginBottom: 4,
     textAlign: 'right',
   },
