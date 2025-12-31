@@ -5,29 +5,273 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  TouchableWithoutFeedback,
   TextInput,
   ActivityIndicator,
   Alert,
   SafeAreaView,
   Image,
   Platform,
+  Linking,
+  Share,
   Modal,
   useWindowDimensions,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { LogOut, Edit, Save, X, Plus, MapPin, Inbox, Trash2, Settings, ClipboardList, Camera, Building2, Calendar } from 'lucide-react-native';
+import { LogOut, Edit, Save, X, Plus, MapPin, Inbox, Trash2, Settings, ClipboardList, Building2, Calendar } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { Feather } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
+import { MotiPressable } from 'moti/interactions';
 import { supabase } from '@/lib/supabase';
 import { authService } from '@/lib/auth';
 import { useAuthStore } from '@/stores/authStore';
 import { useApartmentStore } from '@/stores/apartmentStore';
 import { User, Apartment, UserSurveyResponse } from '@/types/database';
 
+
+type FeatherIconName = keyof typeof Feather.glyphMap;
+type AvatarFabItem = {
+  id: 'camera' | 'library';
+  icon: FeatherIconName;
+  bg: string;
+  accessibilityLabel: string;
+};
+
+type ShareFabItemId = 'whatsapp' | 'telegram' | 'share';
+type ShareFabItem = {
+  id: ShareFabItemId;
+  icon: FeatherIconName;
+  accessibilityLabel: string;
+};
+
+function ShareMenuFab({
+  disabled,
+  message,
+}: {
+  disabled?: boolean;
+  message: string;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const size = 36;
+  const iconSize = 16;
+  const menu: ShareFabItem[] = useMemo(
+    () => [
+      { id: 'whatsapp', icon: 'message-circle', accessibilityLabel: 'שתף בוואטסאפ' },
+      { id: 'telegram', icon: 'send', accessibilityLabel: 'שתף בטלגרם' },
+      { id: 'share', icon: 'share', accessibilityLabel: 'שיתוף' },
+    ],
+    []
+  );
+
+  const onSelect = async (id: ShareFabItemId) => {
+    try {
+      if (disabled) return;
+      const encoded = encodeURIComponent(message);
+      if (id === 'whatsapp') {
+        // Prefer app scheme, fallback to web
+        const appUrl = `whatsapp://send?text=${encoded}`;
+        const webUrl = `https://wa.me/?text=${encoded}`;
+        try {
+          const can = await Linking.canOpenURL(appUrl);
+          await Linking.openURL(can ? appUrl : webUrl);
+        } catch {
+          await Linking.openURL(webUrl);
+        }
+        return;
+      }
+
+      if (id === 'telegram') {
+        const tgUrl = `https://t.me/share/url?text=${encoded}`;
+        await Linking.openURL(tgUrl);
+        return;
+      }
+
+      await Share.share({ message });
+    } finally {
+      setIsOpen(false);
+    }
+  };
+
+  return (
+    <View style={[styles.shareFabBtn, disabled ? { opacity: 0.7 } : null]}>
+      <View style={{ position: 'absolute', width: size, height: size }}>
+        {menu.map((item, index) => {
+          // Anchored to the LEFT side; open to the right/up to avoid clipping.
+          // Use angles in the 1st quadrant (0..π/2) so translateX is positive (right)
+          // and translateY is negative (up).
+          const angle = [Math.PI / 6, Math.PI / 3, Math.PI / 2.15][index] ?? Math.PI / 3;
+          const radius = size * 1.7;
+          return (
+            <MotiPressable
+              key={item.id}
+              accessibilityRole="button"
+              accessibilityLabel={item.accessibilityLabel}
+              disabled={!!disabled || !isOpen}
+              onPress={() => onSelect(item.id)}
+              animate={{
+                translateX: Math.sin(angle) * (isOpen ? radius : 3),
+                translateY: -Math.cos(angle) * (isOpen ? radius : 3),
+                opacity: isOpen ? 1 : 0,
+              }}
+              transition={{ delay: index * 90 }}
+              style={{
+                position: 'absolute',
+                width: size,
+                height: size,
+                borderRadius: size / 2,
+                alignItems: 'center',
+                justifyContent: 'center',
+                backgroundColor: '#000000',
+                borderWidth: 1,
+                borderColor: 'rgba(255,255,255,0.18)',
+                shadowColor: '#000000',
+                shadowOpacity: 0.25,
+                shadowRadius: 10,
+                shadowOffset: { width: 0, height: 6 },
+                elevation: 8,
+              }}
+            >
+              <Feather name={item.icon} size={iconSize} color="#FFFFFF" />
+            </MotiPressable>
+          );
+        })}
+      </View>
+
+      <MotiPressable
+        accessibilityRole="button"
+        accessibilityLabel={isOpen ? 'סגור אפשרויות שיתוף' : 'פתח אפשרויות שיתוף'}
+        disabled={!!disabled}
+        onPress={() => {
+          if (disabled) return;
+          setIsOpen((v) => !v);
+        }}
+        animate={{ rotate: isOpen ? '0deg' : '-45deg' }}
+        style={{
+          width: size,
+          height: size,
+          borderRadius: size / 2,
+          alignItems: 'center',
+          justifyContent: 'center',
+          backgroundColor: 'rgba(255,255,255,0.85)',
+          borderWidth: 1,
+          borderColor: 'rgba(94,63,45,0.16)',
+        }}
+      >
+        <Feather name="x" size={iconSize} color="#5e3f2d" />
+      </MotiPressable>
+    </View>
+  );
+}
+
+function AvatarPhotoFab({
+  disabled,
+  showCamera,
+  onPick,
+}: {
+  disabled?: boolean;
+  showCamera: boolean;
+  onPick: (source: 'camera' | 'library') => Promise<void> | void;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const size = 44;
+  const iconSize = 18;
+
+  const menu: AvatarFabItem[] = useMemo(() => {
+    const items: AvatarFabItem[] = [
+      { id: 'library', icon: 'image', bg: '#000000', accessibilityLabel: 'בחר תמונה מהגלריה' },
+    ];
+    if (showCamera) {
+      items.unshift({ id: 'camera', icon: 'camera', bg: '#000000', accessibilityLabel: 'צלם תמונה' });
+    }
+    return items;
+  }, [showCamera]);
+
+  return (
+    <View style={[styles.avatarCameraBtn, disabled ? { opacity: 0.7 } : null]}>
+      <View style={{ position: 'absolute', width: size, height: size }}>
+        {menu.map((item, index) => {
+          const offsetAngle = Math.PI / 3;
+          const radius = size * (menu.length === 2 ? 1.45 : 1.25);
+
+          // Since the FAB is anchored to the right, keep the radial menu opening
+          // to the left/up so buttons won't be clipped by the screen edge.
+          // For 2 items, use fixed angles with larger separation to prevent overlap.
+          const angle =
+            menu.length === 2
+              ? index === 0
+                ? -Math.PI / 7 // ~ -25.7° (up + a little left)
+                : -Math.PI / 1.9 // ~ -94.7° (mostly left + a bit up)
+              : (index - Math.floor(menu.length / 2)) * offsetAngle;
+
+          return (
+            <MotiPressable
+              key={item.id}
+              accessibilityRole="button"
+              accessibilityLabel={item.accessibilityLabel}
+              disabled={!!disabled || !isOpen}
+              onPress={async () => {
+                if (disabled || !isOpen) return;
+                try {
+                  await onPick(item.id);
+                } finally {
+                  setIsOpen(false);
+                }
+              }}
+              animate={{
+                translateX: Math.sin(angle) * (isOpen ? radius : 3),
+                translateY: -Math.cos(angle) * (isOpen ? radius : 3),
+                opacity: isOpen ? 1 : 0,
+              }}
+              transition={{ delay: index * 90 }}
+              style={{
+                position: 'absolute',
+                width: size,
+                height: size,
+                borderRadius: size / 2,
+                alignItems: 'center',
+                justifyContent: 'center',
+                backgroundColor: item.bg,
+                zIndex: 10 + index,
+                borderWidth: 1,
+                borderColor: 'rgba(255,255,255,0.18)',
+                shadowColor: '#000000',
+                shadowOpacity: 0.25,
+                shadowRadius: 10,
+                shadowOffset: { width: 0, height: 6 },
+                elevation: 8,
+              }}
+            >
+              <Feather name={item.icon} size={iconSize} color="#FFFFFF" />
+            </MotiPressable>
+          );
+        })}
+      </View>
+
+      <MotiPressable
+        accessibilityRole="button"
+        accessibilityLabel={isOpen ? 'סגור תפריט תמונת פרופיל' : 'פתח תפריט תמונת פרופיל'}
+        disabled={!!disabled}
+        onPress={() => {
+          if (disabled) return;
+          setIsOpen((v) => !v);
+        }}
+        animate={{ rotate: isOpen ? '0deg' : '-45deg' }}
+        style={{
+          width: size,
+          height: size,
+          borderRadius: size / 2,
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <Feather name="x" size={iconSize} color="#5e3f2d" />
+      </MotiPressable>
+    </View>
+  );
+}
 
 export default function ProfileScreen() {
   const router = useRouter();
@@ -49,7 +293,6 @@ export default function ProfileScreen() {
   const [isDeletingImage, setIsDeletingImage] = useState(false);
   const [isAddingImage, setIsAddingImage] = useState(false);
   const [isSurveyOpen, setIsSurveyOpen] = useState(false);
-  const [isAvatarActionsOpen, setIsAvatarActionsOpen] = useState(false);
   const [sharedGroups, setSharedGroups] = useState<
     { id: string; name?: string | null; members: Pick<User, 'id' | 'full_name' | 'avatar_url'>[] }[]
   >([]);
@@ -780,17 +1023,7 @@ export default function ProfileScreen() {
     }
   };
 
-  const openAvatarActions = () => {
-    const hasAvatar = !!profile?.avatar_url;
-    const title = hasAvatar ? 'תמונת פרופיל' : 'הוספת תמונת פרופיל';
-    const message = hasAvatar ? 'בחר/י איך לעדכן את התמונה (כולל חיתוך/עריכה).' : 'בחר/י צילום או העלאה.';
-
-    // Always use our own modal (works reliably on web).
-    // We keep title/message for future UI tweaks (currently shown in modal).
-    void title;
-    void message;
-    setIsAvatarActionsOpen(true);
-  };
+  // Avatar action UI is handled by the animated FAB (no modal sheet).
 
   // moved extra-photos upload to edit profile screen
   const addGalleryImage = async () => {
@@ -1021,69 +1254,6 @@ export default function ProfileScreen() {
 
   return (
       <SafeAreaView style={styles.container}>
-        {/* Avatar actions modal (works on web + native) */}
-        <Modal
-          visible={isAvatarActionsOpen}
-          transparent
-          animationType="fade"
-          onRequestClose={() => setIsAvatarActionsOpen(false)}
-        >
-          <View style={styles.avatarActionsOverlay}>
-            {/* Background tap closes modal (sheet itself is not pressable) */}
-            <TouchableWithoutFeedback onPress={() => setIsAvatarActionsOpen(false)}>
-              <View style={styles.avatarActionsBackdrop} />
-            </TouchableWithoutFeedback>
-
-            <View style={styles.avatarActionsSheet}>
-              <Text style={styles.avatarActionsTitle}>תמונת פרופיל</Text>
-              <Text style={styles.avatarActionsSubtitle}>בחר/י איך לעדכן את התמונה</Text>
-
-              <View style={styles.avatarActionsButtons}>
-                {Platform.OS !== 'web' ? (
-                  <TouchableOpacity
-                    style={styles.avatarActionBtn}
-                    onPress={async () => {
-                      try {
-                        await pickAndUploadAvatarFrom('camera');
-                      } finally {
-                        setIsAvatarActionsOpen(false);
-                      }
-                    }}
-                    disabled={isSaving}
-                    activeOpacity={0.9}
-                  >
-                    <Text style={styles.avatarActionBtnText}>צלם/י</Text>
-                  </TouchableOpacity>
-                ) : null}
-
-                <TouchableOpacity
-                  style={styles.avatarActionBtnPrimary}
-                  onPress={async () => {
-                    try {
-                      await pickAndUploadAvatarFrom('library');
-                    } finally {
-                      setIsAvatarActionsOpen(false);
-                    }
-                  }}
-                  disabled={isSaving}
-                  activeOpacity={0.9}
-                >
-                  <Text style={styles.avatarActionBtnPrimaryText}>בחר/י מהגלריה</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={styles.avatarActionBtn}
-                  onPress={() => setIsAvatarActionsOpen(false)}
-                  disabled={isSaving}
-                  activeOpacity={0.9}
-                >
-                  <Text style={styles.avatarActionBtnText}>ביטול</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          </View>
-        </Modal>
-
         <ScrollView contentContainerStyle={[
           styles.scrollContent,
           {
@@ -1110,15 +1280,16 @@ export default function ProfileScreen() {
                 style={styles.photoBottomGradient}
               />
 
-              <TouchableOpacity
-                style={[styles.avatarCameraBtn, isSaving ? { opacity: 0.7 } : null]}
-                onPress={isSaving ? undefined : openAvatarActions}
-                activeOpacity={0.9}
-                accessibilityRole="button"
-                accessibilityLabel="עריכת תמונת פרופיל"
-              >
-                <Camera size={18} color="#5e3f2d" />
-              </TouchableOpacity>
+              <AvatarPhotoFab
+                disabled={isSaving}
+                showCamera={Platform.OS !== 'web'}
+                onPick={(source) => pickAndUploadAvatarFrom(source)}
+              />
+
+              <ShareMenuFab
+                disabled={isSaving}
+                message={`היי! זה הפרופיל שלי ב-Homie: ${(profile?.full_name || 'הפרופיל שלי').toString()}`}
+              />
             </View>
 
             <View style={styles.infoPanel}>
@@ -1712,70 +1883,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     writingDirection: 'rtl',
   },
-  avatarActionsOverlay: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 16,
-  },
-  avatarActionsBackdrop: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    top: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.45)',
-  },
-  avatarActionsSheet: {
-    width: '100%',
-    maxWidth: 420,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    padding: 14,
-  },
-  avatarActionsTitle: {
-    color: '#111827',
-    fontSize: 16,
-    fontWeight: '900',
-    textAlign: 'center',
-  },
-  avatarActionsSubtitle: {
-    marginTop: 6,
-    color: '#6B7280',
-    fontSize: 13,
-    fontWeight: '700',
-    textAlign: 'center',
-  },
-  avatarActionsButtons: {
-    marginTop: 12,
-    gap: 10,
-  },
-  avatarActionBtn: {
-    height: 44,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#FFFFFF',
-  },
-  avatarActionBtnText: {
-    color: '#111827',
-    fontWeight: '800',
-  },
-  avatarActionBtnPrimary: {
-    height: 44,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#5e3f2d',
-  },
-  avatarActionBtnPrimaryText: {
-    color: '#FFFFFF',
-    fontWeight: '900',
-  },
+  // Avatar actions bottom-sheet styles removed (replaced by animated FAB menu)
   centerContainer: {
     flex: 1,
     justifyContent: 'center',
@@ -1887,6 +1995,17 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     shadowOffset: { width: 0, height: 4 },
     elevation: 6,
+  },
+  shareFabBtn: {
+    position: 'absolute',
+    left: 16,
+    bottom: 16,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 12,
   },
   settingsBtn: {
     // removed: settings button moved below survey results

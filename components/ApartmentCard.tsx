@@ -1,10 +1,10 @@
-import { View, Text, StyleSheet, TouchableOpacity, Image, GestureResponderEvent, ScrollView, NativeSyntheticEvent, NativeScrollEvent } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Image, ScrollView, NativeSyntheticEvent, NativeScrollEvent } from 'react-native';
 import { supabase } from '@/lib/supabase';
-import { MapPin, BedDouble, ShowerHead, Users, Heart, Building2, Trees, Ruler } from 'lucide-react-native';
+import { MapPin, BedDouble, ShowerHead, Users, Building2, Trees, Ruler } from 'lucide-react-native';
 import { Apartment } from '@/types/database';
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useAuthStore } from '@/stores/authStore';
+import FavoriteHeartButton from '@/components/FavoriteHeartButton';
 
 interface ApartmentCardProps {
   apartment: Apartment;
@@ -338,7 +338,16 @@ export default function ApartmentCard({
               />
             ) : null}
             {/* Favorite */}
-            <FavoriteButton apartmentId={apartment.id} />
+            <FavoriteHeartButton
+              apartmentId={apartment.id}
+              containerStyle={styles.favoriteButton}
+              size={40}
+              iconSize={18}
+              activeBackgroundColor="#FFE6EC"
+              inactiveBackgroundColor="rgba(255,255,255,0.75)"
+              activeColor="#FF2D55"
+              inactiveColor="#5e3f2d"
+            />
             {/* Roommates badge */}
             {!isHome ? (
               <View style={styles.roommatesBadge} pointerEvents="none">
@@ -535,98 +544,6 @@ export default function ApartmentCard({
   );
 }
 
-function FavoriteButton({ apartmentId }: { apartmentId: string }) {
-  const { user } = useAuthStore();
-  const [isFavorite, setIsFavorite] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
-
-  // Check if this apartment is in the user's likes on mount
-  useEffect(() => {
-    const checkIfLiked = async () => {
-      if (!user?.id) return;
-      try {
-        const { data, error } = await supabase
-          .from('users')
-          .select('likes')
-          .eq('id', user.id)
-          .single();
-
-        if (!error && data?.likes) {
-          setIsFavorite(data.likes.includes(apartmentId));
-        }
-      } catch (err) {
-        console.error('Error checking like status:', err);
-      }
-    };
-    checkIfLiked();
-  }, [user?.id, apartmentId]);
-
-  const onToggle = async (e: GestureResponderEvent) => {
-    // Prevent triggering the card onPress
-    e.stopPropagation();
-    
-    if (!user?.id || isLoading) return;
-    
-    setIsLoading(true);
-    try {
-      // Get current likes
-      const { data: userData, error: fetchError } = await supabase
-        .from('users')
-        .select('likes')
-        .eq('id', user.id)
-        .single();
-
-      if (fetchError) throw fetchError;
-
-      const currentLikes: string[] = userData?.likes || [];
-      let newLikes: string[];
-
-      if (isFavorite) {
-        // Remove from likes
-        newLikes = currentLikes.filter((id) => id !== apartmentId);
-      } else {
-        // Add to likes
-        newLikes = [...currentLikes, apartmentId];
-      }
-
-      // Update in database
-      const { error: updateError } = await supabase
-        .from('users')
-        .update({ likes: newLikes, updated_at: new Date().toISOString() })
-        .eq('id', user.id);
-
-      if (updateError) throw updateError;
-
-      setIsFavorite(!isFavorite);
-    } catch (err) {
-      console.error('Error toggling like:', err);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  return (
-    <TouchableOpacity
-      onPress={onToggle}
-      activeOpacity={0.9}
-      accessibilityRole="button"
-      accessibilityLabel={isFavorite ? 'הסר מאהבתי' : 'הוסף לאהבתי'}
-      disabled={isLoading}
-      style={[
-        styles.favoriteButton,
-        isFavorite ? styles.favoriteButtonActive : styles.favoriteButtonInactive,
-        isLoading && { opacity: 0.6 },
-      ]}
-    >
-      <Heart
-        size={18}
-        color={isFavorite ? '#FFFFFF' : '#1F2937'}
-        fill={isFavorite ? '#FFFFFF' : 'transparent'}
-      />
-    </TouchableOpacity>
-  );
-}
-
 const styles = StyleSheet.create({
   cardOuter: {
     backgroundColor: '#FFFFFF',
@@ -688,23 +605,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 10,
     left: 10,
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(0,0,0,0.06)',
-    shadowColor: '#000',
-    shadowOpacity: 0.16,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 4 },
-  },
-  favoriteButtonInactive: {
-    backgroundColor: 'rgba(255,255,255,0.75)',
-  },
-  favoriteButtonActive: {
-    backgroundColor: '#5e3f2d',
+    zIndex: 20,
   },
   roommatesBadge: {
     position: 'absolute',

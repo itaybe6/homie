@@ -39,7 +39,6 @@ import {
   X,
   UserPlus,
   Search,
-  Heart,
   Share2,
   Snowflake,
   Utensils,
@@ -68,6 +67,7 @@ import { fetchUserSurvey } from '@/lib/survey';
 import { calculateMatchScore } from '@/utils/matchCalculator';
 import { buildCompatSurvey } from '@/lib/compatSurvey';
 import SwipeBackGesture from '@/components/SwipeBackGesture';
+import FavoriteHeartButton from '@/components/FavoriteHeartButton';
 
 export default function ApartmentDetailsScreen() {
   const router = useRouter();
@@ -1354,14 +1354,18 @@ export default function ApartmentDetailsScreen() {
               <Text style={styles.heroPricePer}>/חודש</Text>
             </View>
 
-            <TouchableOpacity
-              style={[styles.circleBtnLight, styles.heroFavBtn]}
-              activeOpacity={0.9}
-              accessibilityRole="button"
-              accessibilityLabel="סמן כמועדף"
-            >
-              <Heart size={18} color="#5e3f2d" />
-            </TouchableOpacity>
+            <FavoriteHeartButton
+              apartmentId={apartment.id}
+              containerStyle={[styles.circleBtnLight, styles.heroFavBtn]}
+              size={36}
+              iconSize={18}
+              activeBackgroundColor="#FFE6EC"
+              inactiveBackgroundColor="rgba(255,255,255,0.9)"
+              activeColor="#FF2D55"
+              inactiveColor="#5e3f2d"
+              accessibilityLabelInactive="סמן כמועדף"
+              accessibilityLabelActive="הסר ממועדפים"
+            />
           </View>
 
           <Text style={styles.heroTitle} numberOfLines={2}>

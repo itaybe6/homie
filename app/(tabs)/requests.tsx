@@ -2368,6 +2368,7 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   listContent: {
+    flex: 1,
     paddingHorizontal: 0,
     paddingTop: 12,
     paddingBottom: 24,
