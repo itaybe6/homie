@@ -1278,6 +1278,7 @@ export default function ProfileScreen() {
               <LinearGradient
                 colors={["rgba(0,0,0,0.0)", "rgba(0,0,0,0.6)"]}
                 style={styles.photoBottomGradient}
+                pointerEvents="none"
               />
 
               <AvatarPhotoFab
@@ -2006,6 +2007,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 12,
+    elevation: 8,
   },
   settingsBtn: {
     // removed: settings button moved below survey results
