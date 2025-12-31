@@ -270,8 +270,6 @@ export default function TabLayout() {
       {/* Map screen: keep tab bar visible but hide from tab items */}
       <Tabs.Screen name="map" options={{ href: null }} />
       {/* Hide nested detail routes from the tab bar */}
-      <Tabs.Screen name="apartment/[id]" options={{ href: null }} />
-      <Tabs.Screen name="apartment/edit/[id]" options={{ href: null }} />
       <Tabs.Screen name="user/[id]" options={{ href: null }} />
       <Tabs.Screen name="group-requests" options={{ href: null }} />
       <Tabs.Screen name="requests" options={{ href: null }} />

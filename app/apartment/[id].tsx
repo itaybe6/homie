@@ -67,6 +67,7 @@ import Ticker from '@/components/Ticker';
 import { fetchUserSurvey } from '@/lib/survey';
 import { calculateMatchScore } from '@/utils/matchCalculator';
 import { buildCompatSurvey } from '@/lib/compatSurvey';
+import SwipeBackGesture from '@/components/SwipeBackGesture';
 
 export default function ApartmentDetailsScreen() {
   const router = useRouter();
@@ -1210,16 +1211,45 @@ export default function ApartmentDetailsScreen() {
     scrollToSlide(activeIdx + 1);
   };
 
+  // Keep the tab bar visible behind this Stack screen.
+  // Since this screen sits above the tabs, we leave the bottom area transparent.
+  const tabBarHeight = Math.max(56, 56 + (insets.bottom || 0));
+
+  const handleBack = () => {
+    const returnToStr = Array.isArray(returnTo) ? returnTo[0] : returnTo;
+    if (typeof returnToStr === 'string' && returnToStr.trim()) {
+      router.replace(returnToStr as any);
+      return;
+    }
+    // Go back to the previous screen (map/home), fallback to home if no history
+    if (navigation.canGoBack()) {
+      navigation.goBack();
+    } else {
+      router.replace('/(tabs)/home');
+    }
+  };
+
   return (
-    <View style={styles.container}>
-      {isOwner ? <StatusBar translucent backgroundColor="transparent" style="light" /> : null}
-      <ScrollView
-        contentContainerStyle={{
-          paddingBottom: (insets.bottom || 0) + 24,
-          paddingTop: 0,
-          backgroundColor: '#FAFAFA',
-        }}
-      >
+    <SwipeBackGesture onGoBack={handleBack} edge="right">
+      <View style={styles.container}>
+        <View
+          pointerEvents="none"
+          style={[
+            StyleSheet.absoluteFill,
+            {
+              backgroundColor: '#FAFAFA',
+              bottom: tabBarHeight, // leave the tab bar area transparent
+            },
+          ]}
+        />
+        {isOwner ? <StatusBar translucent backgroundColor="transparent" style="light" /> : null}
+        <ScrollView
+          contentContainerStyle={{
+            paddingBottom: tabBarHeight + 24,
+            paddingTop: 0,
+            backgroundColor: 'transparent',
+          }}
+        >
         {/* Owner actions pinned to top of the page */}
         {null}
 
@@ -1309,19 +1339,7 @@ export default function ApartmentDetailsScreen() {
             </View>
             <TouchableOpacity
               style={styles.circleBtnLight}
-              onPress={() => {
-                const returnToStr = Array.isArray(returnTo) ? returnTo[0] : returnTo;
-                if (typeof returnToStr === 'string' && returnToStr.trim()) {
-                  router.replace(returnToStr as any);
-                  return;
-                }
-                // Go back to the previous screen (map/home), fallback to home if no history
-                if (navigation.canGoBack()) {
-                  navigation.goBack();
-                } else {
-                  router.replace('/(tabs)/home');
-                }
-              }}
+              onPress={handleBack}
               activeOpacity={0.9}
             >
               <ArrowRight size={18} color="#111827" />
@@ -2165,7 +2183,8 @@ export default function ApartmentDetailsScreen() {
           </View>
         </View>
       </Modal>
-    </View>
+      </View>
+    </SwipeBackGesture>
   );
 }
 
@@ -2207,7 +2226,7 @@ function ZoomableImage({ uri }: { uri: string }) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FAFAFA',
+    backgroundColor: 'transparent',
   },
   addAvatar: {
     width: 44,

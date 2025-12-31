@@ -67,12 +67,8 @@ export interface Apartment {
   city: string;
   neighborhood?: string;
   price: number;
-  apartment_type?: 'REGULAR' | 'GARDEN'; // סוג הדירה (שדות חדשים)
   bedrooms: number;
   bathrooms: number;
-  square_meters?: number; // מטר מרובע של הדירה (שדות חדשים)
-  floor?: number; // קומה (שדות חדשים)
-  garden_square_meters?: number; // מטר מרובע של הגינה (שדות חדשים)
   roommate_capacity?: number;
   image_url?: string; // legacy: single image url (some environments still use it)
   image_urls?: string[]; // new: multiple images
@@ -165,6 +161,7 @@ export interface UserSurveyResponse {
   id: number;
   user_id: string;
   is_completed?: boolean;
+  draft_step_key?: string | null;
   is_sublet?: boolean;
   occupation?: string;
   student_year?: number; // if occupation === 'student', 1–8

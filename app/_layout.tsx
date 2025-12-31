@@ -31,7 +31,7 @@ export default function RootLayout() {
     typeof pathname === 'string' && (pathname === '/add-apartment' || pathname.endsWith('/add-apartment'));
   const hideGlobalTopBar =
     typeof pathname === 'string' &&
-    (pathname.includes('/apartment/') || isMapRoute || isSurveyRoute || isStandaloneAddApartmentRoute);
+    (isMapRoute || isSurveyRoute || isStandaloneAddApartmentRoute);
   const isAuthRoute = typeof pathname === 'string' && pathname.startsWith('/auth');
   const isAdminRoute = typeof pathname === 'string' && pathname.startsWith('/admin');
   const shouldShowGlobalTopBar = !!user && !hideGlobalTopBar && !isAuthRoute && !isAdminRoute;
@@ -138,6 +138,22 @@ export default function RootLayout() {
       <AppAlertProvider>
         <Stack screenOptions={{ headerShown: false }}>
           <Stack.Screen name="+not-found" />
+          {/* Apartment screens are rendered ABOVE tabs; we disable native transitions
+              and make the card transparent so our swipe-back reveals the previous screen. */}
+          <Stack.Screen
+            name="apartment/[id]"
+            options={{
+              animation: 'none',
+              contentStyle: { backgroundColor: 'transparent' },
+            }}
+          />
+          <Stack.Screen
+            name="apartment/edit/[id]"
+            options={{
+              animation: 'none',
+              contentStyle: { backgroundColor: 'transparent' },
+            }}
+          />
         </Stack>
         {/* Global white top bar: notifications (left), Homie (center), requests (right) */}
         {shouldShowGlobalTopBar && <GlobalTopBar backgroundColor={globalTopBarBg} />}

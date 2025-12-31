@@ -17,6 +17,7 @@ import {
 import { useRouter } from 'expo-router';
 import { useNavigation } from '@react-navigation/native';
 import { Check, ChevronRight, X } from 'lucide-react-native';
+import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { useAuthStore } from '@/stores/authStore';
 import { UserSurveyResponse } from '@/types/database';
 import { fetchUserSurvey, upsertUserSurvey } from '@/lib/survey';
@@ -49,6 +50,20 @@ const partnerDietPrefOptions = ['אין בעיה', 'מעדיפ/ה שלא טבע�
 const partnerSmokingPrefOptions = ['אין בעיה', 'מעדיפ/ה שלא'];
 const studentYearOptions = ['שנה א׳', 'שנה ב׳', 'שנה ג׳', 'שנה ד׳', 'שנה ה׳', 'שנה ו׳', 'שנה ז׳'];
 const roommateCountOptions = ['1', '2', '3', '4', '5', '6'];
+const HEB_MONTH_NAMES = [
+  'ינואר',
+  'פברואר',
+  'מרץ',
+  'אפריל',
+  'מאי',
+  'יוני',
+  'יולי',
+  'אוגוסט',
+  'ספטמבר',
+  'אוקטובר',
+  'נובמבר',
+  'דצמבר',
+];
 
 export default function SurveyScreen() {
   const router = useRouter();
@@ -60,6 +75,7 @@ export default function SurveyScreen() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [state, setState] = useState<SurveyState>({});
+  const [resumeStepKey, setResumeStepKey] = useState<string | null>(null);
   const [cityQuery, setCityQuery] = useState('');
   const [citySuggestions, setCitySuggestions] = useState<string[]>([]);
   const [neighborhoodOptions, setNeighborhoodOptions] = useState<string[]>([]);
@@ -72,6 +88,8 @@ export default function SurveyScreen() {
   const animTranslate = useRef(new Animated.Value(0)).current;
   const latestStateRef = useRef<SurveyState>({});
   const exitingRef = useRef(false);
+  const latestStepKeyRef = useRef<string | null>(null);
+  const didResumeRef = useRef(false);
 
   useEffect(() => {
     latestStateRef.current = state;
@@ -87,10 +105,15 @@ export default function SurveyScreen() {
           setState(hydrated);
           setCityQuery(hydrated.preferred_city || '');
           setNeighborhoodSearch('');
+          setResumeStepKey(existing.is_completed ? null : (existing.draft_step_key ?? null));
+          didResumeRef.current = false;
         } else {
           setState({ is_completed: false });
           setCityQuery('');
           setNeighborhoodSearch('');
+          setResumeStepKey(null);
+          didResumeRef.current = true;
+          setCurrentStep(0);
         }
       } catch (e) {
         // eslint-disable-next-line no-console
@@ -463,8 +486,40 @@ export default function SurveyScreen() {
         isVisible: () => !!state.is_sublet,
         render: () => (
           <View style={{ gap: 12 }}>
-            <LabeledInput label="חודש התחלה (YYYY-MM)" value={state.sublet_month_from || ''} placeholder="לדוגמה: 2025-07" onChangeText={(txt) => setField('sublet_month_from', txt)} />
-            <LabeledInput label="חודש סיום (YYYY-MM)" value={state.sublet_month_to || ''} placeholder="לדוגמה: 2025-09" onChangeText={(txt) => setField('sublet_month_to', txt)} />
+            <MonthPickerInput
+              label="חודש התחלה"
+              placeholder="בחר/י חודש"
+              value={state.sublet_month_from || null}
+              onChange={(v) => {
+                setState((prev) => {
+                  const next: SurveyState = { ...prev, sublet_month_from: v || undefined };
+                  if (!v) return next;
+                  const from = parseYYYYMM(v);
+                  const to = parseYYYYMM(next.sublet_month_to);
+                  if (from && to && to < from) {
+                    next.sublet_month_to = v;
+                  }
+                  return next;
+                });
+              }}
+            />
+            <MonthPickerInput
+              label="חודש סיום"
+              placeholder="בחר/י חודש"
+              value={state.sublet_month_to || null}
+              onChange={(v) => {
+                setState((prev) => {
+                  const next: SurveyState = { ...prev, sublet_month_to: v || undefined };
+                  if (!v) return next;
+                  const from = parseYYYYMM(next.sublet_month_from);
+                  const to = parseYYYYMM(v);
+                  if (from && to && to < from) {
+                    next.sublet_month_from = v;
+                  }
+                  return next;
+                });
+              }}
+            />
           </View>
         ),
       },
@@ -574,6 +629,22 @@ export default function SurveyScreen() {
     if (currentStep > totalQuestions - 1) setCurrentStep(totalQuestions - 1);
   }, [totalQuestions, currentStep]);
 
+  // Track the user's current question so "exit & save" can resume next time.
+  useEffect(() => {
+    latestStepKeyRef.current = currentQuestion?.key ?? null;
+  }, [currentQuestion?.key]);
+
+  // Resume draft at the last seen question (once per screen mount).
+  useEffect(() => {
+    if (loading) return;
+    if (didResumeRef.current) return;
+    const key = resumeStepKey;
+    didResumeRef.current = true;
+    if (!key) return;
+    const idx = questions.findIndex((q) => q.key === key);
+    if (idx >= 0) setCurrentStep(idx);
+  }, [loading, resumeStepKey, questions]);
+
   const goToStep = (nextStep: number) => {
     if (nextStep === currentStep) return;
     if (nextStep < 0 || nextStep > totalQuestions - 1) return;
@@ -638,7 +709,7 @@ export default function SurveyScreen() {
     if (!user) return;
     try {
       setSaving(true);
-      const payload = normalizePayload(user.id, state, { isCompleted: true });
+      const payload = normalizePayload(user.id, state, { isCompleted: true, draftStepKey: null });
       // eslint-disable-next-line no-console
       console.log('[survey] submit payload', {
         userId: user.id,
@@ -668,7 +739,10 @@ export default function SurveyScreen() {
 
   const saveDraft = async (): Promise<void> => {
     if (!user?.id) return;
-    const payload = normalizePayload(user.id, latestStateRef.current, { isCompleted: false });
+    const payload = normalizePayload(user.id, latestStateRef.current, {
+      isCompleted: false,
+      draftStepKey: latestStepKeyRef.current,
+    });
     await upsertUserSurvey(payload);
   };
 
@@ -809,12 +883,13 @@ export default function SurveyScreen() {
 function normalizePayload(
   userId: string,
   s: SurveyState,
-  opts: { isCompleted: boolean }
+  opts: { isCompleted: boolean; draftStepKey: string | null }
 ) {
   const coerce = opts.isCompleted; // On final submit we coerce booleans; on draft we keep nulls.
   const payload: any = {
     user_id: userId,
     is_completed: opts.isCompleted,
+    draft_step_key: opts.isCompleted ? null : (opts.draftStepKey ?? null),
     is_sublet: coerce ? (s.is_sublet ?? false) : (s.is_sublet ?? null),
     occupation: s.occupation ?? null,
     student_year: s.student_year ?? null,
@@ -904,28 +979,37 @@ function extractDetailFromOccupation(value?: string | null): string | null {
 }
 
 function generateUpcomingMonths(count = 12): string[] {
-  const monthNames = [
-    'ינואר',
-    'פברואר',
-    'מרץ',
-    'אפריל',
-    'מאי',
-    'יוני',
-    'יולי',
-    'אוגוסט',
-    'ספטמבר',
-    'אוקטובר',
-    'נובמבר',
-    'דצמבר',
-  ];
   const now = new Date();
   const list: string[] = [];
   for (let i = 0; i < count; i++) {
     const current = new Date(now.getFullYear(), now.getMonth() + i, 1);
-    const label = `${monthNames[current.getMonth()]} ${current.getFullYear()}`;
+    const label = `${HEB_MONTH_NAMES[current.getMonth()]} ${current.getFullYear()}`;
     list.push(label);
   }
   return list;
+}
+
+function parseYYYYMM(value?: string | null): Date | null {
+  if (!value) return null;
+  const m = /^(\d{4})-(\d{2})$/.exec(value.trim());
+  if (!m) return null;
+  const year = Number(m[1]);
+  const monthIndex = Number(m[2]) - 1;
+  if (!Number.isFinite(year) || !Number.isFinite(monthIndex)) return null;
+  if (monthIndex < 0 || monthIndex > 11) return null;
+  return new Date(year, monthIndex, 1);
+}
+
+function formatDateToYYYYMM(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  return `${year}-${month}`;
+}
+
+function formatYYYYMMToHebrewMonthYear(value: string): string {
+  const d = parseYYYYMM(value);
+  if (!d) return value;
+  return `${HEB_MONTH_NAMES[d.getMonth()]} ${d.getFullYear()}`;
 }
 
 function generateNumberRange(start: number, end: number): string[] {
@@ -1010,6 +1094,106 @@ function LabeledInput({
         keyboardType={keyboardType}
         style={styles.input}
       />
+    </View>
+  );
+}
+
+function MonthPickerInput({
+  label,
+  value,
+  placeholder,
+  onChange,
+}: {
+  label: string;
+  value: string | null;
+  placeholder?: string;
+  onChange: (v: string | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [tempDate, setTempDate] = useState<Date>(() => parseYYYYMM(value) ?? new Date());
+
+  useEffect(() => {
+    const parsed = parseYYYYMM(value);
+    if (parsed) setTempDate(parsed);
+  }, [value]);
+
+  const labelText = value ? formatYYYYMMToHebrewMonthYear(value) : (placeholder || 'בחר');
+
+  const normalizeToMonthStart = (d: Date) => new Date(d.getFullYear(), d.getMonth(), 1);
+
+  const commit = (d: Date) => {
+    onChange(formatDateToYYYYMM(normalizeToMonthStart(d)));
+  };
+
+  const handleAndroidChange = (event: DateTimePickerEvent, selected?: Date) => {
+    // Android renders a native dialog; hide on any result.
+    setOpen(false);
+    if (event.type !== 'set' || !selected) return;
+    commit(selected);
+  };
+
+  return (
+    <View style={{ gap: 8 }}>
+      <Text style={styles.label}>{label}</Text>
+      <TouchableOpacity
+        style={styles.input}
+        activeOpacity={0.9}
+        onPress={() => {
+          setTempDate(parseYYYYMM(value) ?? new Date());
+          setOpen(true);
+        }}
+        accessibilityLabel={label}
+      >
+        <Text style={value ? styles.selectText : styles.selectPlaceholder}>{labelText}</Text>
+      </TouchableOpacity>
+
+      {Platform.OS === 'android' ? (
+        open ? (
+          <DateTimePicker
+            value={tempDate}
+            mode="date"
+            display="default"
+            onChange={handleAndroidChange}
+          />
+        ) : null
+      ) : (
+        <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
+          <View style={styles.pickerOverlay}>
+            <View style={styles.pickerSheet}>
+              <Text style={styles.pickerTitle}>{label}</Text>
+              <DateTimePicker
+                value={tempDate}
+                mode="date"
+                display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                onChange={(_, selected) => {
+                  if (!selected) return;
+                  setTempDate(normalizeToMonthStart(selected));
+                }}
+              />
+              <View style={{ flexDirection: 'row-reverse', gap: 10, justifyContent: 'space-between' }}>
+                <TouchableOpacity
+                  style={[styles.pickerCancel, { marginTop: 0 }]}
+                  onPress={() => {
+                    onChange(null);
+                    setOpen(false);
+                  }}
+                >
+                  <Text style={styles.pickerCancelText}>נקה</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.primaryBtn, { minWidth: 120 }]}
+                  onPress={() => {
+                    commit(tempDate);
+                    setOpen(false);
+                  }}
+                >
+                  <Text style={styles.primaryBtnText}>בחר</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+      )}
     </View>
   );
 }

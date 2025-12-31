@@ -1,9 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  FlatList,
+  Animated,
   RefreshControl,
   TouchableOpacity,
   ActivityIndicator,
@@ -25,6 +25,7 @@ export default function NotificationsScreen() {
   const user = useAuthStore((s) => s.user);
   const setUnreadCount = useNotificationsStore((s) => s.setUnreadCount);
   const insets = useSafeAreaInsets();
+  const scrollY = useRef(new Animated.Value(0)).current;
   const [items, setItems] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -317,12 +318,16 @@ export default function NotificationsScreen() {
             <ActivityIndicator size="large" color="#5e3f2d" />
           </View>
         ) : (
-          <FlatList
+          <Animated.FlatList
             data={items}
             keyExtractor={(item) => item.id}
             refreshControl={
               <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#5e3f2d" />
             }
+            onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], {
+              useNativeDriver: true,
+            })}
+            scrollEventThrottle={16}
             contentContainerStyle={[
               styles.listContent,
               items.length === 0 ? { flex: 1, justifyContent: 'center' } : null,
@@ -336,7 +341,20 @@ export default function NotificationsScreen() {
                 <Text style={styles.emptySubtext}>כשתתקבלנה התראות חדשות הן יופיעו כאן</Text>
               </View>
             }
-            renderItem={({ item }) => {
+            renderItem={({ item, index }) => {
+              // Approximated row height used for the scroll-based animation.
+              // Even if the item height varies a bit (due to description / buttons),
+              // the effect remains smooth and visually consistent.
+              const ITEM_SIZE = 124;
+              const scale = scrollY.interpolate({
+                inputRange: [-1, 0, ITEM_SIZE * index, ITEM_SIZE * (index + 2)],
+                outputRange: [1, 1, 1, 0],
+              });
+              const opacity = scrollY.interpolate({
+                inputRange: [-1, 0, ITEM_SIZE * index, ITEM_SIZE * (index + 1)],
+                outputRange: [1, 1, 1, 0],
+              });
+
               const sender = sendersById[item.sender_id];
               const aptId = extractInviteApartmentId(item.description);
               const apt = aptId ? apartmentsById[aptId] : undefined;
@@ -350,7 +368,8 @@ export default function NotificationsScreen() {
               const groupMembers = groupMemberIds.map((id) => sendersById[id]).filter(Boolean);
               const descText = displayDescription(item.description);
               return (
-                <View style={styles.rowRtl}>
+                <Animated.View style={{ opacity, transform: [{ scale }] }}>
+                  <View style={styles.rowRtl}>
                   <TouchableOpacity
                     activeOpacity={0.9}
                     style={styles.bubble}
@@ -510,7 +529,8 @@ export default function NotificationsScreen() {
                       )}
                     </View>
                   </TouchableOpacity>
-                </View>
+                  </View>
+                </Animated.View>
               );
             }}
           />
