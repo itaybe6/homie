@@ -1224,7 +1224,7 @@ export default function UserProfileScreen() {
   if (isLoading) {
     return (
       <View style={styles.center}>
-        <ActivityIndicator size="large" color="#4C1D95" />
+        <ActivityIndicator size="large" color="#5e3f2d" />
       </View>
     );
   }
@@ -1387,7 +1387,7 @@ export default function UserProfileScreen() {
 
               {groupLoading ? (
                 <View style={styles.sectionEmptyWrap}>
-                  <ActivityIndicator size="small" color="#4C1D95" />
+                  <ActivityIndicator size="small" color="#5e3f2d" />
                   <Text style={styles.sectionEmptyText}>טוען שותפים...</Text>
                 </View>
               ) : groupContext && groupContext.members.length >= 2 ? (
@@ -1474,7 +1474,7 @@ export default function UserProfileScreen() {
           <View style={{ paddingTop: 12 }}>
             {profileAptLoading ? (
               <View style={styles.sectionEmptyWrap}>
-                <ActivityIndicator size="small" color="#4C1D95" />
+                <ActivityIndicator size="small" color="#5e3f2d" />
                 <Text style={styles.sectionEmptyText}>טוען דירה...</Text>
               </View>
             ) : profileApartments.length ? (

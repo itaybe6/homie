@@ -507,7 +507,7 @@ export default function HomeScreen() {
   if (isLoading && !refreshing) {
     return (
       <View style={styles.centerContainer}>
-        <ActivityIndicator size="large" color="#4C1D95" />
+        <ActivityIndicator size="large" color="#5e3f2d" />
       </View>
     );
   }
@@ -543,7 +543,7 @@ export default function HomeScreen() {
             <RefreshControl
               refreshing={refreshing}
               onRefresh={onRefresh}
-              tintColor="#4C1D95"
+              tintColor="#5e3f2d"
             />
           }
           ListEmptyComponent={

@@ -25,19 +25,21 @@ import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { BlurView } from 'expo-blur';
 import { supabase } from '@/lib/supabase';
-import { autocompleteCities, createSessionToken, PlacePrediction } from '@/lib/googlePlaces';
+import { autocompleteMapbox, type MapboxGeocodingFeature } from '@/lib/mapboxAutocomplete';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import LavaLamp from '../../components/LavaLamp';
 import KeyboardAwareScrollView from 'react-native-keyboard-aware-scroll-view/lib/KeyboardAwareScrollView';
 
 // App primary accent color (align with dark theme)
-const PRIMARY = '#4C1D95';
+const PRIMARY = '#5e3f2d';
+const BG_LIGHT = '#F7F1EC';
 
 export default function RegisterScreen() {
   const router = useRouter();
   const setUser = useAuthStore((state) => state.setUser);
   const setPending = usePendingSignupStore((s) => s.setPending);
   const insets = useSafeAreaInsets();
+  const mapboxToken = process.env.EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN as string | undefined;
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -46,8 +48,7 @@ export default function RegisterScreen() {
   const [age, setAge] = useState('');
   const [city, setCity] = useState('');
   const [avatarUrl, setAvatarUrl] = useState('');
-  const [citySuggestions, setCitySuggestions] = useState<PlacePrediction[]>([]);
-  const [sessionToken, setSessionToken] = useState('');
+  const [citySuggestions, setCitySuggestions] = useState<MapboxGeocodingFeature[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [mode, setMode] = useState<'user' | 'owner'>('user');
@@ -68,27 +69,41 @@ export default function RegisterScreen() {
   const [emailAlreadyExists, setEmailAlreadyExists] = useState(false);
   const transitionTokenRef = useRef(0);
 
-  useEffect(() => {
-    setSessionToken(createSessionToken());
-  }, []);
-
-  // Autocomplete cities using Google Places
+  // Autocomplete cities using Mapbox
   useEffect(() => {
     let active = true;
     const run = async () => {
       const q = city.trim();
-      if (!q || q.length < 2) {
-        setCitySuggestions([]);
+      if (!mapboxToken) {
+        if (active) setCitySuggestions([]);
         return;
       }
-      const preds = await autocompleteCities(q, sessionToken);
-      if (active) setCitySuggestions(preds.slice(0, 8));
+      if (!q || q.length < 1) {
+        if (active) setCitySuggestions([]);
+        return;
+      }
+      const t = setTimeout(async () => {
+        const results = await autocompleteMapbox({
+          accessToken: mapboxToken,
+          query: q,
+          country: 'il',
+          language: 'he',
+          limit: 8,
+          types: 'place,locality',
+        });
+        if (active) setCitySuggestions(results);
+      }, 250);
+      return () => clearTimeout(t);
     };
-    run();
+    let cleanup: undefined | (() => void);
+    (async () => {
+      cleanup = await run();
+    })();
     return () => {
       active = false;
+      cleanup?.();
     };
-  }, [city, sessionToken]);
+  }, [city, mapboxToken]);
 
   const handlePickImage = async () => {
     try {
@@ -267,7 +282,7 @@ export default function RegisterScreen() {
     <View style={styles.container}>
       {/* Animated “liquid glass” background */}
       <View pointerEvents="none" style={styles.bgWrap}>
-        <LavaLamp hue="purple" intensity={40} count={5} duration={16000} backgroundColor="#F5F3FF" />
+        <LavaLamp hue="orange" intensity={40} count={5} duration={16000} backgroundColor={BG_LIGHT} />
       </View>
       {/* Back to login */}
       <TouchableOpacity
@@ -453,16 +468,18 @@ export default function RegisterScreen() {
                     />
                     {citySuggestions.length > 0 ? (
                       <View style={styles.suggestionsBox}>
-                        {citySuggestions.map((p) => (
+                        {citySuggestions.map((f) => (
                           <TouchableOpacity
-                            key={p.placeId}
+                            key={f.id}
                             style={styles.suggestionItem}
                             onPress={() => {
-                              setCity(p.description);
+                              const nextCity = String(f.text || '').trim();
+                              if (nextCity) setCity(nextCity);
                               setCitySuggestions([]);
+                              Keyboard.dismiss();
                             }}
                           >
-                            <Text style={styles.suggestionText}>{p.description}</Text>
+                            <Text style={styles.suggestionText}>{String(f.text || '').trim()}</Text>
                           </TouchableOpacity>
                         ))}
                       </View>
@@ -1101,8 +1118,8 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   emailExistsCard: {
-    backgroundColor: 'rgba(76,29,149,0.06)', // subtle purple tint
-    borderColor: 'rgba(76,29,149,0.16)',
+    backgroundColor: 'rgba(94,63,45,0.06)',
+    borderColor: 'rgba(94,63,45,0.16)',
     borderWidth: 1,
     padding: 12,
     borderRadius: 12,
@@ -1122,7 +1139,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     paddingVertical: 10,
     borderWidth: 1,
-    borderColor: 'rgba(76,29,149,0.35)',
+    borderColor: 'rgba(94,63,45,0.35)',
     alignItems: 'center',
     justifyContent: 'center',
   },

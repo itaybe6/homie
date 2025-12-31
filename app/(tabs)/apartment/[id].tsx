@@ -422,7 +422,7 @@ export default function ApartmentDetailsScreen() {
   if (isLoading) {
     return (
       <View style={styles.centerContainer}>
-        <ActivityIndicator size="large" color="#4C1D95" />
+        <ActivityIndicator size="large" color="#5e3f2d" />
       </View>
     );
   }
@@ -1588,7 +1588,7 @@ export default function ApartmentDetailsScreen() {
                   </View>
                 ) : isGeocoding ? (
                   <View style={styles.mapFallback}>
-                    <ActivityIndicator size="small" color="#4C1D95" />
+                    <ActivityIndicator size="small" color="#5e3f2d" />
                     <Text style={styles.mapFallbackText}>טוען מפה…</Text>
                   </View>
                 ) : geoError ? (
@@ -1922,7 +1922,7 @@ export default function ApartmentDetailsScreen() {
             >
               {isAdding ? (
                 <View style={{ paddingVertical: 20, alignItems: 'center' }}>
-                  <ActivityIndicator size="small" color="#4C1D95" />
+                  <ActivityIndicator size="small" color="#5e3f2d" />
                 </View>
               ) : (
                 <>

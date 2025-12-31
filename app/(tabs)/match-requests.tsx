@@ -755,13 +755,13 @@ export default function MatchRequestsScreen() {
 
       {loading ? (
         <View style={styles.centerContainer}>
-          <ActivityIndicator size="large" color="#4C1D95" />
+          <ActivityIndicator size="large" color="#5e3f2d" />
         </View>
       ) : (
         <FlatList
           data={[{ key: tab }]}
           keyExtractor={(i) => i.key}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#4C1D95" />}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#5e3f2d" />}
           renderItem={({ item }) => {
             if (item.key === 'incoming') {
               return <Section title="בקשות אליי" data={filteredReceived} incoming />;

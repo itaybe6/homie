@@ -996,7 +996,7 @@ export default function ProfileScreen() {
   if (isLoading) {
     return (
       <View style={styles.centerContainer}>
-        <ActivityIndicator size="large" color="#4C1D95" />
+        <ActivityIndicator size="large" color="#5e3f2d" />
       </View>
     );
   }

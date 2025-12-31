@@ -1001,7 +1001,7 @@ export default function ProfileSettingsScreen() {
               </View>
               {aptLoading ? (
                 <View style={{ paddingVertical: 24, alignItems: 'center' }}>
-                  <ActivityIndicator size="large" color="#4C1D95" />
+                  <ActivityIndicator size="large" color="#5e3f2d" />
                 </View>
               ) : !myApartment ? (
                 <Text style={styles.sharedEmptyText}>לא נמצאה דירה משויכת.</Text>
@@ -1569,7 +1569,7 @@ export default function ProfileSettingsScreen() {
 
               {sharedLoading ? (
                 <View style={{ paddingVertical: 24, alignItems: 'center' }}>
-                  <ActivityIndicator size="large" color="#4C1D95" />
+                  <ActivityIndicator size="large" color="#5e3f2d" />
                 </View>
               ) : sharedGroups.length === 0 ? (
                 <Text style={styles.sharedEmptyText}>אין לך פרופילים משותפים פעילים.</Text>

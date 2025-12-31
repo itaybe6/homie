@@ -25,14 +25,14 @@ import LavaLamp from '@/components/LavaLamp';
 
 type SurveyState = Partial<UserSurveyResponse>;
 
-const PRIMARY = '#4C1D95';
-// Match the login screen purple background
-const BG = '#2E1065';
+const PRIMARY = '#5e3f2d';
+// Match the login screen dark background
+const BG = '#2B1A12';
 const CARD = '#FFFFFF';
 const BORDER = '#E5E7EB';
 const TEXT = '#111827';
 const MUTED = '#6B7280';
-const PURPLE_SOFT = 'rgba(76,29,149,0.10)';
+const SOFT_ACCENT = 'rgba(94,63,45,0.10)';
 
 const lifestyleOptions = ['רגוע', 'פעיל', 'ספונטני', 'ביתי', 'חברתי'];
 const dietOptions = ['ללא הגבלה', 'צמחוני', 'טבעוני'];
@@ -719,7 +719,7 @@ export default function SurveyScreen() {
 
   return (
     <View style={styles.root}>
-      <LavaLamp hue="purple" intensity={60} count={5} duration={16000} backgroundColor={BG} />
+      <LavaLamp hue="orange" intensity={60} count={5} duration={16000} backgroundColor={BG} />
       <View style={styles.container}>
       {loading ? (
         <View style={styles.loaderWrap}>
@@ -1515,8 +1515,8 @@ const styles = StyleSheet.create({
     borderRadius: 999,
   },
   toggleActive: {
-    backgroundColor: PURPLE_SOFT,
-    borderColor: 'rgba(76,29,149,0.35)',
+    backgroundColor: SOFT_ACCENT,
+    borderColor: 'rgba(94,63,45,0.35)',
   },
   toggleText: {
     color: MUTED,
@@ -1546,8 +1546,8 @@ const styles = StyleSheet.create({
     borderRadius: 999,
   },
   chipActive: {
-    backgroundColor: PURPLE_SOFT,
-    borderColor: 'rgba(76,29,149,0.35)',
+    backgroundColor: SOFT_ACCENT,
+    borderColor: 'rgba(94,63,45,0.35)',
   },
   chipText: {
     color: TEXT,
@@ -1602,7 +1602,7 @@ const styles = StyleSheet.create({
     borderBottomColor: '#F3F4F6',
   },
   pickerOptionActive: {
-    backgroundColor: PURPLE_SOFT,
+    backgroundColor: SOFT_ACCENT,
   },
   pickerOptionText: {
     color: TEXT,
@@ -1667,8 +1667,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   scaleDotActive: {
-    backgroundColor: PURPLE_SOFT,
-    borderColor: 'rgba(76,29,149,0.35)',
+    backgroundColor: SOFT_ACCENT,
+    borderColor: 'rgba(94,63,45,0.35)',
   },
   scaleDotText: {
     color: TEXT,

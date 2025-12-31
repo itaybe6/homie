@@ -121,7 +121,7 @@ export default function LikesScreen() {
 
       {isLoading ? (
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#8B5CF6" />
+          <ActivityIndicator size="large" color="#5e3f2d" />
         </View>
       ) : (
         <FlatList
@@ -137,8 +137,8 @@ export default function LikesScreen() {
             <RefreshControl
               refreshing={refreshing}
               onRefresh={onRefresh}
-              tintColor="#8B5CF6"
-              colors={['#8B5CF6']}
+              tintColor="#5e3f2d"
+              colors={['#5e3f2d']}
             />
           }
           showsVerticalScrollIndicator={false}

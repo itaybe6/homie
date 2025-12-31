@@ -314,14 +314,14 @@ export default function NotificationsScreen() {
         <View style={styles.pageBody}>
         {loading ? (
           <View style={styles.centerContainer}>
-            <ActivityIndicator size="large" color="#8B5CF6" />
+            <ActivityIndicator size="large" color="#5e3f2d" />
           </View>
         ) : (
           <FlatList
             data={items}
             keyExtractor={(item) => item.id}
             refreshControl={
-              <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#4C1D95" />
+              <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#5e3f2d" />
             }
             contentContainerStyle={[
               styles.listContent,

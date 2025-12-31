@@ -8,7 +8,8 @@ import { authService } from '@/lib/auth';
 import { usePendingPasswordResetStore } from '@/stores/pendingPasswordResetStore';
 import KeyboardAwareScrollView from 'react-native-keyboard-aware-scroll-view/lib/KeyboardAwareScrollView';
 
-const PRIMARY = '#4C1D95';
+const PRIMARY = '#5e3f2d';
+const BG_DARK = '#2B1A12';
 
 export default function ResetCodeScreen() {
   const router = useRouter();
@@ -67,7 +68,7 @@ export default function ResetCodeScreen() {
 
   return (
     <View style={{ flex: 1 }}>
-      <LavaLamp hue="purple" intensity={60} count={5} duration={16000} backgroundColor="#2E1065" />
+      <LavaLamp hue="orange" intensity={60} count={5} duration={16000} backgroundColor={BG_DARK} />
       <KeyboardAwareScrollView
         enableOnAndroid
         extraScrollHeight={Platform.OS === 'ios' ? 16 : 24}

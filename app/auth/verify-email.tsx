@@ -10,7 +10,8 @@ import { useAuthStore } from '@/stores/authStore';
 import { usePendingSignupStore } from '@/stores/pendingSignupStore';
 import * as ImageManipulator from 'expo-image-manipulator';
 
-const PRIMARY = '#4C1D95';
+const PRIMARY = '#5e3f2d';
+const BG_DARK = '#2B1A12';
 
 async function uploadAvatarLocalUri(userId: string, uri: string): Promise<void> {
   const trimmed = String(uri || '').trim();
@@ -171,7 +172,7 @@ export default function VerifyEmailScreen() {
 
   return (
     <View style={{ flex: 1 }}>
-      <LavaLamp hue="purple" intensity={50} count={5} duration={16000} backgroundColor="#2E1065" />
+      <LavaLamp hue="orange" intensity={50} count={5} duration={16000} backgroundColor={BG_DARK} />
       <View style={[styles.container, { paddingTop: insets.top + 24 }]}>
         <View style={styles.sheet}>
           <Text style={styles.title}>אימות מייל</Text>

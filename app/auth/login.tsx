@@ -18,7 +18,8 @@ import { Eye, EyeOff, ArrowLeft } from 'lucide-react-native';
 import LavaLamp from '../../components/LavaLamp';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 
-const ACCENT_PURPLE = '#4C1D95'; // deeper purple
+const ACCENT_BROWN = '#5e3f2d';
+const BG_DARK = '#2B1A12';
 const SHEET_TOP_OFFSET = 72;
 
 export default function LoginScreen() {
@@ -85,7 +86,7 @@ export default function LoginScreen() {
 
   return (
     <View style={{ flex: 1 }}>
-      <LavaLamp hue="purple" intensity={60} count={5} duration={16000} backgroundColor="#2E1065" />
+      <LavaLamp hue="orange" intensity={60} count={5} duration={16000} backgroundColor={BG_DARK} />
       <KeyboardAwareScrollView
         enableOnAndroid
         extraScrollHeight={Platform.OS === 'ios' ? 16 : 24}
@@ -264,7 +265,7 @@ const styles = StyleSheet.create({
     paddingBottom: 16,
     // Stretch to full width (cancel outer content padding)
     marginHorizontal: -24,
-    // sheet now starts right after the purple fill
+    // Sheet starts right after the background fill
     marginTop: 0,
   },
   sheetHeader: {
@@ -274,13 +275,13 @@ const styles = StyleSheet.create({
   sheetTitle: {
     fontSize: 24,
     fontWeight: '800',
-    color: ACCENT_PURPLE,
+    color: ACCENT_BROWN,
     textAlign: 'center',
   },
   sheetSubtitle: {
     marginTop: 4,
     fontSize: 14,
-    color: ACCENT_PURPLE,
+    color: ACCENT_BROWN,
     textAlign: 'center',
   },
   form: {
@@ -329,7 +330,7 @@ const styles = StyleSheet.create({
     writingDirection: 'rtl',
   },
   button: {
-    backgroundColor: ACCENT_PURPLE,
+    backgroundColor: ACCENT_BROWN,
     paddingVertical: 14,
     borderRadius: 12,
     alignItems: 'center',
@@ -381,7 +382,7 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   linkTextPurple: {
-    color: ACCENT_PURPLE,
+    color: ACCENT_BROWN,
     fontSize: 14,
     textAlign: 'center',
   },
@@ -392,7 +393,7 @@ const styles = StyleSheet.create({
     paddingRight: 4,
   },
   forgotLinkText: {
-    color: ACCENT_PURPLE,
+    color: ACCENT_BROWN,
     fontSize: 13,
     fontWeight: '700',
     textAlign: 'right',
