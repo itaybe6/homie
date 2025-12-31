@@ -5,6 +5,7 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
+  TouchableWithoutFeedback,
   TextInput,
   ActivityIndicator,
   Alert,
@@ -48,6 +49,7 @@ export default function ProfileScreen() {
   const [isDeletingImage, setIsDeletingImage] = useState(false);
   const [isAddingImage, setIsAddingImage] = useState(false);
   const [isSurveyOpen, setIsSurveyOpen] = useState(false);
+  const [isAvatarActionsOpen, setIsAvatarActionsOpen] = useState(false);
   const [sharedGroups, setSharedGroups] = useState<
     { id: string; name?: string | null; members: Pick<User, 'id' | 'full_name' | 'avatar_url'>[] }[]
   >([]);
@@ -722,7 +724,9 @@ export default function ProfileScreen() {
       if (!user?.id) return;
 
       if (Platform.OS === 'web') {
-        // Web: camera flow isn't reliable; fallback to file picker
+        // Web: camera flow isn't reliable; fallback to file picker.
+        // Also: avoid permissions API here; some browsers block the picker if it's not opened
+        // directly from the click handler call stack.
         source = 'library';
       }
 
@@ -734,6 +738,18 @@ export default function ProfileScreen() {
         }
 
         const result = await ImagePicker.launchCameraAsync({
+          mediaTypes: ImagePicker.MediaTypeOptions.Images,
+          allowsEditing: true,
+          aspect: [1, 1],
+          quality: 0.9,
+        });
+        if (result.canceled || !result.assets?.length) return;
+        await uploadAvatarFromUri(result.assets[0].uri);
+        return;
+      }
+
+      if (Platform.OS === 'web') {
+        const result = await ImagePicker.launchImageLibraryAsync({
           mediaTypes: ImagePicker.MediaTypeOptions.Images,
           allowsEditing: true,
           aspect: [1, 1],
@@ -769,11 +785,11 @@ export default function ProfileScreen() {
     const title = hasAvatar ? 'תמונת פרופיל' : 'הוספת תמונת פרופיל';
     const message = hasAvatar ? 'בחר/י איך לעדכן את התמונה (כולל חיתוך/עריכה).' : 'בחר/י צילום או העלאה.';
 
-    Alert.alert(title, message, [
-      { text: 'ביטול', style: 'cancel' },
-      { text: 'צלם/י', onPress: () => pickAndUploadAvatarFrom('camera') },
-      { text: hasAvatar ? 'החלף/ערוך מהגלריה' : 'בחר/י מהגלריה', onPress: () => pickAndUploadAvatarFrom('library') },
-    ]);
+    // Always use our own modal (works reliably on web).
+    // We keep title/message for future UI tweaks (currently shown in modal).
+    void title;
+    void message;
+    setIsAvatarActionsOpen(true);
   };
 
   // moved extra-photos upload to edit profile screen
@@ -1005,6 +1021,69 @@ export default function ProfileScreen() {
 
   return (
       <SafeAreaView style={styles.container}>
+        {/* Avatar actions modal (works on web + native) */}
+        <Modal
+          visible={isAvatarActionsOpen}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setIsAvatarActionsOpen(false)}
+        >
+          <View style={styles.avatarActionsOverlay}>
+            {/* Background tap closes modal (sheet itself is not pressable) */}
+            <TouchableWithoutFeedback onPress={() => setIsAvatarActionsOpen(false)}>
+              <View style={styles.avatarActionsBackdrop} />
+            </TouchableWithoutFeedback>
+
+            <View style={styles.avatarActionsSheet}>
+              <Text style={styles.avatarActionsTitle}>תמונת פרופיל</Text>
+              <Text style={styles.avatarActionsSubtitle}>בחר/י איך לעדכן את התמונה</Text>
+
+              <View style={styles.avatarActionsButtons}>
+                {Platform.OS !== 'web' ? (
+                  <TouchableOpacity
+                    style={styles.avatarActionBtn}
+                    onPress={async () => {
+                      try {
+                        await pickAndUploadAvatarFrom('camera');
+                      } finally {
+                        setIsAvatarActionsOpen(false);
+                      }
+                    }}
+                    disabled={isSaving}
+                    activeOpacity={0.9}
+                  >
+                    <Text style={styles.avatarActionBtnText}>צלם/י</Text>
+                  </TouchableOpacity>
+                ) : null}
+
+                <TouchableOpacity
+                  style={styles.avatarActionBtnPrimary}
+                  onPress={async () => {
+                    try {
+                      await pickAndUploadAvatarFrom('library');
+                    } finally {
+                      setIsAvatarActionsOpen(false);
+                    }
+                  }}
+                  disabled={isSaving}
+                  activeOpacity={0.9}
+                >
+                  <Text style={styles.avatarActionBtnPrimaryText}>בחר/י מהגלריה</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.avatarActionBtn}
+                  onPress={() => setIsAvatarActionsOpen(false)}
+                  disabled={isSaving}
+                  activeOpacity={0.9}
+                >
+                  <Text style={styles.avatarActionBtnText}>ביטול</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+
         <ScrollView contentContainerStyle={[
           styles.scrollContent,
           {
@@ -1632,6 +1711,70 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#FFFFFF',
     writingDirection: 'rtl',
+  },
+  avatarActionsOverlay: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+  },
+  avatarActionsBackdrop: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+  },
+  avatarActionsSheet: {
+    width: '100%',
+    maxWidth: 420,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    padding: 14,
+  },
+  avatarActionsTitle: {
+    color: '#111827',
+    fontSize: 16,
+    fontWeight: '900',
+    textAlign: 'center',
+  },
+  avatarActionsSubtitle: {
+    marginTop: 6,
+    color: '#6B7280',
+    fontSize: 13,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  avatarActionsButtons: {
+    marginTop: 12,
+    gap: 10,
+  },
+  avatarActionBtn: {
+    height: 44,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
+  },
+  avatarActionBtnText: {
+    color: '#111827',
+    fontWeight: '800',
+  },
+  avatarActionBtnPrimary: {
+    height: 44,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#4C1D95',
+  },
+  avatarActionBtnPrimaryText: {
+    color: '#FFFFFF',
+    fontWeight: '900',
   },
   centerContainer: {
     flex: 1,
