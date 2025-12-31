@@ -182,17 +182,20 @@ export interface UserSurveyResponse {
   cooking_style?: string;
   home_vibe?: string;
   price_range?: number;
-  bills_included?: boolean;
+  // Tri-state preferences: true/false/null (null = "לא משנה לי")
+  bills_included?: boolean | null;
   preferred_city?: string;
   preferred_neighborhoods?: string[];
   floor_preference?: string;
-  has_balcony?: boolean;
-  has_elevator?: boolean;
-  wants_master_room?: boolean;
+  has_balcony?: boolean | null;
+  has_elevator?: boolean | null;
+  wants_master_room?: boolean | null;
   move_in_month?: string;
-  preferred_roommates?: number;
-  pets_allowed?: boolean;
-  with_broker?: boolean;
+  preferred_roommates?: number; // legacy single value (kept for backwards compat)
+  preferred_roommates_min?: number | null;
+  preferred_roommates_max?: number | null;
+  pets_allowed?: boolean; // whether the user wants an apartment that allows pets
+  with_broker?: boolean | null;
   sublet_month_from?: string; // format: YYYY-MM
   sublet_month_to?: string;   // format: YYYY-MM
   preferred_age_range?: string;

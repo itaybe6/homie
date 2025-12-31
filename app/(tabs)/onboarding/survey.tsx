@@ -15,7 +15,8 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { Check, ChevronRight } from 'lucide-react-native';
+import { useNavigation } from '@react-navigation/native';
+import { Check, ChevronRight, X } from 'lucide-react-native';
 import { useAuthStore } from '@/stores/authStore';
 import { UserSurveyResponse } from '@/types/database';
 import { fetchUserSurvey, upsertUserSurvey } from '@/lib/survey';
@@ -47,10 +48,11 @@ const partnerShabbatPrefOptions = ['אין בעיה', 'מעדיפ/ה שלא'];
 const partnerDietPrefOptions = ['אין בעיה', 'מעדיפ/ה שלא טבעוני', 'כשר בלבד'];
 const partnerSmokingPrefOptions = ['אין בעיה', 'מעדיפ/ה שלא'];
 const studentYearOptions = ['שנה א׳', 'שנה ב׳', 'שנה ג׳', 'שנה ד׳', 'שנה ה׳', 'שנה ו׳', 'שנה ז׳'];
-const roommateCountOptions = ['1', '2', '3', '4'];
+const roommateCountOptions = ['1', '2', '3', '4', '5', '6'];
 
 export default function SurveyScreen() {
   const router = useRouter();
+  const navigation = useNavigation<any>();
   const { user } = useAuthStore();
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
 
@@ -68,6 +70,12 @@ export default function SurveyScreen() {
   const transitionDirRef = useRef<1 | -1>(1);
   const animOpacity = useRef(new Animated.Value(1)).current;
   const animTranslate = useRef(new Animated.Value(0)).current;
+  const latestStateRef = useRef<SurveyState>({});
+  const exitingRef = useRef(false);
+
+  useEffect(() => {
+    latestStateRef.current = state;
+  }, [state]);
 
   useEffect(() => {
     (async () => {
@@ -266,7 +274,7 @@ export default function SurveyScreen() {
       { key: 'smoker', title: 'מעשן/ת?', render: () => <ToggleRow label="מעשן/ת?" value={!!state.is_smoker} onToggle={(v) => setField('is_smoker', v)} /> },
       { key: 'relationship', title: 'מצב זוגי', render: () => <ChipSelect options={relationOptions} value={state.relationship_status || null} onChange={(v) => setField('relationship_status', v || null)} /> },
       { key: 'pet', title: 'מגיע/ה עם בעל חיים?', render: () => <ToggleRow label="מגיע/ה עם בעל חיים?" value={!!state.has_pet} onToggle={(v) => setField('has_pet', v)} /> },
-      { key: 'lifestyle', title: 'סגנון חיים', render: () => <ChipSelect options={lifestyleOptions} value={state.lifestyle || null} onChange={(v) => setField('lifestyle', v || null)} /> },
+      { key: 'lifestyle', title: 'האופי היומיומי שלי', render: () => <ChipSelect options={lifestyleOptions} value={state.lifestyle || null} onChange={(v) => setField('lifestyle', v || null)} /> },
       {
         key: 'cleanliness',
         title: 'כמה חשוב לי ניקיון?',
@@ -285,7 +293,20 @@ export default function SurveyScreen() {
 
       // Apartment you want
       { key: 'price', title: 'תקציב שכירות (₪)', render: () => <LabeledInput label="מחיר (₪)" keyboardType="numeric" value={state.price_range?.toString() || ''} placeholder="לדוגמה: 3500" onChangeText={(txt) => setField('price_range', toNumberOrNull(txt))} /> },
-      { key: 'bills', title: 'חשבונות כלולים?', render: () => <ChipSelect options={['כלול', 'לא כלול']} value={state.bills_included === undefined ? null : state.bills_included ? 'כלול' : 'לא כלול'} onChange={(v) => setField('bills_included', v === 'כלול')} /> },
+      {
+        key: 'bills',
+        title: 'חשבונות כלולים?',
+        render: () => (
+          <TriChoiceRow
+            label="חשבונות כלולים?"
+            value={state.bills_included ?? null}
+            yesLabel="כלולים"
+            noLabel="לא כלולים"
+            anyLabel="לא משנה לי"
+            onChange={(v) => setField('bills_included', v)}
+          />
+        ),
+      },
       {
         key: 'preferred_city',
         title: 'עיר מועדפת',
@@ -334,6 +355,32 @@ export default function SurveyScreen() {
           <View style={{ gap: 10 }}>
             <Text style={styles.label}>שכונות מועדפות</Text>
             {neighborhoodOptions.length ? (
+              <TouchableOpacity
+                style={[
+                  styles.chip,
+                  (state.preferred_neighborhoods || []).length === neighborhoodOptions.length
+                    ? styles.chipActive
+                    : null,
+                ]}
+                activeOpacity={0.9}
+                onPress={() => {
+                  const isAll = (state.preferred_neighborhoods || []).length === neighborhoodOptions.length;
+                  setField('preferred_neighborhoods', isAll ? [] : [...neighborhoodOptions]);
+                }}
+              >
+                <Text
+                  style={[
+                    styles.chipText,
+                    (state.preferred_neighborhoods || []).length === neighborhoodOptions.length
+                      ? styles.chipTextActive
+                      : null,
+                  ]}
+                >
+                  הכל
+                </Text>
+              </TouchableOpacity>
+            ) : null}
+            {neighborhoodOptions.length ? (
               <MultiChipSelect
                 options={filteredNeighborhoods}
                 values={state.preferred_neighborhoods || []}
@@ -354,9 +401,42 @@ export default function SurveyScreen() {
         ),
       },
       { key: 'floor', title: 'קומה מועדפת', render: () => <ChipSelect options={floorOptions} value={state.floor_preference || null} onChange={(v) => setField('floor_preference', v || null)} /> },
-      { key: 'balcony', title: 'מרפסת / גינה', render: () => <ToggleRow label="מרפסת / גינה" value={!!state.has_balcony} onToggle={(v) => setField('has_balcony', v)} /> },
-      { key: 'elevator', title: 'מעלית', render: () => <ToggleRow label="מעלית" value={!!state.has_elevator} onToggle={(v) => setField('has_elevator', v)} /> },
-      { key: 'master', title: 'חדר מאסטר', render: () => <ToggleRow label="חדר מאסטר (שירותים צמודים)" value={!!state.wants_master_room} onToggle={(v) => setField('wants_master_room', v)} /> },
+      {
+        key: 'balcony',
+        title: 'מרפסת / גינה',
+        render: () => (
+          <TriChoiceRow
+            label="עם מרפסת / גינה"
+            value={state.has_balcony ?? null}
+            anyLabel="לא משנה לי"
+            onChange={(v) => setField('has_balcony', v)}
+          />
+        ),
+      },
+      {
+        key: 'elevator',
+        title: 'מעלית',
+        render: () => (
+          <TriChoiceRow
+            label="מעלית"
+            value={state.has_elevator ?? null}
+            anyLabel="לא משנה לי"
+            onChange={(v) => setField('has_elevator', v)}
+          />
+        ),
+      },
+      {
+        key: 'master',
+        title: 'חדר מאסטר',
+        render: () => (
+          <TriChoiceRow
+            label="חדר מאסטר"
+            value={state.wants_master_room ?? null}
+            anyLabel="לא משנה לי"
+            onChange={(v) => setField('wants_master_room', v)}
+          />
+        ),
+      },
       {
         key: 'is_sublet',
         title: 'סאבלט?',
@@ -400,11 +480,39 @@ export default function SurveyScreen() {
         key: 'roommates',
         title: 'כמה שותפים?',
         render: () => (
-          <SelectInput label="כמה שותפים נראה לי מתאים?" options={roommateCountOptions} value={state.preferred_roommates ? String(state.preferred_roommates) : null} placeholder="בחר מספר שותפים" onChange={(v) => setField('preferred_roommates', v ? parseInt(v, 10) : undefined)} />
+          <View style={{ gap: 12 }}>
+            <SelectInput
+              label="מינימום שותפים"
+              options={roommateCountOptions}
+              value={(state as any).preferred_roommates_min != null ? String((state as any).preferred_roommates_min) : null}
+              placeholder="לא משנה"
+              onChange={(v) => setField('preferred_roommates_min' as any, v ? parseInt(v, 10) : null)}
+            />
+            <SelectInput
+              label="מקסימום שותפים"
+              options={roommateCountOptions}
+              value={(state as any).preferred_roommates_max != null ? String((state as any).preferred_roommates_max) : null}
+              placeholder="לא משנה"
+              onChange={(v) => setField('preferred_roommates_max' as any, v ? parseInt(v, 10) : null)}
+            />
+          </View>
         ),
       },
       { key: 'pets_allowed', title: 'אפשר להביא חיות לדירה?', render: () => <ToggleRow label="אפשר להביא בעלי חיים?" value={!!state.pets_allowed} onToggle={(v) => setField('pets_allowed', v)} /> },
-      { key: 'broker', title: 'תיווך / ישירות', render: () => <ChipSelect options={['תיווך', 'ישירות']} value={state.with_broker === undefined ? null : state.with_broker ? 'תיווך' : 'ישירות'} onChange={(v) => setField('with_broker', v === 'תיווך')} /> },
+      {
+        key: 'broker',
+        title: 'תיווך',
+        render: () => (
+          <TriChoiceRow
+            label="תיווך"
+            value={state.with_broker ?? null}
+            yesLabel="עם תיווך"
+            noLabel="בלי תיווך"
+            anyLabel="לא משנה לי"
+            onChange={(v) => setField('with_broker', v)}
+          />
+        ),
+      },
 
       // Partner you want
       {
@@ -530,7 +638,7 @@ export default function SurveyScreen() {
     if (!user) return;
     try {
       setSaving(true);
-      const payload = normalizePayload(user.id, state);
+      const payload = normalizePayload(user.id, state, { isCompleted: true });
       // eslint-disable-next-line no-console
       console.log('[survey] submit payload', {
         userId: user.id,
@@ -558,6 +666,57 @@ export default function SurveyScreen() {
     }
   };
 
+  const saveDraft = async (): Promise<void> => {
+    if (!user?.id) return;
+    const payload = normalizePayload(user.id, latestStateRef.current, { isCompleted: false });
+    await upsertUserSurvey(payload);
+  };
+
+  const handleExit = async () => {
+    if (saving) return;
+    try {
+      setSaving(true);
+      await saveDraft();
+      router.back();
+    } catch (e: any) {
+      Alert.alert('שגיאה', e?.message || 'לא ניתן לשמור טיוטה כעת');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Save draft on any navigation away (hardware back, gestures, header back, etc.)
+  useEffect(() => {
+    if (!user?.id) return;
+    const unsub = navigation.addListener('beforeRemove', (e: any) => {
+      // Prevent infinite loop when we dispatch the saved action
+      if (exitingRef.current) return;
+      // If we're already saving, let the navigation proceed
+      if (saving) return;
+
+      // We want to save draft before leaving
+      e.preventDefault();
+      exitingRef.current = true;
+      (async () => {
+        try {
+          setSaving(true);
+          await saveDraft();
+        } catch {
+          // Best-effort: even if draft save fails, allow leaving
+        } finally {
+          setSaving(false);
+          navigation.dispatch(e.data.action);
+          // reset in next tick
+          setTimeout(() => {
+            exitingRef.current = false;
+          }, 0);
+        }
+      })();
+    });
+    return unsub;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [navigation, user?.id]);
+
   return (
     <View style={styles.root}>
       <LavaLamp hue="purple" intensity={60} count={5} duration={16000} backgroundColor={BG} />
@@ -575,6 +734,19 @@ export default function SurveyScreen() {
                 <Text style={styles.bgSubtitle}>מלא/י את השאלה למטה</Text>
               </View>
               <View style={[styles.popupCard, { width: popupCardWidth, maxHeight: popupCardMaxHeight }]}>
+                <TouchableOpacity
+                  style={styles.exitBtn}
+                  onPress={handleExit}
+                  disabled={saving}
+                  accessibilityRole="button"
+                  accessibilityLabel="יציאה ושמירה"
+                >
+                  {saving ? (
+                    <ActivityIndicator size="small" color={PRIMARY} />
+                  ) : (
+                    <X size={18} color={PRIMARY} />
+                  )}
+                </TouchableOpacity>
                 <View style={styles.popupHeader}>
                   <Text style={styles.popupTitle}>{currentQuestion?.title || ''}</Text>
                   <Text style={styles.popupMeta}>{`שאלה ${Math.min(clampedIndex + 1, totalQuestions)} מתוך ${totalQuestions}`}</Text>
@@ -634,20 +806,30 @@ export default function SurveyScreen() {
   );
 }
 
-function normalizePayload(userId: string, s: SurveyState) {
+function normalizePayload(
+  userId: string,
+  s: SurveyState,
+  opts: { isCompleted: boolean }
+) {
+  const coerce = opts.isCompleted; // On final submit we coerce booleans; on draft we keep nulls.
   const payload: any = {
     user_id: userId,
-    is_completed: true,
-    is_sublet: s.is_sublet ?? false,
+    is_completed: opts.isCompleted,
+    is_sublet: coerce ? (s.is_sublet ?? false) : (s.is_sublet ?? null),
     occupation: s.occupation ?? null,
     student_year: s.student_year ?? null,
-    works_from_home: s.occupation === 'עובד' ? (s.works_from_home ?? false) : null,
-    keeps_kosher: s.keeps_kosher ?? false,
-    is_shomer_shabbat: s.is_shomer_shabbat ?? false,
+    works_from_home:
+      s.occupation === 'עובד'
+        ? coerce
+          ? (s.works_from_home ?? false)
+          : (s.works_from_home ?? null)
+        : null,
+    keeps_kosher: coerce ? (s.keeps_kosher ?? false) : (s.keeps_kosher ?? null),
+    is_shomer_shabbat: coerce ? (s.is_shomer_shabbat ?? false) : (s.is_shomer_shabbat ?? null),
     diet_type: s.diet_type ?? null,
-    is_smoker: s.is_smoker ?? false,
+    is_smoker: coerce ? (s.is_smoker ?? false) : (s.is_smoker ?? null),
     relationship_status: s.relationship_status ?? null,
-    has_pet: s.has_pet ?? false,
+    has_pet: coerce ? (s.has_pet ?? false) : (s.has_pet ?? null),
     lifestyle: s.lifestyle ?? null,
     cleanliness_importance: s.cleanliness_importance ?? null,
     cleaning_frequency: s.cleaning_frequency ?? null,
@@ -660,12 +842,18 @@ function normalizePayload(userId: string, s: SurveyState) {
     preferred_neighborhoods:
       s.preferred_neighborhoods && s.preferred_neighborhoods.length > 0 ? s.preferred_neighborhoods : null,
     floor_preference: s.floor_preference ?? null,
-    has_balcony: s.has_balcony ?? false,
-    has_elevator: s.has_elevator ?? false,
-    wants_master_room: s.wants_master_room ?? false,
+    has_balcony: s.has_balcony ?? null,
+    has_elevator: s.has_elevator ?? null,
+    wants_master_room: s.wants_master_room ?? null,
     move_in_month: s.move_in_month ?? null,
-    preferred_roommates: s.preferred_roommates ?? null,
-    pets_allowed: s.pets_allowed ?? false,
+    preferred_roommates_min: (s as any).preferred_roommates_min ?? null,
+    preferred_roommates_max: (s as any).preferred_roommates_max ?? null,
+    preferred_roommates:
+      (s as any).preferred_roommates_max ??
+      (s as any).preferred_roommates_min ??
+      s.preferred_roommates ??
+      null,
+    pets_allowed: coerce ? (s.pets_allowed ?? false) : (s.pets_allowed ?? null),
     with_broker: s.with_broker ?? null,
     sublet_month_from: s.is_sublet ? (s.sublet_month_from ?? null) : null,
     sublet_month_to: s.is_sublet ? (s.sublet_month_to ?? null) : null,
@@ -910,6 +1098,49 @@ function ToggleRow({ label, value, onToggle }: { label: string; value: boolean; 
   );
 }
 
+function TriChoiceRow({
+  label,
+  value,
+  onChange,
+  yesLabel = 'כן',
+  noLabel = 'לא',
+  anyLabel = 'לא משנה לי',
+}: {
+  label: string;
+  value: boolean | null;
+  onChange: (v: boolean | null) => void;
+  yesLabel?: string;
+  noLabel?: string;
+  anyLabel?: string;
+}) {
+  return (
+    <View style={styles.toggleRow}>
+      <Text style={styles.label}>{label}</Text>
+      <View style={styles.toggleOptions}>
+        <TouchableOpacity
+          style={[styles.toggleBtn, value === true ? styles.toggleActive : null]}
+          onPress={() => onChange(true)}
+        >
+          <Check size={16} color={value === true ? '#0F0F14' : '#9DA4AE'} />
+          <Text style={[styles.toggleText, value === true ? styles.toggleTextActive : null]}>{yesLabel}</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.toggleBtn, value === false ? styles.toggleActive : null]}
+          onPress={() => onChange(false)}
+        >
+          <Text style={[styles.toggleText, value === false ? styles.toggleTextActive : null]}>{noLabel}</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.toggleBtn, value === null ? styles.toggleActive : null]}
+          onPress={() => onChange(null)}
+        >
+          <Text style={[styles.toggleText, value === null ? styles.toggleTextActive : null]}>{anyLabel}</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+}
+
 function ChipSelect({
   label,
   options,
@@ -1053,6 +1284,20 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 14 },
     elevation: 6,
     overflow: 'hidden',
+  },
+  exitBtn: {
+    position: 'absolute',
+    left: 12,
+    top: 12,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.92)',
+    borderWidth: 1,
+    borderColor: BORDER,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 5,
   },
   popupHeader: {
     alignItems: 'center',

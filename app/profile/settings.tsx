@@ -24,6 +24,7 @@ import { authService } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
 import { Apartment, User } from '@/types/database';
 import { fetchUserSurvey, upsertUserSurvey } from '@/lib/survey';
+import { getNeighborhoodsForCityName } from '@/lib/neighborhoods';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 
@@ -76,11 +77,13 @@ export default function ProfileSettingsScreen() {
   const [surveySaving, setSurveySaving] = useState(false);
   // Extra survey fields
   const [surveyNeighborhoods, setSurveyNeighborhoods] = useState('');
-  const [surveyRoommates, setSurveyRoommates] = useState('');
-  const [surveyBillsIncluded, setSurveyBillsIncluded] = useState(false);
-  const [surveyHasBalcony, setSurveyHasBalcony] = useState(false);
-  const [surveyHasElevator, setSurveyHasElevator] = useState(false);
-  const [surveyWantsMasterRoom, setSurveyWantsMasterRoom] = useState(false);
+  const [surveyRoommatesMin, setSurveyRoommatesMin] = useState<string>('');
+  const [surveyRoommatesMax, setSurveyRoommatesMax] = useState<string>('');
+  const [surveyBillsIncluded, setSurveyBillsIncluded] = useState<boolean | null>(null);
+  const [surveyHasBalcony, setSurveyHasBalcony] = useState<boolean | null>(null);
+  const [surveyHasElevator, setSurveyHasElevator] = useState<boolean | null>(null);
+  const [surveyWantsMasterRoom, setSurveyWantsMasterRoom] = useState<boolean | null>(null);
+  const [surveyWithBroker, setSurveyWithBroker] = useState<boolean | null>(null);
   const [surveyWorksFromHome, setSurveyWorksFromHome] = useState(false);
   const [surveyKeepsKosher, setSurveyKeepsKosher] = useState(false);
   const [surveyIsShomerShabbat, setSurveyIsShomerShabbat] = useState(false);
@@ -685,8 +688,16 @@ export default function ProfileSettingsScreen() {
       }
 
       setIsDeleting(true);
-      const { error: deleteError } = await supabase.from('users').delete().eq('id', user.id);
-      if (deleteError) throw deleteError;
+      const { error: deleteError } = await supabase.rpc('delete_my_account');
+      if (deleteError) {
+        const msg = String((deleteError as any)?.message || deleteError);
+        if (msg.toLowerCase().includes('function') && msg.toLowerCase().includes('delete_my_account')) {
+          throw new Error(
+            'חסר RPC במסד הנתונים למחיקת חשבון (public.delete_my_account). נא להריץ את המיגרציה של Supabase ואז לנסות שוב.'
+          );
+        }
+        throw deleteError;
+      }
 
       try {
         await authService.signOut();
@@ -829,11 +840,69 @@ export default function ProfileSettingsScreen() {
                 );
                 setSurveyMoveIn((existing as any)?.move_in_month || '');
                 setSurveyIsSublet(!!(existing as any)?.is_sublet);
+                const neighborhoodsArr: string[] = Array.isArray((existing as any)?.preferred_neighborhoods)
+                  ? ((existing as any).preferred_neighborhoods as string[])
+                  : [];
+                setSurveyNeighborhoods(neighborhoodsArr.length ? neighborhoodsArr.join(', ') : '');
+
+                const minVal =
+                  typeof (existing as any)?.preferred_roommates_min === 'number'
+                    ? String((existing as any).preferred_roommates_min)
+                    : '';
+                const maxVal =
+                  typeof (existing as any)?.preferred_roommates_max === 'number'
+                    ? String((existing as any).preferred_roommates_max)
+                    : typeof (existing as any)?.preferred_roommates === 'number'
+                      ? String((existing as any).preferred_roommates)
+                      : '';
+                setSurveyRoommatesMin(minVal);
+                setSurveyRoommatesMax(maxVal);
+
+                setSurveyBillsIncluded(
+                  (existing as any)?.bills_included === undefined ? null : ((existing as any).bills_included as any)
+                );
+                setSurveyHasBalcony(
+                  (existing as any)?.has_balcony === undefined ? null : ((existing as any).has_balcony as any)
+                );
+                setSurveyHasElevator(
+                  (existing as any)?.has_elevator === undefined ? null : ((existing as any).has_elevator as any)
+                );
+                setSurveyWantsMasterRoom(
+                  (existing as any)?.wants_master_room === undefined ? null : ((existing as any).wants_master_room as any)
+                );
+                setSurveyWithBroker(
+                  (existing as any)?.with_broker === undefined ? null : ((existing as any).with_broker as any)
+                );
+                setSurveyWorksFromHome(!!(existing as any)?.works_from_home);
+                setSurveyKeepsKosher(!!(existing as any)?.keeps_kosher);
+                setSurveyIsShomerShabbat(!!(existing as any)?.is_shomer_shabbat);
+                setSurveyIsSmoker(!!(existing as any)?.is_smoker);
+                setSurveyHasPet(!!(existing as any)?.has_pet);
+                setSurveyHomeVibe((existing as any)?.home_vibe || '');
+                setSurveyOccupation((existing as any)?.occupation || '');
+                setSurveyRelationshipStatus((existing as any)?.relationship_status || '');
+                setSurveyCleanlinessImportance(
+                  typeof (existing as any)?.cleanliness_importance === 'number' ? (existing as any).cleanliness_importance : null
+                );
+                setSurveyCleaningFrequency((existing as any)?.cleaning_frequency || '');
+                setSurveyHostingPreference((existing as any)?.hosting_preference || '');
+                setSurveyCookingStyle((existing as any)?.cooking_style || '');
+                setSurveyPreferredAgeRange((existing as any)?.preferred_age_range || '');
+                setSurveyPreferredGender((existing as any)?.preferred_gender || '');
+                setSurveyPreferredOccupation((existing as any)?.preferred_occupation || '');
               } catch {
                 setSurveyCity('');
                 setSurveyPrice('');
                 setSurveyMoveIn('');
                 setSurveyIsSublet(false);
+                setSurveyNeighborhoods('');
+                setSurveyRoommatesMin('');
+                setSurveyRoommatesMax('');
+                setSurveyBillsIncluded(null);
+                setSurveyHasBalcony(null);
+                setSurveyHasElevator(null);
+                setSurveyWantsMasterRoom(null);
+                setSurveyWithBroker(null);
               } finally {
                 setShowSurveyModal(true);
               }
@@ -1112,6 +1181,21 @@ export default function ProfileSettingsScreen() {
                       onChangeText={setSurveyNeighborhoods}
                       placeholder="לב תל אביב, נווה צדק"
                     />
+                    {!!surveyCity.trim() && (
+                      <TouchableOpacity
+                        style={[styles.chipToggle, { alignSelf: 'flex-end' }]}
+                        onPress={() => {
+                          try {
+                            const all = getNeighborhoodsForCityName(surveyCity.trim());
+                            if (!all.length) return;
+                            setSurveyNeighborhoods(all.join(', '));
+                          } catch {}
+                        }}
+                        activeOpacity={0.9}
+                      >
+                        <Text style={styles.chipToggleText}>הכל</Text>
+                      </TouchableOpacity>
+                    )}
                   </View>
                   <View style={styles.fieldGroup}>
                     <View style={styles.labelRow}>
@@ -1170,11 +1254,12 @@ export default function ProfileSettingsScreen() {
                     <View style={styles.fieldHalf}>
                       <View style={styles.labelRow}>
                         <FileText size={16} color="#4C1D95" />
-                        <Text style={styles.fieldLabel}>עם מרפסת</Text>
+                        <Text style={styles.fieldLabel}>עם מרפסת / גינה</Text>
                       </View>
-                      <View style={{ flexDirection: 'row-reverse', gap: 10 }}>
-                        <TouchableOpacity style={[styles.chipToggle, surveyHasBalcony && styles.chipToggleActive]} onPress={() => setSurveyHasBalcony(true)}><Text style={[styles.chipToggleText, surveyHasBalcony && styles.chipToggleTextActive]}>כן</Text></TouchableOpacity>
-                        <TouchableOpacity style={[styles.chipToggle, !surveyHasBalcony && styles.chipToggleActive]} onPress={() => setSurveyHasBalcony(false)}><Text style={[styles.chipToggleText, !surveyHasBalcony && styles.chipToggleTextActive]}>לא</Text></TouchableOpacity>
+                      <View style={{ flexDirection: 'row-reverse', gap: 10, flexWrap: 'wrap' }}>
+                        <TouchableOpacity style={[styles.chipToggle, surveyHasBalcony === true && styles.chipToggleActive]} onPress={() => setSurveyHasBalcony(true)}><Text style={[styles.chipToggleText, surveyHasBalcony === true && styles.chipToggleTextActive]}>כן</Text></TouchableOpacity>
+                        <TouchableOpacity style={[styles.chipToggle, surveyHasBalcony === false && styles.chipToggleActive]} onPress={() => setSurveyHasBalcony(false)}><Text style={[styles.chipToggleText, surveyHasBalcony === false && styles.chipToggleTextActive]}>לא</Text></TouchableOpacity>
+                        <TouchableOpacity style={[styles.chipToggle, surveyHasBalcony === null && styles.chipToggleActive]} onPress={() => setSurveyHasBalcony(null)}><Text style={[styles.chipToggleText, surveyHasBalcony === null && styles.chipToggleTextActive]}>לא משנה לי</Text></TouchableOpacity>
                       </View>
                     </View>
                     <View style={styles.fieldHalf}>
@@ -1182,9 +1267,10 @@ export default function ProfileSettingsScreen() {
                         <FileText size={16} color="#4C1D95" />
                         <Text style={styles.fieldLabel}>מעלית</Text>
                       </View>
-                      <View style={{ flexDirection: 'row-reverse', gap: 10 }}>
-                        <TouchableOpacity style={[styles.chipToggle, surveyHasElevator && styles.chipToggleActive]} onPress={() => setSurveyHasElevator(true)}><Text style={[styles.chipToggleText, surveyHasElevator && styles.chipToggleTextActive]}>כן</Text></TouchableOpacity>
-                        <TouchableOpacity style={[styles.chipToggle, !surveyHasElevator && styles.chipToggleActive]} onPress={() => setSurveyHasElevator(false)}><Text style={[styles.chipToggleText, !surveyHasElevator && styles.chipToggleTextActive]}>לא</Text></TouchableOpacity>
+                      <View style={{ flexDirection: 'row-reverse', gap: 10, flexWrap: 'wrap' }}>
+                        <TouchableOpacity style={[styles.chipToggle, surveyHasElevator === true && styles.chipToggleActive]} onPress={() => setSurveyHasElevator(true)}><Text style={[styles.chipToggleText, surveyHasElevator === true && styles.chipToggleTextActive]}>כן</Text></TouchableOpacity>
+                        <TouchableOpacity style={[styles.chipToggle, surveyHasElevator === false && styles.chipToggleActive]} onPress={() => setSurveyHasElevator(false)}><Text style={[styles.chipToggleText, surveyHasElevator === false && styles.chipToggleTextActive]}>לא</Text></TouchableOpacity>
+                        <TouchableOpacity style={[styles.chipToggle, surveyHasElevator === null && styles.chipToggleActive]} onPress={() => setSurveyHasElevator(null)}><Text style={[styles.chipToggleText, surveyHasElevator === null && styles.chipToggleTextActive]}>לא משנה לי</Text></TouchableOpacity>
                       </View>
                     </View>
                   </View>
@@ -1194,9 +1280,10 @@ export default function ProfileSettingsScreen() {
                         <FileText size={16} color="#4C1D95" />
                         <Text style={styles.fieldLabel}>חדר מאסטר</Text>
                       </View>
-                      <View style={{ flexDirection: 'row-reverse', gap: 10 }}>
-                        <TouchableOpacity style={[styles.chipToggle, surveyWantsMasterRoom && styles.chipToggleActive]} onPress={() => setSurveyWantsMasterRoom(true)}><Text style={[styles.chipToggleText, surveyWantsMasterRoom && styles.chipToggleTextActive]}>כן</Text></TouchableOpacity>
-                        <TouchableOpacity style={[styles.chipToggle, !surveyWantsMasterRoom && styles.chipToggleActive]} onPress={() => setSurveyWantsMasterRoom(false)}><Text style={[styles.chipToggleText, !surveyWantsMasterRoom && styles.chipToggleTextActive]}>לא</Text></TouchableOpacity>
+                      <View style={{ flexDirection: 'row-reverse', gap: 10, flexWrap: 'wrap' }}>
+                        <TouchableOpacity style={[styles.chipToggle, surveyWantsMasterRoom === true && styles.chipToggleActive]} onPress={() => setSurveyWantsMasterRoom(true)}><Text style={[styles.chipToggleText, surveyWantsMasterRoom === true && styles.chipToggleTextActive]}>כן</Text></TouchableOpacity>
+                        <TouchableOpacity style={[styles.chipToggle, surveyWantsMasterRoom === false && styles.chipToggleActive]} onPress={() => setSurveyWantsMasterRoom(false)}><Text style={[styles.chipToggleText, surveyWantsMasterRoom === false && styles.chipToggleTextActive]}>לא</Text></TouchableOpacity>
+                        <TouchableOpacity style={[styles.chipToggle, surveyWantsMasterRoom === null && styles.chipToggleActive]} onPress={() => setSurveyWantsMasterRoom(null)}><Text style={[styles.chipToggleText, surveyWantsMasterRoom === null && styles.chipToggleTextActive]}>לא משנה לי</Text></TouchableOpacity>
                       </View>
                     </View>
                     <View style={styles.fieldHalf}>
@@ -1204,10 +1291,22 @@ export default function ProfileSettingsScreen() {
                         <FileText size={16} color="#4C1D95" />
                         <Text style={styles.fieldLabel}>חשבונות כלולים</Text>
                       </View>
-                      <View style={{ flexDirection: 'row-reverse', gap: 10 }}>
-                        <TouchableOpacity style={[styles.chipToggle, surveyBillsIncluded && styles.chipToggleActive]} onPress={() => setSurveyBillsIncluded(true)}><Text style={[styles.chipToggleText, surveyBillsIncluded && styles.chipToggleTextActive]}>כן</Text></TouchableOpacity>
-                        <TouchableOpacity style={[styles.chipToggle, !surveyBillsIncluded && styles.chipToggleActive]} onPress={() => setSurveyBillsIncluded(false)}><Text style={[styles.chipToggleText, !surveyBillsIncluded && styles.chipToggleTextActive]}>לא</Text></TouchableOpacity>
+                      <View style={{ flexDirection: 'row-reverse', gap: 10, flexWrap: 'wrap' }}>
+                        <TouchableOpacity style={[styles.chipToggle, surveyBillsIncluded === true && styles.chipToggleActive]} onPress={() => setSurveyBillsIncluded(true)}><Text style={[styles.chipToggleText, surveyBillsIncluded === true && styles.chipToggleTextActive]}>כן</Text></TouchableOpacity>
+                        <TouchableOpacity style={[styles.chipToggle, surveyBillsIncluded === false && styles.chipToggleActive]} onPress={() => setSurveyBillsIncluded(false)}><Text style={[styles.chipToggleText, surveyBillsIncluded === false && styles.chipToggleTextActive]}>לא</Text></TouchableOpacity>
+                        <TouchableOpacity style={[styles.chipToggle, surveyBillsIncluded === null && styles.chipToggleActive]} onPress={() => setSurveyBillsIncluded(null)}><Text style={[styles.chipToggleText, surveyBillsIncluded === null && styles.chipToggleTextActive]}>לא משנה לי</Text></TouchableOpacity>
                       </View>
+                    </View>
+                  </View>
+                  <View style={styles.fieldGroup}>
+                    <View style={styles.labelRow}>
+                      <FileText size={16} color="#4C1D95" />
+                      <Text style={styles.fieldLabel}>תיווך</Text>
+                    </View>
+                    <View style={{ flexDirection: 'row-reverse', gap: 10, flexWrap: 'wrap' }}>
+                      <TouchableOpacity style={[styles.chipToggle, surveyWithBroker === true && styles.chipToggleActive]} onPress={() => setSurveyWithBroker(true)}><Text style={[styles.chipToggleText, surveyWithBroker === true && styles.chipToggleTextActive]}>עם תיווך</Text></TouchableOpacity>
+                      <TouchableOpacity style={[styles.chipToggle, surveyWithBroker === false && styles.chipToggleActive]} onPress={() => setSurveyWithBroker(false)}><Text style={[styles.chipToggleText, surveyWithBroker === false && styles.chipToggleTextActive]}>בלי תיווך</Text></TouchableOpacity>
+                      <TouchableOpacity style={[styles.chipToggle, surveyWithBroker === null && styles.chipToggleActive]} onPress={() => setSurveyWithBroker(null)}><Text style={[styles.chipToggleText, surveyWithBroker === null && styles.chipToggleTextActive]}>לא משנה לי</Text></TouchableOpacity>
                     </View>
                   </View>
                   <View style={styles.sectionDivider} />
@@ -1318,15 +1417,24 @@ export default function ProfileSettingsScreen() {
                   <View style={styles.fieldGroup}>
                     <View style={styles.labelRow}>
                       <UserIcon size={16} color="#4C1D95" />
-                      <Text style={styles.fieldLabel}>מספר שותפים מועדף</Text>
+                      <Text style={styles.fieldLabel}>טווח שותפים מועדף</Text>
                     </View>
-                    <TextInput
-                      style={styles.fieldInput}
-                      value={surveyRoommates}
-                      onChangeText={(t) => setSurveyRoommates(t.replace(/[^0-9]/g, ''))}
-                      keyboardType="number-pad"
-                      placeholder="לדוגמה: 2"
-                    />
+                    <View style={{ flexDirection: 'row-reverse', gap: 12 }}>
+                      <TextInput
+                        style={[styles.fieldInput, { flex: 1 }]}
+                        value={surveyRoommatesMin}
+                        onChangeText={(t) => setSurveyRoommatesMin(t.replace(/[^0-9]/g, ''))}
+                        keyboardType="number-pad"
+                        placeholder="מינימום"
+                      />
+                      <TextInput
+                        style={[styles.fieldInput, { flex: 1 }]}
+                        value={surveyRoommatesMax}
+                        onChangeText={(t) => setSurveyRoommatesMax(t.replace(/[^0-9]/g, ''))}
+                        keyboardType="number-pad"
+                        placeholder="מקסימום"
+                      />
+                    </View>
                   </View>
                   <View style={styles.fieldRow}>
                     <View style={styles.fieldHalf}>
@@ -1390,17 +1498,30 @@ export default function ProfileSettingsScreen() {
                             price_range: (priceNum as any) || null,
                             move_in_month: surveyMoveIn || null,
                             is_sublet: surveyIsSublet || false,
-                            preferred_neighborhoods: surveyNeighborhoods || null,
-                            preferred_roommates: surveyRoommates ? parseInt(surveyRoommates) : null,
-                            bills_included: surveyBillsIncluded || false,
-                            has_balcony: surveyHasBalcony || false,
-                            has_elevator: surveyHasElevator || false,
-                            wants_master_room: surveyWantsMasterRoom || false,
+                            preferred_neighborhoods: (() => {
+                              const raw = (surveyNeighborhoods || '').trim();
+                              if (!raw) return null;
+                              const arr = raw
+                                .split(',')
+                                .map((s) => s.trim())
+                                .filter(Boolean);
+                              return arr.length ? arr : null;
+                            })(),
+                            preferred_roommates_min: surveyRoommatesMin ? parseInt(surveyRoommatesMin) : null,
+                            preferred_roommates_max: surveyRoommatesMax ? parseInt(surveyRoommatesMax) : null,
+                            preferred_roommates:
+                              (surveyRoommatesMax ? parseInt(surveyRoommatesMax) : null) ??
+                              (surveyRoommatesMin ? parseInt(surveyRoommatesMin) : null),
+                            bills_included: surveyBillsIncluded,
+                            has_balcony: surveyHasBalcony,
+                            has_elevator: surveyHasElevator,
+                            wants_master_room: surveyWantsMasterRoom,
                             works_from_home: surveyWorksFromHome || false,
                             keeps_kosher: surveyKeepsKosher || false,
                             is_shomer_shabbat: surveyIsShomerShabbat || false,
                             is_smoker: surveyIsSmoker || false,
                             has_pet: surveyHasPet || false,
+                            with_broker: surveyWithBroker,
                             home_vibe: surveyHomeVibe || null,
                             occupation: surveyOccupation || null,
                             relationship_status: surveyRelationshipStatus || null,

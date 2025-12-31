@@ -641,8 +641,16 @@ export default function ProfileScreen() {
       }
 
       setIsDeleting(true);
-      const { error: deleteError } = await supabase.from('users').delete().eq('id', user.id);
-      if (deleteError) throw deleteError;
+      const { error: deleteError } = await supabase.rpc('delete_my_account');
+      if (deleteError) {
+        const msg = String((deleteError as any)?.message || deleteError);
+        if (msg.toLowerCase().includes('function') && msg.toLowerCase().includes('delete_my_account')) {
+          throw new Error(
+            'חסר RPC במסד הנתונים למחיקת חשבון (public.delete_my_account). נא להריץ את המיגרציה של Supabase ואז לנסות שוב.'
+          );
+        }
+        throw deleteError;
+      }
 
       try {
         await authService.signOut();
