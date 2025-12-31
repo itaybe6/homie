@@ -1,10 +1,11 @@
 import { Tabs, useRouter, usePathname } from 'expo-router';
 import { StyleSheet, Alert, Pressable, View, Platform } from 'react-native';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useAuthStore } from '@/stores/authStore';
 import { fetchUserSurvey } from '@/lib/survey';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Home, Users, Plus, Heart, User as UserIcon } from 'lucide-react-native';
+import { supabase } from '@/lib/supabase';
 
 function FloatingCenterTabButton({
   children,
@@ -12,12 +13,14 @@ function FloatingCenterTabButton({
   accessibilityState,
   accessibilityLabel,
   testID,
+  isVisuallyDisabled,
 }: {
   children: React.ReactNode;
   onPress?: React.ComponentProps<typeof Pressable>['onPress'];
   accessibilityState?: { selected?: boolean };
   accessibilityLabel?: string;
   testID?: string;
+  isVisuallyDisabled?: boolean;
 }) {
   const selected = !!accessibilityState?.selected;
   return (
@@ -30,6 +33,7 @@ function FloatingCenterTabButton({
         style={({ pressed }) => [
           styles.centerButton,
           selected && styles.centerButtonSelected,
+          isVisuallyDisabled && styles.centerButtonDisabled,
           pressed && styles.centerButtonPressed,
         ]}>
         {children}
@@ -45,7 +49,47 @@ export default function TabLayout() {
   const hasPromptedRef = useRef(false);
   const prevUserIdRef = useRef<string | null>(null);
   const isCheckingSurveyRef = useRef(false);
+  const isCheckingOwnedApartmentRef = useRef(false);
   const insets = useSafeAreaInsets();
+  const isSurveyRoute =
+    typeof pathname === 'string' && pathname.includes('/onboarding/survey');
+  const isAddApartmentTabRoute =
+    typeof pathname === 'string' && (pathname === '/(tabs)/add-apartment' || pathname.includes('/add-apartment'));
+  const [ownedApartmentId, setOwnedApartmentId] = useState<string | null | undefined>(
+    user?.id ? undefined : null
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    const checkOwnedApartment = async () => {
+      if (!user?.id) {
+        setOwnedApartmentId(null);
+        return;
+      }
+      // unknown while checking
+      setOwnedApartmentId(undefined);
+      try {
+        const { data, error } = await supabase
+          .from('apartments')
+          .select('id')
+          .eq('owner_id', user.id)
+          .limit(1);
+        if (cancelled) return;
+        if (error) throw error;
+        const firstId = data && data.length > 0 ? (data[0] as any).id : null;
+        setOwnedApartmentId(firstId);
+      } catch {
+        if (cancelled) return;
+        // If we can't verify, keep unknown so we don't accidentally allow extra apartments
+        setOwnedApartmentId(undefined);
+      }
+    };
+
+    checkOwnedApartment();
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id]);
 
   useEffect(() => {
     // Admins should not see the regular tabs – redirect them into admin
@@ -115,7 +159,9 @@ export default function TabLayout() {
         tabBarHideOnKeyboard: true,
         tabBarActiveTintColor: '#4C1D95',
         tabBarInactiveTintColor: '#6B7280',
-        tabBarStyle: {
+        tabBarStyle: isSurveyRoute || isAddApartmentTabRoute
+          ? ({ display: 'none' } as any)
+          : ({
           backgroundColor: '#FFFFFF',
           borderTopColor: '#E5E7EB',
           borderTopWidth: StyleSheet.hairlineWidth,
@@ -129,7 +175,7 @@ export default function TabLayout() {
           shadowRadius: 12,
           shadowOffset: { width: 0, height: -2 },
           elevation: 10,
-        } as any,
+        } as any),
         tabBarLabelStyle: { fontSize: 12, fontWeight: '600' },
       }}>
       <Tabs.Screen
@@ -152,11 +198,57 @@ export default function TabLayout() {
           tabBarLabel: '',
           tabBarButton: (props) => (
             <FloatingCenterTabButton
-              onPress={props.onPress}
+              isVisuallyDisabled={!!user?.id && ownedApartmentId !== null && ownedApartmentId !== undefined}
+              onPress={async (e) => {
+                // Each user can upload max 1 apartment (by owner_id)
+                if (user?.id) {
+                  if (ownedApartmentId === undefined) {
+                    // Retry on demand so we don't get "stuck" if the background check failed
+                    if (isCheckingOwnedApartmentRef.current) return;
+                    isCheckingOwnedApartmentRef.current = true;
+                    try {
+                      const { data, error } = await supabase
+                        .from('apartments')
+                        .select('id')
+                        .eq('owner_id', user.id)
+                        .limit(1);
+                      if (error) throw error;
+                      const firstId = data && data.length > 0 ? (data[0] as any).id : null;
+                      setOwnedApartmentId(firstId);
+
+                      if (firstId) {
+                        Alert.alert(
+                          'לא ניתן להוסיף דירה',
+                          'אי אפשר להעלות עוד דירה כי כבר העלית דירה אחת.'
+                        );
+                        return;
+                      }
+                      router.push('/add-apartment' as any);
+                      return;
+                    } catch {
+                      Alert.alert('שגיאה', 'לא הצלחנו לבדוק אם כבר העלית דירה. נסה שוב.');
+                      return;
+                    } finally {
+                      isCheckingOwnedApartmentRef.current = false;
+                    }
+                  }
+                  if (ownedApartmentId !== null) {
+                    Alert.alert(
+                      'לא ניתן להוסיף דירה',
+                      'אי אפשר להעלות עוד דירה כי כבר העלית דירה אחת.'
+                    );
+                    return;
+                  }
+                }
+                router.push('/add-apartment' as any);
+              }}
               accessibilityLabel={props.accessibilityLabel}
               accessibilityState={props.accessibilityState as any}
               testID={props.testID}>
-              <Plus size={32} color="#FFFFFF" />
+              <Plus
+                size={32}
+                color={!!user?.id && ownedApartmentId !== null && ownedApartmentId !== undefined ? '#E5E7EB' : '#FFFFFF'}
+              />
             </FloatingCenterTabButton>
           ),
         }}
@@ -224,6 +316,10 @@ const styles = StyleSheet.create({
   },
   centerButtonSelected: {
     backgroundColor: '#4C1D95',
+  },
+  centerButtonDisabled: {
+    backgroundColor: '#9CA3AF',
+    borderColor: 'rgba(255,255,255,0.12)',
   },
   centerButtonPressed: {
     transform: [{ scale: 0.98 }],

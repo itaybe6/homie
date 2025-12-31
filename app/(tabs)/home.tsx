@@ -8,6 +8,8 @@ import {
   ActivityIndicator,
   RefreshControl,
   TouchableOpacity,
+  Pressable,
+  useWindowDimensions,
   Modal,
   ScrollView,
   Alert,
@@ -27,9 +29,129 @@ import { Apartment } from '@/types/database';
 import ApartmentCard from '@/components/ApartmentCard';
 import FilterChipsBar, { defaultFilterChips, selectedFiltersFromIds } from '@/components/FilterChipsBar';
 
+function parseOptionalInt(v: string): number | null {
+  const t = String(v || '').trim();
+  if (!t) return null;
+  const n = Number(t);
+  if (!Number.isFinite(n)) return null;
+  const i = Math.floor(n);
+  return i > 0 ? i : null;
+}
+
+function clampInt(n: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, Math.floor(n)));
+}
+
+function GaugeStepper({
+  label,
+  value,
+  min,
+  max,
+  onChange,
+  maxDisplay,
+}: {
+  label: string;
+  value: number | null;
+  min: number;
+  max: number;
+  onChange: (next: number | null) => void;
+  maxDisplay?: string;
+}) {
+  const steps = Array.from({ length: max - min + 1 }, (_, i) => min + i);
+  const displayValue =
+    value === null ? 'ללא' : value === max && maxDisplay ? maxDisplay : String(value);
+
+  const dec = () => {
+    if (value === null) return;
+    if (value <= min) onChange(null);
+    else onChange(value - 1);
+  };
+
+  const inc = () => {
+    if (value === null) onChange(min);
+    else onChange(Math.min(max, value + 1));
+  };
+
+  return (
+    <View style={styles.gaugeWrap}>
+      <View style={styles.gaugeTopRow}>
+        <Text style={styles.gaugeLabel}>{label}</Text>
+        <View style={styles.gaugeTopActions}>
+          <View style={styles.gaugeValueChip}>
+            <Text style={styles.gaugeValueChipText}>{displayValue}</Text>
+          </View>
+          <Pressable
+            onPress={() => onChange(null)}
+            disabled={value === null}
+            style={({ pressed }) => [
+              styles.gaugeClearLink,
+              value === null ? styles.gaugeClearLinkDisabled : null,
+              pressed && value !== null ? styles.gaugeClearLinkPressed : null,
+            ]}
+          >
+            <Text style={[styles.gaugeClearLinkText, value === null ? styles.gaugeClearLinkTextDisabled : null]}>
+              נקה
+            </Text>
+          </Pressable>
+        </View>
+      </View>
+
+      <View style={styles.gaugeBarWithBtns}>
+        <Pressable
+          onPress={dec}
+          disabled={value === null}
+          style={({ pressed }) => [
+            styles.gaugeMiniBtn,
+            value === null ? styles.gaugeMiniBtnDisabled : null,
+            pressed && value !== null ? styles.gaugeMiniBtnPressed : null,
+          ]}
+          accessibilityRole="button"
+          accessibilityLabel={`${label} -`}
+        >
+          <Text style={styles.gaugeMiniBtnText}>−</Text>
+        </Pressable>
+
+        <View style={styles.gaugeBarRow}>
+          {steps.map((n) => {
+            const filled = value !== null && n <= value;
+            return (
+              <Pressable
+                key={`${label}-${n}`}
+                onPress={() => onChange(n)}
+                style={({ pressed }) => [
+                  styles.gaugeSegment,
+                  filled ? styles.gaugeSegmentFilled : null,
+                  pressed ? styles.gaugeSegmentPressed : null,
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel={`${label} ${n}`}
+              />
+            );
+          })}
+        </View>
+
+        <Pressable
+          onPress={inc}
+          style={({ pressed }) => [styles.gaugeMiniBtn, pressed ? styles.gaugeMiniBtnPressed : null]}
+          accessibilityRole="button"
+          accessibilityLabel={`${label} +`}
+        >
+          <Text style={styles.gaugeMiniBtnText}>+</Text>
+        </Pressable>
+      </View>
+
+      <View style={styles.gaugeTicksRow}>
+        <Text style={styles.gaugeTickText}>{min}</Text>
+        <Text style={styles.gaugeTickText}>{maxDisplay ?? String(max)}</Text>
+      </View>
+    </View>
+  );
+}
 
 export default function HomeScreen() {
   const router = useRouter();
+  const { height: screenHeight } = useWindowDimensions();
+  const PAGE_BG = '#FFFFFF';
   const { apartments, setApartments, isLoading, setLoading } =
     useApartmentStore();
   const { user } = useAuthStore();
@@ -59,10 +181,26 @@ export default function HomeScreen() {
         : null;
   }
 
+  function getNormalizedPartnerIds(apartment: Apartment): string[] {
+    const anyApt = apartment as any;
+    const ownerId = String(anyApt?.owner_id || '').trim();
+    const raw = normalizeIds(anyApt?.partner_ids);
+    const uniq = Array.from(
+      new Set(
+        raw
+          .map((x) => String(x || '').trim())
+          .filter(Boolean)
+          // Prevent counting the owner as a partner if bad data includes it
+          .filter((id) => !ownerId || id !== ownerId)
+      )
+    );
+    return uniq;
+  }
+
   function getAvailableRoommateSlots(apartment: Apartment): number | null {
     const max = getMaxRoommates(apartment);
     if (max === null) return null;
-    const used = normalizeIds((apartment as any)?.partner_ids).length;
+    const used = getNormalizedPartnerIds(apartment).length;
     return Math.max(0, max - used);
   }
   const [searchQuery, setSearchQuery] = useState('');
@@ -103,11 +241,6 @@ export default function HomeScreen() {
     outputRange: [0, -12],
     extrapolate: 'clamp',
   });
-  const chipsOpacity = clamped.interpolate({
-    inputRange: [0, 120],
-    outputRange: [1, 0.65],
-    extrapolate: 'clamp',
-  });
   const chipsTranslateY = clamped.interpolate({
     inputRange: [0, 120],
     outputRange: [0, -8],
@@ -117,47 +250,54 @@ export default function HomeScreen() {
   // Header for the list – contains search row and filter chips so that
   // the entire grey area scrolls together.
   const renderListHeader = () => (
-    <Animated.View style={{ transform: [{ translateY: headerTranslateY }] }}>
+    <Animated.View style={{ transform: [{ translateY: headerTranslateY }], backgroundColor: PAGE_BG }}>
       <Animated.View style={{ transform: [{ scale: headerScale }] }}>
-        <View style={styles.searchRow}>
-        {/* Filter button on the left */}
-        <View style={styles.actionsRowBody}>
-          {/* Map button (same style as filter); rendered first so with row-reverse the filter stays near the search */}
-          <TouchableOpacity
-            activeOpacity={0.9}
-            style={styles.actionBtnBody}
-            onPress={() => {
-              router.push('/(tabs)/map');
-            }}
-          >
-            <Map size={22} color="#4C1D95" />
-          </TouchableOpacity>
-          <TouchableOpacity
-            activeOpacity={0.9}
-            style={styles.actionBtnBody}
-            onPress={() => setIsFilterOpen(true)}
-          >
-            <SlidersHorizontal size={22} color="#4C1D95" />
-          </TouchableOpacity>
-        </View>
-        {/* Search input */}
-        <View style={[styles.searchContainer, { flex: 1 }]}>
-          <Search size={20} color="#4C1D95" style={styles.searchIcon} />
-          <TextInput
-            style={styles.topSearchInput}
-            placeholder="חיפוש לפי עיר, שכונה או כתובת..."
-            placeholderTextColor="#9DA4AE"
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-          />
-        </View>
+        <View style={styles.headerFullBleed}>
+          <View style={styles.searchRow}>
+          {/* Filter button on the left */}
+          <View style={styles.actionsRowBody}>
+            {/* Map button (same style as filter); rendered first so with row-reverse the filter stays near the search */}
+            <TouchableOpacity
+              activeOpacity={0.9}
+              style={styles.actionBtnBody}
+              onPress={() => {
+                router.push('/(tabs)/map');
+              }}
+            >
+              <Map size={22} color="#4C1D95" />
+            </TouchableOpacity>
+            <TouchableOpacity
+              activeOpacity={0.9}
+              style={styles.actionBtnBody}
+              onPress={() => setIsFilterOpen(true)}
+            >
+              <SlidersHorizontal size={22} color="#4C1D95" />
+            </TouchableOpacity>
+          </View>
+          {/* Search input */}
+          <View style={[styles.searchContainer, { flex: 1 }]}>
+            <Search size={20} color="#4C1D95" style={styles.searchIcon} />
+            <TextInput
+              style={styles.topSearchInput}
+              placeholder="חיפוש לפי עיר או שכונה..."
+              placeholderTextColor="#9DA4AE"
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+            />
+          </View>
+          </View>
         </View>
       </Animated.View>
-      <Animated.View style={{ opacity: chipsOpacity, transform: [{ translateY: chipsTranslateY }] }}>
+      <Animated.View style={{ transform: [{ translateY: chipsTranslateY }] }}>
         <FilterChipsBar
           filters={defaultFilterChips}
           selectedIds={chipSelected}
           onChange={setChipSelected}
+          withShadow={false}
+          inactiveBackgroundColor="#F3F4F6"
+          inactiveBorderColor="#E5E7EB"
+          activeBackgroundColor="#EFEAFE"
+          activeBorderColor="rgba(76, 29, 149, 0.28)"
           onOpenDropdown={(chip) => {
             if (chip.id === 'price' || chip.id === 'rooms') {
               setIsFilterOpen(true);
@@ -261,9 +401,7 @@ export default function HomeScreen() {
 
       // search query
       const matchesSearch = !query
-        || apartment.title.toLowerCase().includes(query)
         || apartment.city.toLowerCase().includes(query)
-        || apartment.address.toLowerCase().includes(query)
         || (apartment as any).neighborhood?.toLowerCase?.().includes(query);
 
       if (!matchesSearch) return false;
@@ -363,7 +501,7 @@ export default function HomeScreen() {
       Alert.alert('שגיאה', 'אירעה שגיאה בבדיקת השיוך לדירה. נסה שוב.');
       return;
     }
-    router.push('/(tabs)/add-apartment');
+    router.push('/add-apartment' as any);
   };
 
   if (isLoading && !refreshing) {
@@ -376,7 +514,8 @@ export default function HomeScreen() {
 
   return (
     <SafeAreaView edges={['top']} style={styles.safeTop}>
-      <View style={[styles.topBar, { paddingTop: 52, backgroundColor: '#FFFFFF' }]} />
+      {/* Spacer to avoid content sitting under the absolute GlobalTopBar */}
+      <View style={[styles.topBar, { paddingTop: 44, paddingBottom: 0, backgroundColor: PAGE_BG }]} />
 
       {/* Page body: light grey background */}
       <View style={styles.pageBody}>
@@ -388,10 +527,12 @@ export default function HomeScreen() {
             <ApartmentCard
               apartment={item}
               onPress={() => handleApartmentPress(item)}
+              variant="home"
             />
           )}
           keyExtractor={(item: Apartment) => item.id}
           contentContainerStyle={styles.listContent}
+          style={{ backgroundColor: PAGE_BG }}
           ListHeaderComponent={renderListHeader}
           onScroll={Animated.event(
             [{ nativeEvent: { contentOffset: { y: scrollY } } }],
@@ -423,7 +564,14 @@ export default function HomeScreen() {
         <View style={styles.modalOverlay}>
           <TouchableOpacity style={styles.modalBackdrop} activeOpacity={1} onPress={() => setIsFilterOpen(false)} />
 
-          <View style={styles.sheet}>
+          <View
+            style={[
+              styles.sheet,
+              {
+                height: Math.max(360, Math.round(screenHeight * 0.58)),
+              },
+            ]}
+          >
             <View style={styles.sheetHeader}>
               <Text style={styles.sheetTitle}>סינון דירות</Text>
               <TouchableOpacity onPress={() => setIsFilterOpen(false)} style={styles.closeBtn}>
@@ -431,7 +579,12 @@ export default function HomeScreen() {
               </TouchableOpacity>
             </View>
 
-            <View style={styles.sheetContent}>
+            <ScrollView
+              style={[styles.sheetContent, { flex: 1 }]}
+              contentContainerStyle={styles.sheetContentInner}
+              keyboardShouldPersistTaps="handled"
+              nestedScrollEnabled
+            >
               <View style={styles.fieldGroup}> 
                 <Text style={styles.fieldLabel}>עיר</Text>
                 <TouchableOpacity
@@ -603,59 +756,47 @@ export default function HomeScreen() {
               </View>
 
               <View style={styles.fieldGroup}> 
-                <Text style={styles.fieldLabel}>חדרי שינה (מינימום)</Text>
-                <View style={styles.chipsRow}>
-                  {[1,2,3,4,5].map((n) => {
-                    const selected = String(n) === filters.minBedrooms;
-                    return (
-                      <TouchableOpacity
-                        key={`bed-${n}`}
-                        style={[styles.chip, selected && styles.chipSelected]}
-                        onPress={() => setFilters((f) => ({ ...f, minBedrooms: selected ? '' : String(n) }))}
-                      >
-                        <Text style={[styles.chipText, selected && styles.chipTextSelected]}>{n}</Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
+                <GaugeStepper
+                  label="חדרי שינה (מינימום)"
+                  min={1}
+                  max={6}
+                  maxDisplay="6+"
+                  value={parseOptionalInt(filters.minBedrooms)}
+                  onChange={(next) =>
+                    setFilters((f) => ({ ...f, minBedrooms: next === null ? '' : String(clampInt(next, 1, 6)) }))
+                  }
+                />
               </View>
 
               <View style={styles.fieldGroup}> 
-                <Text style={styles.fieldLabel}>חדרי רחצה (מינימום)</Text>
-                <View style={styles.chipsRow}>
-                  {[1,2,3].map((n) => {
-                    const selected = String(n) === filters.minBathrooms;
-                    return (
-                      <TouchableOpacity
-                        key={`bath-${n}`}
-                        style={[styles.chip, selected && styles.chipSelected]}
-                        onPress={() => setFilters((f) => ({ ...f, minBathrooms: selected ? '' : String(n) }))}
-                      >
-                        <Text style={[styles.chipText, selected && styles.chipTextSelected]}>{n}</Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
+                <GaugeStepper
+                  label="חדרי רחצה (מינימום)"
+                  min={1}
+                  max={4}
+                  maxDisplay="4+"
+                  value={parseOptionalInt(filters.minBathrooms)}
+                  onChange={(next) =>
+                    setFilters((f) => ({ ...f, minBathrooms: next === null ? '' : String(clampInt(next, 1, 4)) }))
+                  }
+                />
               </View>
 
               <View style={styles.fieldGroup}>
-                <Text style={styles.fieldLabel}>מקומות פנויים לשותפים (מינימום)</Text>
-                <View style={styles.chipsRow}>
-                  {[1,2,3,4].map((n) => {
-                    const selected = String(n) === filters.minAvailableRoommateSlots;
-                    return (
-                      <TouchableOpacity
-                        key={`slots-${n}`}
-                        style={[styles.chip, selected && styles.chipSelected]}
-                        onPress={() => setFilters((f) => ({ ...f, minAvailableRoommateSlots: selected ? '' : String(n) }))}
-                      >
-                        <Text style={[styles.chipText, selected && styles.chipTextSelected]}>{n}</Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
+                <GaugeStepper
+                  label="מקומות פנויים לשותפים (מינימום)"
+                  min={1}
+                  max={4}
+                  maxDisplay="4+"
+                  value={parseOptionalInt(filters.minAvailableRoommateSlots)}
+                  onChange={(next) =>
+                    setFilters((f) => ({
+                      ...f,
+                      minAvailableRoommateSlots: next === null ? '' : String(clampInt(next, 1, 4)),
+                    }))
+                  }
+                />
               </View>
-            </View>
+            </ScrollView>
 
             <View style={styles.sheetFooter}>
               <TouchableOpacity style={styles.clearBtn} onPress={() => { clearFilters(); }}>
@@ -692,14 +833,20 @@ const styles = StyleSheet.create({
   },
   pageBody: {
     flex: 1,
-    backgroundColor: '#F3F4F6',
+    backgroundColor: '#FFFFFF',
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     overflow: 'visible',
     paddingTop: 0,
   },
+  // The list has paddingHorizontal=16. This "bleeds" the header to full width,
+  // then re-applies a single consistent padding so the search row isn't double-padded.
+  headerFullBleed: {
+    marginHorizontal: -16,
+    paddingHorizontal: 16,
+  },
   searchRow: {
-    paddingHorizontal: 12,
+    paddingHorizontal: 0,
     paddingTop: 6,
     paddingBottom: 6,
     flexDirection: 'row',
@@ -761,16 +908,26 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     paddingHorizontal: 10,
     height: 44,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
+    // Floating look (no border)
+    shadowColor: '#111827',
+    shadowOpacity: 0.08,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 6,
   },
   actionBtnBody: {
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: '#EFEAFE',
+    backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
+    // Floating look (no border)
+    shadowColor: '#111827',
+    shadowOpacity: 0.08,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 6,
   },
   searchIcon: {
     marginLeft: 8,
@@ -808,6 +965,7 @@ const styles = StyleSheet.create({
   listContent: {
     padding: 16,
     paddingBottom: 140, // Leave room for floating tab bar
+    backgroundColor: '#FFFFFF',
   },
   modalOverlay: {
     flex: 1,
@@ -846,9 +1004,12 @@ const styles = StyleSheet.create({
   },
   sheetContent: {
     paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 8,
-    gap: 12,
+    paddingTop: 10,
+    paddingBottom: 6,
+  },
+  sheetContentInner: {
+    paddingBottom: 6,
+    gap: 10,
   },
   fieldGroup: {
     gap: 8,
@@ -901,6 +1062,117 @@ const styles = StyleSheet.create({
   },
   chipTextSelected: {
     color: '#4C1D95',
+  },
+  gaugeWrap: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    padding: 10,
+    gap: 8,
+  },
+  gaugeTopRow: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  gaugeLabel: {
+    color: '#4C1D95',
+    fontSize: 12,
+    fontWeight: '700',
+    textAlign: 'right',
+    flex: 1,
+  },
+  gaugeTopActions: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 10,
+  },
+  gaugeValueChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: '#F3F4F6',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  gaugeValueChipText: {
+    color: '#111827',
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  gaugeClearLink: {
+    paddingHorizontal: 6,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  gaugeClearLinkDisabled: {},
+  gaugeClearLinkPressed: {
+    backgroundColor: '#F3F4F6',
+  },
+  gaugeClearLinkText: {
+    color: '#4C1D95',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  gaugeClearLinkTextDisabled: {
+    color: '#9CA3AF',
+  },
+  gaugeBarWithBtns: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 10,
+  },
+  gaugeMiniBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  gaugeMiniBtnDisabled: {
+    opacity: 0.5,
+  },
+  gaugeMiniBtnPressed: {
+    backgroundColor: '#F5F3FF',
+    borderColor: 'rgba(76, 29, 149, 0.28)',
+  },
+  gaugeMiniBtnText: {
+    color: '#111827',
+    fontSize: 18,
+    fontWeight: '900',
+    marginTop: -1,
+  },
+  gaugeBarRow: {
+    flexDirection: 'row-reverse',
+    gap: 6,
+    flex: 1,
+  },
+  gaugeSegment: {
+    flex: 1,
+    height: 7,
+    borderRadius: 999,
+    backgroundColor: '#E5E7EB',
+    overflow: 'hidden',
+  },
+  gaugeSegmentFilled: {
+    backgroundColor: '#4C1D95',
+  },
+  gaugeSegmentPressed: {
+    opacity: 0.88,
+  },
+  gaugeTicksRow: {
+    flexDirection: 'row-reverse',
+    justifyContent: 'space-between',
+  },
+  gaugeTickText: {
+    color: '#6B7280',
+    fontSize: 12,
+    fontWeight: '700',
   },
   sheetFooter: {
     flexDirection: 'row-reverse',

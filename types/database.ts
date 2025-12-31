@@ -6,6 +6,7 @@ export interface User {
   age?: number;
   phone?: string;
   city?: string;
+  address?: string;
   bio?: string;
   gender?: 'male' | 'female';
   avatar_url?: string;
@@ -66,12 +67,22 @@ export interface Apartment {
   city: string;
   neighborhood?: string;
   price: number;
-  room_type: string;
+  apartment_type?: 'REGULAR' | 'GARDEN'; // סוג הדירה (שדות חדשים)
   bedrooms: number;
   bathrooms: number;
+  square_meters?: number; // מטר מרובע של הדירה (שדות חדשים)
+  floor?: number; // קומה (שדות חדשים)
+  garden_square_meters?: number; // מטר מרובע של הגינה (שדות חדשים)
   roommate_capacity?: number;
+  image_url?: string; // legacy: single image url (some environments still use it)
   image_urls?: string[]; // new: multiple images
   partner_ids?: string[]; // national IDs of roommates associated to the apartment
+
+  // Apartment details (פרטי דירה)
+  apartment_type?: 'REGULAR' | 'GARDEN'; // סוג הדירה
+  square_meters?: number; // מטר מרובע של הדירה
+  floor?: number; // קומה
+  garden_square_meters?: number; // מטר מרובע של הגינה (רק אם apartment_type === 'GARDEN')
 
   // Property features (מאפייני הנכס)
   balcony_count?: number; // 0-3

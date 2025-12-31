@@ -10,46 +10,30 @@ import {
   Image,
   Alert,
   Linking,
+  Modal,
+  Pressable,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { Inbox, Send, Filter, Home, Users, UserPlus2, UserPlus } from 'lucide-react-native';
+import { Inbox, Send, Filter, Home, Users, UserPlus2, UserPlus, Sparkles } from 'lucide-react-native';
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/authStore';
 import { Apartment, User } from '@/types/database';
 import { computeGroupAwareLabel } from '@/lib/group';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { formatTimeAgoHe } from '@/utils/time';
 
 export default function RequestsScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ tab?: string | string[]; kind?: string | string[]; status?: string | string[] }>();
+  const params = useLocalSearchParams<{ tab?: string | string[] }>();
   const user = useAuthStore((s) => s.user);
   const insets = useSafeAreaInsets();
+  const [ownerDetails, setOwnerDetails] = useState<null | { full_name?: string; avatar_url?: string; phone?: string }>(null);
   const toSingle = (value: string | string[] | undefined): string | undefined =>
     Array.isArray(value) ? value[0] : value;
   type KindFilterValue = 'APT' | 'APT_INVITE' | 'MATCH' | 'GROUP' | 'ALL';
   type StatusFilterValue = 'ALL' | 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED' | 'NOT_RELEVANT';
   const parseTabParam = (value?: string): 'incoming' | 'sent' =>
     value === 'sent' ? 'sent' : 'incoming';
-  const parseKindParam = (value?: string): KindFilterValue => {
-    if (value === 'MATCH' || value === 'ALL' || value === 'GROUP' || value === 'APT' || value === 'APT_INVITE') {
-      return value as KindFilterValue;
-    }
-    return 'ALL';
-  };
-  const parseStatusParam = (value?: string): StatusFilterValue => {
-    switch (value) {
-      case 'PENDING':
-      case 'APPROVED':
-      case 'REJECTED':
-      case 'CANCELLED':
-      case 'NOT_RELEVANT':
-        return value;
-      case 'ALL':
-        return 'ALL';
-      default:
-        return 'ALL';
-    }
-  };
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   type UnifiedItem = {
@@ -69,10 +53,9 @@ export default function RequestsScreen() {
   const [received, setReceived] = useState<UnifiedItem[]>([]);
   const [actionId, setActionId] = useState<string | null>(null);
   const [tab, setTab] = useState<'incoming' | 'sent'>(() => parseTabParam(toSingle(params.tab)));
-  const [statusFilter, setStatusFilter] = useState<StatusFilterValue>(() => parseStatusParam(toSingle(params.status)));
-  const [kindFilter, setKindFilter] = useState<KindFilterValue>(() => parseKindParam(toSingle(params.kind)));
-  const [isKindOpen, setIsKindOpen] = useState(false);
-  const [isStatusOpen, setIsStatusOpen] = useState(false);
+  // Always show ALL kinds + ALL statuses (UI hidden)
+  const kindFilter: KindFilterValue = 'ALL';
+  const statusFilter: StatusFilterValue = 'ALL';
 
   const [usersById, setUsersById] = useState<Record<string, Partial<User>>>({});
   const [aptsById, setAptsById] = useState<Record<string, Partial<Apartment>>>({});
@@ -113,9 +96,7 @@ export default function RequestsScreen() {
 
   useEffect(() => {
     setTab(parseTabParam(toSingle(params.tab)));
-    setKindFilter(parseKindParam(toSingle(params.kind)));
-    setStatusFilter(parseStatusParam(toSingle(params.status)));
-  }, [params.tab, params.kind, params.status]);
+  }, [params.tab]);
 
   const fetchAll = async () => {
     if (!user?.id) { setLoading(false); return; }
@@ -1299,9 +1280,7 @@ export default function RequestsScreen() {
 
       await fetchAll();
       setTab('incoming');
-      setKindFilter('MATCH');
-      setStatusFilter('APPROVED');
-      router.setParams({ tab: 'incoming', kind: 'MATCH', status: 'APPROVED' });
+      router.setParams({ tab: 'incoming' });
       Alert.alert('הצלחה', 'בקשת ההתאמה אושרה');
     } catch (e: any) {
       console.error('approve match request failed', e);
@@ -1370,6 +1349,7 @@ export default function RequestsScreen() {
           data={data}
           keyExtractor={(item) => item.id}
           scrollEnabled={false}
+          showsVerticalScrollIndicator={false}
           ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
           renderItem={({ item }) => {
             const otherUser = incoming ? usersById[item.sender_id] : usersById[item.recipient_id];
@@ -1382,14 +1362,39 @@ export default function RequestsScreen() {
               receiverGroupId || (incoming ? senderGroupId : undefined) || (isGroupInvite ? (item as any)?._sender_group_id : undefined);
             const groupMemberIds = effectiveGroupId ? (groupMembersByGroupId[effectiveGroupId] || []) : [];
             const groupMembers = groupMemberIds.map((id) => usersById[id]).filter(Boolean) as Partial<User>[];
+            const groupMembersWithId = groupMemberIds
+              .map((id) => ({ id, ...(usersById[id] || {}) }))
+              .filter((m) => !!m?.id) as Array<Partial<User> & { id: string }>;
+            // For merge-profile requests (GROUP), show the people I'm choosing to merge with (exclude myself when possible)
+            const mergeAvatarMembers =
+              item.kind === 'GROUP'
+                ? groupMembers
+                    .filter((m: any) => {
+                      const mid = m?.id as string | undefined;
+                      return !mid || mid !== user?.id;
+                    })
+                    .slice(0, 3)
+                : [];
+            const mergeProposerMembers =
+              item.kind === 'GROUP'
+                ? groupMembersWithId.filter((m: any) => {
+                    const mid = m?.id as string | undefined;
+                    return !mid || mid !== user?.id;
+                  })
+                : [];
             const apt = (item.kind === 'APT' || item.kind === 'APT_INVITE') && item.apartment_id ? aptsById[item.apartment_id] : undefined;
             const aptImage = apt ? (Array.isArray(apt.image_urls) && (apt.image_urls as any[]).length ? (apt.image_urls as any[])[0] : APT_PLACEHOLDER) : null;
             const ownerUser = apt && (apt as any).owner_id ? ownersById[(apt as any).owner_id as string] : undefined;
             const ownerPhone = ownerUser?.phone as string | undefined;
             return (
-              <View style={styles.card}>
-                <View style={styles.cardInner}>
-                  {!!aptImage ? (
+              <View style={styles.cardShadow}>
+                <View style={styles.card}>
+                  <View style={styles.cardInner}>
+                  {!incoming && item.kind === 'MATCH' && !isGroupMatch ? (
+                    <View style={styles.matchThumbWrap}>
+                      <Sparkles size={34} color="#6B7280" />
+                    </View>
+                  ) : !!aptImage ? (
                     <View style={styles.thumbWrap}>
                       <Image source={{ uri: aptImage }} style={styles.thumbImg} />
                     </View>
@@ -1429,7 +1434,8 @@ export default function RequestsScreen() {
                     })()
                   ) : null}
                   <View style={{ flex: 1, alignItems: 'flex-end' }}>
-                    <Text style={styles.cardTitle} numberOfLines={1}>
+                    {/* Allow long titles/subtitles to wrap instead of truncating with "..." */}
+                    <Text style={styles.cardTitle}>
                       {item.kind === 'APT'
                         ? 'בקשת הצטרפות לדירה'
                         : item.kind === 'APT_INVITE'
@@ -1438,23 +1444,102 @@ export default function RequestsScreen() {
                         ? 'בקשת התאמה'
                         : 'בקשת מיזוג פרופילים'}
                     </Text>
+                    {incoming && item.kind === 'GROUP' && mergeProposerMembers.length ? (
+                      <View style={styles.mergeProposersList}>
+                        {mergeProposerMembers.map((m: any, idx: number) => (
+                          <TouchableOpacity
+                            key={(m?.id as string | undefined) || `m-${idx}`}
+                            style={styles.mergeProposerRow}
+                            activeOpacity={0.85}
+                            onPress={() => {
+                              const id = m?.id as string | undefined;
+                              if (id) router.push({ pathname: '/user/[id]', params: { id } });
+                            }}
+                          >
+                            <View style={styles.mergeProposerAvatarWrap}>
+                              <Image
+                                source={{ uri: m?.avatar_url || DEFAULT_AVATAR }}
+                                style={styles.mergeProposerAvatarImg}
+                                resizeMode="cover"
+                              />
+                            </View>
+                            <Text style={styles.mergeProposerName}>{m?.full_name || 'משתמש'}</Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    ) : null}
                     {!!apt && (
-                      <Text style={styles.cardSub} numberOfLines={1}>
+                      <Text style={styles.cardSub}>
                         {apt.title} • {apt.city}
                       </Text>
                     )}
-                    {(isGroupMatch || isGroupInvite) && groupMembers.length ? (
-                      <Text style={styles.cardSub} numberOfLines={1}>
-                        {groupMembers.map((m) => m.full_name).filter(Boolean).join(' • ')}
-                      </Text>
-                    ) : (incoming && (item.kind === 'APT' || item.kind === 'APT_INVITE') && (item as any)?._sender_group_id && groupMembers.length) ? (
-                      <Text style={styles.cardSub} numberOfLines={1}>
-                        {groupMembers.map((m) => m.full_name).filter(Boolean).join(' • ')}
-                      </Text>
+                    {/* Unified user display: avatar + name under the title (no side avatar). */}
+                    {item.kind !== 'GROUP' && groupMembersWithId.length ? (
+                      <View style={styles.mergeProposersList}>
+                        {groupMembersWithId.slice(0, 3).map((m: any, idx: number) => (
+                          <TouchableOpacity
+                            key={(m?.id as string | undefined) || `gm-${idx}`}
+                            style={styles.mergeProposerRow}
+                            activeOpacity={0.85}
+                            onPress={() => {
+                              const id = m?.id as string | undefined;
+                              if (id) router.push({ pathname: '/user/[id]', params: { id } });
+                            }}
+                          >
+                            <View style={styles.mergeProposerAvatarWrap}>
+                              <Image
+                                source={{ uri: m?.avatar_url || DEFAULT_AVATAR }}
+                                style={styles.mergeProposerAvatarImg}
+                                resizeMode="cover"
+                              />
+                            </View>
+                            <Text style={styles.mergeProposerName}>{m?.full_name || 'משתמש'}</Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
                     ) : !!otherUser?.full_name ? (
-                      <Text style={styles.cardMeta}>משתמש: {otherUser.full_name}</Text>
+                      <TouchableOpacity
+                        style={styles.inviterRow}
+                        activeOpacity={0.85}
+                        onPress={() => {
+                          const id = incoming ? item.sender_id : item.recipient_id;
+                          if (id) router.push({ pathname: '/user/[id]', params: { id } });
+                        }}
+                      >
+                        <View style={styles.inviterAvatarWrap}>
+                          <Image
+                            source={{ uri: otherUser.avatar_url || DEFAULT_AVATAR }}
+                            style={styles.inviterAvatarImg}
+                            resizeMode="cover"
+                          />
+                        </View>
+                        <Text style={styles.inviterName}>{otherUser.full_name}</Text>
+                      </TouchableOpacity>
                     ) : null}
-                    <Text style={styles.cardMeta}>{new Date(item.created_at).toLocaleString()}</Text>
+                    {/* Sender view (sent): approved JOIN_APT shows tags + modal details instead of inline phone/WhatsApp */}
+                    {!incoming && item.kind === 'APT' && item.status === 'APPROVED' && (item.type === 'JOIN_APT' || !item.type) ? (
+                      <View style={styles.tagsRow}>
+                        <View style={styles.tagApproved}>
+                          <Text style={styles.tagApprovedText}>אושרה</Text>
+                        </View>
+                        <TouchableOpacity
+                          style={styles.tagDetails}
+                          activeOpacity={0.85}
+                          onPress={() => {
+                            const full_name = (ownerUser?.full_name as string | undefined) || (otherUser?.full_name as string | undefined);
+                            const avatar_url = (ownerUser?.avatar_url as string | undefined) || (otherUser?.avatar_url as string | undefined);
+                            const phone = (ownerUser?.phone as string | undefined) || ownerPhone || (otherUser?.phone as string | undefined);
+                            setOwnerDetails({ full_name, avatar_url, phone });
+                          }}
+                        >
+                          <Text style={styles.tagDetailsText}>פרטים נוספים</Text>
+                        </TouchableOpacity>
+                      </View>
+                    ) : null}
+
+                    {item.kind !== 'GROUP' && !!item.created_at ? (
+                      <Text style={styles.cardMeta}>{formatTimeAgoHe(item.created_at)}</Text>
+                    ) : null}
                     <View style={{ marginTop: 10, flexDirection: 'row-reverse', gap: 8 as any }}>
                       {incoming && (item.kind === 'APT' || item.kind === 'APT_INVITE') && item.status === 'PENDING' && (
                         <View style={{ flexDirection: 'row-reverse', gap: 8 as any }}>
@@ -1477,23 +1562,28 @@ export default function RequestsScreen() {
                         </View>
                       )}
                       {incoming && item.kind === 'GROUP' && item.status === 'PENDING' && (
-                        <View style={{ flexDirection: 'row-reverse', gap: 8 as any }}>
-                          <TouchableOpacity
-                            style={[styles.approveBtnLight, actionId === item.id && { opacity: 0.7 }]}
-                            onPress={() => approveIncomingGroup(item)}
-                            disabled={actionId === item.id}
-                            activeOpacity={0.85}
-                          >
-                            {actionId === item.id ? <ActivityIndicator size="small" color="#FFFFFF" /> : <Text style={styles.approveBtnTextLight}>אישור</Text>}
-                          </TouchableOpacity>
-                          <TouchableOpacity
-                            style={[styles.rejectBtnLight, actionId === item.id && { opacity: 0.7 }]}
-                            onPress={() => rejectIncomingGroup(item)}
-                            disabled={actionId === item.id}
-                            activeOpacity={0.85}
-                          >
-                            <Text style={styles.rejectBtnTextLight}>דחייה</Text>
-                          </TouchableOpacity>
+                        <View style={{ alignSelf: 'stretch' }}>
+                          <View style={{ flexDirection: 'row-reverse', gap: 8 as any }}>
+                            <TouchableOpacity
+                              style={[styles.approveBtnLight, actionId === item.id && { opacity: 0.7 }]}
+                              onPress={() => approveIncomingGroup(item)}
+                              disabled={actionId === item.id}
+                              activeOpacity={0.85}
+                            >
+                              {actionId === item.id ? <ActivityIndicator size="small" color="#FFFFFF" /> : <Text style={styles.approveBtnTextLight}>אישור</Text>}
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              style={[styles.rejectBtnLight, actionId === item.id && { opacity: 0.7 }]}
+                              onPress={() => rejectIncomingGroup(item)}
+                              disabled={actionId === item.id}
+                              activeOpacity={0.85}
+                            >
+                              <Text style={styles.rejectBtnTextLight}>דחייה</Text>
+                            </TouchableOpacity>
+                          </View>
+                          {!!item.created_at ? (
+                            <Text style={[styles.cardMeta, { marginTop: 10 }]}>{formatTimeAgoHe(item.created_at)}</Text>
+                          ) : null}
                         </View>
                       )}
                       {/* Recipient view (incoming): after approval expose phones.
@@ -1594,28 +1684,7 @@ export default function RequestsScreen() {
                           </View>
                         )
                       )}
-                      {/* Sender view: expose owner's phone and WhatsApp action once approved (only for JOIN_APT) */}
-                      {!incoming && item.kind === 'APT' && item.status === 'APPROVED' && (item.type === 'JOIN_APT' || !item.type) && (
-                        <View style={{ marginTop: 10, alignItems: 'flex-end', gap: 6 as any }}>
-                          <Text style={styles.cardMeta}>
-                            מספר בעל הדירה: {ownerPhone ? ownerPhone : 'לא זמין'}
-                          </Text>
-                          {ownerPhone ? (
-                            <TouchableOpacity
-                              style={[styles.approveBtnLight]}
-                              activeOpacity={0.85}
-                              onPress={() =>
-                                openWhatsApp(
-                                  ownerPhone,
-                                  `היי, בקשתי להצטרף לדירה${apt?.title ? `: ${apt.title}` : ''}${apt?.city ? ` (${apt.city})` : ''} אושרה באפליקציית Homie. אשמח לתאם שיחה/צפייה.`
-                                )
-                              }
-                            >
-                              <Text style={styles.approveBtnTextLight}>שליחת וואטסאפ לבעל הדירה</Text>
-                            </TouchableOpacity>
-                          ) : null}
-                        </View>
-                      )}
+                      {/* Sender view: approved JOIN_APT owner details moved to modal ("פרטים נוספים") */}
                       {/* Sender view (sent): expose recipient phone and WhatsApp action once a MATCH is approved */}
                       {!incoming && item.kind === 'MATCH' && item.status === 'APPROVED' && (
                         isGroupMatch && groupMembers.length ? (
@@ -1903,62 +1972,8 @@ export default function RequestsScreen() {
                       )}
                     </View>
                   </View>
-                  {!isGroupMatch && (
-                    <TouchableOpacity
-                      style={styles.avatarWrap}
-                      activeOpacity={0.85}
-                      onPress={() => {
-                        const id = incoming ? item.sender_id : item.recipient_id;
-                        if (id) router.push({ pathname: '/user/[id]', params: { id } });
-                      }}
-                    >
-                      {(incoming && (item.kind === 'APT' || item.kind === 'APT_INVITE') && (item as any)?._sender_group_id && groupMembers.length) ? (
-                        (() => {
-                          const gm = groupMembers.slice(0, 4);
-                          if (gm.length === 1) {
-                            const m = gm[0];
-                            return (
-                              <Image
-                                source={{ uri: m?.avatar_url || DEFAULT_AVATAR }}
-                                style={{ width: '100%', height: '100%' }}
-                                resizeMode="cover"
-                              />
-                            );
-                          }
-                          if (gm.length === 2) {
-                            return (
-                              <View style={{ flex: 1, flexDirection: 'row' }}>
-                                {gm.map((m, idx) => (
-                                  <View key={idx} style={{ width: '50%', height: '100%' }}>
-                                    <Image
-                                      source={{ uri: m?.avatar_url || DEFAULT_AVATAR }}
-                                      style={{ width: '100%', height: '100%' }}
-                                      resizeMode="cover"
-                                    />
-                                  </View>
-                                ))}
-                              </View>
-                            );
-                          }
-                          return (
-                            <View style={{ flex: 1, flexDirection: 'row', flexWrap: 'wrap' }}>
-                              {gm.map((m, idx) => (
-                                <View key={idx} style={{ width: '50%', height: '50%' }}>
-                                  <Image
-                                    source={{ uri: m?.avatar_url || DEFAULT_AVATAR }}
-                                    style={{ width: '100%', height: '100%' }}
-                                    resizeMode="cover"
-                                  />
-                                </View>
-                              ))}
-                            </View>
-                          );
-                        })()
-                      ) : (
-                        <Image source={{ uri: otherUser?.avatar_url || DEFAULT_AVATAR }} style={styles.avatarImg} />
-                      )}
-                    </TouchableOpacity>
-                  )}
+                  {/* Side avatar removed: unified avatar+name row(s) render under the title */}
+                  </View>
                 </View>
               </View>
             );
@@ -2000,92 +2015,7 @@ export default function RequestsScreen() {
           </TouchableOpacity>
         </View>
 
-            {/* Inline dropdown row */}
-            <View style={styles.dropdownRow}>
-              {/* Kind dropdown */}
-              <View style={styles.selectWrap}>
-                <TouchableOpacity
-                  activeOpacity={0.9}
-                  style={styles.selectButton}
-                  onPress={() => { setIsKindOpen((v) => !v); setIsStatusOpen(false); }}
-                >
-                  <Text style={styles.selectText}>
-                    {kindFilter === 'ALL'
-                      ? 'הכל'
-                      : kindFilter === 'APT'
-                      ? 'דירות'
-                      : kindFilter === 'APT_INVITE'
-                      ? 'הזמנות לדירה'
-                      : kindFilter === 'MATCH'
-                      ? 'התאמות'
-                      : 'מיזוג פרופילים'}
-                  </Text>
-                  <Text style={styles.selectCaret}>▼</Text>
-                </TouchableOpacity>
-                {isKindOpen && (
-                  <View style={styles.menu}>
-                    {[
-                      { key: 'ALL', label: 'הכל' },
-                      { key: 'APT', label: 'דירות' },
-                      { key: 'APT_INVITE', label: 'הזמנות לדירה' },
-                      { key: 'MATCH', label: 'התאמות' },
-                      { key: 'GROUP', label: 'מיזוג פרופילים' },
-                    ].map((opt) => (
-                      <TouchableOpacity
-                        key={opt.key}
-                        style={[styles.menuItem, (kindFilter === (opt.key as any)) && styles.menuItemActive]}
-                        activeOpacity={0.9}
-                        onPress={() => { setKindFilter(opt.key as any); setIsKindOpen(false); }}
-                      >
-                        <Text style={[styles.menuItemText, (kindFilter === (opt.key as any)) && styles.menuItemTextActive]}>
-                          {opt.label}
-                        </Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                )}
-              </View>
-              {/* Status dropdown */}
-              <View style={styles.selectWrap}>
-                <TouchableOpacity
-                  activeOpacity={0.9}
-                  style={styles.selectButton}
-                  onPress={() => { setIsStatusOpen((v) => !v); setIsKindOpen(false); }}
-                >
-                  <Text style={styles.selectText}>
-                    {statusFilter === 'ALL'
-                      ? 'הכל'
-                      : statusFilter === 'PENDING'
-                      ? 'ממתין'
-                      : statusFilter === 'APPROVED'
-                      ? 'אושר'
-                      : 'נדחה'}
-                  </Text>
-                  <Text style={styles.selectCaret}>▼</Text>
-                </TouchableOpacity>
-                {isStatusOpen && (
-                  <View style={styles.menu}>
-                    {[
-                      { key: 'ALL', label: 'הכל' },
-                      { key: 'PENDING', label: 'ממתין' },
-                      { key: 'APPROVED', label: 'אושר' },
-                      { key: 'REJECTED', label: 'נדחה' },
-                    ].map((opt) => (
-                      <TouchableOpacity
-                        key={opt.key}
-                        style={[styles.menuItem, (statusFilter === (opt.key as any)) && styles.menuItemActive]}
-                        activeOpacity={0.9}
-                        onPress={() => { setStatusFilter(opt.key as any); setIsStatusOpen(false); }}
-                      >
-                        <Text style={[styles.menuItemText, (statusFilter === (opt.key as any)) && styles.menuItemTextActive]}>
-                          {opt.label}
-                        </Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                )}
-              </View>
-            </View>
+            {/* Kind/Status filters intentionally hidden: always showing ALL */}
           </View>
 
           {loading ? (
@@ -2096,6 +2026,7 @@ export default function RequestsScreen() {
             <FlatList
               data={[{ key: tab }]}
               keyExtractor={(i) => i.key}
+              showsVerticalScrollIndicator={false}
               refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#4C1D95" />}
               renderItem={({ item }) => {
                 if (item.key === 'incoming') {
@@ -2108,6 +2039,46 @@ export default function RequestsScreen() {
           )}
         </View>
       </View>
+      <Modal
+        visible={!!ownerDetails}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setOwnerDetails(null)}
+      >
+        <Pressable style={styles.modalBackdrop} onPress={() => setOwnerDetails(null)}>
+          <Pressable style={styles.modalCard} onPress={() => {}}>
+            <View style={styles.modalHeaderRow}>
+              <View style={styles.modalAvatarWrap}>
+                <Image
+                  source={{ uri: ownerDetails?.avatar_url || DEFAULT_AVATAR }}
+                  style={styles.modalAvatarImg}
+                  resizeMode="cover"
+                />
+              </View>
+              <View style={{ flex: 1, alignItems: 'flex-end' }}>
+                <Text style={styles.modalName}>{ownerDetails?.full_name || 'בעל הדירה'}</Text>
+                <Text style={styles.modalPhone}>
+                  {ownerDetails?.phone ? ownerDetails.phone : 'מספר לא זמין'}
+                </Text>
+              </View>
+            </View>
+            {ownerDetails?.phone ? (
+              <TouchableOpacity
+                style={styles.modalWhatsappBtn}
+                activeOpacity={0.85}
+                onPress={() =>
+                  openWhatsApp(
+                    ownerDetails.phone as string,
+                    `היי, בקשתי להצטרף לדירה אושרה באפליקציית Homie. אשמח לתאם שיחה/צפייה.`
+                  )
+                }
+              >
+                <Text style={styles.modalWhatsappText}>שליחת וואטסאפ</Text>
+              </TouchableOpacity>
+            ) : null}
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
@@ -2115,7 +2086,8 @@ export default function RequestsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
+    // Keep the entire screen (including the area behind the global top bar) in the same gray.
+    backgroundColor: '#FAFAFA',
   },
   pageBody: {
     flex: 1,
@@ -2380,15 +2352,20 @@ const styles = StyleSheet.create({
   card: {
     backgroundColor: '#FFFFFF',
     borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
     overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 3 },
-    elevation: 2,
     position: 'relative',
+  },
+  cardShadow: {
+    borderRadius: 16,
+    // Keep the wrapper transparent so it won't look like a "frame" around the card.
+    backgroundColor: 'transparent',
+    // Softer, more natural shadow
+    shadowColor: '#111827',
+    shadowOpacity: 0.10,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 8 },
+    // Android shadow (via elevation) – keep it subtle to avoid a harsh outline
+    elevation: 6,
   },
   cardAccent: {
     position: 'absolute',
@@ -2423,18 +2400,169 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '900',
     textAlign: 'right',
+    flexShrink: 1,
+    alignSelf: 'stretch',
   },
   cardSub: {
     color: '#4B5563',
     fontSize: 14,
     textAlign: 'right',
     marginTop: 4,
+    flexShrink: 1,
+    alignSelf: 'stretch',
   },
   cardMeta: {
     color: '#6B7280',
     fontSize: 12,
     marginTop: 6,
     textAlign: 'right',
+  },
+  tagsRow: {
+    marginTop: 8,
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 8 as any,
+    alignSelf: 'stretch',
+  },
+  tagApproved: {
+    backgroundColor: 'rgba(34,197,94,0.10)',
+    borderWidth: 1,
+    borderColor: 'rgba(34,197,94,0.25)',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+  },
+  tagApprovedText: {
+    color: '#16A34A',
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  tagDetails: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+  },
+  tagDetailsText: {
+    color: '#111827',
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+    padding: 18,
+    justifyContent: 'center',
+  },
+  modalCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 18,
+    padding: 16,
+  },
+  modalHeaderRow: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 12 as any,
+  },
+  modalAvatarWrap: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    overflow: 'hidden',
+    backgroundColor: '#F3F4F6',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  modalAvatarImg: {
+    width: '100%',
+    height: '100%',
+  },
+  modalName: {
+    color: '#111827',
+    fontSize: 16,
+    fontWeight: '900',
+    textAlign: 'right',
+  },
+  modalPhone: {
+    color: '#6B7280',
+    fontSize: 13,
+    fontWeight: '700',
+    textAlign: 'right',
+    marginTop: 4,
+  },
+  modalWhatsappBtn: {
+    marginTop: 14,
+    backgroundColor: '#25D366',
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalWhatsappText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '900',
+  },
+  inviterRow: {
+    marginTop: 8,
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 8 as any,
+    alignSelf: 'stretch',
+  },
+  inviterAvatarWrap: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    overflow: 'hidden',
+    backgroundColor: '#F3F4F6',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  inviterAvatarImg: {
+    width: '100%',
+    height: '100%',
+  },
+  inviterName: {
+    color: '#111827',
+    fontSize: 13,
+    fontWeight: '800',
+    textAlign: 'right',
+    flexShrink: 1,
+  },
+  mergeProposersList: {
+    marginTop: 8,
+    alignSelf: 'stretch',
+    gap: 8 as any,
+  },
+  mergeProposerRow: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 8 as any,
+    alignSelf: 'stretch',
+  },
+  mergeProposerAvatarWrap: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    overflow: 'hidden',
+    backgroundColor: '#F3F4F6',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  mergeProposerAvatarImg: {
+    width: '100%',
+    height: '100%',
+  },
+  mergeProposerName: {
+    color: '#111827',
+    fontSize: 13,
+    fontWeight: '800',
+    textAlign: 'right',
+    flexShrink: 1,
   },
   avatarWrap: {
     width: 54,
@@ -2462,16 +2590,25 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
   },
+  matchThumbWrap: {
+    width: 96,
+    height: 96,
+    borderRadius: 14,
+    backgroundColor: '#E5E7EB',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   approveBtnLight: {
-    backgroundColor: '#7C3AED',
-    borderWidth: 0,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
+    backgroundColor: '#F5F3FF',
+    borderWidth: 1,
+    borderColor: '#DDD6FE',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
     borderRadius: 999,
   },
   approveBtnTextLight: {
-    color: '#FFFFFF',
-    fontSize: 14,
+    color: '#5B21B6',
+    fontSize: 13,
     fontWeight: '800',
   },
   whatsappIcon: {
@@ -2479,16 +2616,16 @@ const styles = StyleSheet.create({
     height: 16,
   },
   rejectBtnLight: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#FEF2F2',
     borderWidth: 1,
-    borderColor: '#FCA5A5',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
+    borderColor: '#FECACA',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
     borderRadius: 999,
   },
   rejectBtnTextLight: {
-    color: '#EF4444',
-    fontSize: 14,
+    color: '#B91C1C',
+    fontSize: 13,
     fontWeight: '800',
   },
 });

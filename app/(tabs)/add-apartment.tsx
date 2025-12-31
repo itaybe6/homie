@@ -1,27 +1,37 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
   TextInput,
   TouchableOpacity,
+  Animated,
+  Easing,
   StyleSheet,
   ScrollView,
   ActivityIndicator,
   Alert,
-  SafeAreaView,
   KeyboardAvoidingView,
   Platform,
   Image,
   Switch,
+  Modal,
+  Pressable,
+  Dimensions,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, usePathname, useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/authStore';
 import { useApartmentStore } from '@/stores/apartmentStore';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
-import { autocompleteAddresses, createSessionToken } from '@/lib/googlePlaces';
-import { getNeighborhoodsForCityName, searchCitiesWithNeighborhoods } from '@/lib/neighborhoods';
+import MapboxMap from '@/components/MapboxMap';
+import type { MapboxFeatureCollection } from '@/lib/mapboxHtml';
+import { autocompleteMapbox, reverseGeocodeMapbox, type MapboxGeocodingFeature } from '@/lib/mapboxAutocomplete';
+import { LinearGradient } from 'expo-linear-gradient';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import DateTimePicker from '@react-native-community/datetimepicker';
+import { getNeighborhoodsForCityName } from '@/lib/neighborhoods';
+import type { Apartment } from '@/types/database';
 import {
   Accessibility,
   Snowflake,
@@ -32,19 +42,91 @@ import {
   Hammer,
   PawPrint,
   ArrowUpDown,
+  Bed,
+  Bath,
+  Home,
+  Info,
   Utensils,
   Users,
+  Camera,
+  MapPin,
+  Calendar,
+  ArrowLeft,
+  ArrowRight,
+  Building2,
+  Trees,
 } from 'lucide-react-native';
 
 
-export default function AddApartmentScreen() {
+type UpsertMode = 'create' | 'edit';
+
+export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmentId?: string }) {
   const router = useRouter();
+  const pathname = usePathname();
+  const params = useLocalSearchParams();
   const { user } = useAuthStore();
   const addApartment = useApartmentStore((state) => state.addApartment);
+  const updateApartment = useApartmentStore((state) => state.updateApartment);
+  const mapboxToken = process.env.EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN as string | undefined;
+  const mapboxStyleUrl = process.env.EXPO_PUBLIC_MAPBOX_STYLE_URL as string | undefined;
+  const insets = useSafeAreaInsets();
+  const screenWidth = Dimensions.get('window').width;
+  const previewGalleryRef = useRef<ScrollView>(null);
+  const [previewActiveIdx, setPreviewActiveIdx] = useState(0);
 
-  const TOTAL_STEPS = 4 as const;
-  type Step = 1 | 2 | 3 | 4;
-  const STEP_LABELS = ['מיקום', 'פרטים', 'חדרים', 'תמונות'] as const;
+  const inferredMode: UpsertMode =
+    props?.mode ?? (typeof pathname === 'string' && pathname.includes('/apartment/edit') ? 'edit' : 'create');
+
+  const routeIdRaw = (params as any)?.id;
+  const routeId = Array.isArray(routeIdRaw) ? routeIdRaw[0] : routeIdRaw;
+
+  const mode: UpsertMode = inferredMode;
+  const editingApartmentId =
+    mode === 'edit' ? String(props?.apartmentId || routeId || '') : '';
+
+  // This screen should be fullscreen (no bottom tabs). If we somehow landed in the tabs group,
+  // immediately forward to the standalone route.
+  useEffect(() => {
+    if (mode === 'create' && pathname === '/(tabs)/add-apartment') {
+      router.replace('/add-apartment' as any);
+    }
+  }, [pathname, router, mode]);
+
+  // Guard: each user can upload max 1 apartment. If already owns one, block entry.
+  useEffect(() => {
+    if (mode !== 'create') return;
+    let cancelled = false;
+    const checkLimit = async () => {
+      if (!user?.id) return;
+      try {
+        const { data, error } = await supabase
+          .from('apartments')
+          .select('id')
+          .eq('owner_id', user.id)
+          .limit(1);
+        if (cancelled) return;
+        if (error) throw error;
+        if (data && data.length > 0) {
+          Alert.alert(
+            'לא ניתן להוסיף דירה',
+            'אי אפשר להעלות עוד דירה כי כבר העלית דירה אחת.'
+          );
+          router.replace('/(tabs)/home');
+        }
+      } catch {
+        // If we fail to verify, don't block the whole screen automatically.
+        // The submit handler will re-check and prevent extra uploads safely.
+      }
+    };
+    checkLimit();
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id, router, mode]);
+
+  const TOTAL_STEPS = 3 as const;
+  type Step = 1 | 2 | 3;
+  const STEP_LABELS = ['בסיסי', 'מאפיינים', 'סיכום'] as const;
   const [step, setStep] = useState<Step>(1);
 
   const [title, setTitle] = useState('');
@@ -53,24 +135,34 @@ export default function AddApartmentScreen() {
   const [city, setCity] = useState('');
   const [neighborhood, setNeighborhood] = useState('');
   const [price, setPrice] = useState('');
-  const [bedrooms, setBedrooms] = useState('');
+  const [bedrooms, setBedrooms] = useState(''); // used as "rooms" count in UI
   const [bathrooms, setBathrooms] = useState('');
   const [images, setImages] = useState<string[]>([]); // local URIs before upload
+  const [moveInDate, setMoveInDate] = useState(''); // dd/mm/yyyy (display only)
+  const [moveInDateObj, setMoveInDateObj] = useState<Date | null>(null);
+  const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
+  const [sizeSqm, setSizeSqm] = useState(''); // apartment size in square meters (digits)
+  const [gardenSizeSqm, setGardenSizeSqm] = useState(''); // garden size in square meters (digits) - only for garden apartments
+  const [floor, setFloor] = useState<number>(0);
+  const [propertyType, setPropertyType] = useState<'building' | 'garden'>('building');
+  const [propertyTypeSegmentWidth, setPropertyTypeSegmentWidth] = useState(0);
+  const propertyTypeThumbX = useRef(new Animated.Value(0)).current;
+  const didMeasurePropertyTypeSegment = useRef(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
-  const [citySuggestions, setCitySuggestions] = useState<string[]>([]);
-  const [sessionToken, setSessionToken] = useState<string>('');
-  const [addressSuggestions, setAddressSuggestions] = useState<string[]>([]);
-  const [neighborhoodOptions, setNeighborhoodOptions] = useState<string[]>([]);
-  const [isNeighborhoodOpen, setIsNeighborhoodOpen] = useState(false);
-  const [neighborhoodSearchQuery, setNeighborhoodSearchQuery] = useState('');
-  const [isLoadingNeighborhoods, setIsLoadingNeighborhoods] = useState(false);
+  const [citySuggestions, setCitySuggestions] = useState<MapboxGeocodingFeature[]>([]);
+  const [addressSuggestions, setAddressSuggestions] = useState<MapboxGeocodingFeature[]>([]);
+  const [selectedGeo, setSelectedGeo] = useState<{ lng: number; lat: number } | null>(null);
+  const [isResolvingNeighborhood, setIsResolvingNeighborhood] = useState(false);
+  const [selectedCity, setSelectedCity] = useState<{
+    name: string;
+    center?: { lng: number; lat: number };
+    bbox?: [number, number, number, number];
+  } | null>(null);
   const [includeAsPartner, setIncludeAsPartner] = useState(false);
   const [roommateCapacity, setRoommateCapacity] = useState<number | null>(null);
-  const [isRoommateDropdownOpen, setIsRoommateDropdownOpen] = useState(false);
   const roommateCapacityOptions = [2, 3, 4, 5];
-  const [isBalconyDropdownOpen, setIsBalconyDropdownOpen] = useState(false);
-  const balconyOptions: Array<0 | 1 | 2 | 3> = [0, 1, 2, 3];
+  const [existingPartnerIds, setExistingPartnerIds] = useState<string[]>([]);
 
   // Property features (מאפייני הנכס)
   const [balconyCount, setBalconyCount] = useState<0 | 1 | 2 | 3>(0);
@@ -86,71 +178,387 @@ export default function AddApartmentScreen() {
   const [kosherKitchen, setKosherKitchen] = useState(false);
 
   useEffect(() => {
-    setSessionToken(createSessionToken());
-  }, []);
-
-  useEffect(() => {
     let active = true;
-    const run = () => {
+    const run = async () => {
       const q = city.trim();
-      if (!q || q.length < 1) { setCitySuggestions([]); return; }
-      const names = searchCitiesWithNeighborhoods(q, 8);
-      if (active) setCitySuggestions(names);
-    };
-    run();
-    return () => { active = false; };
-  }, [city]);
-
-  // Load neighborhoods list for selected city from static data (dropdown)
-  useEffect(() => {
-    let cancelled = false;
-    const load = () => {
-      const key = (city || '').trim();
-      if (!key) {
-        setNeighborhoodOptions([]);
-        setIsLoadingNeighborhoods(false);
+      if (!mapboxToken) {
+        if (active) setCitySuggestions([]);
         return;
       }
-      setIsLoadingNeighborhoods(true);
-      try {
-        const list = getNeighborhoodsForCityName(key);
-        if (!cancelled) {
-          setNeighborhoodOptions(list);
-          setIsLoadingNeighborhoods(false);
-        }
-      } catch {
-        if (!cancelled) {
-          setNeighborhoodOptions([]);
-          setIsLoadingNeighborhoods(false);
-        }
+      if (!q || q.length < 1) {
+        if (active) setCitySuggestions([]);
+        return;
       }
+      const t = setTimeout(async () => {
+        const results = await autocompleteMapbox({
+          accessToken: mapboxToken,
+          query: q,
+          country: 'il',
+          language: 'he',
+          limit: 8,
+          types: 'place,locality',
+        });
+        if (active) setCitySuggestions(results);
+      }, 250);
+      return () => clearTimeout(t);
     };
-    load();
-    return () => { cancelled = true; };
-  }, [city]);
+    let cleanup: undefined | (() => void);
+    (async () => {
+      cleanup = await run();
+    })();
+    return () => {
+      active = false;
+      cleanup?.();
+    };
+  }, [city, mapboxToken]);
 
-  // Removed Google neighborhood autocomplete in favor of static dropdown search
+  // If user edits the city after selecting a city, invalidate the selection (so address search won't be "wrong city")
+  useEffect(() => {
+    const c = city.trim();
+    if (!selectedCity) return;
+    if (c && c === selectedCity.name) return;
+    // user changed city text -> require re-selecting city from suggestions
+    setSelectedCity(null);
+    setSelectedGeo(null);
+    setAddress('');
+    setNeighborhood('');
+    setAddressSuggestions([]);
+  }, [city]); // intentionally not depending on selectedCity to keep logic simple
 
   useEffect(() => {
     let active = true;
     const run = async () => {
       const q = address.trim();
-      if (!q || q.length < 2) { setAddressSuggestions([]); return; }
-      const preds = await autocompleteAddresses(q, null, sessionToken, city);
-      if (active) setAddressSuggestions(preds.slice(0, 8));
+      if (!mapboxToken) {
+        if (active) setAddressSuggestions([]);
+        return;
+      }
+      if (!q || q.length < 2) {
+        if (active) setAddressSuggestions([]);
+        return;
+      }
+      const cityPart = city.trim();
+      const query = cityPart ? `${q}, ${cityPart}` : q;
+      const t = setTimeout(async () => {
+        const results = await autocompleteMapbox({
+          accessToken: mapboxToken,
+          query,
+          country: 'il',
+          language: 'he',
+          limit: 8,
+          types: 'address',
+        });
+        if (active) setAddressSuggestions(results);
+      }, 320);
+      return () => clearTimeout(t);
     };
+    let cleanup: undefined | (() => void);
+    (async () => {
+      cleanup = await run();
+    })();
+    return () => {
+      active = false;
+      cleanup?.();
+    };
+  }, [address, city, mapboxToken]);
+
+  // EDIT MODE: load apartment and hydrate the same form UI.
+  useEffect(() => {
+    if (mode !== 'edit') return;
+    if (!editingApartmentId) return;
+
+    let cancelled = false;
+    const run = async () => {
+      setIsLoading(true);
+      setError('');
+      try {
+        const { data: userResp } = await supabase.auth.getUser();
+        const authUser = user ?? userResp.user ?? null;
+        if (!authUser?.id) throw new Error('יש להתחבר כדי לערוך דירה');
+
+        const { data: apt, error: aptErr } = await supabase
+          .from('apartments')
+          .select('*')
+          .eq('id', editingApartmentId)
+          .maybeSingle();
+        if (aptErr) throw aptErr;
+        if (!apt) throw new Error('הדירה לא נמצאה');
+        if (apt.owner_id !== authUser.id) throw new Error('אין לך הרשאה לערוך דירה זו');
+
+        if (cancelled) return;
+        const a = apt as Apartment;
+
+        setTitle(a.title || '');
+        setDescription(a.description || '');
+        setAddress(a.address || '');
+        setCity(a.city || '');
+        setNeighborhood(a.neighborhood || '');
+        setPrice(String(a.price ?? ''));
+        setBedrooms(String(a.bedrooms ?? ''));
+        setBathrooms(String(a.bathrooms ?? ''));
+
+        const aptType = (a as any)?.apartment_type as Apartment['apartment_type'] | undefined;
+        setPropertyType(aptType === 'GARDEN' ? 'garden' : 'building');
+
+        const sqm = (a as any)?.square_meters;
+        setSizeSqm(typeof sqm === 'number' && sqm > 0 ? String(Math.round(sqm)) : '');
+
+        const gardenSqm = (a as any)?.garden_square_meters;
+        setGardenSizeSqm(typeof gardenSqm === 'number' && gardenSqm > 0 ? String(Math.round(gardenSqm)) : '');
+
+        const fl = (a as any)?.floor;
+        setFloor(typeof fl === 'number' && Number.isFinite(fl) ? fl : 0);
+
+        const cap = (a as any)?.roommate_capacity;
+        setRoommateCapacity(typeof cap === 'number' && cap > 0 ? cap : null);
+
+        // Property features
+        const bc =
+          typeof (a as any)?.balcony_count === 'number'
+            ? Math.max(0, Math.min(3, (a as any).balcony_count as number))
+            : 0;
+        setBalconyCount(bc as 0 | 1 | 2 | 3);
+        setWheelchairAccessible(!!(a as any)?.wheelchair_accessible);
+        setHasAirConditioning(!!(a as any)?.has_air_conditioning);
+        setHasBars(!!(a as any)?.has_bars);
+        setHasSolarHeater(!!(a as any)?.has_solar_heater);
+        setIsFurnished(!!(a as any)?.is_furnished);
+        setHasSafeRoom(!!(a as any)?.has_safe_room);
+        setIsRenovated(!!(a as any)?.is_renovated);
+        setPetsAllowed(!!(a as any)?.pets_allowed);
+        setHasElevator(!!(a as any)?.has_elevator);
+        setKosherKitchen(!!(a as any)?.kosher_kitchen);
+
+        const partnerIds = normalizeIds((a as any)?.partner_ids);
+        setExistingPartnerIds(partnerIds);
+        setIncludeAsPartner(partnerIds.includes(authUser.id));
+
+        const existingUrls = [
+          ...normalizeImagesValue((a as any)?.image_urls),
+          ...(a as any)?.image_url ? [String((a as any).image_url)] : [],
+        ].filter(Boolean);
+        setImages(Array.from(new Set(existingUrls)));
+      } catch (e: any) {
+        Alert.alert('שגיאה', e?.message || 'טעינת הדירה נכשלה');
+        router.back();
+      } finally {
+        if (!cancelled) setIsLoading(false);
+      }
+    };
+
     run();
-    return () => { active = false; };
-  }, [address, sessionToken, city]);
+    return () => {
+      cancelled = true;
+    };
+  }, [mode, editingApartmentId, user, router]);
 
   const closeOverlays = () => {
     setCitySuggestions([]);
     setAddressSuggestions([]);
-    setIsNeighborhoodOpen(false);
-    setNeighborhoodSearchQuery('');
-    setIsRoommateDropdownOpen(false);
-    setIsBalconyDropdownOpen(false);
   };
+
+  const normalizeIds = (value: any): string[] => {
+    if (!value) return [];
+    if (Array.isArray(value)) return value.map(String).filter(Boolean);
+    if (typeof value === 'string') {
+      try {
+        const parsed = JSON.parse(value);
+        if (Array.isArray(parsed)) return parsed.map(String).filter(Boolean);
+      } catch {
+        // ignore
+      }
+      return value
+        .replace(/^{|}$/g, '')
+        .split(',')
+        .map((s) => s.replace(/^"+|"+$/g, '').trim())
+        .filter(Boolean);
+    }
+    return [];
+  };
+
+  const normalizeImagesValue = (value: any): string[] => {
+    if (!value) return [];
+    if (Array.isArray(value)) return value.filter(Boolean);
+    if (typeof value === 'string') {
+      try {
+        const parsed = JSON.parse(value);
+        if (Array.isArray(parsed)) return parsed.filter(Boolean);
+      } catch {
+        // ignore
+      }
+      return value
+        .replace(/^{|}$/g, '')
+        .split(',')
+        .map((s: string) => s.replace(/^"+|"+$/g, '').trim())
+        .filter(Boolean);
+    }
+    return [];
+  };
+
+  const isRemoteUrl = (uri: string) => /^https?:\/\//i.test(String(uri || ''));
+
+  function ctxText(feature: MapboxGeocodingFeature, prefix: string): string {
+    const ctx = feature?.context || [];
+    const hit = ctx.find((c) => String(c?.id || '').startsWith(prefix));
+    return String(hit?.text || '').trim();
+  }
+
+  function formatDDMMYYYY(d: Date): string {
+    const dd = String(d.getDate()).padStart(2, '0');
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const yyyy = String(d.getFullYear());
+    return `${dd}/${mm}/${yyyy}`;
+  }
+
+  function startOfToday(): Date {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    return d;
+  }
+
+  function digitsOnly(s: string): string {
+    return String(s || '').replace(/\D+/g, '');
+  }
+
+  function formatWithCommas(rawDigits: string): string {
+    const s = digitsOnly(rawDigits);
+    if (!s) return '';
+    // 4500 -> 4,500
+    return s.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  }
+
+  function normalizeForHMatch(s: string): string {
+    return String(s || '')
+      .trim()
+      // normalize quotes + dashes + whitespace for loose matching
+      .replace(/[״׳"'`´]/g, '')
+      .replace(/[\u2010-\u2015\-]/g, '')
+      .replace(/\s+/g, '')
+      .toLowerCase();
+  }
+
+  function inferNeighborhoodFromPlaceName(placeName: string, cityName: string): string {
+    const pn = String(placeName || '').trim();
+    const city = String(cityName || '').trim();
+    if (!pn || !city) return '';
+
+    const known = getNeighborhoodsForCityName(city);
+    if (!known || known.length === 0) return '';
+
+    const normPlace = normalizeForHMatch(pn);
+    for (const hood of known) {
+      const h = String(hood || '').trim();
+      if (!h) continue;
+      if (normPlace.includes(normalizeForHMatch(h))) return h;
+    }
+    return '';
+  }
+
+  function inferNeighborhoodFromFeature(feature: MapboxGeocodingFeature, cityName: string): string {
+    const city = String(cityName || '').trim();
+    const fromContext =
+      ctxText(feature, 'neighborhood.') ||
+      ctxText(feature, 'locality.') ||
+      ctxText(feature, 'district.') ||
+      '';
+
+    const cleaned = String(fromContext || '').trim();
+    if (cleaned && (!city || normalizeForHMatch(cleaned) !== normalizeForHMatch(city))) {
+      return cleaned;
+    }
+
+    // Fallback: attempt to match from place_name to a known neighborhood list for that city.
+    return inferNeighborhoodFromPlaceName(feature?.place_name || '', city);
+  }
+
+  const neighborhoodReqIdRef = useRef(0);
+
+  function ctxTextFromFeatures(features: MapboxGeocodingFeature[], prefix: string): string {
+    for (const f of features || []) {
+      const t = ctxText(f, prefix);
+      if (t) return t;
+    }
+    return '';
+  }
+
+  const previewPoints = useMemo<MapboxFeatureCollection | undefined>(() => {
+    if (!selectedGeo) return { type: 'FeatureCollection', features: [] };
+    return {
+      type: 'FeatureCollection',
+      features: [
+        {
+          type: 'Feature',
+          geometry: { type: 'Point', coordinates: [selectedGeo.lng, selectedGeo.lat] },
+          properties: { id: 'preview', title: 'מיקום הדירה' },
+        },
+      ],
+    };
+  }, [selectedGeo]);
+
+  const selectedFeatureLabels = useMemo(() => {
+    const out: string[] = [];
+    if (wheelchairAccessible) out.push('גישה לנכים');
+    if (hasAirConditioning) out.push('מיזוג');
+    if (hasBars) out.push('סורגים');
+    if (hasSolarHeater) out.push('דוד שמש');
+    if (isFurnished) out.push('ריהוט');
+    if (hasSafeRoom) out.push('ממ"ד');
+    if (isRenovated) out.push('משופצת');
+    if (petsAllowed) out.push('חיות מחמד');
+    if (hasElevator) out.push('מעלית');
+    if (kosherKitchen) out.push('מטבח כשר');
+    return out;
+  }, [
+    wheelchairAccessible,
+    hasAirConditioning,
+    hasBars,
+    hasSolarHeater,
+    isFurnished,
+    hasSafeRoom,
+    isRenovated,
+    petsAllowed,
+    hasElevator,
+    kosherKitchen,
+  ]);
+
+  const propertyTypeLabel = propertyType === 'garden' ? 'דירת גן' : 'בניין';
+  const priceLabel = price ? `₪${formatWithCommas(price)}` : '—';
+  const locationLine = [address, neighborhood, city].filter(Boolean).join(', ');
+
+  const previewFeatureItems = useMemo(() => {
+    const items: Array<{ key: string; label: string; Icon: any }> = [];
+    if (propertyType === 'building' && balconyCount > 0) {
+      items.push({
+        key: 'balcony_count',
+        label: balconyCount === 1 ? 'מרפסת' : `${balconyCount} מרפסות`,
+        Icon: Home,
+      });
+    }
+    if (wheelchairAccessible) items.push({ key: 'wheelchair_accessible', label: 'גישה לנכים', Icon: Accessibility });
+    if (hasAirConditioning) items.push({ key: 'has_air_conditioning', label: 'מיזוג', Icon: Snowflake });
+    if (hasBars) items.push({ key: 'has_bars', label: 'סורגים', Icon: Fence });
+    if (hasSolarHeater) items.push({ key: 'has_solar_heater', label: 'דוד שמש', Icon: Sun });
+    if (isFurnished) items.push({ key: 'is_furnished', label: 'ריהוט', Icon: Sofa });
+    if (hasSafeRoom) items.push({ key: 'has_safe_room', label: 'ממ״ד', Icon: Shield });
+    if (isRenovated) items.push({ key: 'is_renovated', label: 'משופצת', Icon: Hammer });
+    if (petsAllowed) items.push({ key: 'pets_allowed', label: 'חיות מחמד', Icon: PawPrint });
+    if (hasElevator) items.push({ key: 'has_elevator', label: 'מעלית', Icon: ArrowUpDown });
+    if (kosherKitchen) items.push({ key: 'kosher_kitchen', label: 'מטבח כשר', Icon: Utensils });
+    return items;
+  }, [
+    propertyType,
+    balconyCount,
+    wheelchairAccessible,
+    hasAirConditioning,
+    hasBars,
+    hasSolarHeater,
+    isFurnished,
+    hasSafeRoom,
+    isRenovated,
+    petsAllowed,
+    hasElevator,
+    kosherKitchen,
+  ]);
 
   const goToStep = (next: Step) => {
     closeOverlays();
@@ -158,29 +566,86 @@ export default function AddApartmentScreen() {
     setStep(next);
   };
 
+  const roomsCount = useMemo(() => {
+    const n = Number(String(bedrooms || '').trim());
+    return Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0;
+  }, [bedrooms]);
+
+  const bathroomsCount = useMemo(() => {
+    const n = Number(String(bathrooms || '').trim());
+    return Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0;
+  }, [bathrooms]);
+
+  // Default roommate capacity when user reaches step 2 (required later for submit).
+  useEffect(() => {
+    if (step !== 2) return;
+    if (roommateCapacity !== null) return;
+    setRoommateCapacity(roommateCapacityOptions[0] ?? 2);
+  }, [step, roommateCapacity, roommateCapacityOptions.join(',')]);
+
+  // If user switches to garden apartment, reset fields that don't apply.
+  useEffect(() => {
+    if (propertyType !== 'garden') return;
+    setFloor(0);
+    setBalconyCount(0);
+  }, [propertyType]);
+
+  useEffect(() => {
+    if (propertyType !== 'building') return;
+    setGardenSizeSqm('');
+  }, [propertyType]);
+
+  useEffect(() => {
+    if (!propertyTypeSegmentWidth) return;
+    const innerWidth = Math.max(0, propertyTypeSegmentWidth - 8); // segmentWrap padding (4*2)
+    const half = innerWidth / 2;
+    const targetX = propertyType === 'building' ? half : 0; // row-reverse => "building" is right side
+
+    if (!didMeasurePropertyTypeSegment.current) {
+      propertyTypeThumbX.setValue(targetX);
+      didMeasurePropertyTypeSegment.current = true;
+      return;
+    }
+
+    Animated.timing(propertyTypeThumbX, {
+      toValue: targetX,
+      duration: 220,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [propertyType, propertyTypeSegmentWidth, propertyTypeThumbX]);
+
   const validateCurrentStep = (): boolean => {
     // Close overlays so the UI doesn't get stuck with an open dropdown
     closeOverlays();
 
     if (step === 1) {
-      if (!city.trim()) {
-        setError('אנא בחר/י עיר');
+      if (!images || images.length < 3) {
+        setError('אנא העלה/י לפחות 3 תמונות');
+        return false;
+      }
+      if (!title.trim()) {
+        setError('אנא מלא/י כותרת');
         return false;
       }
       if (!address.trim()) {
         setError('אנא מלא/י כתובת');
         return false;
       }
-      if (![0, 1, 2, 3].includes(balconyCount)) {
-        setError('מספר מרפסות לא תקין');
+      if (!city.trim()) {
+        setError('אנא בחר/י כתובת מהרשימה כדי שנזהה עיר');
         return false;
       }
-      return true;
-    }
-
-    if (step === 2) {
-      if (!title.trim()) {
-        setError('אנא מלא/י כותרת');
+      if (propertyType !== 'building' && propertyType !== 'garden') {
+        setError('אנא בחר/י סוג נכס');
+        return false;
+      }
+      if (roomsCount <= 0) {
+        setError('אנא בחר/י מספר חדרים');
+        return false;
+      }
+      if (bathroomsCount <= 0) {
+        setError('אנא בחר/י מספר חדרי רחצה');
         return false;
       }
       if (!price.trim()) {
@@ -195,33 +660,24 @@ export default function AddApartmentScreen() {
       return true;
     }
 
-    if (step === 3) {
-      if (!bathrooms.trim()) {
-        setError('אנא מלא/י מספר חדרי אמבטיה');
-        return false;
-      }
-      if (!bedrooms.trim()) {
-        setError('אנא מלא/י מספר חדרי שינה');
-        return false;
-      }
-      const bedroomsNum = parseInt(bedrooms);
-      const bathroomsNum = parseInt(bathrooms);
-      if (isNaN(bedroomsNum) || bedroomsNum <= 0) {
-        setError('מספר חדרי שינה לא תקין');
-        return false;
-      }
-      if (isNaN(bathroomsNum) || bathroomsNum <= 0) {
-        setError('מספר חדרי אמבטיה לא תקין');
+    if (step === 2) {
+      const sqm = Number(digitsOnly(sizeSqm));
+      if (!Number.isFinite(sqm) || sqm <= 0) {
+        setError('אנא מלא/י גודל דירה תקין (מ״ר)');
         return false;
       }
       if (roommateCapacity === null) {
-        setError('אנא בחר/י כמות שותפים מתאימה');
+        setError('אנא בחר/י מספר שותפים');
         return false;
       }
       if (!roommateCapacityOptions.includes(roommateCapacity)) {
-        setError('בחירת כמות השותפים אינה תקפה');
+        setError('בחירת מספר השותפים אינה תקפה');
         return false;
       }
+      return true;
+    }
+
+    if (step === 3) {
       return true;
     }
 
@@ -361,6 +817,8 @@ export default function AddApartmentScreen() {
     const bedroomsNum = parseInt(bedrooms);
     const bathroomsNum = parseInt(bathrooms);
     const roommatesNum = roommateCapacity as number;
+    const sizeSqmNum = Number(digitsOnly(sizeSqm));
+    const gardenSizeSqmNum = Number(digitsOnly(gardenSizeSqm));
 
     if (isNaN(priceNum) || priceNum <= 0) {
       setError('מחיר לא תקין');
@@ -384,7 +842,6 @@ export default function AddApartmentScreen() {
 
     setIsLoading(true);
     setError('');
-    setIsRoommateDropdownOpen(false);
 
     try {
       // Ensure user is authenticated
@@ -396,67 +853,151 @@ export default function AddApartmentScreen() {
         return;
       }
 
+      if (mode === 'create') {
+        // Enforce limit: a user can own max 1 apartment (by owner_id)
+        const { data: owned, error: ownedErr } = await supabase
+          .from('apartments')
+          .select('id')
+          .eq('owner_id', authUser.id)
+          .limit(1);
+        if (ownedErr) throw ownedErr;
+        if (owned && owned.length > 0) {
+          Alert.alert('לא ניתן להוסיף דירה', 'אי אפשר להעלות עוד דירה כי כבר העלית דירה אחת.');
+          setIsLoading(false);
+          router.replace('/(tabs)/home');
+          return;
+        }
+      }
+
       // Make sure a users-row exists for FK
       await ensureUserProfileRow(authUser.id, authUser.email ?? null);
 
-      // Upload images first (best-effort; stop if any upload fails)
+      // Upload images:
+      // - In create: all images are local URIs.
+      // - In edit: we may have existing remote URLs + new local URIs.
+      const existingRemote = mode === 'edit' ? images.filter((u) => isRemoteUrl(u)) : [];
+      const localUris = mode === 'edit' ? images.filter((u) => !isRemoteUrl(u)) : images;
+
       const uploadedUrls: string[] = [];
-      for (const uri of images) {
+      for (const uri of localUris) {
         const url = await uploadImage(authUser.id, uri);
         uploadedUrls.push(url);
       }
 
-      const { data, error: insertError } = await supabase
-        .from('apartments')
-        .insert({
-          owner_id: authUser.id,
-          partner_ids: includeAsPartner ? [authUser.id] : [],
-          title,
-          description: description || null,
-          address,
-          city,
-          neighborhood: neighborhood || null,
-          price: priceNum,
-          bedrooms: bedroomsNum,
-          bathrooms: bathroomsNum,
-          roommate_capacity: roommatesNum,
-          image_urls: uploadedUrls.length ? uploadedUrls : null,
+      const finalImageUrls = Array.from(new Set([...(existingRemote || []), ...uploadedUrls].filter(Boolean)));
 
-          // Property features
-          balcony_count: balconyCount,
-          wheelchair_accessible: wheelchairAccessible,
-          has_air_conditioning: hasAirConditioning,
-          has_bars: hasBars,
-          has_solar_heater: hasSolarHeater,
-          is_furnished: isFurnished,
-          has_safe_room: hasSafeRoom,
-          is_renovated: isRenovated,
-          pets_allowed: petsAllowed,
-          has_elevator: hasElevator,
-          kosher_kitchen: kosherKitchen,
-        })
-        .select()
-        .single();
+      if (mode === 'edit') {
+        if (!editingApartmentId) throw new Error('חסר מזהה דירה לעריכה');
 
-      if (insertError) throw insertError;
+        // Preserve existing partner_ids; only toggle owner inclusion if user changed it
+        const base = normalizeIds(existingPartnerIds);
+        const withoutOwner = base.filter((pid) => pid !== authUser.id);
+        const nextPartnerIds = includeAsPartner ? Array.from(new Set([...withoutOwner, authUser.id])) : withoutOwner;
 
-      // Ensure partner_ids contains the creator if user chose to be a partner (fallback if DB ignored the field)
-      let apartmentRow = data;
-      if (includeAsPartner && (!apartmentRow.partner_ids || apartmentRow.partner_ids.length === 0)) {
-        const { data: fixed, error: fixErr } = await supabase
+        const { data: updated, error: updateErr } = await supabase
           .from('apartments')
-          .update({ partner_ids: [authUser.id] })
-          .eq('id', apartmentRow.id)
+          .update({
+            partner_ids: nextPartnerIds,
+            title,
+            description: description || null,
+            address,
+            city,
+            neighborhood: neighborhood || null,
+            price: priceNum,
+            apartment_type: propertyType === 'garden' ? 'GARDEN' : 'REGULAR',
+            bedrooms: bedroomsNum,
+            bathrooms: bathroomsNum,
+            square_meters: Number.isFinite(sizeSqmNum) && sizeSqmNum > 0 ? sizeSqmNum : null,
+            floor: propertyType === 'building' ? floor : null,
+            garden_square_meters:
+              propertyType === 'garden' && Number.isFinite(gardenSizeSqmNum) && gardenSizeSqmNum > 0
+                ? gardenSizeSqmNum
+                : null,
+            roommate_capacity: roommatesNum,
+            image_urls: finalImageUrls.length ? finalImageUrls : null,
+
+            // Property features
+            balcony_count: balconyCount,
+            wheelchair_accessible: wheelchairAccessible,
+            has_air_conditioning: hasAirConditioning,
+            has_bars: hasBars,
+            has_solar_heater: hasSolarHeater,
+            is_furnished: isFurnished,
+            has_safe_room: hasSafeRoom,
+            is_renovated: isRenovated,
+            pets_allowed: petsAllowed,
+            has_elevator: hasElevator,
+            kosher_kitchen: kosherKitchen,
+          })
+          .eq('id', editingApartmentId)
           .select()
           .single();
-        if (!fixErr && fixed) {
-          apartmentRow = fixed;
-        }
-      }
 
-      addApartment(apartmentRow);
-      Alert.alert('הצלחה', 'הדירה נוספה בהצלחה');
-      router.replace('/(tabs)/home');
+        if (updateErr) throw updateErr;
+        updateApartment(updated as Apartment);
+        Alert.alert('הצלחה', 'הדירה עודכנה בהצלחה');
+        router.replace(`/apartment/${editingApartmentId}` as any);
+      } else {
+        const { data, error: insertError } = await supabase
+          .from('apartments')
+          .insert({
+            owner_id: authUser.id,
+            partner_ids: includeAsPartner ? [authUser.id] : [],
+            title,
+            description: description || null,
+            address,
+            city,
+            neighborhood: neighborhood || null,
+            price: priceNum,
+            // New schema fields
+            apartment_type: propertyType === 'garden' ? 'GARDEN' : 'REGULAR',
+            bedrooms: bedroomsNum,
+            bathrooms: bathroomsNum,
+            square_meters: Number.isFinite(sizeSqmNum) && sizeSqmNum > 0 ? sizeSqmNum : null,
+            floor: propertyType === 'building' ? floor : null,
+            garden_square_meters:
+              propertyType === 'garden' && Number.isFinite(gardenSizeSqmNum) && gardenSizeSqmNum > 0
+                ? gardenSizeSqmNum
+                : null,
+            roommate_capacity: roommatesNum,
+            image_urls: finalImageUrls.length ? finalImageUrls : null,
+
+            // Property features
+            balcony_count: balconyCount,
+            wheelchair_accessible: wheelchairAccessible,
+            has_air_conditioning: hasAirConditioning,
+            has_bars: hasBars,
+            has_solar_heater: hasSolarHeater,
+            is_furnished: isFurnished,
+            has_safe_room: hasSafeRoom,
+            is_renovated: isRenovated,
+            pets_allowed: petsAllowed,
+            has_elevator: hasElevator,
+            kosher_kitchen: kosherKitchen,
+          })
+          .select()
+          .single();
+
+        if (insertError) throw insertError;
+
+        // Ensure partner_ids contains the creator if user chose to be a partner (fallback if DB ignored the field)
+        let apartmentRow = data;
+        if (includeAsPartner && (!apartmentRow.partner_ids || apartmentRow.partner_ids.length === 0)) {
+          const { data: fixed, error: fixErr } = await supabase
+            .from('apartments')
+            .update({ partner_ids: [authUser.id] })
+            .eq('id', apartmentRow.id)
+            .select()
+            .single();
+          if (!fixErr && fixed) {
+            apartmentRow = fixed;
+          }
+        }
+
+        addApartment(apartmentRow);
+        Alert.alert('הצלחה', 'הדירה נוספה בהצלחה');
+        router.replace('/(tabs)/home');
+      }
     } catch (err: any) {
       setError(err.message || 'שגיאה בהוספת דירה');
     } finally {
@@ -465,191 +1006,161 @@ export default function AddApartmentScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.sheet}>
-        <KeyboardAvoidingView
-          style={styles.keyboardAvoid}
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-          <ScrollView contentContainerStyle={styles.scrollContent}>
-            <View style={styles.header}>
-              <Text style={styles.title}>הוסף דירה חדשה</Text>
-              <View style={styles.progressTrack}>
-                <View
-                  style={[
-                    styles.progressFill,
-                    {
-                      width:
-                        TOTAL_STEPS <= 1
-                          ? '100%'
-                          : `${Math.round(((step - 1) / (TOTAL_STEPS - 1)) * 100)}%`,
-                    },
-                  ]}
-                />
-              </View>
-              <View style={styles.stepLabelsRow}>
-                {STEP_LABELS.map((lbl, idx) => {
-                  const s = (idx + 1) as Step;
-                  const isActive = s === step;
-                  const isDone = s < step;
-                  return (
-                    <View key={lbl} style={styles.stepLabelWrap}>
-                      <View
-                        style={[
-                          styles.stepDot,
-                          isDone ? styles.stepDotDone : null,
-                          isActive ? styles.stepDotActive : null,
-                        ]}
-                      />
-                      <Text
-                        style={[
-                          styles.stepLabel,
-                          isActive ? styles.stepLabelActive : null,
-                          isDone ? styles.stepLabelDone : null,
-                        ]}
-                      >
-                        {lbl}
-                      </Text>
-                    </View>
-                  );
-                })}
-              </View>
-            </View>
+    <View style={styles.container}>
+      <KeyboardAvoidingView
+        style={styles.keyboardAvoid}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+        <View style={[styles.header, { paddingTop: (insets.top || 0) + 10 }]}>
+          <View style={styles.headerRow}>
+            <TouchableOpacity style={styles.headerBack} onPress={() => router.back()}>
+              <ArrowRight size={22} color="#111827" />
+            </TouchableOpacity>
+            <Text style={styles.headerTitle}>{mode === 'edit' ? 'עריכת דירה' : 'הוספת דירה חדשה'}</Text>
+            {/* Spacer to keep the title centered */}
+            <View style={styles.headerSideSpacer} />
+          </View>
+        </View>
+
+        <View style={styles.progressMetaRow}>
+          <Text style={styles.progressMetaText}>{`הושלם ${Math.round((step / TOTAL_STEPS) * 100)}%`}</Text>
+          <Text style={styles.progressMetaText}>{`שלב ${step} מתוך ${TOTAL_STEPS}`}</Text>
+        </View>
+        <View style={styles.progressTrack}>
+          <View style={[styles.progressFill, { width: `${Math.round((step / TOTAL_STEPS) * 100)}%` }]} />
+        </View>
+
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode={Platform.OS === 'ios' ? 'on-drag' : 'none'}
+        >
 
           {error ? <Text style={styles.error}>{error}</Text> : null}
 
-          <View style={styles.card}> 
-            <View style={styles.form}>
+          <View style={styles.form}>
             {step === 1 ? (
               <>
-                <View style={[styles.inputGroup, citySuggestions.length > 0 ? styles.inputGroupRaised : null]}>
-                  <Text style={styles.label}>
-                    עיר <Text style={styles.required}>*</Text>
-                  </Text>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="לדוגמה: תל אביב"
-                    value={city}
-                    onChangeText={(t) => { setCity(t); }}
-                    editable={!isLoading}
-                    placeholderTextColor="#9AA0A6"
-                  />
-                  {citySuggestions.length > 0 ? (
-                    <View style={styles.suggestionsBox}>
-                      {citySuggestions.map((name) => (
-                        <TouchableOpacity
-                          key={name}
-                          style={styles.suggestionItem}
-                          onPress={() => { setCity(name); setCitySuggestions([]); }}
-                        >
-                          <Text style={styles.suggestionText}>{name}</Text>
-                        </TouchableOpacity>
-                      ))}
-                    </View>
-                  ) : null}
-                </View>
-
-                <View style={[styles.inputGroup, isNeighborhoodOpen ? styles.inputGroupRaised : null]}>
-                  <Text style={styles.label}>שכונה</Text>
+                <Text style={styles.sectionTitle}>
+                  תמונות הדירה <Text style={styles.required}>*</Text>
+                </Text>
+                <View style={styles.uploadCard}>
+                  <View style={styles.uploadIconWrap}>
+                    <Camera size={22} color="#4C1D95" />
+                  </View>
+                  <Text style={styles.uploadTitle}>העלה תמונות</Text>
+                  <Text style={styles.uploadSubtitle}>העלה לפחות 3 תמונות להראות את הדירה</Text>
                   <TouchableOpacity
-                    style={[
-                      styles.input,
-                      styles.selectButton,
-                      !city ? { opacity: 0.6 } : null,
-                    ]}
-                    onPress={() => {
-                      if (city && !isLoadingNeighborhoods) {
-                        setIsNeighborhoodOpen(!isNeighborhoodOpen);
-                      }
-                    }}
-                    disabled={!city || isLoading}
+                    style={styles.uploadBtn}
+                    onPress={pickImages}
+                    disabled={isLoading}
+                    activeOpacity={0.9}
                   >
-                    <Text
-                      style={[
-                        styles.selectButtonText,
-                        !neighborhood && styles.selectButtonPlaceholder,
-                      ]}
-                    >
-                      {neighborhood ||
-                        (isLoadingNeighborhoods
-                          ? 'טוען שכונות...'
-                          : neighborhoodOptions.length > 0
-                          ? 'בחר שכונה'
-                          : city
-                          ? 'אין שכונות זמינות'
-                          : 'בחר עיר קודם')}
-                    </Text>
-                    <Text style={styles.selectButtonArrow}>▼</Text>
+                    <Text style={styles.uploadBtnText}>בחירת תמונות</Text>
                   </TouchableOpacity>
-                  {isNeighborhoodOpen && neighborhoodOptions.length > 0 ? (
-                    <View style={styles.suggestionsBox}>
-                      <TextInput
-                        style={styles.searchInput}
-                        placeholder="חפש שכונה..."
-                        placeholderTextColor="#9AA0A6"
-                        value={neighborhoodSearchQuery}
-                        onChangeText={setNeighborhoodSearchQuery}
-                        autoFocus
-                      />
-                      <ScrollView style={styles.dropdownScroll} nestedScrollEnabled>
-                        {(neighborhoodSearchQuery
-                          ? neighborhoodOptions.filter((n) =>
-                              n.toLowerCase().includes(neighborhoodSearchQuery.toLowerCase())
-                            )
-                          : neighborhoodOptions
-                        )
-                          .slice(0, 100)
-                          .map((name) => (
+                </View>
+
+                <View style={styles.galleryBox}>
+                  {images.length ? (
+                    <>
+                      <View style={styles.galleryGrid}>
+                        {images.map((uri, idx) => (
+                          <View key={uri + idx} style={styles.thumbWrap}>
+                            <Image source={{ uri }} style={styles.thumb} />
                             <TouchableOpacity
-                              key={name}
-                              style={styles.suggestionItem}
-                              onPress={() => {
-                                setNeighborhood(name);
-                                setIsNeighborhoodOpen(false);
-                                setNeighborhoodSearchQuery('');
-                              }}
+                              style={styles.removeThumb}
+                              onPress={() => removeImageAt(idx)}
+                              disabled={isLoading}
                             >
-                              <Text style={styles.suggestionText}>{name}</Text>
+                              <Text style={styles.removeThumbText}>×</Text>
                             </TouchableOpacity>
-                          ))}
-                      </ScrollView>
+                          </View>
+                        ))}
+                      </View>
+
+                      <View style={styles.galleryCountCenterWrap}>
+                        <View style={styles.galleryCountTag}>
+                          <Text style={styles.galleryCountTagText}>{`נבחרו ${images.length}/12`}</Text>
+                        </View>
+                      </View>
+                    </>
+                  ) : (
+                    <View style={styles.galleryPlaceholder}>
+                      <Text style={styles.galleryPlaceholderText}>לא נבחרו תמונות עדיין</Text>
+                      <Text style={styles.galleryPlaceholderSubText}>0/12 תמונות</Text>
                     </View>
-                  ) : null}
+                  )}
                 </View>
 
-                <View style={[styles.inputGroup, addressSuggestions.length > 0 ? styles.inputGroupRaised : null]}>
-                  <Text style={styles.label}>
-                    כתובת <Text style={styles.required}>*</Text>
-                  </Text>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="רחוב ומספר בית"
-                    value={address}
-                    onChangeText={setAddress}
-                    editable={!isLoading}
-                    placeholderTextColor="#9AA0A6"
-                  />
-                  {addressSuggestions.length > 0 ? (
-                    <View style={styles.suggestionsBox}>
-                      {addressSuggestions.map((desc) => (
-                        <TouchableOpacity
-                          key={desc}
-                          style={styles.suggestionItem}
-                          onPress={() => { setAddress(desc); setAddressSuggestions([]); }}
-                        >
-                          <Text style={styles.suggestionText}>{desc}</Text>
-                        </TouchableOpacity>
-                      ))}
-                    </View>
-                  ) : null}
-                </View>
-              </>
-            ) : null}
+                <Text style={[styles.sectionTitle, { marginTop: 8 }]}>פרטים בסיסיים</Text>
 
-            {step === 2 ? (
-              <>
                 <View style={styles.inputGroup}>
                   <Text style={styles.label}>
-                    כותרת <Text style={styles.required}>*</Text>
+                    סוג הנכס <Text style={styles.required}>*</Text>
+                  </Text>
+                  <View
+                    style={styles.segmentWrap}
+                    onLayout={(e) => setPropertyTypeSegmentWidth(e.nativeEvent.layout.width)}
+                  >
+                    <Animated.View
+                      pointerEvents="none"
+                      style={[
+                        styles.segmentThumb,
+                        {
+                          width: Math.max(0, (propertyTypeSegmentWidth - 8) / 2),
+                          transform: [{ translateX: propertyTypeThumbX }],
+                        },
+                      ]}
+                    />
+                    <TouchableOpacity
+                      style={[
+                        styles.segmentBtn,
+                        propertyType === 'building' ? styles.segmentBtnActive : null,
+                      ]}
+                      onPress={() => setPropertyType('building')}
+                      disabled={isLoading}
+                      activeOpacity={0.9}
+                    >
+                      <Building2
+                        size={18}
+                        color={propertyType === 'building' ? '#4C1D95' : '#6B7280'}
+                      />
+                      <Text
+                        style={[
+                          styles.segmentText,
+                          propertyType === 'building' ? styles.segmentTextActive : null,
+                        ]}
+                      >
+                        בניין
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[
+                        styles.segmentBtn,
+                        propertyType === 'garden' ? styles.segmentBtnActive : null,
+                      ]}
+                      onPress={() => setPropertyType('garden')}
+                      disabled={isLoading}
+                      activeOpacity={0.9}
+                    >
+                      <Trees
+                        size={18}
+                        color={propertyType === 'garden' ? '#4C1D95' : '#6B7280'}
+                      />
+                      <Text
+                        style={[
+                          styles.segmentText,
+                          propertyType === 'garden' ? styles.segmentTextActive : null,
+                        ]}
+                      >
+                        דירת גן
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.label}>
+                    כותרת הדירה <Text style={styles.required}>*</Text>
                   </Text>
                   <TextInput
                     style={styles.input}
@@ -662,39 +1173,315 @@ export default function AddApartmentScreen() {
                 </View>
 
                 <View style={styles.inputGroup}>
-                  <Text style={styles.label}>תיאור</Text>
+                  <Text style={styles.label}>
+                    כתובת הדירה <Text style={styles.required}>*</Text>
+                  </Text>
+                  <View style={styles.inputWithIcon}>
+                    <MapPin size={18} color="#9CA3AF" style={styles.inputIcon} />
+                    <TextInput
+                      style={[styles.input, styles.inputFlex]}
+                      placeholder="רחוב, מספר, עיר"
+                      value={address}
+                      onChangeText={(t) => {
+                        setAddress(t);
+                        if (neighborhood) setNeighborhood('');
+                      }}
+                      editable={!isLoading}
+                      placeholderTextColor="#9AA0A6"
+                    />
+                  </View>
+                  {addressSuggestions.length > 0 ? (
+                    <View style={styles.suggestionsBox}>
+                      {addressSuggestions.map((f) => (
+                        <TouchableOpacity
+                          key={f.id}
+                          style={styles.suggestionItem}
+                          onPress={() => {
+                            const street = String(f.text || '').trim();
+                            const house = String(f.address || '').trim();
+                            const nextAddress = `${street}${house ? ` ${house}` : ''}`.trim();
+                            setAddress(nextAddress || street || address);
+                            setAddressSuggestions([]);
+
+                            // derive city from context when possible
+                            const derivedCity =
+                              ctxText(f, 'place.') ||
+                              ctxText(f, 'locality.') ||
+                              ctxText(f, 'district.') ||
+                              '';
+                            if (derivedCity) {
+                              setCity(derivedCity);
+                              const center = Array.isArray(f.center) && f.center.length === 2 ? { lng: f.center[0], lat: f.center[1] } : undefined;
+                              setSelectedCity({ name: derivedCity, center, bbox: undefined });
+                            }
+
+                            const inferredNeighborhood = inferNeighborhoodFromFeature(f, derivedCity || city);
+                            if (inferredNeighborhood) setNeighborhood(inferredNeighborhood);
+
+                            if (Array.isArray(f.center) && f.center.length === 2) {
+                              const geo = { lng: f.center[0], lat: f.center[1] };
+                              setSelectedGeo(geo);
+                            }
+                          }}
+                        >
+                          <Text style={styles.suggestionText}>{f.place_name}</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  ) : null}
+                </View>
+
+                <View style={styles.row}>
+                  <View style={[styles.inputGroup, styles.halfWidth]}>
+                    <Text style={styles.label}>תאריך כניסה</Text>
+                    <TouchableOpacity
+                      activeOpacity={0.9}
+                      onPress={() => setIsDatePickerOpen(true)}
+                      disabled={isLoading}
+                      style={styles.inputWithIcon}
+                    >
+                      <Calendar size={18} color="#9AA0A6" style={styles.inputIcon} />
+                      <View style={[styles.input, styles.inputFlex, styles.dateField]}>
+                        <Text
+                          style={[
+                            styles.dateFieldText,
+                            !moveInDate ? styles.dateFieldPlaceholder : null,
+                          ]}
+                        >
+                          {moveInDate || 'dd/mm/yyyy'}
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                  </View>
+
+                  <View style={[styles.inputGroup, styles.halfWidth]}>
+                    <Text style={styles.label}>
+                      שכר דירה (לשותף) <Text style={styles.required}>*</Text>
+                    </Text>
+                    <View style={styles.moneyWrap}>
+                      <Text style={styles.moneySuffix}>₪</Text>
+                      <TextInput
+                        style={styles.moneyInput}
+                        placeholder="4,500"
+                        value={formatWithCommas(price)}
+                        onChangeText={(t) => setPrice(digitsOnly(t))}
+                        keyboardType="number-pad"
+                        editable={!isLoading}
+                        placeholderTextColor="#9AA0A6"
+                      />
+                    </View>
+                  </View>
+                </View>
+
+                <View style={styles.stepperCard}>
+                  <View style={styles.stepperRow}>
+                    <View style={styles.stepperControl} pointerEvents={isLoading ? 'none' : 'auto'}>
+                      <TouchableOpacity
+                        style={[styles.stepperBtn, styles.stepperBtnPrimary]}
+                        onPress={() => setBedrooms(String(Math.min(12, roomsCount + 1)))}
+                        disabled={isLoading}
+                      >
+                        <Text style={styles.stepperBtnPrimaryText}>+</Text>
+                      </TouchableOpacity>
+                      <View style={styles.stepperValue}>
+                        <Text style={styles.stepperValueText}>{roomsCount}</Text>
+                      </View>
+                      <TouchableOpacity
+                        style={[styles.stepperBtn, styles.stepperBtnSecondary]}
+                        onPress={() => setBedrooms(String(Math.max(0, roomsCount - 1)))}
+                        disabled={isLoading}
+                      >
+                        <Text style={styles.stepperBtnSecondaryText}>−</Text>
+                      </TouchableOpacity>
+                    </View>
+                    <View style={styles.stepperLabels}>
+                      <Text style={styles.stepperTitle}>
+                        מספר חדרים <Text style={styles.required}>*</Text>
+                      </Text>
+                      <Text style={styles.stepperSubtitle}>כולל סלון</Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.stepperDivider} />
+
+                  <View style={styles.stepperRow}>
+                    <View style={styles.stepperControl} pointerEvents={isLoading ? 'none' : 'auto'}>
+                      <TouchableOpacity
+                        style={[styles.stepperBtn, styles.stepperBtnPrimary]}
+                        onPress={() => setBathrooms(String(Math.min(12, bathroomsCount + 1)))}
+                        disabled={isLoading}
+                      >
+                        <Text style={styles.stepperBtnPrimaryText}>+</Text>
+                      </TouchableOpacity>
+                      <View style={styles.stepperValue}>
+                        <Text style={styles.stepperValueText}>{bathroomsCount}</Text>
+                      </View>
+                      <TouchableOpacity
+                        style={[styles.stepperBtn, styles.stepperBtnSecondary]}
+                        onPress={() => setBathrooms(String(Math.max(0, bathroomsCount - 1)))}
+                        disabled={isLoading}
+                      >
+                        <Text style={styles.stepperBtnSecondaryText}>−</Text>
+                      </TouchableOpacity>
+                    </View>
+                    <View style={styles.stepperLabels}>
+                      <Text style={styles.stepperTitle}>
+                        מספר חדרי רחצה <Text style={styles.required}>*</Text>
+                      </Text>
+                      <Text style={styles.stepperSubtitle}>חדרי אמבטיה/שירותים</Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.stepperDivider} />
+
+                  {propertyType === 'building' ? (
+                    <>
+                      <View style={styles.stepperRow}>
+                        <View style={styles.stepperControl} pointerEvents={isLoading ? 'none' : 'auto'}>
+                          <TouchableOpacity
+                            style={[styles.stepperBtn, styles.stepperBtnPrimary]}
+                            onPress={() => setFloor((v) => Math.min(60, v + 1))}
+                            disabled={isLoading}
+                          >
+                            <Text style={styles.stepperBtnPrimaryText}>+</Text>
+                          </TouchableOpacity>
+                          <View style={styles.stepperValue}>
+                            <Text style={styles.stepperValueText}>{floor}</Text>
+                          </View>
+                          <TouchableOpacity
+                            style={[styles.stepperBtn, styles.stepperBtnSecondary]}
+                            onPress={() => setFloor((v) => Math.max(0, v - 1))}
+                            disabled={isLoading}
+                          >
+                            <Text style={styles.stepperBtnSecondaryText}>−</Text>
+                          </TouchableOpacity>
+                        </View>
+                        <View style={styles.stepperLabels}>
+                          <Text style={styles.stepperTitle}>קומה</Text>
+                          <Text style={styles.stepperSubtitle}>מתוך סה״כ בבניין</Text>
+                        </View>
+                      </View>
+
+                      <View style={styles.stepperDivider} />
+
+                      <View style={styles.stepperRow}>
+                        <View style={styles.stepperControl} pointerEvents={isLoading ? 'none' : 'auto'}>
+                          <TouchableOpacity
+                            style={[styles.stepperBtn, styles.stepperBtnPrimary]}
+                            onPress={() =>
+                              setBalconyCount((v) => (v < 3 ? ((v + 1) as 0 | 1 | 2 | 3) : v))
+                            }
+                            disabled={isLoading}
+                          >
+                            <Text style={styles.stepperBtnPrimaryText}>+</Text>
+                          </TouchableOpacity>
+                          <View style={styles.stepperValue}>
+                            <Text style={styles.stepperValueText}>{balconyCount}</Text>
+                          </View>
+                          <TouchableOpacity
+                            style={[styles.stepperBtn, styles.stepperBtnSecondary]}
+                            onPress={() =>
+                              setBalconyCount((v) => (v > 0 ? ((v - 1) as 0 | 1 | 2 | 3) : v))
+                            }
+                            disabled={isLoading}
+                          >
+                            <Text style={styles.stepperBtnSecondaryText}>−</Text>
+                          </TouchableOpacity>
+                        </View>
+                        <View style={styles.stepperLabels}>
+                          <Text style={styles.stepperTitle}>מרפסות</Text>
+                          <Text style={styles.stepperSubtitle}>אופציונלי</Text>
+                        </View>
+                      </View>
+                    </>
+                  ) : null}
+                </View>
+              </>
+            ) : null}
+
+            {step === 2 ? (
+              <>
+                <View style={styles.step2Header}>
+                  <Text style={styles.step2Title}>מאפיינים נוספים</Text>
+                  <Text style={styles.step2Subtitle}>ספר לנו על החוויה ומה יש בדירה.</Text>
+                </View>
+
+                {propertyType === 'garden' ? (
+                  <View style={styles.row}>
+                    <View style={styles.halfWidth}>
+                      <Text style={styles.fieldLabel}>גודל הגינה (מ״ר)</Text>
+                      <View style={styles.unitWrap}>
+                        <Text style={styles.unitSuffix}>מ״ר</Text>
+                        <TextInput
+                          style={styles.unitInput}
+                          placeholder="אופציונלי"
+                          value={digitsOnly(gardenSizeSqm)}
+                          onChangeText={(t) => setGardenSizeSqm(digitsOnly(t))}
+                          keyboardType="number-pad"
+                          editable={!isLoading}
+                          placeholderTextColor="#9AA0A6"
+                        />
+                      </View>
+                    </View>
+
+                    <View style={styles.halfWidth}>
+                      <Text style={styles.fieldLabel}>
+                        גודל הדירה (מ״ר) <Text style={styles.required}>*</Text>
+                      </Text>
+                      <View style={styles.unitWrap}>
+                        <Text style={styles.unitSuffix}>מ״ר</Text>
+                        <TextInput
+                          style={styles.unitInput}
+                          placeholder="למשל: 85"
+                          value={digitsOnly(sizeSqm)}
+                          onChangeText={(t) => setSizeSqm(digitsOnly(t))}
+                          keyboardType="number-pad"
+                          editable={!isLoading}
+                          placeholderTextColor="#9AA0A6"
+                        />
+                      </View>
+                    </View>
+                  </View>
+                ) : (
+                  <>
+                    <Text style={styles.fieldLabel}>
+                      גודל הדירה (מ״ר) <Text style={styles.required}>*</Text>
+                    </Text>
+                    <View style={styles.unitWrap}>
+                      <Text style={styles.unitSuffix}>מ״ר</Text>
+                      <TextInput
+                        style={styles.unitInput}
+                        placeholder="למשל: 85"
+                        value={digitsOnly(sizeSqm)}
+                        onChangeText={(t) => setSizeSqm(digitsOnly(t))}
+                        keyboardType="number-pad"
+                        editable={!isLoading}
+                        placeholderTextColor="#9AA0A6"
+                      />
+                    </View>
+                  </>
+                )}
+
+                <Text style={[styles.fieldLabel, styles.fieldLabelTight]}>קצת על הדירה</Text>
+                <View style={styles.textCard}>
                   <TextInput
-                    style={[styles.input, styles.textArea]}
-                    placeholder="תאר את הדירה בקצרה..."
+                    style={styles.textCardInput}
+                    placeholder="דירה מוארת ומרווחת, משופצת חדשה. במיקום מעולה קרוב לתחבורה ציבורית ומרכזי קניות..."
                     value={description}
                     onChangeText={setDescription}
                     multiline
-                    numberOfLines={4}
+                    numberOfLines={6}
                     editable={!isLoading}
                     placeholderTextColor="#9AA0A6"
+                    textAlignVertical="top"
                   />
                 </View>
 
-                <View style={styles.inputGroup}>
-                  <Text style={styles.label}>
-                    מחיר לחודש (₪) <Text style={styles.required}>*</Text>
-                  </Text>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="3000"
-                    value={price}
-                    onChangeText={setPrice}
-                    keyboardType="numeric"
-                    editable={!isLoading}
-                    placeholderTextColor="#9AA0A6"
-                  />
-                </View>
+                <View style={styles.dividerLine} />
 
-                {/* Property features */}
-                <View style={styles.section}>
-                  <Text style={styles.sectionTitle}>מאפייני הנכס</Text>
+                <Text style={styles.fieldLabel}>מה יש בדירה?</Text>
 
-                  <View style={styles.featuresGrid}>
+                <View style={styles.featuresGrid}>
                     {(
                       [
                         {
@@ -779,7 +1566,9 @@ export default function AddApartmentScreen() {
                           activeOpacity={0.85}
                           disabled={isLoading}
                         >
-                          <Icon size={18} color={active ? '#4C1D95' : '#6B7280'} />
+                          <View style={[styles.featureIconWrap, active ? styles.featureIconWrapActive : null]}>
+                            <Icon size={18} color={active ? '#4C1D95' : '#6B7280'} />
+                          </View>
                           <Text
                             style={[
                               styles.featureText,
@@ -793,116 +1582,52 @@ export default function AddApartmentScreen() {
                       );
                     })}
                   </View>
-                </View>
-              </>
-            ) : null}
 
-            {step === 3 ? (
-              <>
-                <View style={styles.row}>
-                  <View style={[styles.inputGroup, styles.halfWidth]}>
-                    <Text style={styles.label}>
-                      חדרי אמבטיה <Text style={styles.required}>*</Text>
-                    </Text>
-                    <TextInput
-                      style={styles.input}
-                      placeholder="2"
-                      value={bathrooms}
-                      onChangeText={setBathrooms}
-                      keyboardType="numeric"
-                      editable={!isLoading}
-                      placeholderTextColor="#9AA0A6"
-                    />
-                  </View>
+                <View style={styles.dividerLine} />
 
-                  <View style={[styles.inputGroup, styles.halfWidth]}>
-                    <Text style={styles.label}>
-                      חדרי שינה <Text style={styles.required}>*</Text>
-                    </Text>
-                    <TextInput
-                      style={styles.input}
-                      placeholder="3"
-                      value={bedrooms}
-                      onChangeText={setBedrooms}
-                      keyboardType="numeric"
-                      editable={!isLoading}
-                      placeholderTextColor="#9AA0A6"
-                    />
-                  </View>
-                </View>
-
-                <View style={[styles.inputGroup, isBalconyDropdownOpen ? styles.inputGroupRaised : null]}>
-                  <Text style={styles.label}>מרפסות</Text>
-                  <TouchableOpacity
-                    style={[styles.input, styles.selectButton]}
-                    onPress={() => setIsBalconyDropdownOpen((prev) => !prev)}
-                    disabled={isLoading}
-                  >
-                    <Text
-                      style={styles.selectButtonText}
-                    >
-                      {balconyCount === 0 ? 'ללא מרפסת' : `${balconyCount} מרפסות`}
-                    </Text>
-                    <Text style={styles.selectButtonArrow}>▼</Text>
-                  </TouchableOpacity>
-                  {isBalconyDropdownOpen ? (
-                    <View style={styles.suggestionsBox}>
-                      {balconyOptions.map((value) => (
-                        <TouchableOpacity
-                          key={value}
-                          style={styles.suggestionItem}
-                          onPress={() => {
-                            setBalconyCount(value);
-                            setIsBalconyDropdownOpen(false);
-                          }}
-                        >
-                          <Text style={styles.suggestionText}>
-                            {value === 0 ? 'ללא מרפסת' : `${value} מרפסות`}
-                          </Text>
-                        </TouchableOpacity>
-                      ))}
+                <View style={styles.stepperCard}>
+                  <View style={styles.stepperRow}>
+                    <View style={styles.stepperControl} pointerEvents={isLoading ? 'none' : 'auto'}>
+                      <TouchableOpacity
+                        style={[styles.stepperBtn, styles.stepperBtnPrimary]}
+                        onPress={() =>
+                          setRoommateCapacity((prev) => {
+                            const current = prev ?? (roommateCapacityOptions[0] ?? 2);
+                            const idx = roommateCapacityOptions.indexOf(current);
+                            const nextIdx = idx >= 0 ? Math.min(roommateCapacityOptions.length - 1, idx + 1) : 0;
+                            return roommateCapacityOptions[nextIdx] ?? current;
+                          })
+                        }
+                        disabled={isLoading}
+                      >
+                        <Text style={styles.stepperBtnPrimaryText}>+</Text>
+                      </TouchableOpacity>
+                      <View style={styles.stepperValue}>
+                        <Text style={styles.stepperValueText}>{roommateCapacity ?? roommateCapacityOptions[0]}</Text>
+                      </View>
+                      <TouchableOpacity
+                        style={[styles.stepperBtn, styles.stepperBtnSecondary]}
+                        onPress={() =>
+                          setRoommateCapacity((prev) => {
+                            const current = prev ?? (roommateCapacityOptions[0] ?? 2);
+                            const idx = roommateCapacityOptions.indexOf(current);
+                            const nextIdx = idx >= 0 ? Math.max(0, idx - 1) : 0;
+                            return roommateCapacityOptions[nextIdx] ?? current;
+                          })
+                        }
+                        disabled={isLoading}
+                      >
+                        <Text style={styles.stepperBtnSecondaryText}>−</Text>
+                      </TouchableOpacity>
                     </View>
-                  ) : null}
-                </View>
-
-                <View style={[styles.inputGroup, isRoommateDropdownOpen ? styles.inputGroupRaised : null]}>
-                  <Text style={styles.label}>
-                    מתאים לכמות שותפים <Text style={styles.required}>*</Text>
-                  </Text>
-                  <TouchableOpacity
-                    style={[styles.input, styles.selectButton]}
-                    onPress={() => setIsRoommateDropdownOpen((prev) => !prev)}
-                    disabled={isLoading}
-                  >
-                    <Text
-                      style={[
-                        styles.selectButtonText,
-                        roommateCapacity === null && styles.selectButtonPlaceholder,
-                      ]}
-                    >
-                      {roommateCapacity !== null ? `${roommateCapacity} שותפים` : 'בחר מספר שותפים'}
-                    </Text>
-                    <Text style={styles.selectButtonArrow}>▼</Text>
-                  </TouchableOpacity>
-                  {isRoommateDropdownOpen ? (
-                    <View style={styles.suggestionsBox}>
-                      {roommateCapacityOptions.map((value) => (
-                        <TouchableOpacity
-                          key={value}
-                          style={styles.suggestionItem}
-                          onPress={() => {
-                            setRoommateCapacity(value);
-                            setIsRoommateDropdownOpen(false);
-                          }}
-                        >
-                          <Text style={styles.suggestionText}>{`${value} שותפים`}</Text>
-                        </TouchableOpacity>
-                      ))}
+                    <View style={styles.stepperLabels}>
+                      <Text style={styles.stepperTitle}>מתאים לכמות שותפים</Text>
+                      <Text style={styles.stepperSubtitle}>2–5</Text>
                     </View>
-                  ) : null}
+                  </View>
                 </View>
 
-                <View style={[styles.inputGroup, styles.switchRow]}>
+                <View style={[styles.inputGroup, styles.switchRow, { marginTop: 0 }]}>
                   <Text style={[styles.label, styles.switchLabel]}>האם אתה שותף בדירה?</Text>
                   <Switch
                     value={includeAsPartner}
@@ -916,167 +1641,406 @@ export default function AddApartmentScreen() {
               </>
             ) : null}
 
-            {step === 4 ? (
+            {step === 3 ? (
               <>
-                <View style={styles.inputGroup}>
-                  <Text style={styles.label}>תמונות הדירה</Text>
-                  <View style={styles.galleryHeader}>
-                    <Text style={styles.galleryHint}>עד 12 תמונות</Text>
-                    <TouchableOpacity style={styles.addImagesBtn} onPress={pickImages} disabled={isLoading}>
-                      <Text style={styles.addImagesBtnText}>הוסף תמונות</Text>
-                    </TouchableOpacity>
-                  </View>
-                  {images.length ? (
-                    <View style={styles.galleryGrid}>
-                      {images.map((uri, idx) => (
-                        <View key={uri + idx} style={styles.thumbWrap}>
-                          <Image source={{ uri }} style={styles.thumb} />
-                          <TouchableOpacity style={styles.removeThumb} onPress={() => removeImageAt(idx)}>
-                            <Text style={styles.removeThumbText}>×</Text>
-                          </TouchableOpacity>
+                <View style={styles.previewHeader}>
+                  <Text style={styles.step2Title}>{mode === 'edit' ? 'סיכום ועדכון' : 'סיכום ופרסום'}</Text>
+                  <Text style={styles.step2Subtitle}>תצוגה מקדימה כמו עמוד דירה רגיל.</Text>
+                </View>
+
+                <View style={styles.previewGalleryContainer}>
+                  {images?.length ? (
+                    <>
+                      <ScrollView
+                        ref={previewGalleryRef}
+                        horizontal
+                        pagingEnabled
+                        showsHorizontalScrollIndicator={false}
+                        onMomentumScrollEnd={(e) => {
+                          const idx = Math.round(
+                            e.nativeEvent.contentOffset.x / e.nativeEvent.layoutMeasurement.width
+                          );
+                          setPreviewActiveIdx(idx);
+                        }}
+                      >
+                        {images.map((uri, idx) => (
+                          <View key={`${uri}-${idx}`} style={[styles.previewSlide, { width: screenWidth }]}>
+                            <Image source={{ uri }} style={styles.previewImage} resizeMode="cover" />
+                          </View>
+                        ))}
+                      </ScrollView>
+                      {images.length > 1 ? (
+                        <View style={styles.previewDotsWrap} pointerEvents="none">
+                          <View style={styles.previewDotsPill}>
+                            {images.map((_, i) => (
+                              <View
+                                key={`dot-${i}`}
+                                style={[
+                                  styles.previewDot,
+                                  i === previewActiveIdx ? styles.previewDotActive : null,
+                                ]}
+                              />
+                            ))}
+                          </View>
                         </View>
-                      ))}
-                    </View>
+                      ) : null}
+                    </>
                   ) : (
-                    <View style={styles.galleryPlaceholder}>
-                      <Text style={styles.galleryPlaceholderText}>לא נבחרו תמונות</Text>
+                    <View style={styles.previewEmpty}>
+                      <Text style={styles.previewEmptyText}>לא נבחרו תמונות</Text>
                     </View>
                   )}
                 </View>
 
-                <TouchableOpacity
-                  style={[styles.button, isLoading && styles.buttonDisabled]}
-                  onPress={handleSubmit}
-                  disabled={isLoading}
-                >
-                  {isLoading ? (
-                    <ActivityIndicator color="#FFF" />
-                  ) : (
-                    <Text style={styles.buttonText}>הוסף דירה</Text>
-                  )}
-                </TouchableOpacity>
+                <View style={styles.previewTopHeader}>
+                  <Text style={styles.previewTitle} numberOfLines={2}>
+                    {title?.trim() ? title.trim() : 'כותרת הדירה'}
+                  </Text>
+                  <View style={styles.previewLocationRow}>
+                    <MapPin size={16} color="#6B7280" />
+                    <Text style={styles.previewLocationText} numberOfLines={1}>
+                      {locationLine || 'כתובת לא מלאה'}
+                    </Text>
+                  </View>
+                </View>
+
+                <View style={styles.previewPriceCard}>
+                  <Text style={styles.previewPrice}>{priceLabel}</Text>
+                  <Text style={styles.previewPriceSub}>שכר דירה (לשותף)</Text>
+                </View>
+
+                <View style={styles.previewStatsRow}>
+                  <View style={styles.previewStat}>
+                    <View style={styles.previewStatIcon}>
+                      <Users size={20} color="#8B5CF6" />
+                    </View>
+                    <View style={styles.previewStatTextCol}>
+                      <Text style={styles.previewStatNumber}>{roommateCapacity ?? '—'}</Text>
+                      <Text style={styles.previewStatLabel}>שותפים</Text>
+                    </View>
+                  </View>
+                  <View style={styles.previewStat}>
+                    <View style={styles.previewStatIcon}>
+                      <Bed size={20} color="#8B5CF6" />
+                    </View>
+                    <View style={styles.previewStatTextCol}>
+                      <Text style={styles.previewStatNumber}>{roomsCount || '—'}</Text>
+                      <Text style={styles.previewStatLabel}>חדרים</Text>
+                    </View>
+                  </View>
+                  <View style={styles.previewStat}>
+                    <View style={styles.previewStatIcon}>
+                      <Bath size={20} color="#8B5CF6" />
+                    </View>
+                    <View style={styles.previewStatTextCol}>
+                      <Text style={styles.previewStatNumber}>{bathroomsCount || '—'}</Text>
+                      <Text style={styles.previewStatLabel}>מקלחות</Text>
+                    </View>
+                  </View>
+                </View>
+
+                <View style={styles.previewSection}>
+                  <View style={styles.previewWhiteCard}>
+                    <Text style={styles.sectionTitle}>על הדירה</Text>
+                    <Text style={styles.previewBodyText}>
+                      {description?.trim() ? description.trim() : 'לא נוסף תיאור עדיין.'}
+                    </Text>
+                    <View style={styles.previewMetaRow}>
+                      <View style={styles.previewMetaPill}>
+                        <Text style={styles.previewMetaText}>{propertyTypeLabel}</Text>
+                      </View>
+                      <View style={styles.previewMetaPill}>
+                        <Text style={styles.previewMetaText}>
+                          {digitsOnly(sizeSqm) ? `${digitsOnly(sizeSqm)} מ״ר` : 'גודל דירה —'}
+                        </Text>
+                      </View>
+                      {propertyType === 'garden' ? (
+                        <View style={styles.previewMetaPill}>
+                          <Text style={styles.previewMetaText}>
+                            {digitsOnly(gardenSizeSqm) ? `${digitsOnly(gardenSizeSqm)} מ״ר גינה` : 'גינה —'}
+                          </Text>
+                        </View>
+                      ) : null}
+                      {propertyType === 'building' ? (
+                        <View style={styles.previewMetaPill}>
+                          <Text style={styles.previewMetaText}>{`קומה ${floor}`}</Text>
+                        </View>
+                      ) : null}
+                      {propertyType === 'building' ? (
+                        <View style={styles.previewMetaPill}>
+                          <Text style={styles.previewMetaText}>{`מרפסות ${balconyCount}`}</Text>
+                        </View>
+                      ) : null}
+                      {moveInDate ? (
+                        <View style={styles.previewMetaPill}>
+                          <Text style={styles.previewMetaText}>{`כניסה ${moveInDate}`}</Text>
+                        </View>
+                      ) : null}
+                    </View>
+                  </View>
+                </View>
+
+                <View style={styles.previewSection}>
+                  <View style={styles.previewWhiteCard}>
+                    <Text style={styles.sectionTitle}>מה יש בדירה?</Text>
+                    {previewFeatureItems.length ? (
+                      <View style={styles.previewFeaturesGrid}>
+                        {previewFeatureItems.map(({ key, label, Icon }) => (
+                          <View key={`feat-${key}`} style={styles.previewFeatureTile}>
+                            <View style={styles.previewFeatureTileIcon}>
+                              <Icon size={18} color="#4C1D95" />
+                            </View>
+                            <Text style={styles.previewFeatureTileText} numberOfLines={1}>
+                              {label}
+                            </Text>
+                          </View>
+                        ))}
+                      </View>
+                    ) : (
+                      <View style={styles.previewFeaturesEmpty}>
+                        <View style={styles.previewFeaturesEmptyIcon}>
+                          <Info size={18} color="#4C1D95" />
+                        </View>
+                        <Text style={styles.previewFeaturesEmptyTitle}>לא צוינו מאפיינים</Text>
+                        <Text style={styles.previewFeaturesEmptyBody}>אפשר להמשיך גם בלי לבחור מאפיינים.</Text>
+                      </View>
+                    )}
+                  </View>
+                </View>
+
+                <View style={styles.previewSection}>
+                  <View style={styles.previewWhiteCard}>
+                    <Text style={styles.sectionTitle}>מיקום</Text>
+                    <View style={styles.previewMapCard}>
+                      {!selectedGeo ? (
+                        <View style={styles.previewMapFallback}>
+                          <Text style={styles.previewMapFallbackText}>בחר/י כתובת כדי שנציג מפה.</Text>
+                        </View>
+                      ) : (
+                        <View style={styles.previewMapInner}>
+                          {/* Non-interactive map so scroll works */}
+                          <View pointerEvents="none" style={{ flex: 1, alignSelf: 'stretch' }}>
+                            <MapboxMap
+                              accessToken={mapboxToken}
+                              styleUrl={mapboxStyleUrl}
+                              center={selectedGeo ? ([selectedGeo.lng, selectedGeo.lat] as const) : undefined}
+                              zoom={selectedGeo ? 15 : 11}
+                              points={selectedGeo ? previewPoints : { type: 'FeatureCollection', features: [] }}
+                            />
+                          </View>
+                          {locationLine ? (
+                            <View pointerEvents="none" style={styles.previewMapLocationBadge}>
+                              <View style={styles.previewMapLocationIconPill}>
+                                <MapPin size={14} color="#4C1D95" />
+                              </View>
+                              <View style={{ flex: 1, alignItems: 'flex-end' }}>
+                                <Text style={styles.previewMapLocationCity} numberOfLines={1}>
+                                  {String(city || '').trim()}
+                                </Text>
+                                <Text style={styles.previewMapLocationAddress} numberOfLines={1}>
+                                  {String(address || '').trim()}
+                                </Text>
+                              </View>
+                            </View>
+                          ) : null}
+                        </View>
+                      )}
+                    </View>
+                  </View>
+                </View>
               </>
             ) : null}
 
-            <View style={styles.navRow}>
-              {step > 1 ? (
-                <TouchableOpacity
-                  style={[styles.navSecondaryButton, isLoading && styles.buttonDisabled]}
-                  onPress={handlePrev}
-                  disabled={isLoading}
-                >
-                  <Text style={styles.navSecondaryText}>הקודם</Text>
-                </TouchableOpacity>
-              ) : null}
+            {/* Navigation buttons moved to fixed bottom CTA (like the reference design). */}
+          </View>
+          <View style={[styles.footerSpacer, { height: 92 + (insets.bottom || 0) }]} />
+        </ScrollView>
 
-              {step < TOTAL_STEPS ? (
-                <View style={[styles.navPrimaryWrap, step === 1 ? { flex: 1 } : null]}>
-                  <TouchableOpacity
-                    style={[styles.navPrimaryButton, isLoading && styles.buttonDisabled]}
-                    onPress={handleNext}
-                    disabled={isLoading}
-                  >
-                    <Text style={styles.navPrimaryText}>הבא</Text>
+        {isDatePickerOpen ? (
+          <Modal
+            visible
+            transparent
+            animationType="fade"
+            onRequestClose={() => setIsDatePickerOpen(false)}
+          >
+            <Pressable style={styles.modalOverlay} onPress={() => setIsDatePickerOpen(false)} />
+            <View style={styles.modalSheet}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>בחר תאריך כניסה</Text>
+                <TouchableOpacity onPress={() => setIsDatePickerOpen(false)} style={styles.modalCloseBtn}>
+                  <Text style={styles.modalCloseText}>סגור</Text>
+                </TouchableOpacity>
+              </View>
+              <DateTimePicker
+                value={(moveInDateObj && moveInDateObj >= startOfToday()) ? moveInDateObj : startOfToday()}
+                mode="date"
+                display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                locale="he-IL"
+                minimumDate={startOfToday()}
+                onChange={(event: any, selected?: Date) => {
+                  // Android fires "dismissed" and "set". iOS fires continuously.
+                  const type = event?.type;
+                  if (Platform.OS !== 'ios') {
+                    if (type === 'dismissed') {
+                      setIsDatePickerOpen(false);
+                      return;
+                    }
+                    if (type === 'set') {
+                      if (selected) {
+                        const min = startOfToday();
+                        const next = selected < min ? min : selected;
+                        setMoveInDateObj(next);
+                        setMoveInDate(formatDDMMYYYY(next));
+                      }
+                      setIsDatePickerOpen(false);
+                      return;
+                    }
+                  }
+                  if (selected) {
+                    const min = startOfToday();
+                    const next = selected < min ? min : selected;
+                    setMoveInDateObj(next);
+                    setMoveInDate(formatDDMMYYYY(next));
+                  }
+                }}
+              />
+              {Platform.OS === 'ios' ? (
+                <View style={styles.modalFooter}>
+                  <TouchableOpacity style={styles.modalDoneBtn} onPress={() => setIsDatePickerOpen(false)}>
+                    <Text style={styles.modalDoneText}>אישור</Text>
                   </TouchableOpacity>
-                  <Text style={styles.navStepText}>{`שלב ${step} מתוך ${TOTAL_STEPS}`}</Text>
                 </View>
               ) : null}
             </View>
+          </Modal>
+        ) : null}
+
+        <View
+          style={[
+            styles.footerBar,
+            {
+              paddingBottom: 12 + (insets.bottom || 0),
+            },
+          ]}
+          pointerEvents="box-none"
+        >
+          {step === 1 ? (
+            <TouchableOpacity
+              style={[styles.footerCtaBtn, isLoading && styles.buttonDisabled]}
+              onPress={handleNext}
+              disabled={isLoading}
+              activeOpacity={0.92}
+            >
+              <ArrowLeft size={20} color="#FFFFFF" />
+              <Text style={styles.footerCtaText}>המשך לשלב הבא</Text>
+            </TouchableOpacity>
+          ) : (
+            <View style={styles.footerCtaRow}>
+              {step < TOTAL_STEPS ? (
+                <TouchableOpacity
+                  style={[styles.footerCtaBtn, isLoading && styles.buttonDisabled]}
+                  onPress={handleNext}
+                  disabled={isLoading}
+                  activeOpacity={0.92}
+                >
+                  <ArrowLeft size={20} color="#FFFFFF" />
+                  <Text style={styles.footerCtaText}>המשך לשלב הבא</Text>
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity
+                  style={[styles.footerCtaBtn, isLoading && styles.buttonDisabled]}
+                  onPress={handleSubmit}
+                  disabled={isLoading}
+                  activeOpacity={0.92}
+                >
+                  {isLoading ? <ActivityIndicator color="#FFFFFF" /> : <ArrowLeft size={20} color="#FFFFFF" />}
+                  <Text style={styles.footerCtaText}>{mode === 'edit' ? 'עדכן דירה' : 'פרסם דירה'}</Text>
+                </TouchableOpacity>
+              )}
+
+              <TouchableOpacity
+                style={[styles.footerSecondaryBtn, isLoading && styles.buttonDisabled]}
+                onPress={handlePrev}
+                disabled={isLoading}
+                activeOpacity={0.92}
+              >
+                <ArrowRight size={20} color="#111827" />
+                <Text style={styles.footerSecondaryText}>הקודם</Text>
+              </TouchableOpacity>
             </View>
-          </View>
-          </ScrollView>
-        </KeyboardAvoidingView>
-      </View>
-    </SafeAreaView>
+          )}
+        </View>
+      </KeyboardAvoidingView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    // White behind the "sheet" so rounded top corners are visible under the global top bar
     backgroundColor: '#FFFFFF',
-  },
-  sheet: {
-    flex: 1,
-    backgroundColor: '#FAFAFA',
-    marginTop: 64, // a bit lower than the global top bar for nicer spacing
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    overflow: 'hidden',
   },
   keyboardAvoid: {
     flex: 1,
   },
   scrollContent: {
-    paddingHorizontal: 30,
-    // Give room for the global top bar above the rounded sheet
-    paddingTop: 16,
-    paddingBottom: 28,
+    paddingHorizontal: 16,
+    paddingTop: 14,
   },
   header: {
-    marginBottom: 24,
-    paddingTop: 15,
-    gap: 10,
+    paddingBottom: 8,
+    paddingHorizontal: 16,
+    backgroundColor: '#FFFFFF',
   },
   headerRow: {
-    flexDirection: 'row',
+    flexDirection: 'row-reverse',
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-  title: {
-    fontSize: 22,
-    fontWeight: '800',
+  headerTitle: {
+    fontSize: 16,
+    fontWeight: '900',
     color: '#111827',
-    textAlign: 'right',
-    marginBottom: 6,
+    textAlign: 'center',
+    flex: 1,
+  },
+  headerBack: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
+  },
+  headerSideSpacer: {
+    width: 40,
+    height: 40,
+  },
+  progressMetaRow: {
+    paddingHorizontal: 16,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  progressMetaText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#6B7280',
   },
   progressTrack: {
-    flexDirection: 'row-reverse',
-    height: 6,
+    marginHorizontal: 16,
+    height: 4,
     backgroundColor: '#E5E7EB',
     borderRadius: 999,
     overflow: 'hidden',
-    marginBottom: 6,
+    flexDirection: 'row-reverse',
+    marginBottom: 10,
   },
   progressFill: {
-    height: 6,
+    height: 4,
     backgroundColor: '#4C1D95',
     borderRadius: 999,
-  },
-  stepLabelsRow: {
-    flexDirection: 'row-reverse',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  stepLabelWrap: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  stepDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 999,
-    backgroundColor: '#D1D5DB',
-  },
-  stepDotActive: {
-    backgroundColor: '#4C1D95',
-  },
-  stepDotDone: {
-    backgroundColor: '#8B5CF6',
-  },
-  stepLabel: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#9CA3AF',
-    textAlign: 'right',
-  },
-  stepLabelActive: {
-    color: '#4C1D95',
-  },
-  stepLabelDone: {
-    color: '#111827',
   },
   backBtn: {
     backgroundColor: '#FFFFFF',
@@ -1091,17 +2055,124 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
   },
-  card: {
-    backgroundColor: '#FFFFFF',
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: '900',
+    color: '#111827',
+    textAlign: 'right',
+    marginBottom: 10,
+  },
+  step2Header: {
+    marginTop: 4,
+    marginBottom: 10,
+    alignItems: 'flex-end',
+    gap: 4,
+  },
+  step2Title: {
+    fontSize: 24,
+    fontWeight: '900',
+    color: '#111827',
+    textAlign: 'right',
+  },
+  step2Subtitle: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#6B7280',
+    textAlign: 'right',
+  },
+  fieldLabel: {
+    fontSize: 14,
+    fontWeight: '900',
+    color: '#111827',
+    textAlign: 'right',
+    marginBottom: 8,
+  },
+  fieldLabelTight: {
+    marginBottom: 4,
+  },
+  textCard: {
+    backgroundColor: '#F3F4F6',
+    borderRadius: 14,
+    borderWidth: 0,
+    borderColor: 'transparent',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  textCardInput: {
+    minHeight: 110,
+    color: '#111827',
+    fontSize: 13,
+    fontWeight: '700',
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
+  dividerLine: {
+    height: 1,
+    backgroundColor: '#E5E7EB',
+    marginVertical: 14,
+  },
+  uploadCard: {
+    backgroundColor: '#F3F4F6',
     borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#E7E2F5',
-    padding: 16,
+    borderWidth: 2,
+    borderStyle: 'dashed',
+    borderColor: 'rgba(76, 29, 149, 0.22)',
+    paddingVertical: 18,
+    paddingHorizontal: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+  },
+  uploadIconWrap: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    backgroundColor: 'rgba(76, 29, 149, 0.10)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  uploadTitle: {
+    fontSize: 16,
+    fontWeight: '900',
+    color: '#111827',
+    textAlign: 'center',
+  },
+  uploadSubtitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#6B7280',
+    textAlign: 'center',
+  },
+  uploadBtn: {
+    marginTop: 6,
+    backgroundColor: '#FFFFFF',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 999,
     shadowColor: '#111827',
     shadowOpacity: 0.08,
-    shadowRadius: 18,
+    shadowRadius: 14,
     shadowOffset: { width: 0, height: 10 },
-    elevation: 6,
+    elevation: 5,
+  },
+  uploadBtnText: {
+    color: '#4C1D95',
+    fontSize: 13,
+    fontWeight: '900',
+  },
+  stepHintBox: {
+    backgroundColor: '#FAFAFA',
+    borderRadius: 14,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    alignItems: 'flex-end',
+  },
+  stepHintText: {
+    color: '#6B7280',
+    fontSize: 13,
+    fontWeight: '700',
+    textAlign: 'right',
+    writingDirection: 'rtl',
   },
   form: {
     gap: 16,
@@ -1114,6 +2185,48 @@ const styles = StyleSheet.create({
     zIndex: 1000,
     elevation: 16,
   },
+  segmentWrap: {
+    marginTop: 8,
+    flexDirection: 'row-reverse',
+    backgroundColor: '#F3F4F6',
+    borderRadius: 16,
+    padding: 4,
+    borderWidth: 0,
+    borderColor: 'transparent',
+    overflow: 'hidden',
+  },
+  segmentThumb: {
+    position: 'absolute',
+    top: 4,
+    bottom: 4,
+    left: 4,
+    borderRadius: 14,
+    backgroundColor: '#FFFFFF',
+  },
+  segmentBtn: {
+    flex: 1,
+    minHeight: 48,
+    backgroundColor: 'transparent',
+    borderRadius: 14,
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginHorizontal: 2,
+  },
+  segmentBtnActive: {
+    backgroundColor: 'transparent',
+    borderWidth: 0,
+    borderColor: 'transparent',
+  },
+  segmentText: {
+    fontSize: 14,
+    fontWeight: '900',
+    color: '#6B7280',
+  },
+  segmentTextActive: {
+    color: '#4C1D95',
+  },
   label: {
     fontSize: 13,
     fontWeight: '700',
@@ -1124,16 +2237,99 @@ const styles = StyleSheet.create({
     color: '#F87171',
   },
   input: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#F3F4F6',
     paddingHorizontal: 16,
     paddingVertical: 14,
-    borderRadius: 10,
+    borderRadius: 14,
+    minHeight: 52,
     fontSize: 16,
-    borderWidth: 1,
-    borderColor: '#E7E2F5',
+    borderWidth: 0,
+    borderColor: 'transparent',
     color: '#111827',
     textAlign: 'right',
     writingDirection: 'rtl',
+    shadowColor: 'transparent',
+    shadowOpacity: 0,
+    shadowRadius: 0,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 0,
+  },
+  inputWithIcon: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 10,
+  },
+  inputIcon: {
+    position: 'absolute',
+    right: 14,
+    zIndex: 2,
+  },
+  inputFlex: {
+    flex: 1,
+    paddingRight: 44,
+  },
+  dateField: {
+    justifyContent: 'center',
+  },
+  dateFieldText: {
+    color: '#111827',
+    fontSize: 14,
+    fontWeight: '800',
+    textAlign: 'right',
+  },
+  dateFieldPlaceholder: {
+    color: '#9AA0A6',
+  },
+  moneyWrap: {
+    backgroundColor: '#F3F4F6',
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    minHeight: 52,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    // Keep currency on the left and numbers aligned properly regardless of RTL layout
+    ...(Platform.OS !== 'web' ? ({ direction: 'ltr' } as const) : {}),
+  },
+  moneySuffix: {
+    color: '#6B7280',
+    fontSize: 14,
+    fontWeight: '900',
+  },
+  moneyInput: {
+    flex: 1,
+    paddingVertical: 0,
+    paddingHorizontal: 0,
+    color: '#111827',
+    fontSize: 16,
+    fontWeight: '800',
+    textAlign: 'right',
+    writingDirection: 'ltr',
+  },
+  unitWrap: {
+    backgroundColor: '#F3F4F6',
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    minHeight: 52,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    ...(Platform.OS !== 'web' ? ({ direction: 'ltr' } as const) : {}),
+  },
+  unitSuffix: {
+    color: '#6B7280',
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  unitInput: {
+    flex: 1,
+    paddingVertical: 0,
+    paddingHorizontal: 0,
+    color: '#111827',
+    fontSize: 16,
+    fontWeight: '800',
+    textAlign: 'right',
+    writingDirection: 'ltr',
   },
   suggestionsBox: {
     position: 'absolute',
@@ -1144,8 +2340,8 @@ const styles = StyleSheet.create({
     marginTop: 6,
     backgroundColor: '#FFFFFF',
     borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#E7E2F5',
+    borderWidth: 0,
+    borderColor: 'transparent',
     overflow: 'hidden',
     maxHeight: 220,
     shadowColor: '#111827',
@@ -1165,9 +2361,31 @@ const styles = StyleSheet.create({
     fontSize: 14,
     textAlign: 'right',
   },
+  mapPreviewCard: {
+    marginTop: 10,
+    borderRadius: 16,
+    overflow: 'hidden',
+    borderWidth: 0,
+    borderColor: 'transparent',
+    backgroundColor: '#FFFFFF',
+    shadowColor: '#111827',
+    shadowOpacity: 0.08,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 6,
+  },
+  mapPreviewBody: {
+    height: 230,
+    backgroundColor: '#FFFFFF',
+  },
+  autoFieldEmpty: {
+    backgroundColor: '#F3F4F6',
+    color: '#6B7280',
+  },
   textArea: {
-    minHeight: 100,
+    minHeight: 120,
     textAlignVertical: 'top',
+    paddingTop: 14,
   },
   row: {
     flexDirection: 'row',
@@ -1215,23 +2433,22 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   navRow: {
+    marginTop: 6,
+    gap: 10,
+  },
+  navButtonsRow: {
     flexDirection: 'row',
     gap: 12,
-    marginTop: 6,
   },
-  navPrimaryWrap: {
+  navBtn: {
     flex: 1,
-    gap: 8,
-    alignItems: 'center',
-  },
-  navPrimaryButton: {
-    flex: 1,
-    backgroundColor: '#4C1D95',
-    paddingVertical: 14,
-    borderRadius: 12,
+    minHeight: 52,
+    borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
-    alignSelf: 'stretch',
+  },
+  navPrimaryButton: {
+    backgroundColor: '#4C1D95',
   },
   navPrimaryText: {
     color: '#FFFFFF',
@@ -1245,14 +2462,14 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   navSecondaryButton: {
-    flex: 1,
-    backgroundColor: '#FFFFFF',
-    paddingVertical: 14,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: '#E7E2F5',
+    backgroundColor: '#E5E7EB',
+    borderWidth: 0,
+    borderColor: 'transparent',
+    shadowColor: '#111827',
+    shadowOpacity: 0.12,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 5,
   },
   navSecondaryText: {
     color: '#4C1D95',
@@ -1267,40 +2484,237 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: 16,
   },
-  galleryHeader: {
+  footerSpacer: {
+    height: 120,
+  },
+  footerBar: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 16,
+    backgroundColor: '#FFFFFF',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#E5E7EB',
+    shadowColor: '#000000',
+    shadowOpacity: 0.08,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: -6 },
+    elevation: 18,
+  },
+  footerCtaRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  footerCtaBtn: {
+    flex: 1,
+    height: 54,
+    borderRadius: 14,
+    backgroundColor: '#4C1D95',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 10,
+    shadowColor: '#111827',
+    shadowOpacity: 0.16,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 10,
+  },
+  footerCtaText: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '900',
+  },
+  footerSecondaryBtn: {
+    flex: 1,
+    height: 54,
+    borderRadius: 14,
+    backgroundColor: '#E5E7EB',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 10,
+  },
+  footerSecondaryText: {
+    color: '#111827',
+    fontSize: 15,
+    fontWeight: '900',
+  },
+
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+  },
+  modalSheet: {
+    backgroundColor: '#FFFFFF',
+    paddingTop: 12,
+    paddingBottom: 16,
+    paddingHorizontal: 16,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+  },
+  modalHeader: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  modalTitle: {
+    fontSize: 14,
+    fontWeight: '900',
+    color: '#111827',
+  },
+  modalCloseBtn: {
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: 10,
+    backgroundColor: '#F3F4F6',
+  },
+  modalCloseText: {
+    fontSize: 12,
+    fontWeight: '900',
+    color: '#111827',
+  },
+  modalFooter: {
+    marginTop: 10,
+  },
+  modalDoneBtn: {
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: '#4C1D95',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalDoneText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '900',
+  },
+
+  stepperCard: {
+    marginTop: 12,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    overflow: 'hidden',
+    shadowColor: '#111827',
+    shadowOpacity: 0.08,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 6,
+  },
+  stepperRow: {
+    paddingVertical: 12,
+    paddingHorizontal: 12,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    gap: 12,
   },
-  addImagesBtn: {
-    backgroundColor: '#4C1D95',
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    borderRadius: 10,
+  stepperDivider: {
+    height: 1,
+    backgroundColor: '#EEF2F7',
   },
-  addImagesBtnText: {
-    color: '#FFFFFF',
-    fontWeight: '800',
+  stepperLabels: {
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+  },
+  stepperTitle: {
     fontSize: 14,
+    fontWeight: '900',
+    color: '#111827',
+    textAlign: 'right',
   },
-  galleryHint: {
-    color: '#6B7280',
+  stepperSubtitle: {
+    marginTop: 2,
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#9CA3AF',
+    textAlign: 'right',
+  },
+  stepperControl: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    // Keep +/- order stable like the screenshot (plus on the left, minus on the right)
+    ...(Platform.OS !== 'web' ? ({ direction: 'ltr' } as const) : {}),
+    backgroundColor: '#F3F4F6',
+    borderRadius: 10,
+    overflow: 'hidden',
+  },
+  stepperBtn: {
+    width: 38,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stepperBtnPrimary: {
+    backgroundColor: '#4C1D95',
+  },
+  stepperBtnPrimaryText: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '900',
+    marginTop: -1,
+  },
+  stepperBtnSecondary: {
+    backgroundColor: '#EEF2F7',
+  },
+  stepperBtnSecondaryText: {
+    color: '#111827',
+    fontSize: 18,
+    fontWeight: '900',
+    marginTop: -1,
+  },
+  stepperValue: {
+    width: 44,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stepperValueText: {
+    color: '#111827',
+    fontSize: 14,
+    fontWeight: '900',
+  },
+  galleryBox: {
+    marginTop: 10,
+    backgroundColor: '#F3F4F6',
+    borderRadius: 14,
+    padding: 12,
+  },
+  galleryCountCenterWrap: {
+    marginTop: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  galleryCountTag: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 999,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+  },
+  galleryCountTagText: {
+    color: '#111827',
     fontSize: 12,
+    fontWeight: '900',
     textAlign: 'right',
   },
   galleryGrid: {
-    flexDirection: 'row',
+    flexDirection: 'row-reverse',
     flexWrap: 'wrap',
-    gap: 10,
     marginTop: 10,
+    justifyContent: 'space-between',
   },
   thumbWrap: {
-    width: '30%',
+    width: '32%',
     aspectRatio: 1,
     borderRadius: 10,
     overflow: 'hidden',
     position: 'relative',
     backgroundColor: '#F3F4F6',
+    marginBottom: 10,
   },
   thumb: {
     width: '100%',
@@ -1324,18 +2738,27 @@ const styles = StyleSheet.create({
     marginTop: -1,
   },
   galleryPlaceholder: {
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#E7E2F5',
-    borderRadius: 10,
+    backgroundColor: 'transparent',
+    borderWidth: 0,
+    borderColor: 'transparent',
+    borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 20,
-    marginTop: 10,
+    marginTop: 0,
   },
   galleryPlaceholderText: {
     color: '#6B7280',
     fontSize: 13,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  galleryPlaceholderSubText: {
+    marginTop: 6,
+    color: '#9CA3AF',
+    fontSize: 12,
+    fontWeight: '700',
+    textAlign: 'center',
   },
   selectButton: {
     flexDirection: 'row',
@@ -1379,12 +2802,6 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: '#F1ECFF',
     gap: 10,
-  },
-  sectionTitle: {
-    fontSize: 14,
-    fontWeight: '800',
-    color: '#111827',
-    textAlign: 'right',
   },
   chipsRow: {
     flexDirection: 'row-reverse',
@@ -1430,13 +2847,453 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     paddingHorizontal: 12,
     borderWidth: 1,
-    borderColor: '#E7E2F5',
-    borderRadius: 12,
+    borderColor: '#E5E7EB',
+    borderRadius: 14,
     backgroundColor: '#FFFFFF',
   },
   featureCardActive: {
-    backgroundColor: 'rgba(76, 29, 149, 0.08)',
-    borderColor: 'rgba(76, 29, 149, 0.55)',
+    backgroundColor: 'rgba(76, 29, 149, 0.10)',
+    borderColor: 'rgba(76, 29, 149, 0.40)',
+  },
+  previewHeader: {
+    marginTop: 4,
+    marginBottom: 10,
+    alignItems: 'flex-end',
+    gap: 4,
+  },
+  previewGalleryContainer: {
+    marginHorizontal: -16,
+    borderRadius: 18,
+    overflow: 'hidden',
+    backgroundColor: '#F3F4F6',
+    height: 240,
+    marginBottom: 12,
+  },
+  previewSlide: {
+    height: 240,
+    backgroundColor: '#F3F4F6',
+  },
+  previewImage: {
+    width: '100%',
+    height: '100%',
+  },
+  previewDotsWrap: {
+    position: 'absolute',
+    bottom: 10,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+  },
+  previewDotsPill: {
+    flexDirection: 'row',
+    backgroundColor: 'rgba(17,24,39,0.55)',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    gap: 6,
+  },
+  previewDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: 'rgba(255,255,255,0.50)',
+  },
+  previewDotActive: {
+    backgroundColor: '#FFFFFF',
+  },
+  previewEmpty: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  previewEmptyText: {
+    color: '#6B7280',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  previewTopHeader: {
+    alignItems: 'flex-end',
+    marginBottom: 10,
+  },
+  previewTitle: {
+    fontSize: 20,
+    fontWeight: '900',
+    color: '#111827',
+    textAlign: 'right',
+    marginBottom: 6,
+  },
+  previewLocationRow: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 8,
+  },
+  previewLocationText: {
+    color: '#6B7280',
+    fontSize: 12,
+    fontWeight: '800',
+    textAlign: 'right',
+  },
+  previewPriceCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    marginBottom: 12,
+    alignItems: 'flex-end',
+    shadowColor: '#111827',
+    shadowOpacity: 0.06,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 4,
+  },
+  previewPrice: {
+    fontSize: 20,
+    fontWeight: '900',
+    color: '#111827',
+    textAlign: 'right',
+    writingDirection: 'ltr',
+  },
+  previewPriceSub: {
+    marginTop: 2,
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#6B7280',
+    textAlign: 'right',
+  },
+  previewStatsRow: {
+    flexDirection: 'row-reverse',
+    gap: 10,
+    marginBottom: 12,
+  },
+  previewStat: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 10,
+    shadowColor: '#111827',
+    shadowOpacity: 0.05,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 3,
+  },
+  previewStatIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(139, 92, 246, 0.14)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  previewStatTextCol: {
+    alignItems: 'flex-end',
+  },
+  previewStatNumber: {
+    fontSize: 16,
+    fontWeight: '900',
+    color: '#111827',
+    textAlign: 'right',
+  },
+  previewStatLabel: {
+    fontSize: 11,
+    fontWeight: '900',
+    color: '#6B7280',
+    textAlign: 'right',
+    marginTop: 2,
+  },
+  previewSection: {
+    marginBottom: 12,
+  },
+  previewWhiteCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 14,
+    shadowColor: '#111827',
+    shadowOpacity: 0.06,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 4,
+  },
+  previewBodyText: {
+    color: '#111827',
+    fontSize: 13,
+    fontWeight: '700',
+    textAlign: 'right',
+    lineHeight: 20,
+  },
+  previewMetaRow: {
+    marginTop: 12,
+    flexDirection: 'row-reverse',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  previewMetaPill: {
+    backgroundColor: '#F3F4F6',
+    borderRadius: 999,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+  },
+  previewMetaText: {
+    color: '#374151',
+    fontSize: 12,
+    fontWeight: '900',
+    textAlign: 'right',
+  },
+  previewFeaturesGrid: {
+    marginTop: 10,
+    flexDirection: 'row-reverse',
+    flexWrap: 'wrap',
+    gap: 14,
+  },
+  previewFeatureTile: {
+    width: '47%',
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 10,
+  },
+  previewFeatureTileIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(76, 29, 149, 0.10)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  previewFeatureTileText: {
+    flex: 1,
+    color: '#111827',
+    fontSize: 13,
+    fontWeight: '800',
+    textAlign: 'right',
+  },
+  previewFeaturesEmpty: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    gap: 6,
+  },
+  previewFeaturesEmptyIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(76, 29, 149, 0.10)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  previewFeaturesEmptyTitle: {
+    fontSize: 14,
+    fontWeight: '900',
+    color: '#111827',
+    textAlign: 'center',
+  },
+  previewFeaturesEmptyBody: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#6B7280',
+    textAlign: 'center',
+  },
+  previewMapCard: {
+    borderRadius: 16,
+    overflow: 'hidden',
+    backgroundColor: '#F3F4F6',
+    height: 210,
+  },
+  previewMapFallback: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 12,
+  },
+  previewMapFallbackText: {
+    color: '#6B7280',
+    fontSize: 12,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  previewMapInner: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+  },
+  previewMapLocationBadge: {
+    position: 'absolute',
+    right: 10,
+    bottom: 10,
+    left: 10,
+    backgroundColor: 'rgba(255,255,255,0.92)',
+    borderRadius: 14,
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(229,231,235,0.9)',
+  },
+  previewMapLocationIconPill: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: 'rgba(76, 29, 149, 0.10)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  previewMapLocationCity: {
+    color: '#111827',
+    fontSize: 13,
+    fontWeight: '900',
+    textAlign: 'right',
+  },
+  previewMapLocationAddress: {
+    color: '#6B7280',
+    fontSize: 12,
+    fontWeight: '800',
+    textAlign: 'right',
+    marginTop: 2,
+  },
+  summaryHero: {
+    borderRadius: 16,
+    overflow: 'hidden',
+    backgroundColor: '#F3F4F6',
+    height: 190,
+    marginBottom: 12,
+  },
+  summaryHeroImage: {
+    width: '100%',
+    height: '100%',
+    resizeMode: 'cover',
+  },
+  summaryHeroEmpty: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  summaryHeroEmptyText: {
+    color: '#6B7280',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  summaryCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 14,
+    marginBottom: 12,
+    shadowColor: '#111827',
+    shadowOpacity: 0.06,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 4,
+  },
+  summaryCardTitle: {
+    fontSize: 14,
+    fontWeight: '900',
+    color: '#111827',
+    textAlign: 'right',
+    marginBottom: 10,
+  },
+  summaryTopRow: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    marginBottom: 8,
+  },
+  summaryTitle: {
+    flex: 1,
+    fontSize: 16,
+    fontWeight: '900',
+    color: '#111827',
+    textAlign: 'right',
+  },
+  summaryPrice: {
+    fontSize: 16,
+    fontWeight: '900',
+    color: '#4C1D95',
+    textAlign: 'left',
+    writingDirection: 'ltr',
+  },
+  summaryLine: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 8,
+  },
+  summaryLineText: {
+    flex: 1,
+    color: '#374151',
+    fontSize: 12,
+    fontWeight: '700',
+    textAlign: 'right',
+  },
+  summaryGrid: {
+    flexDirection: 'row-reverse',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  summaryItem: {
+    width: '48%',
+    backgroundColor: '#F3F4F6',
+    borderRadius: 14,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    alignItems: 'flex-end',
+  },
+  summaryItemLabel: {
+    fontSize: 11,
+    fontWeight: '900',
+    color: '#6B7280',
+    textAlign: 'right',
+    marginBottom: 4,
+  },
+  summaryItemValue: {
+    fontSize: 13,
+    fontWeight: '900',
+    color: '#111827',
+    textAlign: 'right',
+  },
+  summaryBodyText: {
+    color: '#111827',
+    fontSize: 13,
+    fontWeight: '700',
+    textAlign: 'right',
+    lineHeight: 20,
+  },
+  summaryBodyMuted: {
+    color: '#6B7280',
+    fontSize: 12,
+    fontWeight: '700',
+    textAlign: 'right',
+  },
+  summaryPills: {
+    flexDirection: 'row-reverse',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  summaryPill: {
+    backgroundColor: 'rgba(76, 29, 149, 0.10)',
+    borderRadius: 999,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+  },
+  summaryPillText: {
+    color: '#4C1D95',
+    fontSize: 12,
+    fontWeight: '900',
+    textAlign: 'right',
+  },
+  featureIconWrap: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    backgroundColor: '#F3F4F6',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  featureIconWrapActive: {
+    backgroundColor: 'rgba(76, 29, 149, 0.12)',
   },
   featureText: {
     flex: 1,
@@ -1450,3 +3307,4 @@ const styles = StyleSheet.create({
     color: '#4C1D95',
   },
 });
+

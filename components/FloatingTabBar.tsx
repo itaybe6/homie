@@ -92,7 +92,7 @@ export default function FloatingTabBar({ active }: FloatingTabBarProps) {
            style={styles.fab}
            accessibilityRole="button"
            accessibilityLabel="הוספת דירה"
-           onPress={() => router.push('/(tabs)/add-apartment')}
+           onPress={() => router.push('/add-apartment' as any)}
            activeOpacity={0.9}
          >
            <View style={styles.fabInner}>

@@ -1,7 +1,9 @@
 import 'react-native-gesture-handler';
 import * as React from 'react';
-import { Platform, StyleSheet, Text, TextInput, I18nManager } from 'react-native';
+import { Platform, StyleSheet, Text, TextInput, I18nManager, Alert } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Updates from 'expo-updates';
+import { emitAlert } from '@/lib/alertBus';
 
 // NOTE: Avoid using I18nManager.forceRTL which requires a native reload and may conflict
 // with Expo Go. Instead, on native we enforce RTL text defaults at the component level.
@@ -15,10 +17,57 @@ if (Platform.OS !== 'web') {
       // Always allow RTL and swap logical left/right on native
       I18nManager.allowRTL(true);
       I18nManager.swapLeftAndRightInRTL(true);
+      // Force RTL so system UI (including native Alerts) follows Hebrew alignment.
+      // This may require a one-time reload when it changes.
+      const desiredRtl = true;
+      const currentRtl = I18nManager.isRTL;
+      if (currentRtl !== desiredRtl) {
+        I18nManager.forceRTL(desiredRtl);
+        // Guard: reload only once to avoid loops (persisted flag)
+        const key = 'homie:rtl:forced:v1';
+        const alreadyReloaded = await AsyncStorage.getItem(key);
+        if (!alreadyReloaded) {
+          await AsyncStorage.setItem(key, '1');
+          try {
+            await Updates.reloadAsync();
+          } catch {
+            // ignore; app will pick it up on next cold start
+          }
+        }
+      }
     } catch {
       // ignore
     }
   })();
+}
+
+// Preserve the existing `Alert.alert(...)` calls in the codebase, but render them via our in-app modal
+// so the text is truly RTL + right-aligned while keeping a system-like design.
+if (Platform.OS !== 'web') {
+  try {
+    const anyAlert = Alert as any;
+    if (!anyAlert.__homie_rtl_patched__) {
+      const orig = Alert.alert.bind(Alert);
+      (anyAlert as any).__homie_orig_alert__ = orig;
+      Alert.alert = ((title?: any, message?: any, buttons?: any, options?: any) => {
+        try {
+          emitAlert({
+            title: typeof title === 'string' ? title : String(title || ''),
+            message: typeof message === 'string' ? message : message == null ? '' : String(message),
+            buttons: Array.isArray(buttons) ? buttons : undefined,
+            options,
+          });
+          return;
+        } catch {
+          // fallback to native
+          return orig(title as any, message as any, buttons as any, options);
+        }
+      }) as any;
+      anyAlert.__homie_rtl_patched__ = true;
+    }
+  } catch {
+    // ignore
+  }
 }
 
 // Silence noisy console output on web (keep errors)

@@ -21,6 +21,8 @@ export async function fetchUserSurvey(userId: string): Promise<UserSurveyRespons
 export async function upsertUserSurvey(payload: SurveyUpsert): Promise<UserSurveyResponse> {
   // Some environments may lack a unique constraint on user_id, which breaks onConflict upsert.
   // To be robust, perform a manual upsert: update if row exists, otherwise insert.
+  // Ensure the user's profile row exists to satisfy FK constraints on user_survey_responses.user_id -> users.id
+  await ensureUserProfileRow(payload.user_id);
   const existing = await fetchUserSurvey(payload.user_id);
   // eslint-disable-next-line no-console
   console.log('[survey] upsertUserSurvey start', {
@@ -42,6 +44,47 @@ export async function upsertUserSurvey(payload: SurveyUpsert): Promise<UserSurve
 
   const inserted = await robustInsert(payload);
   return inserted;
+}
+
+async function ensureUserProfileRow(userId: string) {
+  try {
+    // Check if profile row exists
+    const { data: existing, error: selectErr } = await supabase
+      .from('users')
+      .select('id')
+      .eq('id', userId)
+      .maybeSingle();
+    if (selectErr) throw selectErr;
+    if (existing?.id) return;
+
+    // Try to seed it from the authenticated user metadata
+    const { data: authData } = await supabase.auth.getUser();
+    const authUser = authData?.user;
+    const now = new Date().toISOString();
+
+    const row: Record<string, any> = {
+      id: userId,
+      email: authUser?.email ?? null,
+      full_name: (authUser as any)?.user_metadata?.full_name ?? '',
+      role: (authUser as any)?.user_metadata?.role ?? 'user',
+      created_at: now,
+      updated_at: now,
+    };
+
+    const { error: upsertErr } = await supabase.from('users').upsert(row, { onConflict: 'id' });
+    if (upsertErr) throw upsertErr;
+  } catch (e: any) {
+    // If we can't create the profile row due to RLS or missing table, surface a clear message.
+    const msg = String(e?.message || e);
+    const lowered = msg.toLowerCase();
+    if (lowered.includes('row-level security') || lowered.includes('policy')) {
+      throw new Error(
+        "לא ניתן לשמור שאלון כי אין הרשאה ליצור רשומה בטבלת users. צריך להפעיל את המיגרציה `supabase/migrations/20251224_users_rls_and_auth_trigger.sql` או להוסיף Policy שמאפשר למשתמש ליצור את השורה שלו (id = auth.uid())."
+      );
+    }
+    // Otherwise rethrow (could be network/schema issues)
+    throw e;
+  }
 }
 
 function omitSubletNewFields<T extends Record<string, any>>(obj: T): T {

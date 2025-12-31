@@ -4,18 +4,23 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import NotificationsButton from '@/components/NotificationsButton';
 import RequestsButton from '@/components/RequestsButton';
 
-function GlobalTopBarBase() {
+function GlobalTopBarBase({ backgroundColor = '#FFFFFF' }: { backgroundColor?: string }) {
   const insets = useSafeAreaInsets();
   const isWeb = Platform.OS === 'web';
   return (
     <View
       {...(!isWeb ? { pointerEvents: 'box-none' as const } : {})}
-      style={[styles.container, isWeb ? ({ pointerEvents: 'box-none' } as const) : undefined]}
+      style={[
+        styles.container,
+        { backgroundColor },
+        isWeb ? ({ pointerEvents: 'box-none' } as const) : undefined,
+      ]}
     >
       {/* Solid white background under the safe area + header height */}
       <View
         style={[
           styles.background,
+          { backgroundColor },
           { height: (insets.top || 0) + 52 },
         ]}
         pointerEvents="none"
@@ -24,6 +29,7 @@ function GlobalTopBarBase() {
         {...(!isWeb ? { pointerEvents: 'box-none' as const } : {})}
         style={[
           styles.inner,
+          { backgroundColor },
           { paddingTop: insets.top, paddingBottom: 0 },
           isWeb ? ({ pointerEvents: 'box-none' } as const) : undefined,
         ]}

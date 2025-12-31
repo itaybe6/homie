@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -12,6 +12,7 @@ import {
   Modal,
   TextInput,
   Platform,
+  Linking,
 } from 'react-native';
 import { BackHandler } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -25,16 +26,21 @@ import {
   Bed,
   Bath,
   Users,
+  Building2,
+  Trees,
+  Ruler,
+  Layers,
   Trash2,
   Pencil,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
+  ChevronUp,
   X,
   UserPlus,
   Search,
   Heart,
   Share2,
-  MessageCircle,
   Snowflake,
   Utensils,
   Home,
@@ -46,6 +52,7 @@ import {
   Hammer,
   PawPrint,
   ArrowUpDown,
+  Info,
 } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { supabase } from '@/lib/supabase';
@@ -53,6 +60,13 @@ import { useAuthStore } from '@/stores/authStore';
 import { useApartmentStore } from '@/stores/apartmentStore';
 import { Apartment, User } from '@/types/database';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import MapboxMap from '@/components/MapboxMap';
+import type { MapboxFeatureCollection } from '@/lib/mapboxHtml';
+import { geocodeApartmentAddress } from '@/lib/mapboxGeocoding';
+import Ticker from '@/components/Ticker';
+import { fetchUserSurvey } from '@/lib/survey';
+import { calculateMatchScore } from '@/utils/matchCalculator';
+import { buildCompatSurvey } from '@/lib/compatSurvey';
 
 export default function ApartmentDetailsScreen() {
   const router = useRouter();
@@ -77,6 +91,10 @@ export default function ApartmentDetailsScreen() {
   const [isRequestingJoin, setIsRequestingJoin] = useState(false);
   const [hasRequestedJoin, setHasRequestedJoin] = useState(false);
   const [isAssignedAnywhere, setIsAssignedAnywhere] = useState<boolean | null>(null);
+  const [ownerMatchPercent, setOwnerMatchPercent] = useState<number | null>(null);
+  const [ownerMatchDisplay, setOwnerMatchDisplay] = useState<string>('--%');
+  const [isNavOpen, setIsNavOpen] = useState(false);
+  const [navDestination, setNavDestination] = useState<string>('');
   const [confirmState, setConfirmState] = useState<{
     visible: boolean;
     title: string;
@@ -94,10 +112,145 @@ export default function ApartmentDetailsScreen() {
   const insets = useSafeAreaInsets();
   const [isViewerOpen, setViewerOpen] = useState(false);
   const [viewerIndex, setViewerIndex] = useState(0);
+  const mapboxToken = process.env.EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN as string | undefined;
+  const mapboxStyleUrl = process.env.EXPO_PUBLIC_MAPBOX_STYLE_URL as string | undefined;
+  const [aptGeo, setAptGeo] = useState<{ lng: number; lat: number } | null>(null);
+  const [isGeocoding, setIsGeocoding] = useState(false);
+  const [geoError, setGeoError] = useState<string>('');
+  const [isDescExpanded, setIsDescExpanded] = useState(false);
 
   useEffect(() => {
     fetchApartmentDetails();
   }, [id]);
+
+  // Compute match percent between current user and apartment owner (if surveys exist)
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      const myId = String((user as any)?.id || '').trim();
+      const ownerId = String((owner as any)?.id || '').trim();
+      if (!myId || !ownerId || myId === ownerId) {
+        setOwnerMatchPercent(null);
+        return;
+      }
+      try {
+        const [mySurvey, ownerSurvey] = await Promise.all([fetchUserSurvey(myId), fetchUserSurvey(ownerId)]);
+        if (cancelled) return;
+        if (!mySurvey || !ownerSurvey) {
+          setOwnerMatchPercent(null);
+          return;
+        }
+        const myCompat = buildCompatSurvey(user as any, mySurvey as any);
+        const ownerCompat = buildCompatSurvey(owner as any, ownerSurvey as any);
+        const score = calculateMatchScore(myCompat, ownerCompat);
+        const rounded =
+          Number.isFinite(score) && !Number.isNaN(score) ? Math.max(0, Math.min(100, Math.round(score))) : null;
+        setOwnerMatchPercent(rounded);
+      } catch {
+        if (!cancelled) setOwnerMatchPercent(null);
+      }
+    };
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id, owner?.id]);
+
+  // Animate match % display like the user profile "match tab"
+  useEffect(() => {
+    let t: any;
+    if (typeof ownerMatchPercent !== 'number' || !Number.isFinite(ownerMatchPercent)) {
+      setOwnerMatchDisplay('--%');
+      return () => {};
+    }
+    const digitsLen = String(ownerMatchPercent).length;
+    const start = `${'0'.repeat(digitsLen)}%`;
+    const end = `${ownerMatchPercent}%`;
+    setOwnerMatchDisplay(start);
+    t = setTimeout(() => setOwnerMatchDisplay(end), 120);
+    return () => {
+      try {
+        clearTimeout(t);
+      } catch {}
+    };
+  }, [ownerMatchPercent]);
+
+  // Geocode apartment address -> show on Mapbox map (bottom map card)
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      setGeoError('');
+      setAptGeo(null);
+      const token = (mapboxToken || '').trim();
+      if (!token) return;
+      const address = String((apartment as any)?.address || '').trim();
+      const city = String((apartment as any)?.city || '').trim();
+      if (!address || !city) return;
+      setIsGeocoding(true);
+      try {
+        const geo = await geocodeApartmentAddress({ accessToken: token, address, city, country: 'il' });
+        if (cancelled) return;
+        if (geo) setAptGeo(geo);
+      } catch (e: any) {
+        if (cancelled) return;
+        setGeoError(e?.message || 'לא הצלחתי לאתר מיקום למפה');
+      } finally {
+        if (!cancelled) setIsGeocoding(false);
+      }
+    };
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, [apartment?.id, (apartment as any)?.address, (apartment as any)?.city, mapboxToken]);
+
+  const aptMapPoints: MapboxFeatureCollection = useMemo(() => {
+    if (!aptGeo) return { type: 'FeatureCollection', features: [] };
+    const aptId = String((apartment as any)?.id || 'apt');
+    return {
+      type: 'FeatureCollection',
+      features: [
+        {
+          type: 'Feature',
+          geometry: { type: 'Point', coordinates: [aptGeo.lng, aptGeo.lat] },
+          properties: {
+            id: aptId,
+            title: String((apartment as any)?.title || 'דירה'),
+            address: String((apartment as any)?.address || ''),
+            city: String((apartment as any)?.city || ''),
+          },
+        },
+      ],
+    };
+  }, [aptGeo, (apartment as any)?.id, (apartment as any)?.title, (apartment as any)?.address, (apartment as any)?.city]);
+
+  const mapCardHeight = useMemo(() => {
+    // Aim for a "more square" card: approx (screenWidth - horizontal padding) capped for large screens
+    const target = screenWidth - 40; // content padding is 20 on each side
+    // Slightly shorter than before so the map doesn't dominate the page.
+    return Math.max(170, Math.min(260, target));
+  }, [screenWidth]);
+
+  const openNavigationPicker = () => {
+    const city = String((apartment as any)?.city || '').trim();
+    const address = String((apartment as any)?.address || '').trim();
+    const destination = [address, city].filter(Boolean).join(', ');
+    if (!destination) {
+      Alert.alert('אין כתובת', 'לא ניתן לפתוח ניווט כי חסרים עיר/כתובת.');
+      return;
+    }
+    setNavDestination(destination);
+    setIsNavOpen(true);
+  };
+
+  const openNavUrl = async (url: string) => {
+    try {
+      setIsNavOpen(false);
+      await Linking.openURL(url);
+    } catch {
+      Alert.alert('שגיאה', 'לא ניתן לפתוח את אפליקציית הניווט');
+    }
+  };
 
   // Persist "join request sent" per apartment + user (fixes refresh + navigation state bleed)
   useEffect(() => {
@@ -419,13 +572,19 @@ export default function ApartmentDetailsScreen() {
   const roommatesCount = currentPartnerIds.length;
   const partnerSlotsUsed = currentPartnerIds.length;
 
-  // Prefer max_roommates (new schema), fallback to roommate_capacity (legacy schema).
+  // Prefer roommate_capacity (the value set in "upload/edit apartment"),
+  // fallback to max_roommates if it exists in some environments.
   const maxRoommates: number | null =
-    typeof (apartment as any)?.max_roommates === 'number'
-      ? ((apartment as any).max_roommates as number)
-      : typeof apartment.roommate_capacity === 'number'
-        ? apartment.roommate_capacity
+    typeof apartment.roommate_capacity === 'number'
+      ? apartment.roommate_capacity
+      : typeof (apartment as any)?.max_roommates === 'number'
+        ? ((apartment as any).max_roommates as number)
         : null;
+
+  const capacityLabel =
+    typeof maxRoommates === 'number'
+      ? `מתאימה לעד ${maxRoommates} שותפים`
+      : 'קיבולת שותפים לא צוינה';
 
   const availableRoommateSlots =
     maxRoommates !== null ? Math.max(0, maxRoommates - partnerSlotsUsed) : null;
@@ -434,6 +593,50 @@ export default function ApartmentDetailsScreen() {
     currentPartnerIds.map((v) => String(v).toLowerCase()).includes(String(user.id).toLowerCase())
   );
   const isAddPartnerDisabled = availableRoommateSlots !== null && availableRoommateSlots <= 0;
+
+  const address = String((apartment as any)?.address || '').trim();
+  const city = String((apartment as any)?.city || '').trim();
+  const neighborhood = String((apartment as any)?.neighborhood || '').trim();
+  const locationLabel = (() => {
+    const primary = (address || neighborhood || '').trim();
+    if (!primary && !city) return '';
+    if (primary && !city) return primary;
+    if (!primary && city) return city;
+    const a = primary.toLowerCase();
+    const c = city.toLowerCase();
+    if (c && a.includes(c)) return primary;
+    return `${city} · ${primary}`;
+  })();
+
+  const apartmentType = String((apartment as any)?.apartment_type || '').toUpperCase();
+  const floorRaw = (apartment as any)?.floor;
+  const floor = typeof floorRaw === 'number' && Number.isFinite(floorRaw) ? floorRaw : null;
+  const sqmRaw = (apartment as any)?.square_meters;
+  const sqm = typeof sqmRaw === 'number' && Number.isFinite(sqmRaw) ? sqmRaw : null;
+  const gardenSqmRaw = (apartment as any)?.garden_square_meters;
+  const gardenSqm = typeof gardenSqmRaw === 'number' && Number.isFinite(gardenSqmRaw) ? gardenSqmRaw : null;
+
+  const formatSqm = (n: number) => {
+    if (!Number.isFinite(n) || n <= 0) return '';
+    const rounded = Math.round(n);
+    if (Math.abs(n - rounded) < 0.01) return String(rounded);
+    return n.toFixed(1).replace(/\.0$/, '');
+  };
+
+  const typeTagLabel =
+    apartmentType === 'GARDEN'
+      ? 'דירת גן'
+      : apartmentType === 'REGULAR' || !apartmentType
+        ? 'בניין'
+        : null;
+
+  const sqmTagLabel = sqm !== null && sqm > 0 ? `${formatSqm(sqm)} מ״ר` : null;
+  const gardenSqmTagLabel =
+    apartmentType === 'GARDEN' && gardenSqm !== null && gardenSqm > 0 ? `${formatSqm(gardenSqm)} מ״ר גינה` : null;
+  const floorTagLabel = floor !== null ? `קומה ${floor}` : null;
+
+  const descriptionText = String((apartment as any)?.description || '').trim();
+  const shouldShowReadMore = descriptionText.length > 260;
   
 
   // Compute a human-friendly sender label: if user is part of an ACTIVE merged profile,
@@ -570,6 +773,47 @@ export default function ApartmentDetailsScreen() {
     }
   };
 
+  const cancelJoinRequest = async () => {
+    try {
+      if (!user?.id) {
+        Alert.alert('שגיאה', 'יש להתחבר כדי לבצע פעולה זו');
+        return;
+      }
+      if (!apartment?.id) return;
+
+      setIsRequestingJoin(true);
+
+      // Cancel ALL pending JOIN_APT rows for this apartment (there may be multiple recipients)
+      const { error: updErr } = await supabase
+        .from('apartments_request')
+        .update({ status: 'CANCELLED', updated_at: new Date().toISOString() } as any)
+        .eq('sender_id', user.id)
+        .eq('apartment_id', apartment.id)
+        .eq('type', 'JOIN_APT')
+        .eq('status', 'PENDING');
+
+      if (updErr) {
+        // Fallback for schemas without CANCELLED enum/value: delete pending rows
+        const { error: delErr } = await supabase
+          .from('apartments_request')
+          .delete()
+          .eq('sender_id', user.id)
+          .eq('apartment_id', apartment.id)
+          .eq('type', 'JOIN_APT')
+          .eq('status', 'PENDING');
+        if (delErr) throw delErr;
+      }
+
+      setHasRequestedJoin(false);
+      Alert.alert('בוטל', 'הבקשה בוטלה בהצלחה');
+    } catch (e: any) {
+      console.error('cancel join request failed', e);
+      Alert.alert('שגיאה', e?.message || 'לא ניתן לבטל את הבקשה כעת');
+    } finally {
+      setIsRequestingJoin(false);
+    }
+  };
+
   const filteredCandidates = (() => {
     const q = (addSearch || '').trim().toLowerCase();
     const excludeIds = new Set<string>([
@@ -610,7 +854,11 @@ export default function ApartmentDetailsScreen() {
         .eq('role', 'user')
         .order('created_at', { ascending: false });
       if (error) throw error;
-      const all = (data || []) as User[];
+      const all = ((data || []) as User[]).filter((u) => {
+        // Exclude "deleted" / invalid profiles: in some environments the auth user may be gone
+        // while the profile row lingers; treat empty names as deleted/inactive.
+        return String((u as any)?.full_name || '').trim().length > 0;
+      });
       // Exclude users who are already assigned to ANY apartment (owners or partners)
       let assignedIds = new Set<string>();
       try {
@@ -660,7 +908,9 @@ export default function ApartmentDetailsScreen() {
               .in('id', Array.from(groupedMemberIdSet));
             const byId: Record<string, Pick<User, 'id' | 'full_name' | 'avatar_url'>> = {};
             (usersRows || []).forEach((u: any) => {
-              if (u?.id) byId[u.id] = { id: u.id, full_name: u.full_name, avatar_url: u.avatar_url };
+              if (!u?.id) return;
+              if (String(u?.full_name || '').trim().length === 0) return;
+              byId[u.id] = { id: u.id, full_name: u.full_name, avatar_url: u.avatar_url };
             });
             grouped = groupedIds.map((gid) => ({
               id: gid,
@@ -668,7 +918,8 @@ export default function ApartmentDetailsScreen() {
                 .map((uid) => byId[uid])
                 .filter(Boolean),
             }));
-            setSharedGroups(grouped);
+            // Only show groups that still have 2+ active profiles after filtering
+            setSharedGroups(grouped.filter((g) => (g.members || []).length >= 2));
           } else {
             setAddCandidates(candidates);
             setSharedGroups([]);
@@ -952,73 +1203,71 @@ export default function ApartmentDetailsScreen() {
                     }}
                   />
                 </TouchableOpacity>
-                {/* top overlay controls */}
-                <View style={[styles.topControlsRow, isOwner ? { top: 70 } : null]}>
-                  <View style={styles.leftControls}>
-                    <TouchableOpacity style={styles.circleBtnLight} activeOpacity={0.9}>
-                      <Heart size={18} color="#111827" />
-                    </TouchableOpacity>
-                    <TouchableOpacity style={styles.circleBtnLight} activeOpacity={0.9}>
-                      <Share2 size={18} color="#111827" />
-                    </TouchableOpacity>
-                    {isOwner ? (
-                      <TouchableOpacity
-                        style={[styles.circleBtnLight, (isAdding || isAddPartnerDisabled) ? { opacity: 0.55 } : null]}
-                        activeOpacity={0.9}
-                        disabled={isAdding || isAddPartnerDisabled}
-                        onPress={() => {
-                          if (isAddPartnerDisabled) {
-                            Alert.alert('אין מקום', 'הגעת למספר השותפים המקסימלי בדירה זו');
-                            return;
-                          }
-                          openAddPartnerModal();
-                        }}
-                      >
-                        <UserPlus size={18} color="#111827" />
-                      </TouchableOpacity>
-                    ) : null}
-                    {isOwner ? (
-                      <TouchableOpacity
-                        style={styles.circleBtnLight}
-                        activeOpacity={0.9}
-                        onPress={() => router.push({ pathname: '/apartment/edit/[id]', params: { id: apartment.id } })}
-                      >
-                        <Pencil size={18} color="#111827" />
-                      </TouchableOpacity>
-                    ) : null}
-                    {isOwner ? (
-                      <TouchableOpacity
-                        style={styles.circleBtnLight}
-                        activeOpacity={0.9}
-                        onPress={handleDeleteApartment}
-                      >
-                        <Trash2 size={18} color="#111827" />
-                      </TouchableOpacity>
-                    ) : null}
-                  </View>
-                  <TouchableOpacity
-                    style={styles.circleBtnLight}
-                    onPress={() => {
-                      const returnToStr = Array.isArray(returnTo) ? returnTo[0] : returnTo;
-                      if (typeof returnToStr === 'string' && returnToStr.trim()) {
-                        router.replace(returnToStr as any);
-                        return;
-                      }
-                      // Go back to the previous screen (map/home), fallback to home if no history
-                      if (navigation.canGoBack()) {
-                        navigation.goBack();
-                      } else {
-                        router.replace('/(tabs)/home');
-                      }
-                    }}
-                    activeOpacity={0.9}
-                  >
-                    <ArrowRight size={18} color="#111827" />
-                  </TouchableOpacity>
-                </View>
               </View>
             );})}
           </ScrollView>
+
+          {/* top overlay controls (fixed over the whole gallery) */}
+          <View style={[styles.topControlsRow, isOwner ? { top: 70 } : null]}>
+            <View style={styles.leftControls}>
+              <TouchableOpacity style={styles.circleBtnLight} activeOpacity={0.9}>
+                <Share2 size={18} color="#111827" />
+              </TouchableOpacity>
+              {isOwner ? (
+                <TouchableOpacity
+                  style={[styles.circleBtnLight, (isAdding || isAddPartnerDisabled) ? { opacity: 0.55 } : null]}
+                  activeOpacity={0.9}
+                  disabled={isAdding || isAddPartnerDisabled}
+                  onPress={() => {
+                    if (isAddPartnerDisabled) {
+                      Alert.alert('אין מקום', 'הגעת למספר השותפים המקסימלי בדירה זו');
+                      return;
+                    }
+                    openAddPartnerModal();
+                  }}
+                >
+                  <UserPlus size={18} color="#111827" />
+                </TouchableOpacity>
+              ) : null}
+              {isOwner ? (
+                <TouchableOpacity
+                  style={styles.circleBtnLight}
+                  activeOpacity={0.9}
+                  onPress={() => router.push({ pathname: '/apartment/edit/[id]', params: { id: apartment.id } })}
+                >
+                  <Pencil size={18} color="#111827" />
+                </TouchableOpacity>
+              ) : null}
+              {isOwner ? (
+                <TouchableOpacity
+                  style={styles.circleBtnLight}
+                  activeOpacity={0.9}
+                  onPress={handleDeleteApartment}
+                >
+                  <Trash2 size={18} color="#111827" />
+                </TouchableOpacity>
+              ) : null}
+            </View>
+            <TouchableOpacity
+              style={styles.circleBtnLight}
+              onPress={() => {
+                const returnToStr = Array.isArray(returnTo) ? returnTo[0] : returnTo;
+                if (typeof returnToStr === 'string' && returnToStr.trim()) {
+                  router.replace(returnToStr as any);
+                  return;
+                }
+                // Go back to the previous screen (map/home), fallback to home if no history
+                if (navigation.canGoBack()) {
+                  navigation.goBack();
+                } else {
+                  router.replace('/(tabs)/home');
+                }
+              }}
+              activeOpacity={0.9}
+            >
+              <ArrowRight size={18} color="#111827" />
+            </TouchableOpacity>
+          </View>
 
           {galleryImages.length > 1 ? (
             <View style={styles.dotsWrap} pointerEvents="none">
@@ -1031,13 +1280,40 @@ export default function ApartmentDetailsScreen() {
           ) : null}
         </View>
 
-        {/* Title and location directly under image */}
+        {/* Header under image (price -> title -> location) */}
         <View style={styles.topHeader}>
+          <View style={styles.heroPriceRow}>
+            <View style={styles.heroPriceMeta}>
+              <Text style={styles.heroPriceValue}>
+                <Text style={styles.heroCurrency}>₪</Text>
+                {apartment.price?.toLocaleString?.() ?? String(apartment.price ?? '')}
+              </Text>
+              <Text style={styles.heroPricePer}>/חודש</Text>
+            </View>
+
+            <TouchableOpacity
+              style={[styles.circleBtnLight, styles.heroFavBtn]}
+              activeOpacity={0.9}
+              accessibilityRole="button"
+              accessibilityLabel="סמן כמועדף"
+            >
+              <Heart size={18} color="#4C1D95" />
+            </TouchableOpacity>
+          </View>
+
           <Text style={styles.heroTitle} numberOfLines={2}>
             {apartment.title}
           </Text>
-          {apartment.description ? (
-            <Text style={styles.heroDescription}>{apartment.description}</Text>
+
+          {locationLabel ? (
+            <View style={styles.heroLocationRow}>
+              <View style={styles.heroLocationIcon}>
+                <MapPin size={16} color="#6B7280" />
+              </View>
+              <Text style={styles.heroLocationText} numberOfLines={1}>
+                {locationLabel}
+              </Text>
+            </View>
           ) : null}
         </View>
 
@@ -1046,15 +1322,6 @@ export default function ApartmentDetailsScreen() {
         <View style={styles.content}>
           {/* light stats row */}
           <View style={styles.statsRowLight}>
-            <View style={styles.statLight}>
-              <View style={styles.statIconCircle}>
-                <Bed size={22} color="#8B5CF6" />
-              </View>
-              <View style={styles.statLabelRow}>
-                <Text style={styles.statNumber}>{apartment.bedrooms}</Text>
-                <Text style={styles.statLabel}>חדרים</Text>
-              </View>
-            </View>
             <TouchableOpacity
               style={styles.statLight}
               activeOpacity={0.9}
@@ -1064,10 +1331,27 @@ export default function ApartmentDetailsScreen() {
                 <Users size={22} color="#8B5CF6" />
               </View>
               <View style={styles.statLabelRow}>
-                <Text style={styles.statNumber}>{roommatesCount}</Text>
-                <Text style={styles.statLabel}>שותפים</Text>
+                {typeof maxRoommates === 'number' ? (
+                  <Text numberOfLines={1} ellipsizeMode="clip" style={{ color: '#111827' }}>
+                    <Text style={styles.statLabel}>{`מתאימה\u00A0ל`}</Text>
+                    <Text style={styles.statNumber}>{maxRoommates}</Text>
+                  </Text>
+                ) : (
+                  <Text style={styles.statLabel} numberOfLines={1} ellipsizeMode="clip">
+                    קיבולת לא צוינה
+                  </Text>
+                )}
               </View>
             </TouchableOpacity>
+            <View style={styles.statLight}>
+              <View style={styles.statIconCircle}>
+                <Bed size={22} color="#8B5CF6" />
+              </View>
+              <View style={styles.statLabelRow}>
+                <Text style={styles.statNumber}>{apartment.bedrooms}</Text>
+                <Text style={styles.statLabel}>חדרים</Text>
+              </View>
+            </View>
             <View style={styles.statLight}>
               <View style={styles.statIconCircle}>
                 <Bath size={22} color="#8B5CF6" />
@@ -1079,8 +1363,87 @@ export default function ApartmentDetailsScreen() {
             </View>
           </View>
 
+          {/* Description ("על המקום") */}
+          {descriptionText || typeTagLabel || floorTagLabel || gardenSqmTagLabel || sqmTagLabel ? (
+            <View style={styles.section}>
+              <View style={styles.whiteCard}>
+                <Text style={styles.sectionTitle}>על המקום</Text>
+                {/* Type / floor / sqm tags (moved inside "About" card) */}
+                {typeTagLabel || floorTagLabel || gardenSqmTagLabel || sqmTagLabel ? (
+                  <View style={styles.tagsRow}>
+                    {typeTagLabel ? (
+                      <View style={styles.tagPill}>
+                        {apartmentType === 'GARDEN' ? (
+                          <Trees size={14} color="#4C1D95" />
+                        ) : (
+                          <Building2 size={14} color="#4C1D95" />
+                        )}
+                        <Text style={styles.tagText}>{typeTagLabel}</Text>
+                      </View>
+                    ) : null}
+                    {floorTagLabel ? (
+                      <View style={styles.tagPill}>
+                        <Layers size={14} color="#4C1D95" />
+                        <Text style={styles.tagText}>{floorTagLabel}</Text>
+                      </View>
+                    ) : null}
+                    {gardenSqmTagLabel ? (
+                      <View style={styles.tagPill}>
+                        <Trees size={14} color="#4C1D95" />
+                        <Text style={styles.tagText}>{gardenSqmTagLabel}</Text>
+                      </View>
+                    ) : null}
+                    {sqmTagLabel ? (
+                      <View style={styles.tagPill}>
+                        <Ruler size={14} color="#4C1D95" />
+                        <Text style={styles.tagText}>{sqmTagLabel}</Text>
+                      </View>
+                    ) : null}
+                  </View>
+                ) : null}
+
+                {descriptionText ? (
+                  <>
+                    <Text
+                      style={styles.descriptionLight}
+                      numberOfLines={isDescExpanded ? undefined : 6}
+                      ellipsizeMode="tail"
+                    >
+                      {descriptionText}
+                    </Text>
+                    {shouldShowReadMore ? (
+                      <TouchableOpacity
+                        onPress={() => setIsDescExpanded((v) => !v)}
+                        activeOpacity={0.85}
+                        style={styles.readMoreBtn}
+                        accessibilityRole="button"
+                        accessibilityLabel={isDescExpanded ? 'קרא פחות' : 'קרא עוד'}
+                      >
+                        <Text style={styles.readMoreText}>{isDescExpanded ? 'קרא פחות' : 'קרא עוד'}</Text>
+                        {isDescExpanded ? (
+                          <ChevronUp size={16} color="#4C1D95" />
+                        ) : (
+                          <ChevronDown size={16} color="#4C1D95" />
+                        )}
+                      </TouchableOpacity>
+                    ) : null}
+                  </>
+                ) : null}
+              </View>
+            </View>
+          ) : null}
+
           {/* host card */}
           <View style={styles.hostCard}>
+            <LinearGradient
+              colors={typeof ownerMatchPercent === 'number' ? ['#A78BFA', '#4C1D95'] : ['#D1D5DB', '#9CA3AF']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 0, y: 1 }}
+              style={styles.hostMatchTab}
+            >
+              <Ticker value={ownerMatchDisplay} fontSize={15} staggerDuration={55} style={styles.hostMatchTabValue} />
+              <Text style={styles.hostMatchTabLabel}>התאמה</Text>
+            </LinearGradient>
             {/* Right: avatar */}
             <View style={styles.hostAvatarWrap}>
               <Image
@@ -1097,68 +1460,130 @@ export default function ApartmentDetailsScreen() {
               <Text style={styles.hostTitle}>בעל הדירה</Text>
               <Text style={styles.hostSub} numberOfLines={1}>{owner?.full_name || 'בעל הדירה'}</Text>
             </View>
-            {/* Left: message button */}
-            <TouchableOpacity
-              onPress={() => Alert.alert('הודעה', 'פתיחת הודעה בקרוב')}
-              activeOpacity={0.9}
-              style={styles.messageBtn}
-            >
-              <MessageCircle size={18} color="#0B1220" />
-            </TouchableOpacity>
           </View>
 
           {/* price card moved to floating overlay at bottom */}
 
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>מה יש בדירה?</Text>
-            <View style={styles.featuresGrid}>
-              {(() => {
-                const balcony = typeof (apartment as any)?.balcony_count === 'number'
-                  ? ((apartment as any).balcony_count as number)
-                  : 0;
-                const items: Array<{ key: string; label: string; Icon: any }> = [];
+            <View style={styles.whiteCard}>
+              <Text style={styles.sectionTitle}>מה יש בדירה?</Text>
+              <View style={styles.featuresGrid}>
+                {(() => {
+                  const balcony = typeof (apartment as any)?.balcony_count === 'number'
+                    ? ((apartment as any).balcony_count as number)
+                    : 0;
+                  const items: Array<{ key: string; label: string; Icon: any }> = [];
 
-                if (balcony > 0) {
-                  items.push({
-                    key: 'balcony_count',
-                    label: balcony === 1 ? 'מרפסת' : `${balcony} מרפסות`,
-                    Icon: Home,
-                  });
-                }
-                if ((apartment as any)?.wheelchair_accessible) items.push({ key: 'wheelchair_accessible', label: 'גישה לנכים', Icon: Accessibility });
-                if ((apartment as any)?.has_air_conditioning) items.push({ key: 'has_air_conditioning', label: 'מיזוג', Icon: Snowflake });
-                if ((apartment as any)?.has_bars) items.push({ key: 'has_bars', label: 'סורגים', Icon: Fence });
-                if ((apartment as any)?.has_solar_heater) items.push({ key: 'has_solar_heater', label: 'דוד שמש', Icon: Sun });
-                if ((apartment as any)?.is_furnished) items.push({ key: 'is_furnished', label: 'ריהוט', Icon: Sofa });
-                if ((apartment as any)?.has_safe_room) items.push({ key: 'has_safe_room', label: 'ממ״ד', Icon: Shield });
-                if ((apartment as any)?.is_renovated) items.push({ key: 'is_renovated', label: 'משופצת', Icon: Hammer });
-                if ((apartment as any)?.pets_allowed) items.push({ key: 'pets_allowed', label: 'חיות מחמד', Icon: PawPrint });
-                if ((apartment as any)?.has_elevator) items.push({ key: 'has_elevator', label: 'מעלית', Icon: ArrowUpDown });
-                if ((apartment as any)?.kosher_kitchen) items.push({ key: 'kosher_kitchen', label: 'מטבח כשר', Icon: Utensils });
+                  if (balcony > 0) {
+                    items.push({
+                      key: 'balcony_count',
+                      label: balcony === 1 ? 'מרפסת' : `${balcony} מרפסות`,
+                      Icon: Home,
+                    });
+                  }
+                  if ((apartment as any)?.wheelchair_accessible) items.push({ key: 'wheelchair_accessible', label: 'גישה לנכים', Icon: Accessibility });
+                  if ((apartment as any)?.has_air_conditioning) items.push({ key: 'has_air_conditioning', label: 'מיזוג', Icon: Snowflake });
+                  if ((apartment as any)?.has_bars) items.push({ key: 'has_bars', label: 'סורגים', Icon: Fence });
+                  if ((apartment as any)?.has_solar_heater) items.push({ key: 'has_solar_heater', label: 'דוד שמש', Icon: Sun });
+                  if ((apartment as any)?.is_furnished) items.push({ key: 'is_furnished', label: 'ריהוט', Icon: Sofa });
+                  if ((apartment as any)?.has_safe_room) items.push({ key: 'has_safe_room', label: 'ממ״ד', Icon: Shield });
+                  if ((apartment as any)?.is_renovated) items.push({ key: 'is_renovated', label: 'משופצת', Icon: Hammer });
+                  if ((apartment as any)?.pets_allowed) items.push({ key: 'pets_allowed', label: 'חיות מחמד', Icon: PawPrint });
+                  if ((apartment as any)?.has_elevator) items.push({ key: 'has_elevator', label: 'מעלית', Icon: ArrowUpDown });
+                  if ((apartment as any)?.kosher_kitchen) items.push({ key: 'kosher_kitchen', label: 'מטבח כשר', Icon: Utensils });
 
-                if (!items.length) {
-                  return <Text style={styles.featuresEmpty}>לא צוינו מאפיינים</Text>;
-                }
+                  if (!items.length) {
+                    return (
+                      <View style={styles.featuresEmptyWrap}>
+                        <View style={styles.featuresEmptyIconPill}>
+                          <Info size={18} color="#4C1D95" />
+                        </View>
+                        <Text style={styles.featuresEmptyTitle}>לא צוינו מאפיינים</Text>
+                        <Text style={styles.featuresEmptyText}>
+                          בעל הדירה עדיין לא הוסיף פירוט על מה יש בדירה.
+                        </Text>
+                      </View>
+                    );
+                  }
 
-                return items.map(({ key, label, Icon }) => (
-                  <View key={`feat-${key}`} style={styles.featureLine}>
-                    <Icon size={18} color="#6B7280" style={{ marginLeft: 6 }} />
-                    <Text style={styles.featureText}>{label}</Text>
-                  </View>
-                ));
-              })()}
+                  return items.map(({ key, label, Icon }) => (
+                    <View key={`feat-${key}`} style={styles.featureLine}>
+                      <Icon size={20} color="#4C1D95" />
+                      <Text style={styles.featureText}>{label}</Text>
+                    </View>
+                  ));
+                })()}
+              </View>
             </View>
           </View>
 
           <View style={styles.section}>
-            <View style={styles.locationHeaderRow}>
-              <MapPin size={16} color="#8B5CF6" />
-              <Text style={styles.locationHeaderText} numberOfLines={1} allowFontScaling={false}>
-                {apartment.neighborhood ? `${apartment.neighborhood}, ${apartment.city}` : apartment.city}
-              </Text>
-            </View>
-            <View style={styles.mapCard}>
-              <View style={styles.mapDot} />
+            <View style={styles.whiteCard}>
+              <View style={styles.cardHeaderRow}>
+                <Text style={[styles.sectionTitle, { marginBottom: 0 }]}>מיקום</Text>
+              </View>
+              <View style={[styles.mapCard, { height: mapCardHeight }]}>
+                {!mapboxToken ? (
+                  <View style={styles.mapFallback}>
+                    <Text style={styles.mapFallbackText}>חסר EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN</Text>
+                  </View>
+                ) : isGeocoding ? (
+                  <View style={styles.mapFallback}>
+                    <ActivityIndicator size="small" color="#4C1D95" />
+                    <Text style={styles.mapFallbackText}>טוען מפה…</Text>
+                  </View>
+                ) : geoError ? (
+                  <View style={styles.mapFallback}>
+                    <Text style={styles.mapFallbackText}>{geoError}</Text>
+                  </View>
+                ) : (
+                  <View style={styles.mapInner}>
+                    {/* Non-interactive map: allow the page to scroll when swiping over the map */}
+                    <View pointerEvents="none" style={{ flex: 1, alignSelf: 'stretch' }}>
+                      <MapboxMap
+                        accessToken={mapboxToken}
+                        styleUrl={mapboxStyleUrl}
+                        center={aptGeo ? ([aptGeo.lng, aptGeo.lat] as const) : undefined}
+                        zoom={aptGeo ? 16.5 : 11}
+                        points={aptGeo ? aptMapPoints : { type: 'FeatureCollection', features: [] }}
+                      />
+                    </View>
+                    {/* City + address overlay (bottom-right) */}
+                    {(String((apartment as any)?.city || '').trim() || String((apartment as any)?.address || '').trim()) ? (
+                      <View style={styles.mapLocationBadge}>
+                        <View style={styles.mapLocationIconPill}>
+                          <MapPin size={14} color="#4C1D95" />
+                        </View>
+                        <View style={styles.mapLocationTextWrap}>
+                          <Text style={styles.mapLocationCity} numberOfLines={1}>
+                            {String((apartment as any)?.city || '').trim()}
+                          </Text>
+                          <Text style={styles.mapLocationAddress} numberOfLines={1}>
+                            {String((apartment as any)?.address || '').trim()}
+                          </Text>
+                        </View>
+                        <TouchableOpacity
+                          style={styles.mapNavPill}
+                          onPress={openNavigationPicker}
+                          activeOpacity={0.9}
+                          accessibilityRole="button"
+                          accessibilityLabel="פתח ניווט"
+                        >
+                          <View style={styles.mapNavIconWrap}>
+                            <MapPin size={14} color="#FFFFFF" />
+                          </View>
+                          <Text style={styles.mapNavPillText}>ניווט</Text>
+                        </TouchableOpacity>
+                      </View>
+                    ) : null}
+                    {!aptGeo ? (
+                      <View pointerEvents="none" style={styles.mapOverlayHint}>
+                        <Text style={styles.mapOverlayHintText}>בחרנו להציג את המפה גם בלי נקודה — כדי לקבל נקודה ודא שכתובת+עיר תקינים</Text>
+                      </View>
+                    ) : null}
+                  </View>
+                )}
+              </View>
             </View>
           </View>
 
@@ -1202,32 +1627,41 @@ export default function ApartmentDetailsScreen() {
             return (
               <>
                 <View style={styles.section}>
-                  <Text style={styles.sectionTitle}>מי בבית?</Text>
-                  <View style={styles.peopleGrid}>
-                    {people.map((p, idx) => {
-                      const meta = typeof p.age === 'number' ? `${p.role} • ${p.age}` : p.role;
-                      return (
-                        <TouchableOpacity
-                          key={`person-${p.id}-${idx}`}
-                          style={styles.personCard}
-                          activeOpacity={0.9}
-                          onPress={() => {
-                            router.push({ pathname: '/user/[id]', params: { id: p.id } });
-                          }}
-                        >
-                          <View style={styles.personAvatarWrap}>
-                            <Image
-                              source={{ uri: p.avatar || 'https://cdn-icons-png.flaticon.com/512/847/847969.png' }}
-                              style={styles.personAvatar}
-                            />
-                          </View>
-                          <Text style={styles.personName} numberOfLines={1}>
-                            {p.name}
-                          </Text>
-                          <Text style={styles.personMeta}>{meta}</Text>
-                        </TouchableOpacity>
-                      );
-                    })}
+                  <View style={styles.whiteCard}>
+                    <View style={styles.cardHeaderRow}>
+                      <Text style={[styles.sectionTitle, { marginBottom: 0 }]}>מי בבית?</Text>
+                      {typeof maxRoommates === 'number' ? (
+                        <View style={styles.peopleCountPill}>
+                          <Text style={styles.peopleCountText}>{`${roommatesCount}/${maxRoommates}`}</Text>
+                        </View>
+                      ) : null}
+                    </View>
+                    <View style={styles.peopleGrid}>
+                      {people.map((p, idx) => {
+                        const meta = typeof p.age === 'number' ? `${p.role} • ${p.age}` : p.role;
+                        return (
+                          <TouchableOpacity
+                            key={`person-${p.id}-${idx}`}
+                            style={styles.personCard}
+                            activeOpacity={0.9}
+                            onPress={() => {
+                              router.push({ pathname: '/user/[id]', params: { id: p.id } });
+                            }}
+                          >
+                            <View style={styles.personAvatarWrap}>
+                              <Image
+                                source={{ uri: p.avatar || 'https://cdn-icons-png.flaticon.com/512/847/847969.png' }}
+                                style={styles.personAvatar}
+                              />
+                            </View>
+                            <Text style={styles.personName} numberOfLines={1}>
+                              {p.name}
+                            </Text>
+                            <Text style={styles.personMeta}>{meta}</Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
                   </View>
                 </View>
               </>
@@ -1238,21 +1672,41 @@ export default function ApartmentDetailsScreen() {
           <View style={{ paddingBottom: (insets.bottom || 0) + 8 }}>
             <View style={styles.priceCard}>
               <View style={styles.priceRight}>
-                <Text style={styles.priceValue}>
-                  <Text style={styles.currencySign}>₪</Text>
-                  {apartment.price.toLocaleString?.() ?? String(apartment.price)}
-                </Text>
-                <View style={styles.greenChip}>
-                  <Text style={styles.greenChipText}>זמין מיידית</Text>
+                <View style={[styles.statusChip, hasRequestedJoin ? styles.statusChipPending : styles.statusChipGreen]}>
+                  <Text
+                    style={[styles.statusChipText, hasRequestedJoin ? styles.statusChipTextPending : styles.statusChipTextGreen]}
+                    numberOfLines={1}
+                    ellipsizeMode="clip"
+                  >
+                    {hasRequestedJoin ? 'מחכים לאישור של בעל הדירה' : 'הגישו בקשה והצטרפו לדירה'}
+                  </Text>
                 </View>
               </View>
               <TouchableOpacity
                 activeOpacity={0.9}
-                onPress={handleRequestJoin}
-                disabled={isOwner || isMember || isAssignedAnywhere !== false || isRequestingJoin || hasRequestedJoin}
+                onPress={() => {
+                  if (hasRequestedJoin) {
+                    Alert.alert('ביטול בקשה', 'לבטל את הבקשה להצטרף לדירה?', [
+                      { text: 'חזור', style: 'cancel' },
+                      { text: 'בטל בקשה', style: 'destructive', onPress: cancelJoinRequest },
+                    ]);
+                    return;
+                  }
+                  handleRequestJoin();
+                }}
+                disabled={
+                  isOwner ||
+                  isMember ||
+                  isRequestingJoin ||
+                  // Only block "submit" if already assigned elsewhere; allow cancel regardless.
+                  (!hasRequestedJoin && isAssignedAnywhere !== false)
+                }
                 style={[
                   styles.availabilityBtn,
-                  (isOwner || isMember || isAssignedAnywhere !== false || isRequestingJoin || hasRequestedJoin)
+                  (isOwner ||
+                    isMember ||
+                    isRequestingJoin ||
+                    (!hasRequestedJoin && isAssignedAnywhere !== false))
                     ? { opacity: 0.6 }
                     : null,
                 ]}
@@ -1260,12 +1714,14 @@ export default function ApartmentDetailsScreen() {
                 <Text style={styles.availabilityBtnText}>
                   {isOwner || isMember
                     ? 'בדוק זמינות'
-                    : isAssignedAnywhere !== false
+                    : !hasRequestedJoin && isAssignedAnywhere !== false
                       ? 'לא זמין'
                       : isRequestingJoin
-                        ? 'שולח...'
+                        ? hasRequestedJoin
+                          ? 'מבטל...'
+                          : 'שולח...'
                         : hasRequestedJoin
-                          ? 'נשלחה בקשה'
+                          ? 'בטל בקשה'
                           : 'הגש בקשה'}
                 </Text>
               </TouchableOpacity>
@@ -1286,7 +1742,7 @@ export default function ApartmentDetailsScreen() {
               <Text style={styles.sheetTitle}>שותפים</Text>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                 <Text style={styles.sheetCount}>
-                  {typeof maxRoommates === 'number' ? `${roommatesCount} / ${maxRoommates} שותפים` : `${roommatesCount} שותפים`}
+                  {capacityLabel}
                 </Text>
                 <TouchableOpacity onPress={() => setIsMembersOpen(false)} style={styles.closeBtn}>
                   <X size={18} color="#FFFFFF" />
@@ -1368,13 +1824,15 @@ export default function ApartmentDetailsScreen() {
           <TouchableOpacity style={styles.modalBackdrop} activeOpacity={1} onPress={() => setIsAddOpen(false)} />
           <View style={styles.sheet}>
             <View style={styles.sheetHeader}>
-              <Text style={styles.sheetTitle}>הוסף שותף</Text>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                <Text style={styles.sheetCount}>{filteredCandidates.length} מועמדים</Text>
                 <TouchableOpacity onPress={() => setIsAddOpen(false)} style={styles.closeBtn}>
                   <X size={18} color="#FFFFFF" />
                 </TouchableOpacity>
+                <View style={styles.sheetCountPill}>
+                  <Text style={styles.sheetCountText}>{filteredCandidates.length} מועמדים</Text>
+                </View>
               </View>
+              <Text style={styles.sheetTitle}>הוסף שותף</Text>
             </View>
             <View style={styles.searchWrap}>
               <Search size={16} color="#9DA4AE" style={{ marginRight: 8 }} />
@@ -1386,7 +1844,11 @@ export default function ApartmentDetailsScreen() {
                 style={styles.searchInput}
               />
             </View>
-            <ScrollView contentContainerStyle={styles.sheetContent}>
+            <ScrollView
+              style={styles.sheetScroll}
+              contentContainerStyle={styles.sheetContent}
+              keyboardShouldPersistTaps="handled"
+            >
               {isAdding ? (
                 <View style={{ paddingVertical: 20, alignItems: 'center' }}>
                   <ActivityIndicator size="small" color="#4C1D95" />
@@ -1422,6 +1884,28 @@ export default function ApartmentDetailsScreen() {
                                 })
                               }
                             >
+                              <TouchableOpacity
+                                style={styles.candidateRight}
+                                activeOpacity={0.85}
+                                onPress={() =>
+                                  setConfirmState({
+                                    visible: true,
+                                    title: 'שליחת הזמנה לקבוצה',
+                                    message: `לשלוח הזמנה לפרופיל המשותף (${names}) להצטרף כדיירים?`,
+                                    confirmLabel: 'שלח הזמנה',
+                                    cancelLabel: 'ביטול',
+                                    onConfirm: () =>
+                                      handleAddSharedGroup(
+                                        g.id,
+                                        (g.members || []).map((m) => m.id).filter(Boolean) as string[]
+                                      ),
+                                  })
+                                }
+                                accessibilityRole="button"
+                                accessibilityLabel="שלח הזמנה לפרופיל משותף"
+                              >
+                                <UserPlus size={16} color="#4C1D95" />
+                              </TouchableOpacity>
                               <View style={styles.groupAvatarLeft}>
                                 <View style={styles.groupAvatarStack}>
                                   {third ? (
@@ -1450,9 +1934,7 @@ export default function ApartmentDetailsScreen() {
                                   <View style={styles.candidateBadge}><Text style={styles.candidateBadgeText}>פרופיל משותף</Text></View>
                                 </View>
                               </View>
-                              <View style={styles.candidateRight}>
-                                <UserPlus size={16} color="#4C1D95" />
-                              </View>
+                              
                             </TouchableOpacity>
                           );
                         })}
@@ -1467,12 +1949,15 @@ export default function ApartmentDetailsScreen() {
                         activeOpacity={0.9}
                         onPress={() => confirmAddPartner(u)}
                       >
-                        <View style={styles.candidateLeft}>
-                          <Image
-                            source={{ uri: (u as any).avatar_url || 'https://cdn-icons-png.flaticon.com/512/847/847969.png' }}
-                            style={styles.candidateAvatar}
-                          />
-                        </View>
+                        <TouchableOpacity
+                          style={styles.candidateRight}
+                          activeOpacity={0.85}
+                          onPress={() => confirmAddPartner(u)}
+                          accessibilityRole="button"
+                          accessibilityLabel="שלח הזמנה"
+                        >
+                          <UserPlus size={16} color="#4C1D95" />
+                        </TouchableOpacity>
                         <View style={{ flex: 1 }}>
                           <Text style={styles.candidateName} numberOfLines={1}>{u.full_name}</Text>
                           <View style={styles.candidateBadges}>
@@ -1480,8 +1965,11 @@ export default function ApartmentDetailsScreen() {
                             <View style={styles.candidateBadge}><Text style={styles.candidateBadgeText}>מתאים</Text></View>
                           </View>
                         </View>
-                        <View style={styles.candidateRight}>
-                          <UserPlus size={16} color="#4C1D95" />
+                        <View style={styles.candidateLeft}>
+                          <Image
+                            source={{ uri: (u as any).avatar_url || 'https://cdn-icons-png.flaticon.com/512/847/847969.png' }}
+                            style={styles.candidateAvatar}
+                          />
                         </View>
                       </TouchableOpacity>
                     ))
@@ -1546,6 +2034,63 @@ export default function ApartmentDetailsScreen() {
                 </Text>
               </TouchableOpacity>
             </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Navigation picker (nice-looking bottom sheet) */}
+      <Modal visible={isNavOpen} transparent animationType="fade" onRequestClose={() => setIsNavOpen(false)}>
+        <View style={styles.navOverlay}>
+          <TouchableOpacity style={styles.navBackdrop} activeOpacity={1} onPress={() => setIsNavOpen(false)} />
+          <View style={[styles.navSheet, { paddingBottom: 12 + (insets.bottom || 0) }]}>
+            <View style={styles.navHeaderRow}>
+              <Text style={styles.navTitle}>ניווט</Text>
+              <TouchableOpacity onPress={() => setIsNavOpen(false)} style={styles.navCloseBtn} activeOpacity={0.9}>
+                <X size={18} color="#111827" />
+              </TouchableOpacity>
+            </View>
+            {!!navDestination ? (
+              <Text style={styles.navSubtitle} numberOfLines={2}>
+                {navDestination}
+              </Text>
+            ) : null}
+
+            {(() => {
+              const encoded = encodeURIComponent(navDestination || '');
+              const urls = {
+                waze: `https://waze.com/ul?q=${encoded}&navigate=yes`,
+                google: `https://www.google.com/maps/dir/?api=1&destination=${encoded}`,
+                apple: `http://maps.apple.com/?daddr=${encoded}`,
+              } as const;
+              return (
+                <View style={styles.navButtons}>
+                  <TouchableOpacity style={styles.navBtn} activeOpacity={0.9} onPress={() => openNavUrl(urls.waze)}>
+                    <View style={styles.navBtnIcon}>
+                      <Text style={styles.navBtnIconText}>W</Text>
+                    </View>
+                    <Text style={styles.navBtnText}>Waze</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.navBtn} activeOpacity={0.9} onPress={() => openNavUrl(urls.google)}>
+                    <View style={styles.navBtnIcon}>
+                      <Text style={styles.navBtnIconText}>G</Text>
+                    </View>
+                    <Text style={styles.navBtnText}>Google Maps</Text>
+                  </TouchableOpacity>
+                  {Platform.OS === 'ios' ? (
+                    <TouchableOpacity style={styles.navBtn} activeOpacity={0.9} onPress={() => openNavUrl(urls.apple)}>
+                      <View style={styles.navBtnIcon}>
+                        <Text style={styles.navBtnIconText}></Text>
+                      </View>
+                      <Text style={styles.navBtnText}>Apple Maps</Text>
+                    </TouchableOpacity>
+                  ) : null}
+
+                  <TouchableOpacity style={[styles.navBtn, styles.navBtnCancel]} activeOpacity={0.9} onPress={() => setIsNavOpen(false)}>
+                    <Text style={[styles.navBtnText, styles.navBtnCancelText]}>ביטול</Text>
+                  </TouchableOpacity>
+                </View>
+              );
+            })()}
           </View>
         </View>
       </Modal>
@@ -1661,6 +2206,62 @@ const styles = StyleSheet.create({
     paddingBottom: 8,
     writingDirection: 'rtl',
   },
+  heroPriceRow: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 6,
+  },
+  heroPriceMeta: {
+    flexDirection: 'row-reverse',
+    alignItems: 'baseline',
+    justifyContent: 'flex-start',
+    gap: 8,
+  },
+  heroFavBtn: {
+    backgroundColor: '#FFFFFF',
+  },
+  heroPriceValue: {
+    color: '#4C1D95',
+    fontSize: 34,
+    fontWeight: '900',
+    letterSpacing: -0.5,
+    writingDirection: 'ltr',
+  },
+  heroCurrency: {
+    color: '#4C1D95',
+    fontSize: 22,
+    fontWeight: '900',
+  },
+  heroPricePer: {
+    color: '#6B7280',
+    fontSize: 14,
+    fontWeight: '700',
+    writingDirection: 'rtl',
+  },
+  heroLocationRow: {
+    marginTop: 8,
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 4,
+  },
+  heroLocationIcon: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'transparent',
+    borderWidth: 0,
+  },
+  heroLocationText: {
+    flex: 1,
+    color: '#6B7280',
+    fontSize: 13,
+    fontWeight: '800',
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
   avatar: {
     width: 44,
     height: 44,
@@ -1768,31 +2369,81 @@ const styles = StyleSheet.create({
   },
   heroTitle: {
     color: '#111827',
-    fontSize: 24,
+    fontSize: 20,
     fontWeight: '800',
-    lineHeight: 32,
+    lineHeight: 26,
     textAlign: 'right',
     writingDirection: 'rtl',
   },
-  heroDescription: {
-    color: '#374151',
-    fontSize: 14,
-    lineHeight: 20,
-    marginTop: 8,
-    textAlign: 'right',
-    writingDirection: 'rtl',
+  tagsRow: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 12,
   },
-  locationHeaderRow: {
+  tagPill: {
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 999,
+    backgroundColor: '#F5F3FF',
     flexDirection: 'row-reverse',
     alignItems: 'center',
     gap: 6,
+  },
+  tagText: {
+    color: '#4C1D95',
+    fontSize: 12,
+    fontWeight: '900',
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
+  readMoreBtn: {
+    alignSelf: 'flex-end',
+    marginTop: 10,
+    paddingHorizontal: 2,
+    paddingVertical: 6,
+    borderRadius: 10,
+    backgroundColor: 'transparent',
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 6,
+  },
+  readMoreText: {
+    color: '#4C1D95',
+    fontSize: 13,
+    fontWeight: '900',
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
+  mapHeader: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 10,
     marginBottom: 10,
   },
-  locationHeaderText: {
+  mapHeaderIcon: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F5F3FF',
+    borderWidth: 1,
+    borderColor: '#E9D5FF',
+  },
+  mapHeaderTitle: {
+    color: '#111827',
+    fontSize: 16,
+    fontWeight: '900',
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
+  mapHeaderSubtitle: {
+    marginTop: 2,
     color: '#6B7280',
-    fontSize: 14,
-    lineHeight: 16,
-    fontWeight: '500',
+    fontSize: 13,
+    fontWeight: '700',
     textAlign: 'right',
     writingDirection: 'rtl',
   },
@@ -1836,12 +2487,16 @@ const styles = StyleSheet.create({
   statLabel: { color: '#111827', fontWeight: '800', fontSize: 14 },
   statNumber: { color: '#111827', fontWeight: '900', fontSize: 16 },
   hostCard: {
+    position: 'relative',
     flexDirection: 'row-reverse',
     alignItems: 'center',
     gap: 10,
     backgroundColor: '#FFFFFF',
     borderRadius: 14,
-    padding: 12,
+    paddingVertical: 12,
+    paddingRight: 12,
+    // Reserve space for the match tab on the left side
+    paddingLeft: 12 + 78,
     marginBottom: 12,
     ...(Platform.OS === 'ios'
       ? {
@@ -1851,6 +2506,38 @@ const styles = StyleSheet.create({
           shadowOffset: { width: 0, height: 4 },
         }
       : { elevation: 4 }),
+  },
+  hostMatchTab: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    width: 78,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderTopLeftRadius: 14,
+    borderBottomLeftRadius: 14,
+    // Inner edge stays straight (attached look)
+    borderTopRightRadius: 0,
+    borderBottomRightRadius: 0,
+  },
+  hostMatchTabValue: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '900',
+    lineHeight: 18,
+    includeFontPadding: false,
+    textAlign: 'center',
+    writingDirection: 'ltr',
+  },
+  hostMatchTabLabel: {
+    marginTop: 2,
+    color: 'rgba(255,255,255,0.92)',
+    fontSize: 10,
+    fontWeight: '800',
+    lineHeight: 12,
+    includeFontPadding: false,
+    textAlign: 'center',
   },
   hostIconCircle: {
     width: 28,
@@ -1881,22 +2568,6 @@ const styles = StyleSheet.create({
     borderRadius: 999,
   },
   proBadgeText: { color: '#8B5CF6', fontSize: 11, fontWeight: '900' },
-  messageBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#F3F4F6',
-    ...(Platform.OS === 'ios'
-      ? {
-          shadowColor: '#000',
-          shadowOpacity: 0.08,
-          shadowRadius: 8,
-          shadowOffset: { width: 0, height: 4 },
-        }
-      : { elevation: 4 }),
-  },
   priceCard: {
     flexDirection: 'row-reverse',
     alignItems: 'center',
@@ -1916,17 +2587,43 @@ const styles = StyleSheet.create({
         }
       : { elevation: 4 }),
   },
-  priceRight: { alignItems: 'flex-end', gap: 6 },
+  priceRight: { flex: 1, alignItems: 'flex-end', gap: 6 },
   priceValue: { color: '#0B1220', fontSize: 20, fontWeight: '800' },
   currencySign: { color: '#0B1220', fontSize: 18, fontWeight: '800' },
   pricePerUnit: { color: '#6B7280', fontSize: 13, marginTop: 2, marginBottom: 6 },
   pricePerInline: { color: '#6B7280', fontSize: 13, fontWeight: '600', marginLeft: 6 },
-  greenChip: { backgroundColor: '#DCFCE7', borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4 },
-  greenChipText: { color: '#16A34A', fontSize: 12, fontWeight: '800' },
+  statusChip: {
+    borderRadius: 14,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    flexShrink: 1,
+    maxWidth: 260,
+  },
+  statusChipGreen: {
+    backgroundColor: '#DCFCE7',
+  },
+  statusChipPending: {
+    backgroundColor: '#E5E7EB',
+  },
+  statusChipText: {
+    fontSize: 11,
+    fontWeight: '900',
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    lineHeight: 15,
+    includeFontPadding: false,
+    flexShrink: 1,
+  },
+  statusChipTextGreen: {
+    color: '#16A34A',
+  },
+  statusChipTextPending: {
+    color: '#374151',
+  },
   availabilityBtn: {
     backgroundColor: '#8B5CF6',
-    height: 44,
-    paddingHorizontal: 18,
+    height: 42,
+    paddingHorizontal: 12,
     borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
@@ -1939,10 +2636,173 @@ const styles = StyleSheet.create({
         }
       : { elevation: 6 }),
   },
-  availabilityBtnText: { color: '#FFFFFF', fontSize: 15, fontWeight: '900' },
+  availabilityBtnText: { color: '#FFFFFF', fontSize: 13, fontWeight: '900', includeFontPadding: false, lineHeight: 16 },
   section: {
     marginTop: 12,
     marginBottom: 16,
+  },
+  whiteCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 16,
+    ...(Platform.OS === 'ios'
+      ? {
+          shadowColor: '#000',
+          shadowOpacity: 0.08,
+          shadowRadius: 14,
+          shadowOffset: { width: 0, height: 8 },
+        }
+      : { elevation: 4 }),
+  },
+  cardHeaderRow: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+  peopleCountPill: {
+    backgroundColor: '#EFEAFE',
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  peopleCountText: {
+    color: '#4C1D95',
+    fontSize: 12,
+    fontWeight: '900',
+    textAlign: 'center',
+    writingDirection: 'ltr',
+  },
+  navPill: {
+    backgroundColor: '#8B5CF6',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...(Platform.OS === 'ios'
+      ? {
+          shadowColor: '#8B5CF6',
+          shadowOpacity: 0.22,
+          shadowRadius: 8,
+          shadowOffset: { width: 0, height: 5 },
+        }
+      : { elevation: 5 }),
+  },
+  navPillText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '900',
+    textAlign: 'center',
+    includeFontPadding: false,
+    lineHeight: 16,
+  },
+  navIconWrap: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 8,
+  },
+  navOverlay: {
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
+  navBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+  },
+  navSheet: {
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 22,
+    borderTopRightRadius: 22,
+    paddingHorizontal: 16,
+    paddingTop: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(17,24,39,0.08)',
+    ...(Platform.OS === 'ios'
+      ? {
+          shadowColor: '#000',
+          shadowOpacity: 0.18,
+          shadowRadius: 18,
+          shadowOffset: { width: 0, height: -6 },
+        }
+      : { elevation: 12 }),
+  },
+  navHeaderRow: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  navCloseBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F3F4F6',
+  },
+  navTitle: {
+    color: '#111827',
+    fontSize: 18,
+    fontWeight: '900',
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
+  navSubtitle: {
+    marginTop: 8,
+    color: '#6B7280',
+    fontSize: 13,
+    fontWeight: '700',
+    lineHeight: 18,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
+  navButtons: {
+    marginTop: 14,
+    gap: 10,
+  },
+  navBtn: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: '#F3F4F6',
+    borderRadius: 14,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+  },
+  navBtnCancel: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    justifyContent: 'center',
+  },
+  navBtnText: {
+    color: '#111827',
+    fontSize: 15,
+    fontWeight: '900',
+    textAlign: 'right',
+  },
+  navBtnCancelText: {
+    color: '#374151',
+    textAlign: 'center',
+  },
+  navBtnIcon: {
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+    backgroundColor: '#EFEAFE',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(76, 29, 149, 0.14)',
+  },
+  navBtnIconText: {
+    color: '#4C1D95',
+    fontSize: 14,
+    fontWeight: '900',
   },
   sectionTitle: {
     fontSize: 20,
@@ -1958,16 +2818,23 @@ const styles = StyleSheet.create({
     flexDirection: 'row-reverse',
     flexWrap: 'wrap',
     justifyContent: 'space-between',
-    marginTop: 6,
+    marginTop: 10,
     marginBottom: 10,
+    gap: 12,
   },
   featureLine: {
     width: '48%',
     flexDirection: 'row-reverse',
     alignItems: 'center',
-    marginBottom: 16,
+    justifyContent: 'flex-start',
+    gap: 10,
+    minHeight: 56,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    borderRadius: 16,
+    backgroundColor: '#F3F4F6',
   },
-  featureText: { color: '#6B7280', fontSize: 14, fontWeight: '600' },
+  featureText: { color: '#111827', fontSize: 14, fontWeight: '800', textAlign: 'right', writingDirection: 'rtl' },
   featuresEmpty: {
     color: '#6B7280',
     fontSize: 14,
@@ -1975,22 +2842,160 @@ const styles = StyleSheet.create({
     textAlign: 'right',
     writingDirection: 'rtl',
   },
-  mapCard: {
-    height: 140,
-    borderRadius: 16,
-    backgroundColor: '#F3F4F6',
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
+  featuresEmptyWrap: {
+    width: '100%',
+    backgroundColor: '#F9FAFB',
+    borderRadius: 14,
+    paddingVertical: 16,
+    paddingHorizontal: 14,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  mapDot: {
-    width: 14,
-    height: 14,
-    borderRadius: 7,
-    backgroundColor: '#E9D5FF',
-    borderWidth: 3,
-    borderColor: '#8B5CF6',
+  featuresEmptyIconPill: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#EFEAFE',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(76, 29, 149, 0.14)',
+    marginBottom: 10,
+  },
+  featuresEmptyTitle: {
+    color: '#111827',
+    fontSize: 14,
+    fontWeight: '900',
+    textAlign: 'center',
+    writingDirection: 'rtl',
+    marginBottom: 4,
+  },
+  featuresEmptyText: {
+    color: '#6B7280',
+    fontSize: 12,
+    fontWeight: '700',
+    textAlign: 'center',
+    writingDirection: 'rtl',
+    lineHeight: 18,
+  },
+  mapCard: {
+    borderRadius: 16,
+    backgroundColor: '#F3F4F6',
+    overflow: 'hidden',
+  },
+  mapInner: {
+    flex: 1,
+    alignSelf: 'stretch',
+  },
+  mapOverlayHint: {
+    position: 'absolute',
+    left: 8,
+    right: 8,
+    top: 8,
+    backgroundColor: 'rgba(17, 24, 39, 0.72)',
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+  },
+  mapLocationBadge: {
+    position: 'absolute',
+    right: 10,
+    bottom: 10,
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.92)',
+    borderWidth: 1,
+    borderColor: 'rgba(17, 24, 39, 0.10)',
+    maxWidth: '92%',
+    ...(Platform.OS === 'ios'
+      ? {
+          shadowColor: '#000',
+          shadowOpacity: 0.16,
+          shadowRadius: 14,
+          shadowOffset: { width: 0, height: 8 },
+        }
+      : { elevation: 6 }),
+  },
+  mapLocationIconPill: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: '#EFEAFE',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(76, 29, 149, 0.14)',
+  },
+  mapLocationTextWrap: {
+    flex: 1,
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+  },
+  mapLocationCity: {
+    color: '#111827',
+    fontSize: 13,
+    fontWeight: '900',
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
+  mapLocationAddress: {
+    marginTop: 2,
+    color: '#374151',
+    fontSize: 12,
+    fontWeight: '800',
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
+  mapNavPill: {
+    backgroundColor: '#8B5CF6',
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  mapNavPillText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '900',
+    textAlign: 'center',
+    includeFontPadding: false,
+    lineHeight: 16,
+  },
+  mapNavIconWrap: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 6,
+  },
+  mapOverlayHintText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '800',
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
+  mapFallback: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingHorizontal: 12,
+  },
+  mapFallbackText: {
+    color: '#6B7280',
+    fontSize: 12,
+    fontWeight: '800',
+    textAlign: 'center',
   },
   peopleGrid: {
     flexDirection: 'row-reverse',
@@ -2000,20 +3005,13 @@ const styles = StyleSheet.create({
   },
   personCard: {
     width: '48%',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#F3F4F6',
     borderRadius: 14,
     paddingVertical: 12,
     paddingHorizontal: 10,
     alignItems: 'center',
     marginBottom: 12,
-    ...(Platform.OS === 'ios'
-      ? {
-          shadowColor: '#000',
-          shadowOpacity: 0.08,
-          shadowRadius: 8,
-          shadowOffset: { width: 0, height: 4 },
-        }
-      : { elevation: 4 }),
+    borderWidth: 0,
   },
   personAvatarWrap: {
     width: 56,
@@ -2097,10 +3095,9 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     overflow: 'hidden',
-    maxHeight: '75%',
+    height: '75%',
     writingDirection: 'rtl',
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderWidth: 0,
     ...(Platform.OS === 'android'
       ? { elevation: 18 }
       : {
@@ -2109,6 +3106,9 @@ const styles = StyleSheet.create({
           shadowRadius: 18,
           shadowOffset: { width: 0, height: -8 },
         }),
+  },
+  sheetScroll: {
+    flex: 1,
   },
   sheetHeader: {
     flexDirection: 'row',
@@ -2127,6 +3127,19 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.85)',
     fontSize: 13,
     fontWeight: '700',
+  },
+  sheetCountPill: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.22)',
+  },
+  sheetCountText: {
+    color: 'rgba(255,255,255,0.92)',
+    fontSize: 12,
+    fontWeight: '900',
   },
   sectionHeading: {
     color: '#6B7280',
@@ -2157,9 +3170,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     height: 40,
     borderRadius: 10,
-    backgroundColor: '#F3F4F6',
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 0,
+    ...(Platform.OS === 'android'
+      ? { elevation: 2 }
+      : {
+          shadowColor: '#111827',
+          shadowOpacity: 0.08,
+          shadowRadius: 10,
+          shadowOffset: { width: 0, height: 4 },
+        }),
   },
   searchInput: {
     flex: 1,
@@ -2172,8 +3192,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 12,
     paddingVertical: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: '#1F2030',
+    borderBottomWidth: 0,
   },
   candidateRow: {
     flexDirection: 'row',
@@ -2182,8 +3201,7 @@ const styles = StyleSheet.create({
     padding: 12,
     backgroundColor: '#FFFFFF',
     borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderWidth: 0,
     ...(Platform.OS === 'android'
       ? { elevation: 2 }
       : {

@@ -18,6 +18,7 @@ import {
 import { useRouter } from 'expo-router';
 import { authService } from '@/lib/auth';
 import { useAuthStore } from '@/stores/authStore';
+import { usePendingSignupStore } from '@/stores/pendingSignupStore';
 import { Home, Camera, Pencil, X, ChevronRight, Eye, EyeOff, Check } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
@@ -34,6 +35,7 @@ const PRIMARY = '#4C1D95';
 export default function RegisterScreen() {
   const router = useRouter();
   const setUser = useAuthStore((state) => state.setUser);
+  const setPending = usePendingSignupStore((s) => s.setPending);
   const insets = useSafeAreaInsets();
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
@@ -62,6 +64,7 @@ export default function RegisterScreen() {
   const [isAgePickerOpen, setIsAgePickerOpen] = useState(false);
   const [isPasswordVisible, setPasswordVisible] = useState(false);
   const [isConfirmPasswordVisible, setConfirmPasswordVisible] = useState(false);
+  const [emailAlreadyExists, setEmailAlreadyExists] = useState(false);
 
   useEffect(() => {
     setSessionToken(createSessionToken());
@@ -172,47 +175,54 @@ export default function RegisterScreen() {
 
     setIsLoading(true);
     setError('');
+    setEmailAlreadyExists(false);
 
     try {
+      // IMPORTANT: OTP sign-up with shouldCreateUser=true behaves like login for existing emails.
+      // Block early so "register" doesn't silently sign the user in.
+      await authService.assertEmailAvailable(email);
+
       const trimmed = avatarUrl.trim();
       const safeAvatarUrl = /^https?:\/\//.test(trimmed) ? trimmed : undefined;
       const avatarForSignup = mode === 'user' ? safeAvatarUrl : undefined;
-      const { user } = await authService.signUp({
-        email,
+
+      // Store pending signup data locally (avoid passing secrets like password in the URL).
+      const pendingRole = mode === 'owner' ? 'owner' : 'user';
+      setPending({
+        email: email.trim(),
         password,
         fullName,
-        role: mode === 'owner' ? 'owner' : 'user',
+        role: pendingRole,
         phone: mode === 'user' ? (phone.trim() || undefined) : undefined,
         age: age ? Number(age) : undefined,
         city: city.trim() || undefined,
         bio: mode === 'user' ? (bio.trim() || undefined) : undefined,
         gender: mode === 'user' && (gender === 'male' || gender === 'female') ? gender : undefined,
         avatarUrl: avatarForSignup,
-        // Always create users profile so FK from apartments(owner_id) -> users(id) passes
-        createProfile: true,
       });
-      if (user) {
-        if (mode === 'user' && avatarUrl) {
-          // Try to upload avatar and update profile (best-effort)
-          await uploadAvatar(user.id, avatarUrl);
-        }
-        if (mode === 'owner') {
-          // Ensure role is explicitly stored as 'owner' even if profile upsert skipped/partial
-          try {
-            await supabase.from('users').update({ role: 'owner' as any }).eq('id', user.id);
-          } catch (e) {
-            // Non-blocking; role column may be missing until migrations are applied
-            console.warn('Failed to set owner role, check DB migrations:', e);
-          }
-          setUser({ id: user.id, email: user.email! });
-          router.push({ pathname: '/(tabs)/add-apartment', params: { from: 'register-owner' } as any });
-        } else {
-          setUser({ id: user.id, email: user.email! });
-          router.replace('/(tabs)/home');
-        }
-      }
+
+      // Send 6-digit code email (requires Email OTP enabled in Supabase Auth settings).
+      await authService.startEmailOtpSignUp({
+        email: email.trim(),
+        fullName,
+        role: pendingRole,
+        phone: mode === 'user' ? (phone.trim() || undefined) : undefined,
+        age: age ? Number(age) : undefined,
+        city: city.trim() || undefined,
+        bio: mode === 'user' ? (bio.trim() || undefined) : undefined,
+        gender: mode === 'user' && (gender === 'male' || gender === 'female') ? gender : undefined,
+        avatarUrl: avatarForSignup,
+      });
+
+      router.push('/auth/verify-email' as any);
     } catch (err: any) {
-      setError(err.message || 'שגיאה ברישום');
+      const msg = String(err?.message || err || '');
+      if (msg.includes('המייל כבר קיים')) {
+        setEmailAlreadyExists(true);
+        setError(msg);
+      } else {
+        setError(msg || 'שגיאה ברישום');
+      }
     } finally {
       setIsLoading(false);
     }
@@ -565,7 +575,25 @@ export default function RegisterScreen() {
               </>
             ) : (
               <>
-                {error ? <Text style={styles.error}>{error}</Text> : null}
+                {error ? (
+                  emailAlreadyExists ? (
+                    <View style={styles.emailExistsCard}>
+                      <Text style={styles.emailExistsText}>{error}</Text>
+                      <TouchableOpacity
+                        style={[styles.emailExistsButton, isLoading && styles.emailExistsButtonDisabled]}
+                        onPress={() => {
+                          // Move user to login and prefill the email for convenience
+                          router.replace({ pathname: '/auth/login', params: { email: email.trim() } } as any);
+                        }}
+                        disabled={isLoading}
+                      >
+                        <Text style={styles.emailExistsButtonText}>לעבור להתחברות</Text>
+                      </TouchableOpacity>
+                    </View>
+                  ) : (
+                    <Text style={styles.error}>{error}</Text>
+                  )
+                ) : null}
                 <View style={styles.form}>
                   <View style={styles.cardPlain}>
                     <Text style={styles.label}>אימייל</Text>
@@ -1056,6 +1084,40 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     textAlign: 'right',
     marginBottom: 16,
+  },
+  emailExistsCard: {
+    backgroundColor: 'rgba(76,29,149,0.06)', // subtle purple tint
+    borderColor: 'rgba(76,29,149,0.16)',
+    borderWidth: 1,
+    padding: 12,
+    borderRadius: 12,
+    marginBottom: 16,
+    gap: 8,
+  },
+  emailExistsText: {
+    color: '#374151',
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    fontSize: 13.5,
+    lineHeight: 19,
+    fontWeight: '600',
+  },
+  emailExistsButton: {
+    backgroundColor: 'transparent',
+    borderRadius: 10,
+    paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(76,29,149,0.35)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emailExistsButtonDisabled: {
+    opacity: 0.6,
+  },
+  emailExistsButtonText: {
+    color: PRIMARY,
+    fontSize: 13.5,
+    fontWeight: '700',
   },
   logoWrap: {
     width: 64,
