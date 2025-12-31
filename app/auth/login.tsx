@@ -9,7 +9,7 @@ import {
   Platform,
   Image,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { authService } from '@/lib/auth';
 import { useAuthStore } from '@/stores/authStore';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -25,12 +25,21 @@ export default function LoginScreen() {
   const router = useRouter();
   const setUser = useAuthStore((s) => s.setUser);
   const insets = useSafeAreaInsets();
+  const params = useLocalSearchParams();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isPasswordVisible, setPasswordVisible] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
+
+  // Prefill email when coming from register ("email already exists")
+  useEffect(() => {
+    const incoming = (params as any)?.email;
+    if (typeof incoming === 'string' && incoming.trim()) {
+      setEmail(incoming.trim());
+    }
+  }, [params]);
 
   // Clear any broken/partial session so the login screen doesn't log refresh errors on mount
   useEffect(() => {
@@ -145,6 +154,13 @@ export default function LoginScreen() {
                     {isPasswordVisible ? <EyeOff color="#6B7280" /> : <Eye color="#6B7280" />}
                   </TouchableOpacity>
                 </View>
+                <TouchableOpacity
+                  style={styles.forgotLinkWrap}
+                  onPress={() => router.push({ pathname: '/auth/forgot-password', params: { email: email.trim() } } as any)}
+                  disabled={isLoading}
+                >
+                  <Text style={styles.forgotLinkText}>שכחתי סיסמה</Text>
+                </TouchableOpacity>
                 <TouchableOpacity style={[styles.button, isLoading && styles.buttonDisabled]} onPress={handleLogin} disabled={isLoading}>
                   {isLoading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.buttonText}>התחבר</Text>}
                 </TouchableOpacity>
@@ -368,6 +384,19 @@ const styles = StyleSheet.create({
     color: ACCENT_PURPLE,
     fontSize: 14,
     textAlign: 'center',
+  },
+  forgotLinkWrap: {
+    alignItems: 'flex-end',
+    marginTop: 2,
+    marginBottom: 2,
+    paddingRight: 4,
+  },
+  forgotLinkText: {
+    color: ACCENT_PURPLE,
+    fontSize: 13,
+    fontWeight: '700',
+    textAlign: 'right',
+    writingDirection: 'rtl',
   },
   errorLight: {
     backgroundColor: 'rgba(255,59,48,0.08)',

@@ -8,6 +8,39 @@ export interface AuthUser {
 }
 
 export const authService = {
+  /**
+   * Checks (server-side) if an email is already registered.
+   * Requires the `public.email_exists(email_to_check text)` RPC to be deployed.
+   */
+  async isEmailRegistered(email: string): Promise<boolean> {
+    const normalized = (email || '').trim().toLowerCase();
+    if (!normalized) return false;
+    const { data, error } = await supabase.rpc('email_exists', {
+      email_to_check: normalized,
+    } as any);
+    if (error) {
+      const msg = String((error as any)?.message || error);
+      // Helpful hint when the migration wasn't applied yet
+      if (msg.toLowerCase().includes('function') && msg.toLowerCase().includes('email_exists')) {
+        throw new Error(
+          'חסר RPC במסד הנתונים לבדיקת אימייל קיים (public.email_exists). נא להריץ את המיגרציה של Supabase ואז לנסות שוב.'
+        );
+      }
+      throw error;
+    }
+    return !!data;
+  },
+
+  /**
+   * Throws a friendly error when the email already exists.
+   */
+  async assertEmailAvailable(email: string): Promise<void> {
+    const exists = await this.isEmailRegistered(email);
+    if (exists) {
+      throw new Error('המייל כבר קיים במערכת. אנא הירשמו עם מייל אחר.');
+    }
+  },
+
   async startEmailOtpSignUp(params: {
     email: string;
     fullName: string;
@@ -40,6 +73,48 @@ export const authService = {
       },
     });
 
+    if (error) throw error;
+    return true;
+  },
+
+  /**
+   * Password reset via OTP (6-digit code).
+   * We intentionally set shouldCreateUser=false so an unknown email won't create an account.
+   */
+  async startPasswordResetOtp(email: string) {
+    const normalized = (email || '').trim();
+    const { error } = await supabase.auth.signInWithOtp({
+      email: normalized,
+      options: {
+        shouldCreateUser: false,
+      },
+    });
+    if (error) throw error;
+    return true;
+  },
+
+  /**
+   * Verify OTP for password reset. This creates an authenticated session.
+   */
+  async verifyPasswordResetEmailOtp(params: { email: string; token: string }) {
+    const { email, token } = params;
+    const cleaned = token.replace(/\s/g, '');
+    const { data, error } = await supabase.auth.verifyOtp({
+      email,
+      token: cleaned,
+      type: 'email',
+    });
+    if (error) throw error;
+    const authedUser = data.user;
+    if (!authedUser) throw new Error('לא התקבל משתמש מהשרת');
+    return { user: authedUser };
+  },
+
+  /**
+   * Update password for the currently authenticated user (after OTP verification).
+   */
+  async updatePassword(newPassword: string) {
+    const { error } = await supabase.auth.updateUser({ password: newPassword });
     if (error) throw error;
     return true;
   },

@@ -64,6 +64,7 @@ export default function RegisterScreen() {
   const [isAgePickerOpen, setIsAgePickerOpen] = useState(false);
   const [isPasswordVisible, setPasswordVisible] = useState(false);
   const [isConfirmPasswordVisible, setConfirmPasswordVisible] = useState(false);
+  const [emailAlreadyExists, setEmailAlreadyExists] = useState(false);
 
   useEffect(() => {
     setSessionToken(createSessionToken());
@@ -174,8 +175,13 @@ export default function RegisterScreen() {
 
     setIsLoading(true);
     setError('');
+    setEmailAlreadyExists(false);
 
     try {
+      // IMPORTANT: OTP sign-up with shouldCreateUser=true behaves like login for existing emails.
+      // Block early so "register" doesn't silently sign the user in.
+      await authService.assertEmailAvailable(email);
+
       const trimmed = avatarUrl.trim();
       const safeAvatarUrl = /^https?:\/\//.test(trimmed) ? trimmed : undefined;
       const avatarForSignup = mode === 'user' ? safeAvatarUrl : undefined;
@@ -210,7 +216,13 @@ export default function RegisterScreen() {
 
       router.push('/auth/verify-email' as any);
     } catch (err: any) {
-      setError(err.message || 'שגיאה ברישום');
+      const msg = String(err?.message || err || '');
+      if (msg.includes('המייל כבר קיים')) {
+        setEmailAlreadyExists(true);
+        setError(msg);
+      } else {
+        setError(msg || 'שגיאה ברישום');
+      }
     } finally {
       setIsLoading(false);
     }
@@ -563,7 +575,25 @@ export default function RegisterScreen() {
               </>
             ) : (
               <>
-                {error ? <Text style={styles.error}>{error}</Text> : null}
+                {error ? (
+                  emailAlreadyExists ? (
+                    <View style={styles.emailExistsCard}>
+                      <Text style={styles.emailExistsText}>{error}</Text>
+                      <TouchableOpacity
+                        style={[styles.emailExistsButton, isLoading && styles.emailExistsButtonDisabled]}
+                        onPress={() => {
+                          // Move user to login and prefill the email for convenience
+                          router.replace({ pathname: '/auth/login', params: { email: email.trim() } } as any);
+                        }}
+                        disabled={isLoading}
+                      >
+                        <Text style={styles.emailExistsButtonText}>לעבור להתחברות</Text>
+                      </TouchableOpacity>
+                    </View>
+                  ) : (
+                    <Text style={styles.error}>{error}</Text>
+                  )
+                ) : null}
                 <View style={styles.form}>
                   <View style={styles.cardPlain}>
                     <Text style={styles.label}>אימייל</Text>
@@ -1054,6 +1084,40 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     textAlign: 'right',
     marginBottom: 16,
+  },
+  emailExistsCard: {
+    backgroundColor: 'rgba(76,29,149,0.06)', // subtle purple tint
+    borderColor: 'rgba(76,29,149,0.16)',
+    borderWidth: 1,
+    padding: 12,
+    borderRadius: 12,
+    marginBottom: 16,
+    gap: 8,
+  },
+  emailExistsText: {
+    color: '#374151',
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    fontSize: 13.5,
+    lineHeight: 19,
+    fontWeight: '600',
+  },
+  emailExistsButton: {
+    backgroundColor: 'transparent',
+    borderRadius: 10,
+    paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(76,29,149,0.35)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emailExistsButtonDisabled: {
+    opacity: 0.6,
+  },
+  emailExistsButtonText: {
+    color: PRIMARY,
+    fontSize: 13.5,
+    fontWeight: '700',
   },
   logoWrap: {
     width: 64,
