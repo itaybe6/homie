@@ -1356,7 +1356,7 @@ export default function ApartmentDetailsScreen() {
               accessibilityRole="button"
               accessibilityLabel="סמן כמועדף"
             >
-              <Heart size={18} color="#4C1D95" />
+              <Heart size={18} color="#5e3f2d" />
             </TouchableOpacity>
           </View>
 
@@ -1387,7 +1387,7 @@ export default function ApartmentDetailsScreen() {
               onPress={() => setIsMembersOpen(true)}
             >
               <View style={styles.statIconCircle}>
-                <Users size={22} color="#8B5CF6" />
+                <Users size={22} color="#5e3f2d" />
               </View>
               <View style={styles.statLabelRow}>
                 {typeof maxRoommates === 'number' ? (
@@ -1404,7 +1404,7 @@ export default function ApartmentDetailsScreen() {
             </TouchableOpacity>
             <View style={styles.statLight}>
               <View style={styles.statIconCircle}>
-                <Bed size={22} color="#8B5CF6" />
+                <Bed size={22} color="#5e3f2d" />
               </View>
               <View style={styles.statLabelRow}>
                 <Text style={styles.statNumber}>{apartment.bedrooms}</Text>
@@ -1413,7 +1413,7 @@ export default function ApartmentDetailsScreen() {
             </View>
             <View style={styles.statLight}>
               <View style={styles.statIconCircle}>
-                <Bath size={22} color="#8B5CF6" />
+                <Bath size={22} color="#5e3f2d" />
               </View>
               <View style={styles.statLabelRow}>
                 <Text style={styles.statNumber}>{apartment.bathrooms}</Text>
@@ -1433,28 +1433,28 @@ export default function ApartmentDetailsScreen() {
                     {typeTagLabel ? (
                       <View style={styles.tagPill}>
                         {apartmentType === 'GARDEN' ? (
-                          <Trees size={14} color="#4C1D95" />
+                            <Trees size={14} color="#5e3f2d" />
                         ) : (
-                          <Building2 size={14} color="#4C1D95" />
+                            <Building2 size={14} color="#5e3f2d" />
                         )}
                         <Text style={styles.tagText}>{typeTagLabel}</Text>
                       </View>
                     ) : null}
                     {floorTagLabel ? (
                       <View style={styles.tagPill}>
-                        <Layers size={14} color="#4C1D95" />
+                        <Layers size={14} color="#5e3f2d" />
                         <Text style={styles.tagText}>{floorTagLabel}</Text>
                       </View>
                     ) : null}
                     {gardenSqmTagLabel ? (
                       <View style={styles.tagPill}>
-                        <Trees size={14} color="#4C1D95" />
+                        <Trees size={14} color="#5e3f2d" />
                         <Text style={styles.tagText}>{gardenSqmTagLabel}</Text>
                       </View>
                     ) : null}
                     {sqmTagLabel ? (
                       <View style={styles.tagPill}>
-                        <Ruler size={14} color="#4C1D95" />
+                        <Ruler size={14} color="#5e3f2d" />
                         <Text style={styles.tagText}>{sqmTagLabel}</Text>
                       </View>
                     ) : null}
@@ -1480,9 +1480,9 @@ export default function ApartmentDetailsScreen() {
                       >
                         <Text style={styles.readMoreText}>{isDescExpanded ? 'קרא פחות' : 'קרא עוד'}</Text>
                         {isDescExpanded ? (
-                          <ChevronUp size={16} color="#4C1D95" />
+                          <ChevronUp size={16} color="#5e3f2d" />
                         ) : (
-                          <ChevronDown size={16} color="#4C1D95" />
+                          <ChevronDown size={16} color="#5e3f2d" />
                         )}
                       </TouchableOpacity>
                     ) : null}
@@ -1495,7 +1495,7 @@ export default function ApartmentDetailsScreen() {
           {/* host card */}
           <View style={styles.hostCard}>
             <LinearGradient
-              colors={typeof ownerMatchPercent === 'number' ? ['#A78BFA', '#4C1D95'] : ['#D1D5DB', '#9CA3AF']}
+              colors={typeof ownerMatchPercent === 'number' ? ['#cbb59e', '#5e3f2d'] : ['#D1D5DB', '#9CA3AF']}
               start={{ x: 0, y: 0 }}
               end={{ x: 0, y: 1 }}
               style={styles.hostMatchTab}
@@ -1555,7 +1555,7 @@ export default function ApartmentDetailsScreen() {
                     return (
                       <View style={styles.featuresEmptyWrap}>
                         <View style={styles.featuresEmptyIconPill}>
-                          <Info size={18} color="#4C1D95" />
+                          <Info size={18} color="#5e3f2d" />
                         </View>
                         <Text style={styles.featuresEmptyTitle}>לא צוינו מאפיינים</Text>
                         <Text style={styles.featuresEmptyText}>
@@ -1567,7 +1567,7 @@ export default function ApartmentDetailsScreen() {
 
                   return items.map(({ key, label, Icon }) => (
                     <View key={`feat-${key}`} style={styles.featureLine}>
-                      <Icon size={20} color="#4C1D95" />
+                      <Icon size={20} color="#5e3f2d" />
                       <Text style={styles.featureText}>{label}</Text>
                     </View>
                   ));
@@ -1611,7 +1611,7 @@ export default function ApartmentDetailsScreen() {
                     {(String((apartment as any)?.city || '').trim() || String((apartment as any)?.address || '').trim()) ? (
                       <View style={styles.mapLocationBadge}>
                         <View style={styles.mapLocationIconPill}>
-                          <MapPin size={14} color="#4C1D95" />
+                          <MapPin size={14} color="#5e3f2d" />
                         </View>
                         <View style={styles.mapLocationTextWrap}>
                           <Text style={styles.mapLocationCity} numberOfLines={1}>
@@ -1975,7 +1975,7 @@ export default function ApartmentDetailsScreen() {
                                 accessibilityRole="button"
                                 accessibilityLabel="שלח הזמנה לפרופיל משותף"
                               >
-                                <UserPlus size={16} color="#4C1D95" />
+                                <UserPlus size={16} color="#5e3f2d" />
                               </TouchableOpacity>
                               <View style={styles.groupAvatarLeft}>
                                 <View style={styles.groupAvatarStack}>
@@ -2027,7 +2027,7 @@ export default function ApartmentDetailsScreen() {
                           accessibilityRole="button"
                           accessibilityLabel="שלח הזמנה"
                         >
-                          <UserPlus size={16} color="#4C1D95" />
+                          <UserPlus size={16} color="#5e3f2d" />
                         </TouchableOpacity>
                         <View style={{ flex: 1 }}>
                           <Text style={styles.candidateName} numberOfLines={1}>{u.full_name}</Text>
@@ -2293,14 +2293,14 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
   },
   heroPriceValue: {
-    color: '#4C1D95',
+    color: '#5e3f2d',
     fontSize: 34,
     fontWeight: '900',
     letterSpacing: -0.5,
     writingDirection: 'ltr',
   },
   heroCurrency: {
-    color: '#4C1D95',
+    color: '#5e3f2d',
     fontSize: 22,
     fontWeight: '900',
   },
@@ -2457,13 +2457,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 7,
     borderRadius: 999,
-    backgroundColor: '#F5F3FF',
+    backgroundColor: 'rgba(94,63,45,0.08)',
     flexDirection: 'row-reverse',
     alignItems: 'center',
     gap: 6,
   },
   tagText: {
-    color: '#4C1D95',
+    color: '#5e3f2d',
     fontSize: 12,
     fontWeight: '900',
     textAlign: 'right',
@@ -2481,7 +2481,7 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   readMoreText: {
-    color: '#4C1D95',
+    color: '#5e3f2d',
     fontSize: 13,
     fontWeight: '900',
     textAlign: 'right',
@@ -2499,9 +2499,9 @@ const styles = StyleSheet.create({
     borderRadius: 15,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#F5F3FF',
+    backgroundColor: 'rgba(94,63,45,0.08)',
     borderWidth: 1,
-    borderColor: '#E9D5FF',
+    borderColor: 'rgba(94,63,45,0.25)',
   },
   mapHeaderTitle: {
     color: '#111827',
@@ -2547,7 +2547,7 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#F5F3FF',
+    backgroundColor: 'rgba(94,63,45,0.08)',
     marginBottom: 8,
   },
   statLabelRow: {
@@ -2625,20 +2625,20 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     backgroundColor: '#FFFFFF',
     borderWidth: 2,
-    borderColor: '#E9D5FF',
+    borderColor: 'rgba(94,63,45,0.25)',
   },
   hostAvatar: { width: '100%', height: '100%' },
   hostTitle: { color: '#111827', fontSize: 13, fontWeight: '800' },
   hostSub: { color: '#6B7280', fontSize: 12 },
   proBadge: {
-    backgroundColor: '#F5F3FF',
-    borderColor: '#E9D5FF',
+    backgroundColor: 'rgba(94,63,45,0.08)',
+    borderColor: 'rgba(94,63,45,0.25)',
     borderWidth: 1,
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 999,
   },
-  proBadgeText: { color: '#8B5CF6', fontSize: 11, fontWeight: '900' },
+  proBadgeText: { color: '#5e3f2d', fontSize: 11, fontWeight: '900' },
   priceCard: {
     flexDirection: 'row-reverse',
     alignItems: 'center',
@@ -2692,7 +2692,7 @@ const styles = StyleSheet.create({
     color: '#374151',
   },
   availabilityBtn: {
-    backgroundColor: '#8B5CF6',
+    backgroundColor: '#5e3f2d',
     height: 42,
     paddingHorizontal: 12,
     borderRadius: 22,
@@ -2700,7 +2700,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     ...(Platform.OS === 'ios'
       ? {
-          shadowColor: '#8B5CF6',
+          shadowColor: '#5e3f2d',
           shadowOpacity: 0.25,
           shadowRadius: 14,
           shadowOffset: { width: 0, height: 8 },
@@ -2732,20 +2732,20 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   peopleCountPill: {
-    backgroundColor: '#EFEAFE',
+    backgroundColor: 'rgba(94,63,45,0.10)',
     borderRadius: 999,
     paddingHorizontal: 10,
     paddingVertical: 6,
   },
   peopleCountText: {
-    color: '#4C1D95',
+    color: '#5e3f2d',
     fontSize: 12,
     fontWeight: '900',
     textAlign: 'center',
     writingDirection: 'ltr',
   },
   navPill: {
-    backgroundColor: '#8B5CF6',
+    backgroundColor: '#5e3f2d',
     borderRadius: 12,
     paddingHorizontal: 12,
     paddingVertical: 8,
@@ -2754,7 +2754,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     ...(Platform.OS === 'ios'
       ? {
-          shadowColor: '#8B5CF6',
+          shadowColor: '#5e3f2d',
           shadowOpacity: 0.22,
           shadowRadius: 8,
           shadowOffset: { width: 0, height: 5 },
@@ -2864,14 +2864,14 @@ const styles = StyleSheet.create({
     width: 28,
     height: 28,
     borderRadius: 8,
-    backgroundColor: '#EFEAFE',
+    backgroundColor: 'rgba(94,63,45,0.10)',
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(76, 29, 149, 0.14)',
+    borderColor: 'rgba(94,63,45,0.14)',
   },
   navBtnIconText: {
-    color: '#4C1D95',
+    color: '#5e3f2d',
     fontSize: 14,
     fontWeight: '900',
   },
@@ -2926,11 +2926,11 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: '#EFEAFE',
+    backgroundColor: 'rgba(94,63,45,0.10)',
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(76, 29, 149, 0.14)',
+    borderColor: 'rgba(94,63,45,0.14)',
     marginBottom: 10,
   },
   featuresEmptyTitle: {
@@ -2997,11 +2997,11 @@ const styles = StyleSheet.create({
     width: 30,
     height: 30,
     borderRadius: 15,
-    backgroundColor: '#EFEAFE',
+    backgroundColor: 'rgba(94,63,45,0.10)',
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(76, 29, 149, 0.14)',
+    borderColor: 'rgba(94,63,45,0.14)',
   },
   mapLocationTextWrap: {
     flex: 1,
@@ -3024,7 +3024,7 @@ const styles = StyleSheet.create({
     writingDirection: 'rtl',
   },
   mapNavPill: {
-    backgroundColor: '#8B5CF6',
+    backgroundColor: '#5e3f2d',
     borderRadius: 12,
     paddingHorizontal: 10,
     paddingVertical: 8,
@@ -3113,11 +3113,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(124,92,255,0.45)',
+    borderColor: 'rgba(94,63,45,0.45)',
   },
   joinBtnDisabled: {
     backgroundColor: 'transparent',
-    borderColor: 'rgba(124,92,255,0.25)',
+    borderColor: 'rgba(94,63,45,0.25)',
   },
   joinBtnText: {
     color: '#FFFFFF',
@@ -3139,7 +3139,7 @@ const styles = StyleSheet.create({
   // deprecated old bottom action buttons kept for potential reuse
   editButton: {
     flex: 1,
-    backgroundColor: '#A78BFA',
+    backgroundColor: '#5e3f2d',
     paddingVertical: 14,
     borderRadius: 12,
     alignItems: 'center',
@@ -3148,7 +3148,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   editButtonText: {
-    color: '#0F0F14',
+    color: '#FFFFFF',
     fontSize: 15,
     fontWeight: '800',
   },
@@ -3187,7 +3187,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingVertical: 14,
-    backgroundColor: '#4C1D95',
+    backgroundColor: '#5e3f2d',
   },
   sheetTitle: {
     color: '#FFFFFF',
@@ -3300,9 +3300,9 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#F3E8FF',
+    backgroundColor: 'rgba(94,63,45,0.10)',
     borderWidth: 1,
-    borderColor: '#A78BFA',
+    borderColor: 'rgba(94,63,45,0.45)',
   },
   candidateName: {
     color: '#111827',
@@ -3318,13 +3318,13 @@ const styles = StyleSheet.create({
   candidateBadge: {
     paddingHorizontal: 8,
     paddingVertical: 4,
-    backgroundColor: '#F3E8FF',
+    backgroundColor: 'rgba(94,63,45,0.10)',
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: 'rgba(167,139,250,0.55)',
+    borderColor: 'rgba(94,63,45,0.35)',
   },
   candidateBadgeText: {
-    color: '#4C1D95',
+    color: '#5e3f2d',
     fontSize: 11,
     fontWeight: '700',
   },
@@ -3471,8 +3471,8 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
   confirmApprovePrimary: {
-    backgroundColor: '#4C1D95',
-    borderColor: '#4C1D95',
+    backgroundColor: '#5e3f2d',
+    borderColor: '#5e3f2d',
   },
   confirmApprovePrimaryText: {
     color: '#FFFFFF',

@@ -264,19 +264,19 @@ export default function HomeScreen() {
                 router.push('/(tabs)/map');
               }}
             >
-              <Map size={22} color="#4C1D95" />
+              <Map size={22} color="#5e3f2d" />
             </TouchableOpacity>
             <TouchableOpacity
               activeOpacity={0.9}
               style={styles.actionBtnBody}
               onPress={() => setIsFilterOpen(true)}
             >
-              <SlidersHorizontal size={22} color="#4C1D95" />
+              <SlidersHorizontal size={22} color="#5e3f2d" />
             </TouchableOpacity>
           </View>
           {/* Search input */}
           <View style={[styles.searchContainer, { flex: 1 }]}>
-            <Search size={20} color="#4C1D95" style={styles.searchIcon} />
+            <Search size={20} color="#5e3f2d" style={styles.searchIcon} />
             <TextInput
               style={styles.topSearchInput}
               placeholder="חיפוש לפי עיר או שכונה..."
@@ -296,8 +296,10 @@ export default function HomeScreen() {
           withShadow={false}
           inactiveBackgroundColor="#F3F4F6"
           inactiveBorderColor="#E5E7EB"
-          activeBackgroundColor="#EFEAFE"
-          activeBorderColor="rgba(76, 29, 149, 0.28)"
+          activeBackgroundColor="rgba(94,63,45,0.10)"
+          activeBorderColor="rgba(94,63,45,0.28)"
+          activeTextColor="#5e3f2d"
+          activeIconColor="#5e3f2d"
           onOpenDropdown={(chip) => {
             if (chip.id === 'price' || chip.id === 'rooms') {
               setIsFilterOpen(true);
@@ -887,7 +889,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: '#EFEAFE',
+    backgroundColor: 'rgba(94,63,45,0.10)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -957,7 +959,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   heroText: {
-    color: '#4C1D95',
+    color: '#5e3f2d',
     fontSize: 20,
     fontWeight: '800',
     lineHeight: 26,
@@ -1000,7 +1002,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#EFEAFE',
+    backgroundColor: 'rgba(94,63,45,0.10)',
   },
   sheetContent: {
     paddingHorizontal: 16,
@@ -1015,7 +1017,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   fieldLabel: {
-    color: '#4C1D95',
+    color: '#5e3f2d',
     fontSize: 13,
     fontWeight: '600',
     textAlign: 'right',
@@ -1052,8 +1054,8 @@ const styles = StyleSheet.create({
     borderColor: '#E5E7EB',
   },
   chipSelected: {
-    backgroundColor: '#EFEAFE',
-    borderColor: '#A78BFA',
+    backgroundColor: 'rgba(94,63,45,0.10)',
+    borderColor: 'rgba(94,63,45,0.45)',
   },
   chipText: {
     color: '#4B5563',
@@ -1061,7 +1063,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   chipTextSelected: {
-    color: '#4C1D95',
+    color: '#5e3f2d',
   },
   gaugeWrap: {
     backgroundColor: '#FFFFFF',
@@ -1078,7 +1080,7 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   gaugeLabel: {
-    color: '#4C1D95',
+    color: '#5e3f2d',
     fontSize: 12,
     fontWeight: '700',
     textAlign: 'right',
@@ -1112,7 +1114,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#F3F4F6',
   },
   gaugeClearLinkText: {
-    color: '#4C1D95',
+    color: '#5e3f2d',
     fontSize: 12,
     fontWeight: '800',
   },
@@ -1138,8 +1140,8 @@ const styles = StyleSheet.create({
     opacity: 0.5,
   },
   gaugeMiniBtnPressed: {
-    backgroundColor: '#F5F3FF',
-    borderColor: 'rgba(76, 29, 149, 0.28)',
+    backgroundColor: 'rgba(94,63,45,0.10)',
+    borderColor: 'rgba(94,63,45,0.28)',
   },
   gaugeMiniBtnText: {
     color: '#111827',
@@ -1160,7 +1162,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   gaugeSegmentFilled: {
-    backgroundColor: '#4C1D95',
+    backgroundColor: '#5e3f2d',
   },
   gaugeSegmentPressed: {
     opacity: 0.88,
@@ -1202,7 +1204,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#4C1D95',
+    backgroundColor: '#5e3f2d',
   },
   applyText: {
     color: '#FFFFFF',
@@ -1239,13 +1241,13 @@ const styles = StyleSheet.create({
     borderBottomColor: '#F1F5F9',
   },
   suggestionText: {
-    color: '#4C1D95',
+    color: '#5e3f2d',
     fontSize: 14,
     textAlign: 'right',
     writingDirection: 'rtl',
   },
   suggestionItemSelected: {
-    backgroundColor: '#4C1D95',
+    backgroundColor: '#5e3f2d',
   },
   suggestionTextSelected: {
     color: '#FFFFFF',
@@ -1258,7 +1260,7 @@ const styles = StyleSheet.create({
   },
   selectButtonText: {
     flex: 1,
-    color: '#4C1D95',
+    color: '#5e3f2d',
     fontSize: 14,
     textAlign: 'right',
     writingDirection: 'rtl',

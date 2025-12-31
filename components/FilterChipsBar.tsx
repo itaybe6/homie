@@ -43,6 +43,10 @@ type Props = {
   activeBackgroundColor?: string;
   inactiveBorderColor?: string;
   activeBorderColor?: string;
+  inactiveTextColor?: string;
+  activeTextColor?: string;
+  inactiveIconColor?: string;
+  activeIconColor?: string;
   withShadow?: boolean;
 };
 
@@ -79,6 +83,10 @@ export default function FilterChipsBar({
   activeBackgroundColor,
   inactiveBorderColor,
   activeBorderColor,
+  inactiveTextColor,
+  activeTextColor,
+  inactiveIconColor,
+  activeIconColor,
   withShadow = true,
 }: Props) {
   const [internalSelected, setInternalSelected] = useState<string[]>([]);
@@ -87,6 +95,10 @@ export default function FilterChipsBar({
   const activeBg = activeBackgroundColor ?? '#FFFFFF';
   const inactiveBd = inactiveBorderColor ?? 'transparent';
   const activeBd = activeBorderColor ?? 'transparent';
+  const inactiveTxt = inactiveTextColor ?? '#6B7280';
+  const activeTxt = activeTextColor ?? '#5e3f2d';
+  const inactiveIc = inactiveIconColor ?? '#6B7280';
+  const activeIc = activeIconColor ?? '#5e3f2d';
 
   // Preserve horizontal scroll offset when toggling chips to avoid jump-to-start
   const scrollRef = useRef<ScrollView | null>(null);
@@ -167,7 +179,7 @@ export default function FilterChipsBar({
         <View style={styles.rowReverse}>
           {filters.map((chip) => {
             const activeChip = isActive(chip.id);
-            const iconColor = activeChip ? '#7C3AED' : '#6B7280';
+            const iconColor = activeChip ? activeIc : inactiveIc;
             const Icon =
               chip.renderIcon ??
               ((c: string, s: number) => <Tag color={c} size={s} />);
@@ -210,15 +222,12 @@ export default function FilterChipsBar({
                   {chip.type === 'dropdown' ? (
                     <ChevronDown
                       size={16}
-                      color={activeChip ? '#7C3AED' : '#6B7280'}
+                      color={activeChip ? activeIc : inactiveIc}
                       style={{ marginLeft: 4 }}
                     />
                   ) : null}
                   <Text
-                    style={[
-                      styles.chipLabel,
-                      activeChip ? styles.chipLabelActive : styles.chipLabelInactive,
-                    ]}
+                    style={[styles.chipLabel, { color: activeChip ? activeTxt : inactiveTxt }]}
                     numberOfLines={1}
                   >
                     {chip.label}
@@ -271,7 +280,8 @@ const styles = StyleSheet.create({
     borderColor: 'transparent',
   },
   chipActive: {
-    backgroundColor: '#EFEAFE',
+    // Default active bg; can be overridden via props.
+    backgroundColor: 'rgba(94,63,45,0.10)',
     borderColor: 'transparent',
   },
   chipInnerRow: {
@@ -282,12 +292,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
   },
-  chipLabelInactive: {
-    color: '#6B7280',
-  },
-  chipLabelActive: {
-    color: '#7C3AED',
-  },
+  // chip label colors are set inline to allow per-screen theming
 });
 
 

@@ -1355,7 +1355,7 @@ export default function UserProfileScreen() {
             </Text>
             {!!profile.city ? (
               <View style={styles.locationPill}>
-                <MapPin size={14} color="#4C1D95" />
+                <MapPin size={14} color="#5e3f2d" />
                 <Text style={styles.locationText}>{profile.city}</Text>
               </View>
             ) : null}
@@ -1428,7 +1428,7 @@ export default function UserProfileScreen() {
               ) : (
                 <View style={styles.sectionEmptyWrap}>
                   <View style={styles.sectionEmptyIconPill}>
-                    <Users size={18} color="#4C1D95" />
+                    <Users size={18} color="#5e3f2d" />
                   </View>
                   <Text style={styles.sectionEmptyTitle}>עדיין אין שותפים</Text>
                   <Text style={styles.sectionEmptyText}>
@@ -1556,7 +1556,7 @@ export default function UserProfileScreen() {
             ) : (
               <View style={styles.sectionEmptyWrap}>
                 <View style={styles.sectionEmptyIconPill}>
-                  <Building2 size={18} color="#4C1D95" />
+                  <Building2 size={18} color="#5e3f2d" />
                 </View>
                 <Text style={styles.sectionEmptyTitle}>עדיין אין דירה</Text>
                 <Text style={styles.sectionEmptyText}>
@@ -1585,7 +1585,7 @@ export default function UserProfileScreen() {
                 disabled={surveyLoading || !survey}
               >
                 <LinearGradient
-                  colors={(surveyLoading || !survey) ? ['#D1D5DB', '#9CA3AF'] : ['#A78BFA', '#4C1D95']}
+                  colors={(surveyLoading || !survey) ? ['#D1D5DB', '#9CA3AF'] : ['#cbb59e', '#5e3f2d']}
                   start={{ x: 0, y: 0 }}
                   end={{ x: 0, y: 1 }}
                   style={styles.surveyCTAMatchTab}
@@ -1616,7 +1616,7 @@ export default function UserProfileScreen() {
 
                 <View style={styles.surveyCTABadge}>
                   <LinearGradient
-                    colors={(surveyLoading || !survey) ? ['#D1D5DB', '#9CA3AF'] : ['#A78BFA', '#4C1D95']}
+                    colors={(surveyLoading || !survey) ? ['#D1D5DB', '#9CA3AF'] : ['#cbb59e', '#5e3f2d']}
                     start={{ x: 0, y: 0 }}
                     end={{ x: 1, y: 1 }}
                     style={styles.surveyCTABadgeInner}
@@ -1762,7 +1762,7 @@ export default function UserProfileScreen() {
           ) : (
             <View style={styles.sectionEmptyWrap}>
               <View style={styles.sectionEmptyIconPill}>
-                <Images size={18} color="#4C1D95" />
+                <Images size={18} color="#5e3f2d" />
               </View>
               <Text style={styles.sectionEmptyTitle}>עדיין אין תמונות</Text>
               <Text style={styles.sectionEmptyText}>
@@ -1907,7 +1907,7 @@ const styles = StyleSheet.create({
     borderRadius: 15,
     overflow: 'hidden',
     borderWidth: 1.5,
-    borderColor: '#E9D5FF',
+    borderColor: 'rgba(94,63,45,0.25)',
     backgroundColor: '#F3F4F6',
   },
   mergedAvatarOverlap: {
@@ -1945,12 +1945,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 999,
-    backgroundColor: 'rgba(76,29,149,0.08)',
+    backgroundColor: 'rgba(94,63,45,0.08)',
     borderWidth: 1,
-    borderColor: 'rgba(76,29,149,0.16)',
+    borderColor: 'rgba(94,63,45,0.16)',
   },
   locationText: {
-    color: '#4C1D95',
+    color: '#5e3f2d',
     fontSize: 13,
     fontWeight: '900',
   },
@@ -2094,8 +2094,8 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#4C1D95',
-    shadowColor: '#4C1D95',
+    backgroundColor: '#5e3f2d',
+    shadowColor: '#5e3f2d',
     shadowOpacity: 0.25,
     shadowRadius: 8,
     shadowOffset: { width: 0, height: 4 },
@@ -2140,7 +2140,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#4C1D95',
+    backgroundColor: '#5e3f2d',
   },
   sheetScroll: {
     flex: 1,
@@ -2196,7 +2196,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   surveySectionTitle: {
-    color: '#4C1D95',
+    color: '#5e3f2d',
     fontSize: 14,
     fontWeight: '900',
     textAlign: 'right',
@@ -2218,9 +2218,9 @@ const styles = StyleSheet.create({
   },
   surveyRowValuePill: {
     maxWidth: '55%',
-    backgroundColor: 'rgba(76,29,149,0.08)',
+    backgroundColor: 'rgba(94,63,45,0.08)',
     borderWidth: 1,
-    borderColor: 'rgba(76,29,149,0.18)',
+    borderColor: 'rgba(94,63,45,0.18)',
     paddingHorizontal: 10,
     paddingVertical: 8,
     borderRadius: 14,
@@ -2256,16 +2256,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 7,
     borderRadius: 999,
-    backgroundColor: '#F5F3FF',
+    backgroundColor: 'rgba(94,63,45,0.08)',
     borderWidth: 1,
-    borderColor: '#E9D5FF',
+    borderColor: 'rgba(94,63,45,0.25)',
     marginBottom: 14,
   },
   surveyBadgeText: {
     fontSize: 12,
     fontWeight: '800',
     letterSpacing: 0.3,
-    color: '#8B5CF6',
+    color: '#5e3f2d',
   },
   pillsRow: {
     flexDirection: 'row',
@@ -2342,14 +2342,14 @@ const styles = StyleSheet.create({
     marginTop: 4,
     height: 48,
     borderRadius: 14,
-    backgroundColor: '#8B5CF6',
+    backgroundColor: '#5e3f2d',
     borderWidth: 1,
-    borderColor: '#E9D5FF',
+    borderColor: 'rgba(94,63,45,0.25)',
     alignItems: 'center',
     justifyContent: 'center',
     flexDirection: 'row',
     gap: 8,
-    shadowColor: '#8B5CF6',
+    shadowColor: '#5e3f2d',
     shadowOpacity: 0.26,
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 4 },
@@ -2367,8 +2367,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     borderRadius: 18,
     borderWidth: 1,
-    borderColor: '#E9D5FF',
-    backgroundColor: '#6D28D9',
+    borderColor: 'rgba(94,63,45,0.25)',
+    backgroundColor: '#5e3f2d',
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
@@ -2401,7 +2401,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 999,
-    backgroundColor: '#8B5CF6',
+    backgroundColor: '#5e3f2d',
     marginBottom: 12,
   },
   groupBadgeText: {
@@ -2437,7 +2437,7 @@ const styles = StyleSheet.create({
     marginRight: -14,
   },
   groupAvatarHighlighted: {
-    borderColor: '#4C1D95',
+    borderColor: '#5e3f2d',
     borderWidth: 3,
   },
   groupAvatarImg: {
@@ -2591,9 +2591,9 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: 'rgba(76,29,149,0.10)',
+    backgroundColor: 'rgba(94,63,45,0.10)',
     borderWidth: 1,
-    borderColor: 'rgba(76,29,149,0.16)',
+    borderColor: 'rgba(94,63,45,0.16)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -2647,12 +2647,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 999,
-    backgroundColor: 'rgba(76,29,149,0.08)',
+    backgroundColor: 'rgba(94,63,45,0.08)',
     borderWidth: 1,
-    borderColor: 'rgba(76,29,149,0.16)',
+    borderColor: 'rgba(94,63,45,0.16)',
   },
   apartmentsHeaderTagText: {
-    color: '#4C1D95',
+    color: '#5e3f2d',
     fontSize: 12,
     fontWeight: '900',
   },
@@ -2896,11 +2896,11 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   aptOccupantOverflow: {
-    borderColor: '#E9D5FF',
-    backgroundColor: 'rgba(139,92,246,0.10)',
+    borderColor: 'rgba(94,63,45,0.25)',
+    backgroundColor: 'rgba(94,63,45,0.10)',
   },
   aptOccupantOverflowText: {
-    color: '#8B5CF6',
+    color: '#5e3f2d',
     fontSize: 12,
     fontWeight: '800',
   },

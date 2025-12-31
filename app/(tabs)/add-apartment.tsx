@@ -1045,7 +1045,7 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
                 </Text>
                 <View style={styles.uploadCard}>
                   <View style={styles.uploadIconWrap}>
-                    <Camera size={22} color="#4C1D95" />
+                    <Camera size={22} color="#5e3f2d" />
                   </View>
                   <Text style={styles.uploadTitle}>העלה תמונות</Text>
                   <Text style={styles.uploadSubtitle}>העלה לפחות 3 תמונות להראות את הדירה</Text>
@@ -1122,7 +1122,7 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
                     >
                       <Building2
                         size={18}
-                        color={propertyType === 'building' ? '#4C1D95' : '#6B7280'}
+                        color={propertyType === 'building' ? '#5e3f2d' : '#6B7280'}
                       />
                       <Text
                         style={[
@@ -1144,7 +1144,7 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
                     >
                       <Trees
                         size={18}
-                        color={propertyType === 'garden' ? '#4C1D95' : '#6B7280'}
+                        color={propertyType === 'garden' ? '#5e3f2d' : '#6B7280'}
                       />
                       <Text
                         style={[
@@ -1567,7 +1567,7 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
                           disabled={isLoading}
                         >
                           <View style={[styles.featureIconWrap, active ? styles.featureIconWrapActive : null]}>
-                            <Icon size={18} color={active ? '#4C1D95' : '#6B7280'} />
+                            <Icon size={18} color={active ? '#5e3f2d' : '#6B7280'} />
                           </View>
                           <Text
                             style={[
@@ -1633,7 +1633,7 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
                     value={includeAsPartner}
                     onValueChange={setIncludeAsPartner}
                     disabled={isLoading}
-                    trackColor={{ false: '#D1D5DB', true: '#4C1D95' }}
+                    trackColor={{ false: '#D1D5DB', true: '#5e3f2d' }}
                     thumbColor="#FFFFFF"
                     ios_backgroundColor="#D1D5DB"
                   />
@@ -1712,7 +1712,7 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
                 <View style={styles.previewStatsRow}>
                   <View style={styles.previewStat}>
                     <View style={styles.previewStatIcon}>
-                      <Users size={20} color="#8B5CF6" />
+                      <Users size={20} color="#5e3f2d" />
                     </View>
                     <View style={styles.previewStatTextCol}>
                       <Text style={styles.previewStatNumber}>{roommateCapacity ?? '—'}</Text>
@@ -1721,7 +1721,7 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
                   </View>
                   <View style={styles.previewStat}>
                     <View style={styles.previewStatIcon}>
-                      <Bed size={20} color="#8B5CF6" />
+                      <Bed size={20} color="#5e3f2d" />
                     </View>
                     <View style={styles.previewStatTextCol}>
                       <Text style={styles.previewStatNumber}>{roomsCount || '—'}</Text>
@@ -1730,7 +1730,7 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
                   </View>
                   <View style={styles.previewStat}>
                     <View style={styles.previewStatIcon}>
-                      <Bath size={20} color="#8B5CF6" />
+                      <Bath size={20} color="#5e3f2d" />
                     </View>
                     <View style={styles.previewStatTextCol}>
                       <Text style={styles.previewStatNumber}>{bathroomsCount || '—'}</Text>
@@ -1788,7 +1788,7 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
                         {previewFeatureItems.map(({ key, label, Icon }) => (
                           <View key={`feat-${key}`} style={styles.previewFeatureTile}>
                             <View style={styles.previewFeatureTileIcon}>
-                              <Icon size={18} color="#4C1D95" />
+                              <Icon size={18} color="#5e3f2d" />
                             </View>
                             <Text style={styles.previewFeatureTileText} numberOfLines={1}>
                               {label}
@@ -1799,7 +1799,7 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
                     ) : (
                       <View style={styles.previewFeaturesEmpty}>
                         <View style={styles.previewFeaturesEmptyIcon}>
-                          <Info size={18} color="#4C1D95" />
+                          <Info size={18} color="#5e3f2d" />
                         </View>
                         <Text style={styles.previewFeaturesEmptyTitle}>לא צוינו מאפיינים</Text>
                         <Text style={styles.previewFeaturesEmptyBody}>אפשר להמשיך גם בלי לבחור מאפיינים.</Text>
@@ -1831,7 +1831,7 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
                           {locationLine ? (
                             <View pointerEvents="none" style={styles.previewMapLocationBadge}>
                               <View style={styles.previewMapLocationIconPill}>
-                                <MapPin size={14} color="#4C1D95" />
+                                <MapPin size={14} color="#5e3f2d" />
                               </View>
                               <View style={{ flex: 1, alignItems: 'flex-end' }}>
                                 <Text style={styles.previewMapLocationCity} numberOfLines={1}>
@@ -2039,7 +2039,7 @@ const styles = StyleSheet.create({
   },
   progressFill: {
     height: 4,
-    backgroundColor: '#4C1D95',
+    backgroundColor: '#5e3f2d',
     borderRadius: 999,
   },
   backBtn: {
@@ -2051,7 +2051,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
   },
   backBtnText: {
-    color: '#4C1D95',
+    color: '#5e3f2d',
     fontSize: 14,
     fontWeight: '700',
   },
@@ -2116,7 +2116,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     borderWidth: 2,
     borderStyle: 'dashed',
-    borderColor: 'rgba(76, 29, 149, 0.22)',
+    borderColor: 'rgba(94,63,45,0.22)',
     paddingVertical: 18,
     paddingHorizontal: 14,
     alignItems: 'center',
@@ -2127,7 +2127,7 @@ const styles = StyleSheet.create({
     width: 54,
     height: 54,
     borderRadius: 27,
-    backgroundColor: 'rgba(76, 29, 149, 0.10)',
+    backgroundColor: 'rgba(94,63,45,0.10)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -2156,7 +2156,7 @@ const styles = StyleSheet.create({
     elevation: 5,
   },
   uploadBtnText: {
-    color: '#4C1D95',
+    color: '#5e3f2d',
     fontSize: 13,
     fontWeight: '900',
   },
@@ -2225,7 +2225,7 @@ const styles = StyleSheet.create({
     color: '#6B7280',
   },
   segmentTextActive: {
-    color: '#4C1D95',
+    color: '#5e3f2d',
   },
   label: {
     fontSize: 13,
@@ -2405,7 +2405,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   button: {
-    backgroundColor: '#4C1D95',
+    backgroundColor: '#5e3f2d',
     paddingVertical: 16,
     borderRadius: 12,
     alignItems: 'center',
@@ -2428,7 +2428,7 @@ const styles = StyleSheet.create({
     borderColor: '#E7E2F5',
   },
   resetButtonText: {
-    color: '#4C1D95',
+    color: '#5e3f2d',
     fontSize: 16,
     fontWeight: '700',
   },
@@ -2448,7 +2448,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   navPrimaryButton: {
-    backgroundColor: '#4C1D95',
+    backgroundColor: '#5e3f2d',
   },
   navPrimaryText: {
     color: '#FFFFFF',
@@ -2472,7 +2472,7 @@ const styles = StyleSheet.create({
     elevation: 5,
   },
   navSecondaryText: {
-    color: '#4C1D95',
+    color: '#5e3f2d',
     fontSize: 16,
     fontWeight: '800',
   },
@@ -2512,7 +2512,7 @@ const styles = StyleSheet.create({
     flex: 1,
     height: 54,
     borderRadius: 14,
-    backgroundColor: '#4C1D95',
+    backgroundColor: '#5e3f2d',
     alignItems: 'center',
     justifyContent: 'center',
     flexDirection: 'row',
@@ -2584,7 +2584,7 @@ const styles = StyleSheet.create({
   modalDoneBtn: {
     height: 44,
     borderRadius: 12,
-    backgroundColor: '#4C1D95',
+    backgroundColor: '#5e3f2d',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -2650,7 +2650,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   stepperBtnPrimary: {
-    backgroundColor: '#4C1D95',
+    backgroundColor: '#5e3f2d',
   },
   stepperBtnPrimaryText: {
     color: '#FFFFFF',
@@ -2821,8 +2821,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   chipActive: {
-    backgroundColor: 'rgba(76, 29, 149, 0.10)',
-    borderColor: '#4C1D95',
+    backgroundColor: 'rgba(94,63,45,0.10)',
+    borderColor: '#5e3f2d',
   },
   chipText: {
     fontSize: 14,
@@ -2830,7 +2830,7 @@ const styles = StyleSheet.create({
     color: '#111827',
   },
   chipTextActive: {
-    color: '#4C1D95',
+    color: '#5e3f2d',
   },
   featuresGrid: {
     flexDirection: 'row-reverse',
@@ -2852,8 +2852,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
   },
   featureCardActive: {
-    backgroundColor: 'rgba(76, 29, 149, 0.10)',
-    borderColor: 'rgba(76, 29, 149, 0.40)',
+    backgroundColor: 'rgba(94,63,45,0.10)',
+    borderColor: 'rgba(94,63,45,0.40)',
   },
   previewHeader: {
     marginTop: 4,
@@ -3060,7 +3060,7 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: 'rgba(76, 29, 149, 0.10)',
+    backgroundColor: 'rgba(94,63,45,0.10)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -3081,7 +3081,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: 'rgba(76, 29, 149, 0.10)',
+    backgroundColor: 'rgba(94,63,45,0.10)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -3138,7 +3138,7 @@ const styles = StyleSheet.create({
     width: 34,
     height: 34,
     borderRadius: 17,
-    backgroundColor: 'rgba(76, 29, 149, 0.10)',
+    backgroundColor: 'rgba(94,63,45,0.10)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -3212,7 +3212,7 @@ const styles = StyleSheet.create({
   summaryPrice: {
     fontSize: 16,
     fontWeight: '900',
-    color: '#4C1D95',
+    color: '#5e3f2d',
     textAlign: 'left',
     writingDirection: 'ltr',
   },
@@ -3273,13 +3273,13 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   summaryPill: {
-    backgroundColor: 'rgba(76, 29, 149, 0.10)',
+    backgroundColor: 'rgba(94,63,45,0.10)',
     borderRadius: 999,
     paddingVertical: 8,
     paddingHorizontal: 10,
   },
   summaryPillText: {
-    color: '#4C1D95',
+    color: '#5e3f2d',
     fontSize: 12,
     fontWeight: '900',
     textAlign: 'right',
@@ -3293,7 +3293,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   featureIconWrapActive: {
-    backgroundColor: 'rgba(76, 29, 149, 0.12)',
+    backgroundColor: 'rgba(94,63,45,0.12)',
   },
   featureText: {
     flex: 1,
@@ -3304,7 +3304,7 @@ const styles = StyleSheet.create({
     writingDirection: 'rtl',
   },
   featureTextActive: {
-    color: '#4C1D95',
+    color: '#5e3f2d',
   },
 });
 

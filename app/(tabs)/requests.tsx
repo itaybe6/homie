@@ -1339,7 +1339,7 @@ export default function RequestsScreen() {
       {data.length === 0 ? (
         <View style={styles.emptyState}>
           <View style={styles.emptyIconWrap}>
-            <Inbox size={40} color="#7C3AED" />
+            <Inbox size={40} color="#5e3f2d" />
           </View>
           <Text style={styles.emptyTitle}>אין כרגע בקשות</Text>
           <Text style={styles.emptySubtitle}>כשתתקבל בקשה חדשה נציג אותה כאן</Text>
@@ -1756,10 +1756,10 @@ export default function RequestsScreen() {
                                       flexGrow: 0,
                                       minWidth: 240,
                                       maxWidth: 360,
-                                      backgroundColor: 'rgba(124,92,255,0.08)',
+                                      backgroundColor: 'rgba(94,63,45,0.08)',
                                       borderRadius: 12,
                                       borderWidth: 1,
-                                      borderColor: 'rgba(124,92,255,0.2)',
+                                      borderColor: 'rgba(94,63,45,0.2)',
                                       padding: 12,
                                       gap: 10 as any,
                                     }}
@@ -1767,7 +1767,7 @@ export default function RequestsScreen() {
                                     <View style={{ flexDirection: 'row-reverse', alignItems: 'center', gap: 10 as any }}>
                                       <Image
                                         source={{ uri: m.avatar_url || DEFAULT_AVATAR }}
-                                        style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: '#1F1F29', borderWidth: 2, borderColor: 'rgba(124,92,255,0.3)' }}
+                                        style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: '#1F1F29', borderWidth: 2, borderColor: 'rgba(94,63,45,0.3)' }}
                                       />
                                       <View style={{ flex: 1, alignItems: 'flex-end' }}>
                                         <Text style={{ color: '#FFFFFF', fontSize: 15, fontWeight: '800' }}>
@@ -1813,10 +1813,10 @@ export default function RequestsScreen() {
                             <View
                               style={{
                                 width: '100%',
-                                backgroundColor: 'rgba(124,92,255,0.08)',
+                                backgroundColor: 'rgba(94,63,45,0.08)',
                                 borderRadius: 12,
                                 borderWidth: 1,
-                                borderColor: 'rgba(124,92,255,0.2)',
+                                borderColor: 'rgba(94,63,45,0.2)',
                                 padding: 12,
                                 gap: 10 as any,
                               }}
@@ -1824,7 +1824,7 @@ export default function RequestsScreen() {
                               <View style={{ flexDirection: 'row-reverse', alignItems: 'center', gap: 10 as any }}>
                                 <Image
                                   source={{ uri: otherUser?.avatar_url || DEFAULT_AVATAR }}
-                                  style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: '#1F1F29', borderWidth: 2, borderColor: 'rgba(124,92,255,0.3)' }}
+                                  style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: '#1F1F29', borderWidth: 2, borderColor: 'rgba(94,63,45,0.3)' }}
                                 />
                                 <View style={{ flex: 1, alignItems: 'flex-end' }}>
                                   <Text style={{ color: '#FFFFFF', fontSize: 15, fontWeight: '800' }}>
@@ -1910,10 +1910,10 @@ export default function RequestsScreen() {
                                       flexGrow: 0,
                                       minWidth: 240,
                                       maxWidth: 360,
-                                      backgroundColor: 'rgba(124,92,255,0.08)',
+                                      backgroundColor: 'rgba(94,63,45,0.08)',
                                       borderRadius: 12,
                                       borderWidth: 1,
-                                      borderColor: 'rgba(124,92,255,0.2)',
+                                      borderColor: 'rgba(94,63,45,0.2)',
                                       padding: 12,
                                       gap: 10 as any,
                                     }}
@@ -1921,7 +1921,7 @@ export default function RequestsScreen() {
                                     <View style={{ flexDirection: 'row-reverse', alignItems: 'center', gap: 10 as any }}>
                                       <Image
                                         source={{ uri: m.avatar_url || DEFAULT_AVATAR }}
-                                        style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: '#1F1F29', borderWidth: 2, borderColor: 'rgba(124,92,255,0.3)' }}
+                                        style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: '#1F1F29', borderWidth: 2, borderColor: 'rgba(94,63,45,0.3)' }}
                                       />
                                       <View style={{ flex: 1, alignItems: 'flex-end' }}>
                                         <Text style={{ color: '#FFFFFF', fontSize: 15, fontWeight: '800' }}>
@@ -1967,10 +1967,10 @@ export default function RequestsScreen() {
                             <View
                               style={{
                                 width: '100%',
-                                backgroundColor: 'rgba(124,92,255,0.08)',
+                                backgroundColor: 'rgba(94,63,45,0.08)',
                                 borderRadius: 12,
                                 borderWidth: 1,
-                                borderColor: 'rgba(124,92,255,0.2)',
+                                borderColor: 'rgba(94,63,45,0.2)',
                                 padding: 12,
                                 gap: 10 as any,
                               }}
@@ -1978,7 +1978,7 @@ export default function RequestsScreen() {
                               <View style={{ flexDirection: 'row-reverse', alignItems: 'center', gap: 10 as any }}>
                                 <Image
                                   source={{ uri: otherUser?.avatar_url || DEFAULT_AVATAR }}
-                                  style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: '#1F1F29', borderWidth: 2, borderColor: 'rgba(124,92,255,0.3)' }}
+                                  style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: '#1F1F29', borderWidth: 2, borderColor: 'rgba(94,63,45,0.3)' }}
                                 />
                                 <View style={{ flex: 1, alignItems: 'flex-end' }}>
                                   <Text style={{ color: '#FFFFFF', fontSize: 15, fontWeight: '800' }}>
@@ -2175,8 +2175,8 @@ const styles = StyleSheet.create({
     elevation: 1,
   },
   segmentBtnActive: {
-    borderColor: '#A78BFA',
-    backgroundColor: '#EFEAFE',
+    borderColor: 'rgba(94,63,45,0.45)',
+    backgroundColor: 'rgba(94,63,45,0.10)',
   },
   segmentText: {
     color: '#6B7280',
@@ -2184,7 +2184,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
   segmentTextActive: {
-    color: '#4C1D95',
+    color: '#5e3f2d',
   },
   statusChipsRow: {
     marginTop: 8,
@@ -2256,7 +2256,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   menuItemTextActive: {
-    color: '#4C1D95',
+    color: '#5e3f2d',
   },
   switchWrap: {
     flexDirection: 'row-reverse',
@@ -2294,7 +2294,7 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   switchTextActive: {
-    color: '#5B21B6',
+    color: '#5e3f2d',
   },
   switchDot: {
     width: 10,
@@ -2311,8 +2311,8 @@ const styles = StyleSheet.create({
     borderColor: '#E5E7EB',
   },
   statusChipActive: {
-    borderColor: '#A78BFA',
-    backgroundColor: '#EFEAFE',
+    borderColor: 'rgba(94,63,45,0.45)',
+    backgroundColor: 'rgba(94,63,45,0.10)',
   },
   statusChipText: {
     color: '#6B7280',
@@ -2320,7 +2320,7 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   statusChipTextActive: {
-    color: '#4C1D95',
+    color: '#5e3f2d',
   },
   centerContainer: {
     flex: 1,
@@ -2384,12 +2384,12 @@ const styles = StyleSheet.create({
     borderRadius: 36,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#EFEAFE',
+    backgroundColor: 'rgba(94,63,45,0.10)',
     borderWidth: 1,
-    borderColor: '#E9E3FF',
+    borderColor: 'rgba(94,63,45,0.20)',
   },
   emptyTitle: {
-    color: '#5B21B6',
+    color: '#5e3f2d',
     fontSize: 16,
     fontWeight: '900',
   },
@@ -2664,15 +2664,15 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   approveBtnLight: {
-    backgroundColor: '#F5F3FF',
+    backgroundColor: 'rgba(94,63,45,0.10)',
     borderWidth: 1,
-    borderColor: '#DDD6FE',
+    borderColor: 'rgba(94,63,45,0.30)',
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 999,
   },
   approveBtnTextLight: {
-    color: '#5B21B6',
+    color: '#5e3f2d',
     fontSize: 13,
     fontWeight: '800',
   },

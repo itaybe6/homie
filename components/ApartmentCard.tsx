@@ -1,6 +1,6 @@
 import { View, Text, StyleSheet, TouchableOpacity, Image, GestureResponderEvent, ScrollView, NativeSyntheticEvent, NativeScrollEvent } from 'react-native';
 import { supabase } from '@/lib/supabase';
-import { MapPin, Bed, Bath, Users, Heart, Building2, Trees, Ruler } from 'lucide-react-native';
+import { MapPin, BedDouble, ShowerHead, Users, Heart, Building2, Trees, Ruler } from 'lucide-react-native';
 import { Apartment } from '@/types/database';
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -342,7 +342,9 @@ export default function ApartmentCard({
             {/* Roommates badge */}
             {!isHome ? (
               <View style={styles.roommatesBadge} pointerEvents="none">
-                <Users size={18} color="#111827" />
+                <View style={styles.badgeIconCircle}>
+                  <Users size={16} color="#5e3f2d" strokeWidth={2.5} />
+                </View>
                 <Text style={styles.roommatesBadgeText}>
                   {typeof maxRoommates === 'number' ? `${partnerSlotsUsed}/${maxRoommates}` : `${partnerSlotsUsed}`}
                 </Text>
@@ -350,7 +352,9 @@ export default function ApartmentCard({
             ) : null}
             {isHome ? (
               <View style={styles.roommatesBadgeHome} pointerEvents="none">
-                <Users size={14} color="#111827" />
+                <View style={styles.badgeIconCircleHome}>
+                  <Users size={14} color="#5e3f2d" strokeWidth={2.5} />
+                </View>
                 <Text style={styles.roommatesBadgeHomeText}>
                   {typeof maxRoommates === 'number' ? `${partnerSlotsUsed}/${maxRoommates}` : `${partnerSlotsUsed}`}
                 </Text>
@@ -438,21 +442,27 @@ export default function ApartmentCard({
 
               <View style={styles.metaRowHome}>
                 <View style={styles.metaItemHome}>
-                  <Users size={16} color="#5e3f2d" />
+                  <View style={styles.iconCircle}>
+                    <Users size={14} color="#5e3f2d" strokeWidth={2.5} />
+                  </View>
                   <Text style={styles.metaTextHome} numberOfLines={1}>
                     שותפים {partnerSlotsUsed}
                   </Text>
                 </View>
-                <Text style={styles.metaDotHome}>·</Text>
+                <View style={styles.metaDivider} />
                 <View style={styles.metaItemHome}>
-                  <Bed size={16} color="#5e3f2d" />
+                  <View style={styles.iconCircle}>
+                    <BedDouble size={14} color="#5e3f2d" strokeWidth={2.5} />
+                  </View>
                   <Text style={styles.metaTextHome} numberOfLines={1}>
                     חדרי שינה {apartment.bedrooms ?? ''}
                   </Text>
                 </View>
-                <Text style={styles.metaDotHome}>·</Text>
+                <View style={styles.metaDivider} />
                 <View style={styles.metaItemHome}>
-                  <Bath size={16} color="#5e3f2d" />
+                  <View style={styles.iconCircle}>
+                    <ShowerHead size={14} color="#5e3f2d" strokeWidth={2.5} />
+                  </View>
                   <Text style={styles.metaTextHome} numberOfLines={1}>
                     חדרי רחצה {apartment.bathrooms ?? ''}
                   </Text>
@@ -498,16 +508,22 @@ export default function ApartmentCard({
               <View style={styles.bottomContainer}>
                 <View style={styles.statsRow}>
                   <View style={styles.stat}>
-                    <Users size={16} color="#5e3f2d" />
+                    <View style={styles.iconCircle}>
+                      <Users size={14} color="#5e3f2d" strokeWidth={2.5} />
+                    </View>
                     <Text style={styles.statText}>שותפים {partnerSlotsUsed}</Text>
                   </View>
                   <View style={styles.stat}>
-                    <Bath size={16} color="#5e3f2d" />
-                    <Text style={styles.statText}>מקלחות {apartment.bathrooms}</Text>
+                    <View style={styles.iconCircle}>
+                      <BedDouble size={14} color="#5e3f2d" strokeWidth={2.5} />
+                    </View>
+                    <Text style={styles.statText}>חדרים {apartment.bedrooms}</Text>
                   </View>
                   <View style={styles.stat}>
-                    <Bed size={16} color="#5e3f2d" />
-                    <Text style={styles.statText}>חדרים {apartment.bedrooms}</Text>
+                    <View style={styles.iconCircle}>
+                      <ShowerHead size={14} color="#5e3f2d" strokeWidth={2.5} />
+                    </View>
+                    <Text style={styles.statText}>מקלחות {apartment.bathrooms}</Text>
                   </View>
                 </View>
               </View>
@@ -700,7 +716,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row-reverse',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 6,
+    gap: 8,
     borderWidth: 1,
     borderColor: 'rgba(0,0,0,0.06)',
     backgroundColor: 'rgba(255,255,255,0.75)',
@@ -709,8 +725,18 @@ const styles = StyleSheet.create({
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 4 },
   },
+  badgeIconCircle: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: 'rgba(94, 63, 45, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(94, 63, 45, 0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   roommatesBadgeText: {
-    color: '#111827',
+    color: '#5e3f2d',
     fontSize: 13,
     fontWeight: '800',
     writingDirection: 'ltr',
@@ -725,7 +751,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row-reverse',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 6,
+    gap: 8,
     backgroundColor: 'rgba(255,255,255,0.82)',
     borderWidth: 1,
     borderColor: 'rgba(0,0,0,0.06)',
@@ -734,8 +760,18 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     shadowOffset: { width: 0, height: 3 },
   },
+  badgeIconCircleHome: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: 'rgba(94, 63, 45, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(94, 63, 45, 0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   roommatesBadgeHomeText: {
-    color: '#111827',
+    color: '#5e3f2d',
     fontSize: 14,
     fontWeight: '800',
     writingDirection: 'ltr',
@@ -823,7 +859,7 @@ const styles = StyleSheet.create({
   contentHome: {
     paddingHorizontal: 14,
     paddingTop: 12,
-    paddingBottom: 20,
+    paddingBottom: 12,
     minHeight: 96,
     alignItems: 'stretch',
   },
@@ -919,23 +955,25 @@ const styles = StyleSheet.create({
     width: '100%',
     flexDirection: 'row-reverse',
     alignItems: 'center',
-    justifyContent: 'center',
-    paddingTop: 10,
-    paddingHorizontal: 14,
+    justifyContent: 'space-evenly',
+    paddingTop: 8,
+    paddingBottom: 8,
+    paddingHorizontal: 12,
     borderTopWidth: 1,
     borderTopColor: '#EEF2F7',
     gap: 8,
-    flexWrap: 'wrap',
   },
   metaItemHome: {
     flexDirection: 'row-reverse',
     alignItems: 'center',
-    gap: 6,
+    gap: 5,
+    flex: 1,
+    justifyContent: 'center',
   },
   metaTextHome: {
     color: '#374151',
     fontSize: 12,
-    fontWeight: '800',
+    fontWeight: '700',
     textAlign: 'right',
     writingDirection: 'rtl',
   },
@@ -944,6 +982,21 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '900',
     marginTop: -1,
+  },
+  metaDivider: {
+    width: 1,
+    height: 24,
+    backgroundColor: '#E5E7EB',
+  },
+  iconCircle: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(94, 63, 45, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(94, 63, 45, 0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   locationRow: {
     flexDirection: 'row-reverse',
@@ -964,7 +1017,7 @@ const styles = StyleSheet.create({
   },
   bottomContainer: {
     marginTop: 6,
-    paddingTop: 10,
+    paddingTop: 8,
     paddingBottom: 8,
     paddingHorizontal: 12,
     borderTopWidth: 1,
@@ -974,18 +1027,22 @@ const styles = StyleSheet.create({
   statsRow: {
     flexDirection: 'row-reverse',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: 22,
+    justifyContent: 'space-evenly',
+    gap: 8,
     width: '100%',
   },
   stat: {
     flexDirection: 'row-reverse',
     alignItems: 'center',
-    gap: 6,
+    gap: 5,
+    flex: 1,
+    justifyContent: 'center',
   },
   statText: {
     color: '#6B7280',
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '700',
+    textAlign: 'right',
+    writingDirection: 'rtl',
   },
 });

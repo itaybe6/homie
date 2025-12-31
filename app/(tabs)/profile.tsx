@@ -1011,7 +1011,7 @@ export default function ProfileScreen() {
           </Text>
           <TouchableOpacity
             onPress={() => router.push('/auth/login')}
-            style={{ backgroundColor: '#4C1D95', paddingHorizontal: 18, paddingVertical: 12, borderRadius: 10 }}>
+            style={{ backgroundColor: '#5e3f2d', paddingHorizontal: 18, paddingVertical: 12, borderRadius: 10 }}>
             <Text style={{ color: '#FFFFFF', fontWeight: '800' }}>כניסה / הרשמה</Text>
           </TouchableOpacity>
         </View>
@@ -1117,7 +1117,7 @@ export default function ProfileScreen() {
                 accessibilityRole="button"
                 accessibilityLabel="עריכת תמונת פרופיל"
               >
-                <Camera size={18} color="#4C1D95" />
+                <Camera size={18} color="#5e3f2d" />
               </TouchableOpacity>
             </View>
 
@@ -1129,7 +1129,7 @@ export default function ProfileScreen() {
                 <View style={styles.metaChipsRow}>
                   {(profile?.address || profile?.city) ? (
                     <View style={styles.metaChip}>
-                      <MapPin size={14} color="#4C1D95" />
+                      <MapPin size={14} color="#5e3f2d" />
                       <Text style={styles.metaChipText} numberOfLines={1}>
                         {profile?.address || profile?.city}
                       </Text>
@@ -1137,7 +1137,7 @@ export default function ProfileScreen() {
                   ) : null}
                   {profile?.age ? (
                     <View style={styles.metaChip}>
-                      <Calendar size={14} color="#4C1D95" />
+                      <Calendar size={14} color="#5e3f2d" />
                       <Text style={styles.metaChipText}>גיל {profile.age}</Text>
                     </View>
                   ) : null}
@@ -1410,7 +1410,7 @@ export default function ProfileScreen() {
               ) : (
                 <View style={styles.sectionEmptyWrap}>
                   <View style={styles.sectionEmptyIconPill}>
-                    <Building2 size={18} color="#4C1D95" />
+                    <Building2 size={18} color="#5e3f2d" />
                   </View>
                   <Text style={styles.sectionEmptyTitle}>עדיין אין דירה</Text>
                   <Text style={styles.sectionEmptyText}>עדיין לא בחרת דירה להצגה בפרופיל.</Text>
@@ -1434,7 +1434,7 @@ export default function ProfileScreen() {
           >
             {profile ? (
               <LinearGradient
-                colors={['#A78BFA', '#4C1D95']}
+                colors={['#cbb59e', '#5e3f2d']}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
                 style={styles.surveyCTAAvatarRing}
@@ -1457,7 +1457,7 @@ export default function ProfileScreen() {
             </View>
             <View style={styles.surveyCTABadge}>
               <LinearGradient
-                colors={['#A78BFA', '#4C1D95']}
+                colors={['#cbb59e', '#5e3f2d']}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
                 style={styles.surveyCTABadgeInner}
@@ -1510,7 +1510,7 @@ export default function ProfileScreen() {
                     onPress={isAddingImage ? undefined : addGalleryImage}
                     activeOpacity={0.9}
                   >
-                    <Plus size={18} color="#4C1D95" />
+                    <Plus size={18} color="#5e3f2d" />
                     <Text style={styles.galleryAddTileText}>הוסף</Text>
                   </TouchableOpacity>
                 )}
@@ -1522,7 +1522,7 @@ export default function ProfileScreen() {
                   onPress={isAddingImage ? undefined : addGalleryImage}
                   activeOpacity={0.9}
                 >
-                  <Plus size={18} color="#4C1D95" />
+                  <Plus size={18} color="#5e3f2d" />
                   <Text style={styles.galleryAddTileText}>הוסף</Text>
                 </TouchableOpacity>
               </View>
@@ -1545,7 +1545,7 @@ export default function ProfileScreen() {
 
             <View style={styles.surveyCTABadge}>
               <LinearGradient
-                colors={['#A78BFA', '#4C1D95']}
+                colors={['#cbb59e', '#5e3f2d']}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
                 style={styles.surveyCTABadgeInner}
@@ -1770,7 +1770,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#4C1D95',
+    backgroundColor: '#5e3f2d',
   },
   avatarActionBtnPrimaryText: {
     color: '#FFFFFF',
@@ -1866,7 +1866,7 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: '#4C1D95',
+    backgroundColor: '#5e3f2d',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1881,7 +1881,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(76, 29, 149, 0.16)',
+    borderColor: 'rgba(94,63,45,0.16)',
     shadowColor: '#000000',
     shadowOpacity: 0.18,
     shadowRadius: 8,
@@ -1985,9 +1985,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 999,
-    backgroundColor: 'rgba(76,29,149,0.06)',
+    backgroundColor: 'rgba(94,63,45,0.06)',
     borderWidth: 1,
-    borderColor: 'rgba(76,29,149,0.12)',
+    borderColor: 'rgba(94,63,45,0.12)',
     maxWidth: '100%',
   },
   metaChipText: {
@@ -2004,7 +2004,7 @@ const styles = StyleSheet.create({
     borderColor: 'transparent',
   },
   bioTitle: {
-    color: '#4C1D95',
+    color: '#5e3f2d',
     fontSize: 13,
     fontWeight: '900',
     textAlign: 'right',
@@ -2118,7 +2118,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   galleryAddBtn: {
-    backgroundColor: '#4C1D95',
+    backgroundColor: '#5e3f2d',
     borderWidth: 0,
     borderColor: 'transparent',
     paddingHorizontal: 12,
@@ -2176,7 +2176,7 @@ const styles = StyleSheet.create({
   },
   galleryAddTileText: {
     marginTop: 10,
-    color: '#4C1D95',
+    color: '#5e3f2d',
     fontWeight: '800',
     fontSize: 12,
     lineHeight: 16,
@@ -2220,7 +2220,7 @@ const styles = StyleSheet.create({
     padding: 8,
   },
   saveButton: {
-    backgroundColor: '#4C1D95',
+    backgroundColor: '#5e3f2d',
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 10,
@@ -2298,12 +2298,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 999,
-    backgroundColor: 'rgba(76,29,149,0.08)',
+    backgroundColor: 'rgba(94,63,45,0.08)',
     borderWidth: 1,
-    borderColor: 'rgba(76,29,149,0.16)',
+    borderColor: 'rgba(94,63,45,0.16)',
   },
   apartmentsHeaderTagText: {
-    color: '#4C1D95',
+    color: '#5e3f2d',
     fontSize: 12,
     fontWeight: '900',
   },
@@ -2318,9 +2318,9 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: 'rgba(76,29,149,0.10)',
+    backgroundColor: 'rgba(94,63,45,0.10)',
     borderWidth: 1,
-    borderColor: 'rgba(76,29,149,0.16)',
+    borderColor: 'rgba(94,63,45,0.16)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -2445,11 +2445,11 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   aptOccupantOverflow: {
-    borderColor: '#E9D5FF',
-    backgroundColor: 'rgba(139,92,246,0.10)',
+    borderColor: 'rgba(94,63,45,0.25)',
+    backgroundColor: 'rgba(94,63,45,0.10)',
   },
   aptOccupantOverflowText: {
-    color: '#8B5CF6',
+    color: '#5e3f2d',
     fontSize: 12,
     fontWeight: '800',
   },
@@ -2478,11 +2478,11 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: 999,
     borderWidth: 1,
-    backgroundColor: '#EFEAFE',
+    backgroundColor: 'rgba(94,63,45,0.10)',
     borderColor: '#E5E7EB',
   },
   surveyBadgeText: {
-    color: '#4C1D95',
+    color: '#5e3f2d',
     fontSize: 12,
     fontWeight: '800',
   },
@@ -2521,7 +2521,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   surveySectionTitle: {
-    color: '#4C1D95',
+    color: '#5e3f2d',
     fontSize: 14,
     fontWeight: '900',
     textAlign: 'right',
@@ -2543,9 +2543,9 @@ const styles = StyleSheet.create({
   },
   surveyRowValuePill: {
     maxWidth: '55%',
-    backgroundColor: 'rgba(76,29,149,0.08)',
+    backgroundColor: 'rgba(94,63,45,0.08)',
     borderWidth: 1,
-    borderColor: 'rgba(76,29,149,0.18)',
+    borderColor: 'rgba(94,63,45,0.18)',
     paddingHorizontal: 10,
     paddingVertical: 8,
     borderRadius: 14,
@@ -2681,8 +2681,8 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#4C1D95',
-    shadowColor: '#4C1D95',
+    backgroundColor: '#5e3f2d',
+    shadowColor: '#5e3f2d',
     shadowOpacity: 0.25,
     shadowRadius: 8,
     shadowOffset: { width: 0, height: 4 },
@@ -2736,7 +2736,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#4C1D95',
+    backgroundColor: '#5e3f2d',
   },
   sheetScroll: {
     flex: 1,
@@ -2762,7 +2762,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginLeft: 12,
-    shadowColor: '#4C1D95',
+    shadowColor: '#5e3f2d',
     shadowOpacity: 0.2,
     shadowRadius: 6,
     shadowOffset: { width: 0, height: 3 },
@@ -2998,7 +2998,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
   aptPricePurple: {
-    color: '#4C1D95',
+    color: '#5e3f2d',
     fontWeight: '900',
     fontSize: 14,
     textAlign: 'right',
@@ -3053,7 +3053,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 6 },
   },
   actionStar: {
-    shadowColor: '#7C3AED',
+    shadowColor: '#5e3f2d',
     shadowOpacity: 0.3,
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 6 },
