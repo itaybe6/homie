@@ -8,8 +8,47 @@ import { authService } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/authStore';
 import { usePendingSignupStore } from '@/stores/pendingSignupStore';
+import * as ImageManipulator from 'expo-image-manipulator';
 
 const PRIMARY = '#4C1D95';
+
+async function uploadAvatarLocalUri(userId: string, uri: string): Promise<void> {
+  const trimmed = String(uri || '').trim();
+  if (!trimmed) return;
+  // Only handle local files here; remote URLs are already handled via metadata on signup.
+  if (/^https?:\/\//.test(trimmed)) return;
+
+  // Resize (only if needed) + compress to keep uploads light.
+  const imageInfo = await ImageManipulator.manipulateAsync(trimmed, []);
+  const actions: ImageManipulator.Action[] = [];
+  if (imageInfo.width > 800) {
+    actions.push({ resize: { width: 800 } });
+  }
+  const compressed = await ImageManipulator.manipulateAsync(trimmed, actions, {
+    compress: 0.8,
+    format: ImageManipulator.SaveFormat.JPEG,
+  });
+
+  const fileName = `${userId}-${Date.now()}.jpg`;
+  const filePath = `users/${userId}/${fileName}`;
+
+  const res = await fetch(compressed.uri);
+  const arrayBuffer = await res.arrayBuffer();
+
+  const { error: uploadError } = await supabase.storage
+    .from('user-images')
+    .upload(filePath, arrayBuffer, { upsert: true, contentType: 'image/jpeg' });
+  if (uploadError) throw uploadError;
+
+  const { data } = supabase.storage.from('user-images').getPublicUrl(filePath);
+  const publicUrl = data.publicUrl;
+
+  const { error: updateError } = await supabase
+    .from('users')
+    .update({ avatar_url: publicUrl, updated_at: new Date().toISOString() } as any)
+    .eq('id', userId);
+  if (updateError) throw updateError;
+}
 
 export default function VerifyEmailScreen() {
   const router = useRouter();
@@ -74,6 +113,16 @@ export default function VerifyEmailScreen() {
         }
       } catch {
         // ignore
+      }
+
+      // 3.5) Best-effort: upload avatar chosen during signup (local file URI)
+      // We can only upload after OTP verification because we need an authenticated session.
+      try {
+        if (pending.role === 'user' && pending.avatarLocalUri) {
+          await uploadAvatarLocalUri(user.id, pending.avatarLocalUri);
+        }
+      } catch {
+        // Non-blocking: don't fail signup if avatar upload fails
       }
 
       // 4) Continue into the app

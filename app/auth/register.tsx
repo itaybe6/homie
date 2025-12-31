@@ -7,6 +7,7 @@ import {
   StyleSheet,
   ActivityIndicator,
   Keyboard,
+  InteractionManager,
   TouchableWithoutFeedback,
   Platform,
   ScrollView,
@@ -65,6 +66,7 @@ export default function RegisterScreen() {
   const [isPasswordVisible, setPasswordVisible] = useState(false);
   const [isConfirmPasswordVisible, setConfirmPasswordVisible] = useState(false);
   const [emailAlreadyExists, setEmailAlreadyExists] = useState(false);
+  const transitionTokenRef = useRef(0);
 
   useEffect(() => {
     setSessionToken(createSessionToken());
@@ -183,7 +185,9 @@ export default function RegisterScreen() {
       await authService.assertEmailAvailable(email);
 
       const trimmed = avatarUrl.trim();
-      const safeAvatarUrl = /^https?:\/\//.test(trimmed) ? trimmed : undefined;
+      const isRemoteAvatar = /^https?:\/\//.test(trimmed);
+      const safeAvatarUrl = isRemoteAvatar ? trimmed : undefined;
+      const avatarLocalUri = !isRemoteAvatar && trimmed ? trimmed : undefined;
       const avatarForSignup = mode === 'user' ? safeAvatarUrl : undefined;
 
       // Store pending signup data locally (avoid passing secrets like password in the URL).
@@ -199,6 +203,7 @@ export default function RegisterScreen() {
         bio: mode === 'user' ? (bio.trim() || undefined) : undefined,
         gender: mode === 'user' && (gender === 'male' || gender === 'female') ? gender : undefined,
         avatarUrl: avatarForSignup,
+        avatarLocalUri: mode === 'user' ? avatarLocalUri : undefined,
       });
 
       // Send 6-digit code email (requires Email OTP enabled in Supabase Auth settings).
@@ -233,19 +238,29 @@ export default function RegisterScreen() {
       setError('אנא מלא שם מלא, טלפון ועיר');
       return;
     }
-    setError('');
-    setFormStep(1);
+    transitionToFormStep(1);
   };
 
   const handleNextFromProfile = () => {
     // No required fields here yet, but can be enforced later
-    setError('');
-    setFormStep(2);
+    transitionToFormStep(2);
   };
 
   const handleNextFromAvatar = () => {
+    transitionToFormStep(3);
+  };
+
+  const transitionToFormStep = (next: 0 | 1 | 2 | 3) => {
+    // Avoid KeyboardAwareScrollView trying to scroll to a field that gets unmounted
+    // during step transitions (common on Android / bridgeless UIManager).
     setError('');
-    setFormStep(3);
+    Keyboard.dismiss();
+    const token = ++transitionTokenRef.current;
+    InteractionManager.runAfterInteractions(() => {
+      // If another transition started since we scheduled this one, ignore.
+      if (transitionTokenRef.current !== token) return;
+      setFormStep(next);
+    });
   };
 
   return (
@@ -518,7 +533,7 @@ export default function RegisterScreen() {
                     <TouchableOpacity
                       accessibilityRole="button"
                       accessibilityLabel="חזרה"
-                      onPress={() => setFormStep(0)}
+                      onPress={() => transitionToFormStep(0)}
                       style={styles.iconButton}
                       hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                       disabled={isLoading}
@@ -562,7 +577,7 @@ export default function RegisterScreen() {
                     <TouchableOpacity
                       accessibilityRole="button"
                       accessibilityLabel="חזרה"
-                      onPress={() => setFormStep(1)}
+                      onPress={() => transitionToFormStep(1)}
                       style={styles.iconButton}
                       hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                       disabled={isLoading}
@@ -668,7 +683,7 @@ export default function RegisterScreen() {
                     <TouchableOpacity
                       accessibilityRole="button"
                       accessibilityLabel="חזרה"
-                      onPress={() => setFormStep(mode === 'user' ? 1 : 0)}
+                      onPress={() => transitionToFormStep(mode === 'user' ? 1 : 0)}
                       style={styles.iconButton}
                       hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                       disabled={isLoading}

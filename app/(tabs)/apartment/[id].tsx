@@ -725,7 +725,9 @@ export default function ApartmentDetailsScreen() {
       const senderName = await computeSenderLabel(user.id);
 
       const title = 'בקשה להצטרף כדייר';
-      const description = `${senderName} מעוניין להצטרף לדירה: ${apartment.title} (${apartment.city})`;
+      // Include a stable tag so we can reliably delete the relevant notification on cancel.
+      const aptTag = `[APT:${apartment.id}]`;
+      const description = `${senderName} מעוניין להצטרף לדירה: ${apartment.title} (${apartment.city}) ${aptTag}`;
 
       const rows = recipients.map((rid) => ({
         sender_id: user.id!,
@@ -783,25 +785,82 @@ export default function ApartmentDetailsScreen() {
 
       setIsRequestingJoin(true);
 
+      // If already approved, do not allow cancelling via this button.
+      // (We treat APPROVED as "already requested" for UI purposes.)
+      try {
+        const { data: statusRows, error: statusErr } = await supabase
+          .from('apartments_request')
+          .select('status')
+          .eq('sender_id', user.id)
+          .eq('apartment_id', apartment.id)
+          .eq('type', 'JOIN_APT')
+          .in('status', ['PENDING', 'APPROVED'] as any)
+          .limit(20);
+        if (!statusErr) {
+          const statuses = (statusRows || []).map((r: any) => String(r?.status || '').toUpperCase());
+          if (statuses.includes('APPROVED')) {
+            Alert.alert('לא ניתן לבטל', 'הבקשה כבר אושרה ולכן לא ניתן לבטל אותה מהמסך הזה.');
+            return;
+          }
+        }
+      } catch {
+        // ignore
+      }
+
+      // Best-effort: delete the notifications created for this JOIN_APT request.
+      // We can't reference a request_id, so we match by (sender_id, recipients, title, apt tag in description).
+      try {
+        const recipients = Array.from(
+          new Set<string>([apartment.owner_id, ...currentPartnerIds].filter((rid) => rid && rid !== user.id))
+        );
+        if (recipients.length) {
+          const title = 'בקשה להצטרף כדייר';
+          const aptTag = `[APT:${apartment.id}]`;
+
+          // Preferred: delete tagged notifications (new format)
+          const { error: delNotifErr } = await supabase
+            .from('notifications')
+            .delete()
+            .eq('sender_id', user.id)
+            .in('recipient_id', recipients as any)
+            .eq('title', title)
+            .ilike('description', `%${aptTag}%`);
+
+          // Fallback for older notifications without the tag
+          if (delNotifErr) {
+            await supabase
+              .from('notifications')
+              .delete()
+              .eq('sender_id', user.id)
+              .in('recipient_id', recipients as any)
+              .eq('title', title)
+              .ilike('description', `%${String(apartment.title || '').trim()}%`);
+          }
+        }
+      } catch {
+        // ignore (non-blocking)
+      }
+
       // Cancel ALL pending JOIN_APT rows for this apartment (there may be multiple recipients)
-      const { error: updErr } = await supabase
+      // Prefer DELETE so the request disappears from "Requests" and the UI returns to "הגש בקשה".
+      const { error: delErr } = await supabase
         .from('apartments_request')
-        .update({ status: 'CANCELLED', updated_at: new Date().toISOString() } as any)
+        .delete()
         .eq('sender_id', user.id)
         .eq('apartment_id', apartment.id)
         .eq('type', 'JOIN_APT')
         .eq('status', 'PENDING');
 
-      if (updErr) {
-        // Fallback for schemas without CANCELLED enum/value: delete pending rows
-        const { error: delErr } = await supabase
+      if (delErr) {
+        // Fallback: if DELETE is not allowed by RLS, mark as CANCELLED.
+        const { error: updErr } = await supabase
           .from('apartments_request')
-          .delete()
+          .update({ status: 'CANCELLED', updated_at: new Date().toISOString() } as any)
           .eq('sender_id', user.id)
           .eq('apartment_id', apartment.id)
           .eq('type', 'JOIN_APT')
           .eq('status', 'PENDING');
-        if (delErr) throw delErr;
+        if (updErr) throw updErr;
       }
 
       setHasRequestedJoin(false);
@@ -1686,10 +1745,22 @@ export default function ApartmentDetailsScreen() {
                 activeOpacity={0.9}
                 onPress={() => {
                   if (hasRequestedJoin) {
-                    Alert.alert('ביטול בקשה', 'לבטל את הבקשה להצטרף לדירה?', [
-                      { text: 'חזור', style: 'cancel' },
-                      { text: 'בטל בקשה', style: 'destructive', onPress: cancelJoinRequest },
-                    ]);
+                    // On web, RN Alert may be a no-op; use our custom confirm modal.
+                    if (Platform.OS === 'web') {
+                      setConfirmState({
+                        visible: true,
+                        title: 'ביטול בקשה',
+                        message: 'לבטל את הבקשה להצטרף לדירה?',
+                        confirmLabel: 'בטל בקשה',
+                        cancelLabel: 'חזור',
+                        onConfirm: cancelJoinRequest,
+                      });
+                    } else {
+                      Alert.alert('ביטול בקשה', 'לבטל את הבקשה להצטרף לדירה?', [
+                        { text: 'חזור', style: 'cancel' },
+                        { text: 'בטל בקשה', style: 'destructive', onPress: cancelJoinRequest },
+                      ]);
+                    }
                     return;
                   }
                   handleRequestJoin();

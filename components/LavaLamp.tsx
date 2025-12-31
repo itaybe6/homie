@@ -40,7 +40,7 @@ type CircleProps = {
 
 export default function LavaLamp({
   count = 4,
-  hue = 'purple',
+  hue = 'orange',
   intensity = 40,
   colors,
   duration,

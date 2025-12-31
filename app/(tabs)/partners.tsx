@@ -445,10 +445,16 @@ export default function PartnersScreen() {
       // Fetch ACTIVE groups first (public readable by RLS), then get their members
       const { data: groupsData, error: groupsErr } = await supabase
         .from('profile_groups')
-        .select('id, status')
+        .select('id, status, created_by')
         .eq('status', 'ACTIVE');
       if (groupsErr) throw groupsErr;
       const groupIds = (groupsData || []).map((g: any) => g.id as string);
+      const groupIdToCreatorId: Record<string, string> = {};
+      (groupsData || []).forEach((g: any) => {
+        const gid = String(g?.id || '').trim();
+        const creator = String(g?.created_by || '').trim();
+        if (gid && creator) groupIdToCreatorId[gid] = creator;
+      });
 
       let members: { group_id: string; user_id: string }[] = [];
       if (groupIds.length) {
@@ -468,7 +474,9 @@ export default function PartnersScreen() {
       );
 
 
-      const groupUserIds = Array.from(new Set(members.map((m) => m.user_id)));
+      // Include group creators as a fallback member source (some old groups may miss the creator row in profile_group_members)
+      const creatorIds = Object.values(groupIdToCreatorId).filter(Boolean);
+      const groupUserIds = Array.from(new Set([...members.map((m) => m.user_id), ...creatorIds]));
       let groupUsersById: Record<string, User> = {};
       if (groupUserIds.length) {
         const { data: gUsers, error: guErr } = await supabase
@@ -487,6 +495,14 @@ export default function PartnersScreen() {
         if (!groupIdToUsers[m.group_id]) groupIdToUsers[m.group_id] = [];
         groupIdToUsers[m.group_id].push(u);
       });
+      // Ensure creator is included (deduped)
+      Object.entries(groupIdToCreatorId).forEach(([gid, creatorId]) => {
+        const creator = groupUsersById[creatorId];
+        if (!creator) return;
+        if (!groupIdToUsers[gid]) groupIdToUsers[gid] = [];
+        const exists = groupIdToUsers[gid].some((u) => String(u?.id) === creatorId);
+        if (!exists) groupIdToUsers[gid].push(creator);
+      });
 
       // Filter to groups with at least 2 users, not including the current user
       // Apply UI filters: all members must pass filters (age, gender)
@@ -494,7 +510,7 @@ export default function PartnersScreen() {
         .map(([gid, us]) => ({ groupId: gid, users: us }))
         .filter(
           (g) =>
-            g.users.length >= 1 &&
+            g.users.length >= 2 &&
             !g.users.some((u) => u.id === authId) &&
             groupPassesFilters(g.users)
         );

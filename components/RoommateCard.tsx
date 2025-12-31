@@ -360,13 +360,13 @@ const styles = StyleSheet.create({
     writingDirection: 'rtl',
   },
   aptCta: {
-    color: '#4C1D95',
+    color: '#5e3f2d',
     fontSize: 13,
     fontWeight: '800',
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 999,
     borderWidth: 1,
-    borderColor: 'rgba(124,92,255,0.35)',
+    borderColor: 'rgba(94,63,45,0.35)',
   },
 });

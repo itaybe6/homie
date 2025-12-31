@@ -44,7 +44,7 @@ export default function GroupCard({
 						style={[styles.actionBtn, styles.likeBtn]}
 						onPress={() => onLike(groupId, users)}
 					>
-						<Heart size={16} color="#0F0F14" />
+						<Heart size={16} color="#FFFFFF" />
 						<Text style={[styles.actionText, styles.likeText]}>אהבתי</Text>
 					</TouchableOpacity>
 				</View>
@@ -139,8 +139,8 @@ const styles = StyleSheet.create({
 		borderColor: 'rgba(248,113,113,0.35)',
 	},
 	likeBtn: {
-		backgroundColor: '#A78BFA',
-		borderColor: '#A78BFA',
+		backgroundColor: '#5e3f2d',
+		borderColor: '#5e3f2d',
 	},
 	actionText: {
 		fontSize: 12,
@@ -150,7 +150,7 @@ const styles = StyleSheet.create({
 		color: '#F87171',
 	},
 	likeText: {
-		color: '#0F0F14',
+		color: '#FFFFFF',
 	},
 	membersRow: {
 		paddingHorizontal: 12,

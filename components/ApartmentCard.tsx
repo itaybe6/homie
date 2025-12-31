@@ -418,16 +418,16 @@ export default function ApartmentCard({
                   <View style={styles.tagsRow}>
                     {sqmTagLabel ? (
                       <View style={styles.tagPill}>
-                        <Ruler size={14} color="#4C1D95" />
+                        <Ruler size={14} color="#5e3f2d" />
                         <Text style={styles.tagText}>{sqmTagLabel}</Text>
                       </View>
                     ) : null}
                     {typeTagLabel ? (
                       <View style={styles.tagPill}>
                         {apartmentType === 'GARDEN' ? (
-                          <Trees size={14} color="#4C1D95" />
+                          <Trees size={14} color="#5e3f2d" />
                         ) : (
-                          <Building2 size={14} color="#4C1D95" />
+                          <Building2 size={14} color="#5e3f2d" />
                         )}
                         <Text style={styles.tagText}>{typeTagLabel}</Text>
                       </View>
@@ -438,21 +438,21 @@ export default function ApartmentCard({
 
               <View style={styles.metaRowHome}>
                 <View style={styles.metaItemHome}>
-                  <Users size={16} color="#4C1D95" />
+                  <Users size={16} color="#5e3f2d" />
                   <Text style={styles.metaTextHome} numberOfLines={1}>
                     שותפים {partnerSlotsUsed}
                   </Text>
                 </View>
                 <Text style={styles.metaDotHome}>·</Text>
                 <View style={styles.metaItemHome}>
-                  <Bed size={16} color="#4C1D95" />
+                  <Bed size={16} color="#5e3f2d" />
                   <Text style={styles.metaTextHome} numberOfLines={1}>
                     חדרי שינה {apartment.bedrooms ?? ''}
                   </Text>
                 </View>
                 <Text style={styles.metaDotHome}>·</Text>
                 <View style={styles.metaItemHome}>
-                  <Bath size={16} color="#4C1D95" />
+                  <Bath size={16} color="#5e3f2d" />
                   <Text style={styles.metaTextHome} numberOfLines={1}>
                     חדרי רחצה {apartment.bathrooms ?? ''}
                   </Text>
@@ -478,16 +478,16 @@ export default function ApartmentCard({
                 <View style={[styles.tagsRow, styles.tagsRowDefault]}>
                   {sqmTagLabel ? (
                     <View style={styles.tagPill}>
-                      <Ruler size={14} color="#4C1D95" />
+                      <Ruler size={14} color="#5e3f2d" />
                       <Text style={styles.tagText}>{sqmTagLabel}</Text>
                     </View>
                   ) : null}
                   {typeTagLabel ? (
                     <View style={styles.tagPill}>
                       {apartmentType === 'GARDEN' ? (
-                        <Trees size={14} color="#4C1D95" />
+                        <Trees size={14} color="#5e3f2d" />
                       ) : (
-                        <Building2 size={14} color="#4C1D95" />
+                        <Building2 size={14} color="#5e3f2d" />
                       )}
                       <Text style={styles.tagText}>{typeTagLabel}</Text>
                     </View>
@@ -498,15 +498,15 @@ export default function ApartmentCard({
               <View style={styles.bottomContainer}>
                 <View style={styles.statsRow}>
                   <View style={styles.stat}>
-                    <Users size={16} color="#c084fc" />
+                    <Users size={16} color="#5e3f2d" />
                     <Text style={styles.statText}>שותפים {partnerSlotsUsed}</Text>
                   </View>
                   <View style={styles.stat}>
-                    <Bath size={16} color="#c084fc" />
+                    <Bath size={16} color="#5e3f2d" />
                     <Text style={styles.statText}>מקלחות {apartment.bathrooms}</Text>
                   </View>
                   <View style={styles.stat}>
-                    <Bed size={16} color="#c084fc" />
+                    <Bed size={16} color="#5e3f2d" />
                     <Text style={styles.statText}>חדרים {apartment.bedrooms}</Text>
                   </View>
                 </View>
@@ -688,7 +688,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.75)',
   },
   favoriteButtonActive: {
-    backgroundColor: '#8B5CF6',
+    backgroundColor: '#5e3f2d',
   },
   roommatesBadge: {
     position: 'absolute',
@@ -787,7 +787,7 @@ const styles = StyleSheet.create({
     bottom: 12,
     flexDirection: 'row-reverse',
     alignItems: 'center',
-    backgroundColor: '#4C1D95',
+    backgroundColor: '#5e3f2d',
     borderRadius: 22,
     paddingHorizontal: 12,
     paddingVertical: 8,
@@ -804,7 +804,7 @@ const styles = StyleSheet.create({
     position: 'relative',
     right: undefined,
     bottom: undefined,
-    backgroundColor: '#4C1D95',
+    backgroundColor: '#5e3f2d',
     borderColor: 'rgba(255,255,255,0.18)',
     paddingHorizontal: 12,
     paddingVertical: 8,
@@ -875,15 +875,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 999,
-    backgroundColor: '#F5F3FF',
+    backgroundColor: 'rgba(94,63,45,0.08)',
     borderWidth: 1,
-    borderColor: 'rgba(76, 29, 149, 0.18)',
+    borderColor: 'rgba(94,63,45,0.18)',
     flexDirection: 'row-reverse',
     alignItems: 'center',
     gap: 6,
   },
   tagText: {
-    color: '#4C1D95',
+    color: '#5e3f2d',
     fontSize: 12,
     fontWeight: '800',
     textAlign: 'right',
@@ -953,7 +953,7 @@ const styles = StyleSheet.create({
   },
   location: {
     fontSize: 14,
-    color: '#4C1D95',
+    color: '#5e3f2d',
     textAlign: 'right',
     writingDirection: 'rtl',
   },

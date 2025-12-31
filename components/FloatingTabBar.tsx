@@ -109,7 +109,7 @@ export default function FloatingTabBar({ active }: FloatingTabBarProps) {
             if (typeof w === 'number' && !Number.isNaN(w)) setPillMeasuredWidth(w);
           }}
         >
-        {/* Purple mini-pill behind the active tab */}
+        {/* Active mini-pill behind the active tab */}
         {current !== 'none' ? (
           <View
             pointerEvents="none"
