@@ -39,7 +39,6 @@ import {
   X,
   UserPlus,
   Search,
-  Share2,
   Snowflake,
   Utensils,
   Home,
@@ -68,6 +67,7 @@ import { calculateMatchScore } from '@/utils/matchCalculator';
 import { buildCompatSurvey } from '@/lib/compatSurvey';
 import SwipeBackGesture from '@/components/SwipeBackGesture';
 import FavoriteHeartButton from '@/components/FavoriteHeartButton';
+import { ShareMenuFab } from '@/components/ShareMenuFab';
 
 export default function ApartmentDetailsScreen() {
   const router = useRouter();
@@ -1285,9 +1285,15 @@ export default function ApartmentDetailsScreen() {
           {/* top overlay controls (fixed over the whole gallery) */}
           <View style={[styles.topControlsRow, isOwner ? { top: 70 } : null]}>
             <View style={styles.leftControls}>
-              <TouchableOpacity style={styles.circleBtnLight} activeOpacity={0.9}>
-                <Share2 size={18} color="#111827" />
-              </TouchableOpacity>
+              <ShareMenuFab
+                message={`דירה ב-Homie: ${(apartment?.title || '').toString()} ${(apartment?.city || '').toString()}`.trim()}
+                size={36}
+                anchor="left"
+                menuOffsetY={40}
+                radiusMultiplier={2.1}
+                containerStyle={{ width: 36, height: 36 }}
+                mainButtonStyle={styles.circleBtnLight}
+              />
               {isOwner ? (
                 <TouchableOpacity
                   style={[styles.circleBtnLight, (isAdding || isAddPartnerDisabled) ? { opacity: 0.55 } : null]}

@@ -11,8 +11,6 @@ import {
   SafeAreaView,
   Image,
   Platform,
-  Linking,
-  Share,
   Modal,
   useWindowDimensions,
 } from 'react-native';
@@ -39,132 +37,6 @@ type AvatarFabItem = {
   bg: string;
   accessibilityLabel: string;
 };
-
-type ShareFabItemId = 'whatsapp' | 'telegram' | 'share';
-type ShareFabItem = {
-  id: ShareFabItemId;
-  icon: FeatherIconName;
-  accessibilityLabel: string;
-};
-
-function ShareMenuFab({
-  disabled,
-  message,
-}: {
-  disabled?: boolean;
-  message: string;
-}) {
-  const [isOpen, setIsOpen] = useState(false);
-  const size = 36;
-  const iconSize = 16;
-  const menu: ShareFabItem[] = useMemo(
-    () => [
-      { id: 'whatsapp', icon: 'message-circle', accessibilityLabel: 'שתף בוואטסאפ' },
-      { id: 'telegram', icon: 'send', accessibilityLabel: 'שתף בטלגרם' },
-      { id: 'share', icon: 'share', accessibilityLabel: 'שיתוף' },
-    ],
-    []
-  );
-
-  const onSelect = async (id: ShareFabItemId) => {
-    try {
-      if (disabled) return;
-      const encoded = encodeURIComponent(message);
-      if (id === 'whatsapp') {
-        // Prefer app scheme, fallback to web
-        const appUrl = `whatsapp://send?text=${encoded}`;
-        const webUrl = `https://wa.me/?text=${encoded}`;
-        try {
-          const can = await Linking.canOpenURL(appUrl);
-          await Linking.openURL(can ? appUrl : webUrl);
-        } catch {
-          await Linking.openURL(webUrl);
-        }
-        return;
-      }
-
-      if (id === 'telegram') {
-        const tgUrl = `https://t.me/share/url?text=${encoded}`;
-        await Linking.openURL(tgUrl);
-        return;
-      }
-
-      await Share.share({ message });
-    } finally {
-      setIsOpen(false);
-    }
-  };
-
-  return (
-    <View style={[styles.shareFabBtn, disabled ? { opacity: 0.7 } : null]}>
-      <View style={{ position: 'absolute', width: size, height: size }}>
-        {menu.map((item, index) => {
-          // Anchored to the LEFT side; open to the right/up to avoid clipping.
-          // Use angles in the 1st quadrant (0..π/2) so translateX is positive (right)
-          // and translateY is negative (up).
-          const angle = [Math.PI / 6, Math.PI / 3, Math.PI / 2.15][index] ?? Math.PI / 3;
-          const radius = size * 1.7;
-          return (
-            <MotiPressable
-              key={item.id}
-              accessibilityRole="button"
-              accessibilityLabel={item.accessibilityLabel}
-              disabled={!!disabled || !isOpen}
-              onPress={() => onSelect(item.id)}
-              animate={{
-                translateX: Math.sin(angle) * (isOpen ? radius : 3),
-                translateY: -Math.cos(angle) * (isOpen ? radius : 3),
-                opacity: isOpen ? 1 : 0,
-              }}
-              transition={{ delay: index * 90 }}
-              style={{
-                position: 'absolute',
-                width: size,
-                height: size,
-                borderRadius: size / 2,
-                alignItems: 'center',
-                justifyContent: 'center',
-                backgroundColor: '#000000',
-                borderWidth: 1,
-                borderColor: 'rgba(255,255,255,0.18)',
-                shadowColor: '#000000',
-                shadowOpacity: 0.25,
-                shadowRadius: 10,
-                shadowOffset: { width: 0, height: 6 },
-                elevation: 8,
-              }}
-            >
-              <Feather name={item.icon} size={iconSize} color="#FFFFFF" />
-            </MotiPressable>
-          );
-        })}
-      </View>
-
-      <MotiPressable
-        accessibilityRole="button"
-        accessibilityLabel={isOpen ? 'סגור אפשרויות שיתוף' : 'פתח אפשרויות שיתוף'}
-        disabled={!!disabled}
-        onPress={() => {
-          if (disabled) return;
-          setIsOpen((v) => !v);
-        }}
-        animate={{ rotate: isOpen ? '0deg' : '-45deg' }}
-        style={{
-          width: size,
-          height: size,
-          borderRadius: size / 2,
-          alignItems: 'center',
-          justifyContent: 'center',
-          backgroundColor: 'rgba(255,255,255,0.85)',
-          borderWidth: 1,
-          borderColor: 'rgba(94,63,45,0.16)',
-        }}
-      >
-        <Feather name="x" size={iconSize} color="#5e3f2d" />
-      </MotiPressable>
-    </View>
-  );
-}
 
 function AvatarPhotoFab({
   disabled,
@@ -1286,11 +1158,6 @@ export default function ProfileScreen() {
                 showCamera={Platform.OS !== 'web'}
                 onPick={(source) => pickAndUploadAvatarFrom(source)}
               />
-
-              <ShareMenuFab
-                disabled={isSaving}
-                message={`היי! זה הפרופיל שלי ב-Homie: ${(profile?.full_name || 'הפרופיל שלי').toString()}`}
-              />
             </View>
 
             <View style={styles.infoPanel}>
@@ -1996,18 +1863,6 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     shadowOffset: { width: 0, height: 4 },
     elevation: 6,
-  },
-  shareFabBtn: {
-    position: 'absolute',
-    left: 16,
-    bottom: 16,
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 12,
-    elevation: 8,
   },
   settingsBtn: {
     // removed: settings button moved below survey results
