@@ -52,8 +52,11 @@ export default function MatchPercentBadge({
   }, [normalized, triggerKey]);
 
   const isDisabled = typeof normalized !== 'number';
-  const colors = isDisabled ? (['rgba(17,24,39,0.55)', 'rgba(17,24,39,0.35)'] as const) : (['#A78BFA', '#4C1D95'] as const);
-  const borderColor = isDisabled ? 'rgba(255,255,255,0.22)' : 'rgba(233,213,255,0.55)';
+  const colors =
+    isDisabled
+      ? (['rgba(17,24,39,0.55)', 'rgba(17,24,39,0.35)'] as const)
+      : (['#cbb59e', '#5e3f2d'] as const);
+  const borderColor = isDisabled ? 'rgba(255,255,255,0.22)' : 'rgba(203,181,158,0.60)';
 
   // Fit text better for different sizes (slightly more compact)
   const valueFontSize = Math.max(12, Math.round(size * 0.235));

@@ -16,7 +16,7 @@ export default function OtpCodeInput({
   length = 6,
   disabled = false,
   autoFocus = false,
-  accentColor = '#4C1D95',
+  accentColor = '#5e3f2d',
 }: Props) {
   const inputsRef = useRef<Array<TextInput | null>>([]);
 
@@ -115,7 +115,7 @@ export default function OtpCodeInput({
               maxLength={length} // allows paste of multiple digits; we control display via value={d}
               style={[
                 styles.cell,
-                { borderColor: isFilled ? 'rgba(76,29,149,0.25)' : '#E5E7EB' },
+                { borderColor: isFilled ? 'rgba(94,63,45,0.25)' : '#E5E7EB' },
                 !disabled && styles.cellEnabled,
                 !disabled && i === 0 && autoFocus ? styles.cellAutoFocusHint : null,
                 { outlineColor: accentColor } as any,

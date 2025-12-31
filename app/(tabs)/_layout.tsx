@@ -157,7 +157,7 @@ export default function TabLayout() {
         headerShown: false,
         tabBarShowLabel: true,
         tabBarHideOnKeyboard: true,
-        tabBarActiveTintColor: '#4C1D95',
+        tabBarActiveTintColor: '#5e3f2d',
         tabBarInactiveTintColor: '#6B7280',
         tabBarStyle: isSurveyRoute || isAddApartmentTabRoute
           ? ({ display: 'none' } as any)
@@ -297,7 +297,7 @@ const styles = StyleSheet.create({
     borderRadius: 32,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#4C1D95',
+    backgroundColor: '#5e3f2d',
     marginTop: -28, // lifts it above the tab bar
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.18)',
@@ -315,7 +315,7 @@ const styles = StyleSheet.create({
     }),
   },
   centerButtonSelected: {
-    backgroundColor: '#4C1D95',
+    backgroundColor: '#5e3f2d',
   },
   centerButtonDisabled: {
     backgroundColor: '#9CA3AF',

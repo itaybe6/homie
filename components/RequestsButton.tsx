@@ -18,7 +18,7 @@ function RequestsButtonBase({ style, badgeCount }: Props) {
   const [count, setCount] = useState<number>(badgeCount || 0);
 
   // Keep consistent with Home screen action icons (map/filter/search).
-  const ICON_COLOR = '#4C1D95';
+  const ICON_COLOR = '#5e3f2d';
 
   useEffect(() => {
     let isMounted = true;
@@ -108,7 +108,7 @@ const styles = StyleSheet.create({
     height: 18,
     paddingHorizontal: 4,
     borderRadius: 9,
-    backgroundColor: 'rgba(124,92,255,0.85)',
+    backgroundColor: 'rgba(94,63,45,0.85)',
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 0,

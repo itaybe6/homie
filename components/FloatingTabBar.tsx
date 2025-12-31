@@ -224,7 +224,7 @@ const styles = StyleSheet.create({
     width: 56,
     height: 56,
     borderRadius: 28,
-    backgroundColor: '#4C1D95',
+    backgroundColor: '#5e3f2d',
     alignItems: 'center',
     justifyContent: 'center',
     ...(Platform.OS === 'ios'
@@ -242,11 +242,11 @@ const styles = StyleSheet.create({
   },
   activeTrack: {
     position: 'absolute',
-    backgroundColor: '#4C1D95',
+    backgroundColor: '#5e3f2d',
     zIndex: 0,
     ...(Platform.OS === 'ios'
       ? {
-          shadowColor: '#4C1D95',
+          shadowColor: '#5e3f2d',
           shadowOpacity: 0.25,
           shadowRadius: 16,
           shadowOffset: { width: 0, height: 6 },
