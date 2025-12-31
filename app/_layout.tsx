@@ -31,7 +31,7 @@ export default function RootLayout() {
     typeof pathname === 'string' && (pathname === '/add-apartment' || pathname.endsWith('/add-apartment'));
   const hideGlobalTopBar =
     typeof pathname === 'string' &&
-    (isMapRoute || isSurveyRoute || isStandaloneAddApartmentRoute);
+    (pathname.includes('/apartment/') || isMapRoute || isSurveyRoute || isStandaloneAddApartmentRoute);
   const isAuthRoute = typeof pathname === 'string' && pathname.startsWith('/auth');
   const isAdminRoute = typeof pathname === 'string' && pathname.startsWith('/admin');
   const shouldShowGlobalTopBar = !!user && !hideGlobalTopBar && !isAuthRoute && !isAdminRoute;

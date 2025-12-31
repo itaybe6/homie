@@ -1211,10 +1211,6 @@ export default function ApartmentDetailsScreen() {
     scrollToSlide(activeIdx + 1);
   };
 
-  // Keep the tab bar visible behind this Stack screen.
-  // Since this screen sits above the tabs, we leave the bottom area transparent.
-  const tabBarHeight = Math.max(56, 56 + (insets.bottom || 0));
-
   const handleBack = () => {
     const returnToStr = Array.isArray(returnTo) ? returnTo[0] : returnTo;
     if (typeof returnToStr === 'string' && returnToStr.trim()) {
@@ -1232,22 +1228,12 @@ export default function ApartmentDetailsScreen() {
   return (
     <SwipeBackGesture onGoBack={handleBack} edge="right">
       <View style={styles.container}>
-        <View
-          pointerEvents="none"
-          style={[
-            StyleSheet.absoluteFill,
-            {
-              backgroundColor: '#FAFAFA',
-              bottom: tabBarHeight, // leave the tab bar area transparent
-            },
-          ]}
-        />
         {isOwner ? <StatusBar translucent backgroundColor="transparent" style="light" /> : null}
         <ScrollView
           contentContainerStyle={{
-            paddingBottom: tabBarHeight + 24,
+            paddingBottom: (insets.bottom || 0) + 24,
             paddingTop: 0,
-            backgroundColor: 'transparent',
+            backgroundColor: '#FAFAFA',
           }}
         >
         {/* Owner actions pinned to top of the page */}
@@ -2226,7 +2212,7 @@ function ZoomableImage({ uri }: { uri: string }) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: 'transparent',
+    backgroundColor: '#FAFAFA',
   },
   addAvatar: {
     width: 44,

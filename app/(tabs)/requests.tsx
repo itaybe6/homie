@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  FlatList,
+  Animated,
   RefreshControl,
   TouchableOpacity,
   ActivityIndicator,
@@ -27,6 +27,7 @@ export default function RequestsScreen() {
   const params = useLocalSearchParams<{ tab?: string | string[] }>();
   const user = useAuthStore((s) => s.user);
   const insets = useSafeAreaInsets();
+  const scrollY = useRef(new Animated.Value(0)).current;
   const [ownerDetails, setOwnerDetails] = useState<null | { full_name?: string; avatar_url?: string; phone?: string }>(null);
   const toSingle = (value: string | string[] | undefined): string | undefined =>
     Array.isArray(value) ? value[0] : value;
@@ -1334,7 +1335,7 @@ export default function RequestsScreen() {
   };
 
   const Section = ({ title, data, incoming }: { title: string; data: UnifiedItem[]; incoming?: boolean }) => (
-    <View style={{ marginTop: 12 }}>
+    <View style={{ marginTop: 12, flex: 1 }}>
       <Text style={styles.sectionTitle}>{title}</Text>
       {data.length === 0 ? (
         <View style={styles.emptyState}>
@@ -1345,13 +1346,28 @@ export default function RequestsScreen() {
           <Text style={styles.emptySubtitle}>כשתתקבל בקשה חדשה נציג אותה כאן</Text>
         </View>
       ) : (
-        <FlatList
+        <Animated.FlatList
           data={data}
           keyExtractor={(item) => item.id}
-          scrollEnabled={false}
           showsVerticalScrollIndicator={false}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#5e3f2d" />}
+          onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], {
+            useNativeDriver: true,
+          })}
+          scrollEventThrottle={16}
           ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
-          renderItem={({ item }) => {
+          renderItem={({ item, index }) => {
+            // Approximate card height for scroll-based scale/fade effect.
+            const ITEM_SIZE = 138;
+            const scale = scrollY.interpolate({
+              inputRange: [-1, 0, ITEM_SIZE * index, ITEM_SIZE * (index + 2)],
+              outputRange: [1, 1, 1, 0],
+            });
+            const opacity = scrollY.interpolate({
+              inputRange: [-1, 0, ITEM_SIZE * index, ITEM_SIZE * (index + 1)],
+              outputRange: [1, 1, 1, 0],
+            });
+
             const otherUser = incoming ? usersById[item.sender_id] : usersById[item.recipient_id];
             const receiverGroupId = (item as any)?._receiver_group_id as string | undefined;
             const senderGroupId = (item as any)?._sender_group_id as string | undefined;
@@ -1387,9 +1403,10 @@ export default function RequestsScreen() {
             const ownerUser = apt && (apt as any).owner_id ? ownersById[(apt as any).owner_id as string] : undefined;
             const ownerPhone = ownerUser?.phone as string | undefined;
             return (
-              <View style={styles.cardShadow}>
-                <View style={styles.card}>
-                  <View style={styles.cardInner}>
+              <Animated.View style={{ opacity, transform: [{ scale }] }}>
+                <View style={styles.cardShadow}>
+                  <View style={styles.card}>
+                    <View style={styles.cardInner}>
                   {!incoming && item.kind === 'MATCH' && !isGroupMatch ? (
                     <View style={styles.matchThumbWrap}>
                       <Sparkles size={34} color="#6B7280" />
@@ -2021,9 +2038,10 @@ export default function RequestsScreen() {
                     </View>
                   </View>
                   {/* Side avatar removed: unified avatar+name row(s) render under the title */}
+                    </View>
                   </View>
                 </View>
-              </View>
+              </Animated.View>
             );
           }}
         />
@@ -2071,19 +2089,13 @@ export default function RequestsScreen() {
               <ActivityIndicator size="large" color="#5e3f2d" />
             </View>
           ) : (
-            <FlatList
-              data={[{ key: tab }]}
-              keyExtractor={(i) => i.key}
-              showsVerticalScrollIndicator={false}
-              refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#5e3f2d" />}
-              renderItem={({ item }) => {
-                if (item.key === 'incoming') {
-                  return <Section title="בקשות אליי" data={filteredReceived} incoming />;
-                }
-                return <Section title="הבקשות שלי" data={filteredSent} />;
-              }}
-              contentContainerStyle={styles.listContent}
-            />
+            <View style={styles.listContent}>
+              {tab === 'incoming' ? (
+                <Section title="בקשות אליי" data={filteredReceived} incoming />
+              ) : (
+                <Section title="הבקשות שלי" data={filteredSent} />
+              )}
+            </View>
           )}
         </View>
       </View>

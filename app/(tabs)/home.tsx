@@ -1,24 +1,29 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  FlatList,
   TextInput,
   ActivityIndicator,
   RefreshControl,
   TouchableOpacity,
   Pressable,
+  LayoutChangeEvent,
   useWindowDimensions,
   Modal,
   ScrollView,
   Alert,
   Platform,
-  Animated,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-// Animated wrapper for VirtualizedList/FlatList to support native onScroll
-const AnimatedFlatList = Animated.createAnimatedComponent(FlatList as any);
+import Animated, {
+  Extrapolation,
+  interpolate,
+  type SharedValue,
+  useAnimatedScrollHandler,
+  useAnimatedStyle,
+  useSharedValue,
+} from 'react-native-reanimated';
 import { useRouter } from 'expo-router';
 import { Search, SlidersHorizontal, X, Map } from 'lucide-react-native';
 import { getAllCitiesWithNeighborhoods, getNeighborhoodsForCityName } from '@/lib/neighborhoods';
@@ -28,6 +33,37 @@ import { useAuthStore } from '@/stores/authStore';
 import { Apartment } from '@/types/database';
 import ApartmentCard from '@/components/ApartmentCard';
 import FilterChipsBar, { defaultFilterChips, selectedFiltersFromIds } from '@/components/FilterChipsBar';
+
+function AnimatedApartmentRow({
+  apartment,
+  index,
+  scrollIndex,
+  onPress,
+  onMaybeMeasure,
+}: {
+  apartment: Apartment;
+  index: number;
+  scrollIndex: SharedValue<number>;
+  onPress: () => void;
+  onMaybeMeasure?: (e: LayoutChangeEvent) => void;
+}) {
+  const stylez = useAnimatedStyle(() => {
+    return {
+      opacity: interpolate(scrollIndex.value, [index - 1, index, index + 1], [0.4, 1, 0.4], Extrapolation.CLAMP),
+      transform: [
+        {
+          scale: interpolate(scrollIndex.value, [index - 1, index, index + 1], [0.92, 1, 0.92], Extrapolation.CLAMP),
+        },
+      ],
+    };
+  }, [index]);
+
+  return (
+    <Animated.View style={stylez} onLayout={onMaybeMeasure}>
+      <ApartmentCard apartment={apartment} onPress={onPress} variant="home" />
+    </Animated.View>
+  );
+}
 
 function parseOptionalInt(v: string): number | null {
   const t = String(v || '').trim();
@@ -228,30 +264,68 @@ export default function HomeScreen() {
   const [chipSelected, setChipSelected] = useState<string[]>([]);
   // Removed cityPlaceId/sessionToken (no Google city autocomplete)
 
-  // Animated collapse/expand for search row + chips
-  const scrollY = useRef(new Animated.Value(0)).current;
-  const clamped = Animated.diffClamp(scrollY, 0, 120);
-  const headerScale = clamped.interpolate({
-    inputRange: [0, 120],
-    outputRange: [1, 0.9],
-    extrapolate: 'clamp',
+  // Reanimated scroll values (drives header + the apartment card scale/fade)
+  const scrollY = useSharedValue(0); // px
+  const headerHeight = useSharedValue(0); // px
+  const [headerHeightPx, setHeaderHeightPx] = useState(0);
+  const itemFullSize = useSharedValue(1); // px (card height + spacing)
+  const scrollIndex = useSharedValue(0); // normalized by itemFullSize
+  const [snapIntervalPx, setSnapIntervalPx] = useState(0);
+
+  const onScroll = useAnimatedScrollHandler((e) => {
+    scrollY.value = e.contentOffset.y;
+    const yForCards = Math.max(0, e.contentOffset.y - (headerHeight.value || 0));
+    const denom = itemFullSize.value || 1;
+    scrollIndex.value = yForCards / denom;
   });
-  const headerTranslateY = clamped.interpolate({
-    inputRange: [0, 120],
-    outputRange: [0, -12],
-    extrapolate: 'clamp',
+
+  const headerOuterStyle = useAnimatedStyle(() => {
+    const clamped = Math.min(120, Math.max(0, scrollY.value));
+    return {
+      transform: [
+        {
+          translateY: interpolate(clamped, [0, 120], [0, -12], Extrapolation.CLAMP),
+        },
+      ],
+    };
   });
-  const chipsTranslateY = clamped.interpolate({
-    inputRange: [0, 120],
-    outputRange: [0, -8],
-    extrapolate: 'clamp',
+
+  const headerInnerStyle = useAnimatedStyle(() => {
+    const clamped = Math.min(120, Math.max(0, scrollY.value));
+    return {
+      transform: [
+        {
+          scale: interpolate(clamped, [0, 120], [1, 0.9], Extrapolation.CLAMP),
+        },
+      ],
+    };
+  });
+
+  const chipsStyle = useAnimatedStyle(() => {
+    const clamped = Math.min(120, Math.max(0, scrollY.value));
+    return {
+      transform: [
+        {
+          translateY: interpolate(clamped, [0, 120], [0, -8], Extrapolation.CLAMP),
+        },
+      ],
+    };
   });
 
   // Header for the list – contains search row and filter chips so that
   // the entire grey area scrolls together.
   const renderListHeader = () => (
-    <Animated.View style={{ transform: [{ translateY: headerTranslateY }], backgroundColor: PAGE_BG }}>
-      <Animated.View style={{ transform: [{ scale: headerScale }] }}>
+    <Animated.View
+      style={[{ backgroundColor: PAGE_BG }, headerOuterStyle]}
+      onLayout={(e) => {
+        const h = e?.nativeEvent?.layout?.height ?? 0;
+        if (h > 0 && headerHeightPx === 0) {
+          setHeaderHeightPx(h);
+          headerHeight.value = h;
+        }
+      }}
+    >
+      <Animated.View style={headerInnerStyle}>
         <View style={styles.headerFullBleed}>
           <View style={styles.searchRow}>
           {/* Filter button on the left */}
@@ -288,7 +362,7 @@ export default function HomeScreen() {
           </View>
         </View>
       </Animated.View>
-      <Animated.View style={{ transform: [{ translateY: chipsTranslateY }] }}>
+      <Animated.View style={chipsStyle}>
         <FilterChipsBar
           filters={defaultFilterChips}
           selectedIds={chipSelected}
@@ -514,6 +588,14 @@ export default function HomeScreen() {
     );
   }
 
+  const snapOffsets =
+    headerHeightPx > 0 && snapIntervalPx > 0
+      ? [
+          0,
+          ...Array.from({ length: filteredApartments.length }, (_, i) => headerHeightPx + snapIntervalPx * i),
+        ]
+      : undefined;
+
   return (
     <SafeAreaView edges={['top']} style={styles.safeTop}>
       {/* Spacer to avoid content sitting under the absolute GlobalTopBar */}
@@ -523,24 +605,37 @@ export default function HomeScreen() {
       <View style={styles.pageBody}>
         {/* Removed hero banner */}
 
-        <AnimatedFlatList
+        <Animated.FlatList
           data={filteredApartments}
-          renderItem={({ item }: { item: Apartment }) => (
-            <ApartmentCard
+          renderItem={({ item, index }: { item: Apartment; index: number }) => (
+            <AnimatedApartmentRow
               apartment={item}
+              index={index}
+              scrollIndex={scrollIndex}
               onPress={() => handleApartmentPress(item)}
-              variant="home"
+              onMaybeMeasure={
+                index === 0 && snapIntervalPx === 0
+                  ? (e) => {
+                      // ApartmentCard defines its own spacing via marginBottom; include it for snap/normalization.
+                      const measured = e?.nativeEvent?.layout?.height ?? 0;
+                      const full = measured > 0 ? measured + 16 : 0;
+                      if (full > 0 && snapIntervalPx === 0) {
+                        setSnapIntervalPx(full);
+                        itemFullSize.value = full;
+                      }
+                    }
+                  : undefined
+              }
             />
           )}
           keyExtractor={(item: Apartment) => item.id}
           contentContainerStyle={styles.listContent}
           style={{ backgroundColor: PAGE_BG }}
           ListHeaderComponent={renderListHeader}
-          onScroll={Animated.event(
-            [{ nativeEvent: { contentOffset: { y: scrollY } } }],
-            { useNativeDriver: true }
-          )}
-          scrollEventThrottle={16}
+          onScroll={onScroll}
+          scrollEventThrottle={1000 / 60}
+          decelerationRate="fast"
+          snapToOffsets={snapOffsets as any}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
