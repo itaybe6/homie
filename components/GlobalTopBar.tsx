@@ -46,7 +46,7 @@ function GlobalTopBarBase({ backgroundColor = '#FFFFFF' }: { backgroundColor?: s
           ]}
         >
           <Image
-            source={require('../assets/images/logo-03.png')}
+            source={require('../assets/images/homiebrown logo.png')}
             style={styles.logo}
             resizeMode="contain"
           />
