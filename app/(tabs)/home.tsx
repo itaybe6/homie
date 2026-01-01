@@ -8,7 +8,6 @@ import {
   RefreshControl,
   TouchableOpacity,
   Pressable,
-  LayoutChangeEvent,
   useWindowDimensions,
   Modal,
   ScrollView,
@@ -19,7 +18,6 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import Animated, {
   Extrapolation,
   interpolate,
-  type SharedValue,
   useAnimatedScrollHandler,
   useAnimatedStyle,
   useSharedValue,
@@ -33,37 +31,6 @@ import { useAuthStore } from '@/stores/authStore';
 import { Apartment } from '@/types/database';
 import ApartmentCard from '@/components/ApartmentCard';
 import FilterChipsBar, { defaultFilterChips, selectedFiltersFromIds } from '@/components/FilterChipsBar';
-
-function AnimatedApartmentRow({
-  apartment,
-  index,
-  scrollIndex,
-  onPress,
-  onMaybeMeasure,
-}: {
-  apartment: Apartment;
-  index: number;
-  scrollIndex: SharedValue<number>;
-  onPress: () => void;
-  onMaybeMeasure?: (e: LayoutChangeEvent) => void;
-}) {
-  const stylez = useAnimatedStyle(() => {
-    return {
-      opacity: interpolate(scrollIndex.value, [index - 1, index, index + 1], [0.4, 1, 0.4], Extrapolation.CLAMP),
-      transform: [
-        {
-          scale: interpolate(scrollIndex.value, [index - 1, index, index + 1], [0.92, 1, 0.92], Extrapolation.CLAMP),
-        },
-      ],
-    };
-  }, [index]);
-
-  return (
-    <Animated.View style={stylez} onLayout={onMaybeMeasure}>
-      <ApartmentCard apartment={apartment} onPress={onPress} variant="home" />
-    </Animated.View>
-  );
-}
 
 function parseOptionalInt(v: string): number | null {
   const t = String(v || '').trim();
@@ -264,19 +231,11 @@ export default function HomeScreen() {
   const [chipSelected, setChipSelected] = useState<string[]>([]);
   // Removed cityPlaceId/sessionToken (no Google city autocomplete)
 
-  // Reanimated scroll values (drives header + the apartment card scale/fade)
+  // Reanimated scroll values (drives header)
   const scrollY = useSharedValue(0); // px
-  const headerHeight = useSharedValue(0); // px
-  const [headerHeightPx, setHeaderHeightPx] = useState(0);
-  const itemFullSize = useSharedValue(1); // px (card height + spacing)
-  const scrollIndex = useSharedValue(0); // normalized by itemFullSize
-  const [snapIntervalPx, setSnapIntervalPx] = useState(0);
 
   const onScroll = useAnimatedScrollHandler((e) => {
     scrollY.value = e.contentOffset.y;
-    const yForCards = Math.max(0, e.contentOffset.y - (headerHeight.value || 0));
-    const denom = itemFullSize.value || 1;
-    scrollIndex.value = yForCards / denom;
   });
 
   const headerOuterStyle = useAnimatedStyle(() => {
@@ -317,13 +276,6 @@ export default function HomeScreen() {
   const renderListHeader = () => (
     <Animated.View
       style={[{ backgroundColor: PAGE_BG }, headerOuterStyle]}
-      onLayout={(e) => {
-        const h = e?.nativeEvent?.layout?.height ?? 0;
-        if (h > 0 && headerHeightPx === 0) {
-          setHeaderHeightPx(h);
-          headerHeight.value = h;
-        }
-      }}
     >
       <Animated.View style={headerInnerStyle}>
         <View style={styles.headerFullBleed}>
@@ -368,18 +320,23 @@ export default function HomeScreen() {
           selectedIds={chipSelected}
           onChange={setChipSelected}
           withShadow={false}
-          inactiveBackgroundColor="#F3F4F6"
-          inactiveBorderColor="#E5E7EB"
-          activeBackgroundColor="rgba(94,63,45,0.10)"
-          activeBorderColor="rgba(94,63,45,0.28)"
-          activeTextColor="#5e3f2d"
-          activeIconColor="#5e3f2d"
+          chipBorderWidth={1}
+          // Inactive chips match the ApartmentCard "בניין/מ״ר" tag pills
+          inactiveBackgroundColor="rgba(94,63,45,0.08)"
+          inactiveBorderColor="rgba(94,63,45,0.18)"
+          inactiveTextColor="#5e3f2d"
+          inactiveIconColor="#5e3f2d"
+          // Active chips match the ApartmentCard "מחיר" badge
+          activeBackgroundColor="#5e3f2d"
+          activeBorderColor="transparent"
+          activeTextColor="#FFFFFF"
+          activeIconColor="#FFFFFF"
           onOpenDropdown={(chip) => {
             if (chip.id === 'price' || chip.id === 'rooms') {
               setIsFilterOpen(true);
             }
           }}
-          style={{ marginTop: 8, marginBottom: 12 }}
+          style={{ marginTop: 8, marginBottom: 20 }}
         />
       </Animated.View>
     </Animated.View>
@@ -588,14 +545,6 @@ export default function HomeScreen() {
     );
   }
 
-  const snapOffsets =
-    headerHeightPx > 0 && snapIntervalPx > 0
-      ? [
-          0,
-          ...Array.from({ length: filteredApartments.length }, (_, i) => headerHeightPx + snapIntervalPx * i),
-        ]
-      : undefined;
-
   return (
     <SafeAreaView edges={['top']} style={styles.safeTop}>
       {/* Spacer to avoid content sitting under the absolute GlobalTopBar */}
@@ -607,26 +556,10 @@ export default function HomeScreen() {
 
         <Animated.FlatList
           data={filteredApartments}
-          renderItem={({ item, index }: { item: Apartment; index: number }) => (
-            <AnimatedApartmentRow
-              apartment={item}
-              index={index}
-              scrollIndex={scrollIndex}
-              onPress={() => handleApartmentPress(item)}
-              onMaybeMeasure={
-                index === 0 && snapIntervalPx === 0
-                  ? (e) => {
-                      // ApartmentCard defines its own spacing via marginBottom; include it for snap/normalization.
-                      const measured = e?.nativeEvent?.layout?.height ?? 0;
-                      const full = measured > 0 ? measured + 16 : 0;
-                      if (full > 0 && snapIntervalPx === 0) {
-                        setSnapIntervalPx(full);
-                        itemFullSize.value = full;
-                      }
-                    }
-                  : undefined
-              }
-            />
+          renderItem={({ item }: { item: Apartment }) => (
+            <View>
+              <ApartmentCard apartment={item} onPress={() => handleApartmentPress(item)} variant="home" />
+            </View>
           )}
           keyExtractor={(item: Apartment) => item.id}
           contentContainerStyle={styles.listContent}
@@ -634,8 +567,6 @@ export default function HomeScreen() {
           ListHeaderComponent={renderListHeader}
           onScroll={onScroll}
           scrollEventThrottle={1000 / 60}
-          decelerationRate="fast"
-          snapToOffsets={snapOffsets as any}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}

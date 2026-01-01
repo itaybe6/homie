@@ -21,6 +21,8 @@ import {
   Sofa,
   ChevronDown,
   Tag,
+  Sparkles,
+  DoorOpen,
 } from 'lucide-react-native';
 
 export type FilterChipType = 'toggle' | 'dropdown';
@@ -39,6 +41,7 @@ type Props = {
   onChange?: (selectedIds: string[]) => void;
   onOpenDropdown?: (chip: FilterChip) => void;
   style?: ViewStyle;
+  chipBorderWidth?: number;
   inactiveBackgroundColor?: string;
   activeBackgroundColor?: string;
   inactiveBorderColor?: string;
@@ -60,8 +63,8 @@ export const defaultFilterChips: FilterChip[] = [
   { id: 'kosher_kitchen', label: 'מטבח כשר', type: 'toggle', renderIcon: (c, s) => <Utensils color={c} size={s} /> },
   { id: 'has_air_conditioning', label: 'מיזוג', type: 'toggle', renderIcon: (c, s) => <Wind color={c} size={s} /> },
   { id: 'has_solar_heater', label: 'דוד שמש', type: 'toggle', renderIcon: (c, s) => <Sun color={c} size={s} /> },
-  { id: 'is_renovated', label: 'משופצת', type: 'toggle', renderIcon: (c, s) => <Tag color={c} size={s} /> },
-  { id: 'balcony', label: 'מרפסת', type: 'toggle', renderIcon: (c, s) => <Tag color={c} size={s} /> },
+  { id: 'is_renovated', label: 'משופצת', type: 'toggle', renderIcon: (c, s) => <Sparkles color={c} size={s} /> },
+  { id: 'balcony', label: 'מרפסת', type: 'toggle', renderIcon: (c, s) => <DoorOpen color={c} size={s} /> },
 ];
 
 // Helper for consumers to translate ids → fast lookup object
@@ -79,6 +82,7 @@ export default function FilterChipsBar({
   onChange,
   onOpenDropdown,
   style,
+  chipBorderWidth,
   inactiveBackgroundColor,
   activeBackgroundColor,
   inactiveBorderColor,
@@ -99,6 +103,7 @@ export default function FilterChipsBar({
   const activeTxt = activeTextColor ?? '#5e3f2d';
   const inactiveIc = inactiveIconColor ?? '#6B7280';
   const activeIc = activeIconColor ?? '#5e3f2d';
+  const borderW = typeof chipBorderWidth === 'number' ? chipBorderWidth : 0;
 
   // Preserve horizontal scroll offset when toggling chips to avoid jump-to-start
   const scrollRef = useRef<ScrollView | null>(null);
@@ -213,6 +218,7 @@ export default function FilterChipsBar({
                   {
                     backgroundColor: activeChip ? activeBg : inactiveBg,
                     borderColor: activeChip ? activeBd : inactiveBd,
+                    borderWidth: borderW,
                     opacity: 1,
                   },
                 ]}

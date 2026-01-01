@@ -212,6 +212,9 @@ export default function ApartmentCard({
   const availableRoommateSlots =
     maxRoommates !== null ? Math.max(0, maxRoommates - partnerSlotsUsed) : null;
 
+  const roommatesCapacityLabel =
+    maxRoommates !== null ? `${maxRoommates} שותפים` : `${partnerSlotsUsed} שותפים`;
+
   const neighborhood = String((apartment as any)?.neighborhood || '').trim();
   const address = String((apartment as any)?.address || (apartment as any)?.street_address || '').trim();
   const city = String((apartment as any)?.city || '').trim();
@@ -428,13 +431,7 @@ export default function ApartmentCard({
                 </Text>
 
                 {typeTagLabel || sqmTagLabel ? (
-                  <View style={styles.tagsRow}>
-                    {sqmTagLabel ? (
-                      <View style={styles.tagPill}>
-                        <Ruler size={14} color="#5e3f2d" />
-                        <Text style={styles.tagText}>{sqmTagLabel}</Text>
-                      </View>
-                    ) : null}
+                  <View style={[styles.tagsRow, styles.tagsRowHome]}>
                     {typeTagLabel ? (
                       <View style={styles.tagPill}>
                         {apartmentType === 'GARDEN' ? (
@@ -445,35 +442,41 @@ export default function ApartmentCard({
                         <Text style={styles.tagText}>{typeTagLabel}</Text>
                       </View>
                     ) : null}
+                    {sqmTagLabel ? (
+                      <View style={styles.tagPill}>
+                        <Ruler size={14} color="#5e3f2d" />
+                        <Text style={styles.tagText}>{sqmTagLabel}</Text>
+                      </View>
+                    ) : null}
                   </View>
                 ) : null}
               </View>
 
               <View style={styles.metaRowHome}>
                 <View style={styles.metaItemHome}>
-                  <View style={styles.iconCircle}>
+                  <View style={[styles.iconCircle, styles.iconCircleCompact]}>
                     <Users size={14} color="#5e3f2d" strokeWidth={2.5} />
                   </View>
                   <Text style={styles.metaTextHome} numberOfLines={1}>
-                    שותפים {partnerSlotsUsed}
+                    {roommatesCapacityLabel}
                   </Text>
                 </View>
                 <View style={styles.metaDivider} />
                 <View style={styles.metaItemHome}>
-                  <View style={styles.iconCircle}>
+                  <View style={[styles.iconCircle, styles.iconCircleCompact]}>
                     <BedDouble size={14} color="#5e3f2d" strokeWidth={2.5} />
                   </View>
                   <Text style={styles.metaTextHome} numberOfLines={1}>
-                    חדרי שינה {apartment.bedrooms ?? ''}
+                    {apartment.bedrooms ?? ''} חדרי שינה
                   </Text>
                 </View>
                 <View style={styles.metaDivider} />
                 <View style={styles.metaItemHome}>
-                  <View style={styles.iconCircle}>
+                  <View style={[styles.iconCircle, styles.iconCircleCompact]}>
                     <ShowerHead size={14} color="#5e3f2d" strokeWidth={2.5} />
                   </View>
                   <Text style={styles.metaTextHome} numberOfLines={1}>
-                    חדרי רחצה {apartment.bathrooms ?? ''}
+                    {apartment.bathrooms ?? ''} חדרי רחצה
                   </Text>
                 </View>
               </View>
@@ -495,12 +498,6 @@ export default function ApartmentCard({
 
               {typeTagLabel || sqmTagLabel ? (
                 <View style={[styles.tagsRow, styles.tagsRowDefault]}>
-                  {sqmTagLabel ? (
-                    <View style={styles.tagPill}>
-                      <Ruler size={14} color="#5e3f2d" />
-                      <Text style={styles.tagText}>{sqmTagLabel}</Text>
-                    </View>
-                  ) : null}
                   {typeTagLabel ? (
                     <View style={styles.tagPill}>
                       {apartmentType === 'GARDEN' ? (
@@ -511,28 +508,34 @@ export default function ApartmentCard({
                       <Text style={styles.tagText}>{typeTagLabel}</Text>
                     </View>
                   ) : null}
+                  {sqmTagLabel ? (
+                    <View style={styles.tagPill}>
+                      <Ruler size={14} color="#5e3f2d" />
+                      <Text style={styles.tagText}>{sqmTagLabel}</Text>
+                    </View>
+                  ) : null}
                 </View>
               ) : null}
 
               <View style={styles.bottomContainer}>
                 <View style={styles.statsRow}>
                   <View style={styles.stat}>
-                    <View style={styles.iconCircle}>
+                    <View style={[styles.iconCircle, styles.iconCircleCompact]}>
                       <Users size={14} color="#5e3f2d" strokeWidth={2.5} />
                     </View>
-                    <Text style={styles.statText}>שותפים {partnerSlotsUsed}</Text>
+                    <Text style={styles.statText}>{roommatesCapacityLabel}</Text>
                   </View>
                   <View style={styles.stat}>
-                    <View style={styles.iconCircle}>
+                    <View style={[styles.iconCircle, styles.iconCircleCompact]}>
                       <BedDouble size={14} color="#5e3f2d" strokeWidth={2.5} />
                     </View>
-                    <Text style={styles.statText}>חדרים {apartment.bedrooms}</Text>
+                    <Text style={styles.statText}>{apartment.bedrooms} חדרים</Text>
                   </View>
                   <View style={styles.stat}>
-                    <View style={styles.iconCircle}>
+                    <View style={[styles.iconCircle, styles.iconCircleCompact]}>
                       <ShowerHead size={14} color="#5e3f2d" strokeWidth={2.5} />
                     </View>
-                    <Text style={styles.statText}>מקלחות {apartment.bathrooms}</Text>
+                    <Text style={styles.statText}>{apartment.bathrooms} מקלחות</Text>
                   </View>
                 </View>
               </View>
@@ -619,8 +622,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 4,
     borderWidth: 1,
-    borderColor: 'rgba(94, 63, 45, 0.15)',
-    backgroundColor: 'rgba(94, 63, 45, 0.08)',
+    // Match "בניין/מ״ר" tag pill but with an opaque background for better readability on images
+    borderColor: 'rgba(94, 63, 45, 0.18)',
+    backgroundColor: '#F2F0EE',
     shadowColor: '#000',
     shadowOpacity: 0.16,
     shadowRadius: 10,
@@ -652,9 +656,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 4,
-    backgroundColor: 'rgba(94, 63, 45, 0.08)',
+    // Match "בניין/מ״ר" tag pill but with an opaque background for better readability on images
+    backgroundColor: '#F2F0EE',
     borderWidth: 1,
-    borderColor: 'rgba(94, 63, 45, 0.15)',
+    borderColor: 'rgba(94, 63, 45, 0.18)',
     shadowColor: '#000',
     shadowOpacity: 0.10,
     shadowRadius: 8,
@@ -706,15 +711,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 8,
     borderRadius: 999,
-    backgroundColor: 'rgba(15, 23, 42, 0.62)',
+    // Lighter, semi-transparent pill behind carousel dots
+    backgroundColor: 'rgba(243, 244, 246, 0.78)',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
+    borderColor: 'rgba(94, 63, 45, 0.10)',
   },
   dotHome: {
     width: 7,
     height: 7,
     borderRadius: 3.5,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#5e3f2d',
   },
   priceBadge: {
     position: 'absolute',
@@ -802,6 +808,9 @@ const styles = StyleSheet.create({
     gap: 8,
     marginTop: 2,
   },
+  tagsRowHome: {
+    marginBottom: 8,
+  },
   tagsRowDefault: {
     marginBottom: 8,
     justifyContent: 'flex-end',
@@ -854,24 +863,24 @@ const styles = StyleSheet.create({
     width: '100%',
     flexDirection: 'row-reverse',
     alignItems: 'center',
-    justifyContent: 'space-evenly',
+    justifyContent: 'space-between',
     paddingTop: 8,
     paddingBottom: 8,
-    paddingHorizontal: 12,
+    paddingHorizontal: 16,
     borderTopWidth: 1,
     borderTopColor: '#EEF2F7',
-    gap: 8,
+    gap: 12,
   },
   metaItemHome: {
     flexDirection: 'row-reverse',
     alignItems: 'center',
-    gap: 5,
+    gap: 6,
     flex: 1,
     justifyContent: 'center',
   },
   metaTextHome: {
     color: '#374151',
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '700',
     textAlign: 'right',
     writingDirection: 'rtl',
@@ -886,6 +895,7 @@ const styles = StyleSheet.create({
     width: 1,
     height: 24,
     backgroundColor: '#E5E7EB',
+    marginHorizontal: 10,
   },
   iconCircle: {
     width: 32,
@@ -896,6 +906,11 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(94, 63, 45, 0.15)',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  iconCircleCompact: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
   },
   locationRow: {
     flexDirection: 'row-reverse',
@@ -918,7 +933,7 @@ const styles = StyleSheet.create({
     marginTop: 6,
     paddingTop: 8,
     paddingBottom: 8,
-    paddingHorizontal: 12,
+    paddingHorizontal: 16,
     borderTopWidth: 1,
     borderTopColor: '#E5E7EB',
     alignItems: 'center',
@@ -926,8 +941,8 @@ const styles = StyleSheet.create({
   statsRow: {
     flexDirection: 'row-reverse',
     alignItems: 'center',
-    justifyContent: 'space-evenly',
-    gap: 8,
+    justifyContent: 'space-between',
+    gap: 12,
     width: '100%',
   },
   stat: {
@@ -939,7 +954,7 @@ const styles = StyleSheet.create({
   },
   statText: {
     color: '#6B7280',
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '700',
     textAlign: 'right',
     writingDirection: 'rtl',
