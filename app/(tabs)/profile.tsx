@@ -17,9 +17,8 @@ import {
 import { useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { LogOut, Edit, Save, X, Plus, MapPin, Inbox, Trash2, Settings, ClipboardList, Building2, Calendar } from 'lucide-react-native';
+import { LogOut, Edit, Save, X, Plus, MapPin, Inbox, Trash2, Settings, ClipboardList, Building2, Calendar, Camera, Image as ImageIcon } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Feather } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { MotiPressable } from 'moti/interactions';
@@ -30,10 +29,9 @@ import { useApartmentStore } from '@/stores/apartmentStore';
 import { User, Apartment, UserSurveyResponse } from '@/types/database';
 
 
-type FeatherIconName = keyof typeof Feather.glyphMap;
 type AvatarFabItem = {
   id: 'camera' | 'library';
-  icon: FeatherIconName;
+  icon: React.ComponentType<{ size?: number; color?: string }>;
   bg: string;
   accessibilityLabel: string;
 };
@@ -53,10 +51,10 @@ function AvatarPhotoFab({
 
   const menu: AvatarFabItem[] = useMemo(() => {
     const items: AvatarFabItem[] = [
-      { id: 'library', icon: 'image', bg: '#000000', accessibilityLabel: 'בחר תמונה מהגלריה' },
+      { id: 'library', icon: ImageIcon, bg: '#000000', accessibilityLabel: 'בחר תמונה מהגלריה' },
     ];
     if (showCamera) {
-      items.unshift({ id: 'camera', icon: 'camera', bg: '#000000', accessibilityLabel: 'צלם תמונה' });
+      items.unshift({ id: 'camera', icon: Camera, bg: '#000000', accessibilityLabel: 'צלם תמונה' });
     }
     return items;
   }, [showCamera]);
@@ -116,7 +114,10 @@ function AvatarPhotoFab({
                 elevation: 8,
               }}
             >
-              <Feather name={item.icon} size={iconSize} color="#FFFFFF" />
+              {(() => {
+                const Icon = item.icon;
+                return <Icon size={iconSize} color="#FFFFFF" />;
+              })()}
             </MotiPressable>
           );
         })}
@@ -139,7 +140,7 @@ function AvatarPhotoFab({
           justifyContent: 'center',
         }}
       >
-        <Feather name="x" size={iconSize} color="#5e3f2d" />
+        <X size={iconSize} color="#5e3f2d" />
       </MotiPressable>
     </View>
   );
@@ -149,6 +150,7 @@ export default function ProfileScreen() {
   const router = useRouter();
   const { user, setUser } = useAuthStore();
   const apartments = useApartmentStore((state) => state.apartments);
+  const removeApartmentFromStore = useApartmentStore((state) => state.removeApartment);
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
 
@@ -160,6 +162,7 @@ export default function ProfileScreen() {
   const [isDeleting, setIsDeleting] = useState(false);
   const [leavingGroupId, setLeavingGroupId] = useState<string | null>(null);
   const [leavingApartmentId, setLeavingApartmentId] = useState<string | null>(null);
+  const [deletingOwnedApartmentId, setDeletingOwnedApartmentId] = useState<string | null>(null);
   const [aptMembers, setAptMembers] = useState<Record<string, User[]>>({});
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);
   const [isDeletingImage, setIsDeletingImage] = useState(false);
@@ -170,6 +173,43 @@ export default function ProfileScreen() {
   >([]);
   const [surveyResponse, setSurveyResponse] = useState<UserSurveyResponse | null>(null);
   const ignoreNextGalleryPressRef = useRef(false);
+
+  const ownedApartments = useMemo(() => {
+    const uid = (user as any)?.id as string | undefined;
+    if (!uid) return [];
+    return userApartments.filter((a: any) => String(a?.owner_id || '') === String(uid));
+  }, [userApartments, user]);
+
+  const openAddPartnersFromProfile = async () => {
+    const owned = ownedApartments;
+    if (!owned.length) return;
+
+    const go = (apt: any) => {
+      const id = apt?.id;
+      if (!id) return;
+      router.push({ pathname: '/apartment/[id]', params: { id, openAdd: '1', returnTo: '/(tabs)/profile' } } as any);
+    };
+
+    if (owned.length === 1) {
+      go(owned[0] as any);
+      return;
+    }
+
+    // Multiple owned apartments: ask which one to invite partners to (native). On web fallback to first.
+    if (Platform.OS === 'web') {
+      go(owned[0] as any);
+      return;
+    }
+
+    const options = owned.slice(0, 6).map((apt: any) => ({
+      text: String(apt?.title || 'דירה'),
+      onPress: () => go(apt),
+    }));
+    Alert.alert('לאיזו דירה להוסיף שותפים?', 'בחר/י דירה:', [
+      { text: 'ביטול', style: 'cancel' },
+      ...options,
+    ]);
+  };
 
   const surveySheetMaxHeight = useMemo(() => {
     const hardMax = Math.max(420, Math.round(windowHeight * 0.88));
@@ -531,6 +571,57 @@ export default function ProfileScreen() {
       Alert.alert('שגיאה', e?.message || 'לא ניתן לעזוב את הדירה כעת');
     } finally {
       setLeavingApartmentId(null);
+    }
+  };
+
+  const confirmDeleteOwnedApartment = async (apt: Apartment) => {
+    if (!user?.id || !apt?.id) return;
+    if (deletingOwnedApartmentId) return;
+
+    const isOwner = String((apt as any)?.owner_id || '') === String(user.id);
+    if (!isOwner) {
+      Alert.alert('שגיאה', 'רק בעל/ת הדירה יכול/ה למחוק את הדירה');
+      return;
+    }
+
+    try {
+      const aptTitle = String((apt as any)?.title || 'הדירה');
+      const shouldProceed =
+        Platform.OS === 'web'
+          ? (typeof confirm === 'function'
+              ? confirm(`למחוק את "${aptTitle}"? פעולה זו אינה ניתנת לשחזור.`)
+              : true)
+          : await new Promise<boolean>((resolve) => {
+              Alert.alert('מחיקת דירה', `למחוק את "${aptTitle}"? פעולה זו אינה ניתנת לשחזור.`, [
+                { text: 'ביטול', style: 'cancel', onPress: () => resolve(false) },
+                { text: 'מחק', style: 'destructive', onPress: () => resolve(true) },
+              ]);
+            });
+      if (!shouldProceed) return;
+
+      setDeletingOwnedApartmentId(apt.id);
+
+      // Security: scope the delete by both id and owner_id.
+      const { error } = await supabase.from('apartments').delete().eq('id', apt.id).eq('owner_id', user.id);
+      if (error) throw error;
+
+      // Update local UI immediately.
+      setUserApartments((prev) => prev.filter((a) => String(a.id) !== String(apt.id)));
+      setAptMembers((prev) => {
+        const next = { ...prev };
+        delete next[apt.id];
+        return next;
+      });
+      removeApartmentFromStore(apt.id);
+
+      Alert.alert('נמחק', 'הדירה נמחקה בהצלחה.');
+
+      // Re-fetch to ensure all profile-derived state is consistent.
+      fetchProfile();
+    } catch (e: any) {
+      Alert.alert('שגיאה', e?.message || 'לא ניתן למחוק את הדירה כעת');
+    } finally {
+      setDeletingOwnedApartmentId(null);
     }
   };
 
@@ -1245,32 +1336,34 @@ export default function ProfileScreen() {
         )}
 
         {/* Shared profile (if any) */}
-        {sharedGroups.length > 0 && (
-          <View style={styles.sectionDark}>
-            {sharedGroups.map((g) => (
+        <View style={styles.sectionDark}>
+          {sharedGroups.length > 0 ? (
+            sharedGroups.map((g) => (
               <View key={g.id} style={styles.sharedCard}>
                 <View style={styles.sharedCardHeaderRow}>
                   <Text style={styles.sharedCardTitle} numberOfLines={1}>
                     {(g.name || 'פרופיל משותף').toString()}
                   </Text>
-                  <TouchableOpacity
-                    style={[
-                      styles.sectionActionPill,
-                      styles.sectionActionPillDanger,
-                      leavingGroupId === g.id ? { opacity: 0.7 } : null,
-                    ]}
-                    activeOpacity={0.9}
-                    onPress={() => confirmLeaveGroup(g.id)}
-                    disabled={!!leavingGroupId}
-                    accessibilityRole="button"
-                    accessibilityLabel="עזוב קבוצה"
-                  >
-                    {leavingGroupId === g.id ? (
-                      <ActivityIndicator size="small" color="#DC2626" />
-                    ) : (
-                      <Text style={styles.sectionActionPillTextDanger}>עזוב/י</Text>
-                    )}
-                  </TouchableOpacity>
+                  <View style={styles.sharedHeaderActions}>
+                    <TouchableOpacity
+                      style={[
+                        styles.sectionActionPill,
+                        styles.sectionActionPillDanger,
+                        leavingGroupId === g.id ? { opacity: 0.7 } : null,
+                      ]}
+                      activeOpacity={0.9}
+                      onPress={() => confirmLeaveGroup(g.id)}
+                      disabled={!!leavingGroupId}
+                      accessibilityRole="button"
+                      accessibilityLabel="עזוב קבוצה"
+                    >
+                      {leavingGroupId === g.id ? (
+                        <ActivityIndicator size="small" color="#DC2626" />
+                      ) : (
+                        <Text style={styles.sectionActionPillTextDanger}>עזוב/י</Text>
+                      )}
+                    </TouchableOpacity>
+                  </View>
                 </View>
 
                 <View style={styles.sharedMembersGrid}>
@@ -1309,15 +1402,34 @@ export default function ProfileScreen() {
                   ))}
                 </View>
               </View>
-            ))}
-          </View>
-        )}
+            ))
+          ) : (
+            <View style={styles.sharedCard}>
+              <View style={styles.sharedCardHeaderRow}>
+                <Text style={styles.sharedCardTitle} numberOfLines={1}>
+                  השותפים שלי
+                </Text>
+              </View>
+              <View style={styles.sectionEmptyWrap}>
+                <View style={styles.sectionEmptyIconPill}>
+                  <Inbox size={18} color="#5e3f2d" />
+                </View>
+                <Text style={styles.sectionEmptyTitle}>כרגע אין שותפים</Text>
+                <Text style={styles.sectionEmptyText}>כשתצטרף/י לקבוצה או תזמין/י שותפים, הם יופיעו כאן.</Text>
+              </View>
+            </View>
+          )}
+        </View>
 
         {/* My apartment(s) — match the card style used on other user's profile */}
         <View style={styles.sectionDark}>
           <View style={styles.apartmentsCard}>
             {(() => {
               const uid = (user as any)?.id as string | undefined;
+              const ownedApts =
+                !!uid
+                  ? userApartments.filter((a: any) => String(a?.owner_id || '') === String(uid))
+                  : [];
               const leaveableApts =
                 !!uid
                   ? userApartments.filter((a: any) => {
@@ -1330,40 +1442,126 @@ export default function ProfileScreen() {
               return (
                 <View style={styles.apartmentsHeaderRow}>
                   <Text style={styles.apartmentsHeaderTitle}>הדירה שלי</Text>
-                  {leaveableApts.length ? (
-                    <TouchableOpacity
-                      style={[styles.sectionActionPill, styles.sectionActionPillDanger, leavingApartmentId ? { opacity: 0.7 } : null]}
-                      activeOpacity={0.9}
-                      disabled={!!leavingApartmentId}
-                      onPress={async () => {
-                        if (leavingApartmentId) return;
-                        if (leaveableApts.length === 1) {
-                          confirmLeaveApartment(leaveableApts[0] as any);
-                          return;
-                        }
-                        // Multiple apartments: ask which one to leave (native). On web fallback to first.
-                        if (Platform.OS === 'web') {
-                          confirmLeaveApartment(leaveableApts[0] as any);
-                          return;
-                        }
-                        const options = leaveableApts.slice(0, 6).map((apt: any) => ({
-                          text: String(apt?.title || 'דירה'),
-                          onPress: () => confirmLeaveApartment(apt as any),
-                        }));
-                        Alert.alert('איזו דירה לעזוב?', 'בחר/י דירה לעזיבה:', [
-                          { text: 'ביטול', style: 'cancel' },
-                          ...options,
-                        ]);
-                      }}
-                      accessibilityRole="button"
-                      accessibilityLabel="עזוב דירה"
-                    >
-                      {leavingApartmentId ? (
-                        <ActivityIndicator size="small" color="#DC2626" />
-                      ) : (
-                        <Text style={styles.sectionActionPillTextDanger}>עזוב/י דירה</Text>
-                      )}
-                    </TouchableOpacity>
+                  {(ownedApts.length || leaveableApts.length) ? (
+                    <View style={styles.apartmentsHeaderActions}>
+                      {ownedApts.length ? (
+                        <TouchableOpacity
+                          style={[
+                            styles.deleteAptCircleBtn,
+                            deletingOwnedApartmentId ? { opacity: 0.75 } : null,
+                          ]}
+                          activeOpacity={0.9}
+                          disabled={!!deletingOwnedApartmentId}
+                          onPress={async () => {
+                            if (deletingOwnedApartmentId) return;
+                            if (ownedApts.length === 1) {
+                              confirmDeleteOwnedApartment(ownedApts[0] as any);
+                              return;
+                            }
+                            // Multiple owned apartments: ask which one to delete (native). On web fallback to first.
+                            if (Platform.OS === 'web') {
+                              confirmDeleteOwnedApartment(ownedApts[0] as any);
+                              return;
+                            }
+                            const options = ownedApts.slice(0, 6).map((apt: any) => ({
+                              text: String(apt?.title || 'דירה'),
+                              style: 'destructive' as const,
+                              onPress: () => confirmDeleteOwnedApartment(apt as any),
+                            }));
+                            Alert.alert('איזו דירה למחוק?', 'בחר/י דירה למחיקה:', [
+                              { text: 'ביטול', style: 'cancel' },
+                              ...options,
+                            ]);
+                          }}
+                          accessibilityRole="button"
+                          accessibilityLabel="מחק דירה"
+                        >
+                          {deletingOwnedApartmentId ? (
+                            <ActivityIndicator size="small" color="#DC2626" />
+                          ) : (
+                            <Trash2 size={18} color="#DC2626" />
+                          )}
+                        </TouchableOpacity>
+                      ) : null}
+
+                      {ownedApts.length ? (
+                        <TouchableOpacity
+                          style={styles.editAptCircleBtn}
+                          activeOpacity={0.9}
+                          onPress={async () => {
+                            if (ownedApts.length === 1) {
+                              const id = (ownedApts[0] as any)?.id;
+                              if (!id) return;
+                              router.push({ pathname: '/apartment/edit/[id]', params: { id } } as any);
+                              return;
+                            }
+                            // Multiple owned apartments: ask which one to edit (native). On web fallback to first.
+                            if (Platform.OS === 'web') {
+                              const id = (ownedApts[0] as any)?.id;
+                              if (!id) return;
+                              router.push({ pathname: '/apartment/edit/[id]', params: { id } } as any);
+                              return;
+                            }
+                            const options = ownedApts.slice(0, 6).map((apt: any) => ({
+                              text: String(apt?.title || 'דירה'),
+                              onPress: () => {
+                                const id = apt?.id;
+                                if (!id) return;
+                                router.push({ pathname: '/apartment/edit/[id]', params: { id } } as any);
+                              },
+                            }));
+                            Alert.alert('איזו דירה לערוך?', 'בחר/י דירה לעריכה:', [
+                              { text: 'ביטול', style: 'cancel' },
+                              ...options,
+                            ]);
+                          }}
+                          accessibilityRole="button"
+                          accessibilityLabel="ערוך דירה"
+                        >
+                          <Edit size={18} color="#5e3f2d" />
+                        </TouchableOpacity>
+                      ) : null}
+
+                      {leaveableApts.length ? (
+                        <TouchableOpacity
+                          style={[
+                            styles.sectionActionPill,
+                            styles.sectionActionPillDanger,
+                            leavingApartmentId ? { opacity: 0.7 } : null,
+                          ]}
+                          activeOpacity={0.9}
+                          disabled={!!leavingApartmentId}
+                          onPress={async () => {
+                            if (leavingApartmentId) return;
+                            if (leaveableApts.length === 1) {
+                              confirmLeaveApartment(leaveableApts[0] as any);
+                              return;
+                            }
+                            // Multiple apartments: ask which one to leave (native). On web fallback to first.
+                            if (Platform.OS === 'web') {
+                              confirmLeaveApartment(leaveableApts[0] as any);
+                              return;
+                            }
+                            const options = leaveableApts.slice(0, 6).map((apt: any) => ({
+                              text: String(apt?.title || 'דירה'),
+                              onPress: () => confirmLeaveApartment(apt as any),
+                            }));
+                            Alert.alert('איזו דירה לעזוב?', 'בחר/י דירה לעזיבה:', [
+                              { text: 'ביטול', style: 'cancel' },
+                              ...options,
+                            ]);
+                          }}
+                          accessibilityRole="button"
+                          accessibilityLabel="עזוב דירה"
+                        >
+                          {leavingApartmentId ? (
+                            <ActivityIndicator size="small" color="#DC2626" />
+                          ) : (
+                            <Text style={styles.sectionActionPillTextDanger}>עזוב/י דירה</Text>
+                          )}
+                        </TouchableOpacity>
+                      ) : null}
+                    </View>
                   ) : null}
                 </View>
               );
@@ -2270,6 +2468,49 @@ const styles = StyleSheet.create({
     textAlign: 'right',
     flex: 1,
   },
+  apartmentsHeaderActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    // Force LTR so "row" maps to visual left-to-right even when parent is row-reverse (RTL screens).
+    direction: 'ltr',
+  },
+  editAptCircleBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(94,63,45,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(94,63,45,0.16)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000000',
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 5 },
+    elevation: 2,
+    ...(Platform.OS === 'web'
+      ? ({ boxShadow: '0 10px 22px rgba(0,0,0,0.07)' } as any)
+      : null),
+  },
+  deleteAptCircleBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(220,38,38,0.10)',
+    borderWidth: 1,
+    borderColor: 'rgba(220,38,38,0.22)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000000',
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 5 },
+    elevation: 3,
+    ...(Platform.OS === 'web'
+      ? ({ boxShadow: '0 10px 22px rgba(0,0,0,0.08)' } as any)
+      : null),
+  },
   apartmentsHeaderTag: {
     paddingHorizontal: 12,
     paddingVertical: 8,
@@ -2774,7 +3015,26 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 10,
-    marginBottom: 10,
+    paddingBottom: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#EEF2F7',
+  },
+  sharedHeaderActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    // Force LTR so "row" maps to visual left-to-right even when the screen is RTL.
+    direction: 'ltr',
+  },
+  sharedAddCircleBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: 'rgba(94,63,45,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(94,63,45,0.16)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   sharedCardTitle: {
     color: '#111827',
@@ -2835,6 +3095,7 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 10,
     justifyContent: 'flex-start',
+    paddingTop: 10,
   },
   sharedMemberTile: {
     width: '31%',

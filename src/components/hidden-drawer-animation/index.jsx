@@ -1,7 +1,6 @@
 /*
     Inspiration: https://dribbble.com/shots/6558740-Add-Button-Interaction
 */
-import { Feather } from "@expo/vector-icons";
 import { MotiImage, MotiText, MotiView } from "moti";
 import { useState } from "react";
 import {
@@ -13,6 +12,7 @@ import {
   View,
 } from "react-native";
 import { Easing } from "react-native-reanimated";
+import { Camera, Settings, Plus } from "lucide-react-native";
 const { width } = Dimensions.get("screen");
 
 const _spacing = 20;
@@ -72,12 +72,7 @@ export default function AddButtonDrawer() {
                   alignItems: "center",
                   marginTop: _spacing,
                 }}>
-                <Feather
-                  name='camera'
-                  size={24}
-                  color='#fff'
-                  style={{ opacity: 0.5 }}
-                />
+                <Camera size={24} color='#fff' style={{ opacity: 0.5 }} />
               </View>
             </Pressable>
             <Pressable
@@ -94,12 +89,7 @@ export default function AddButtonDrawer() {
                   alignItems: "center",
                   marginTop: _spacing,
                 }}>
-                <Feather
-                  name='settings'
-                  size={24}
-                  color='#fff'
-                  style={{ opacity: 0.5 }}
-                />
+                <Settings size={24} color='#fff' style={{ opacity: 0.5 }} />
               </View>
             </Pressable>
           </View>
@@ -202,7 +192,7 @@ export default function AddButtonDrawer() {
                 right: _spacing,
                 bottom: _spacing,
               }}>
-              <Feather name='plus' size={24} color='#fff' />
+              <Plus size={24} color='#fff' />
             </MotiView>
           </>
         </TouchableOpacity>

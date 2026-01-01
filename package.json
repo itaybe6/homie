@@ -13,7 +13,7 @@
     "@animatereactnative/marquee": "^0.5.2",
     "@animatereactnative/stagger": "^0.3.0",
     "@expo-google-fonts/anonymous-pro": "^0.2.3",
-    "@expo/vector-icons": "^15.0.2",
+    "@expo/vector-icons": "^15.0.3",
     "@faker-js/faker": "^9.2.0",
     "@lucide/lab": "^0.1.2",
     "@react-native-async-storage/async-storage": "2.2.0",

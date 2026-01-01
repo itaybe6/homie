@@ -51,6 +51,7 @@ import {
   PawPrint,
   ArrowUpDown,
   Info,
+  Key,
 } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { supabase } from '@/lib/supabase';
@@ -68,11 +69,12 @@ import { buildCompatSurvey } from '@/lib/compatSurvey';
 import SwipeBackGesture from '@/components/SwipeBackGesture';
 import FavoriteHeartButton from '@/components/FavoriteHeartButton';
 import { ShareMenuFab } from '@/components/ShareMenuFab';
+import { KeyFabPanel } from '@/components/KeyFabPanel';
 
 export default function ApartmentDetailsScreen() {
   const router = useRouter();
   const navigation = useNavigation();
-  const { id, returnTo } = useLocalSearchParams();
+  const { id, returnTo, openAdd } = useLocalSearchParams();
   const { user } = useAuthStore();
   const removeApartment = useApartmentStore((state) => state.removeApartment);
 
@@ -109,8 +111,11 @@ export default function ApartmentDetailsScreen() {
     message: '',
   });
   const galleryRef = useRef<ScrollView>(null);
+  const didAutoOpenAddRef = useRef(false);
   const screenWidth = Dimensions.get('window').width;
   const insets = useSafeAreaInsets();
+  const [ctaHeight, setCtaHeight] = useState(120);
+  const [isKeyPanelOpen, setIsKeyPanelOpen] = useState(false);
   const [isViewerOpen, setViewerOpen] = useState(false);
   const [viewerIndex, setViewerIndex] = useState(0);
   const mapboxToken = process.env.EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN as string | undefined;
@@ -419,6 +424,22 @@ export default function ApartmentDetailsScreen() {
       },
     ]);
   };
+
+  // If navigated here with openAdd=1 (from Profile), auto-open the "Add partner" modal once.
+  useEffect(() => {
+    if (didAutoOpenAddRef.current) return;
+    const openAddStr = Array.isArray(openAdd) ? openAdd[0] : openAdd;
+    const shouldOpen = String(openAddStr || '').trim() === '1';
+    if (!shouldOpen) return;
+    if (!user?.id || !apartment) return;
+    const isOwner = String((apartment as any)?.owner_id || '') === String(user.id);
+    if (!isOwner) return;
+
+    didAutoOpenAddRef.current = true;
+    // Defined later in the file; safe because this effect only runs when apartment is loaded.
+    openAddPartnerModal();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openAdd, apartment, user?.id]);
 
   if (isLoading) {
     return (
@@ -902,7 +923,7 @@ export default function ApartmentDetailsScreen() {
     );
   })();
 
-  const openAddPartnerModal = async () => {
+  async function openAddPartnerModal() {
     if (!apartment) return;
     try {
       setIsAdding(true);
@@ -999,7 +1020,7 @@ export default function ApartmentDetailsScreen() {
     } finally {
       setIsAdding(false);
     }
-  };
+  }
 
   const handleAddPartner = async (partnerId: string) => {
     if (!apartment || !user?.id) return;
@@ -1231,7 +1252,8 @@ export default function ApartmentDetailsScreen() {
         {isOwner ? <StatusBar translucent backgroundColor="transparent" style="light" /> : null}
         <ScrollView
           contentContainerStyle={{
-            paddingBottom: (insets.bottom || 0) + 24,
+            // Reserve space for the sticky bottom CTA so content doesn't hide behind it
+            paddingBottom: ctaHeight + 24,
             paddingTop: 0,
             backgroundColor: '#FAFAFA',
           }}
@@ -1742,81 +1764,105 @@ export default function ApartmentDetailsScreen() {
             );
           })()}
 
-          {/* Availability card pinned at the bottom of the content (not floating) */}
-          <View style={{ paddingBottom: (insets.bottom || 0) + 8 }}>
-            <View style={styles.priceCard}>
-              <View style={styles.priceRight}>
-                <View style={[styles.statusChip, hasRequestedJoin ? styles.statusChipPending : styles.statusChipGreen]}>
-                  <Text
-                    style={[styles.statusChipText, hasRequestedJoin ? styles.statusChipTextPending : styles.statusChipTextGreen]}
-                    numberOfLines={1}
-                    ellipsizeMode="clip"
-                  >
-                    {hasRequestedJoin ? 'מחכים לאישור של בעל הדירה' : 'הגישו בקשה והצטרפו לדירה'}
-                  </Text>
-                </View>
-              </View>
-              <TouchableOpacity
-                activeOpacity={0.9}
-                onPress={() => {
-                  if (hasRequestedJoin) {
-                    // On web, RN Alert may be a no-op; use our custom confirm modal.
-                    if (Platform.OS === 'web') {
-                      setConfirmState({
-                        visible: true,
-                        title: 'ביטול בקשה',
-                        message: 'לבטל את הבקשה להצטרף לדירה?',
-                        confirmLabel: 'בטל בקשה',
-                        cancelLabel: 'חזור',
-                        onConfirm: cancelJoinRequest,
-                      });
-                    } else {
-                      Alert.alert('ביטול בקשה', 'לבטל את הבקשה להצטרף לדירה?', [
-                        { text: 'חזור', style: 'cancel' },
-                        { text: 'בטל בקשה', style: 'destructive', onPress: cancelJoinRequest },
-                      ]);
-                    }
-                    return;
-                  }
-                  handleRequestJoin();
-                }}
-                disabled={
-                  isOwner ||
-                  isMember ||
-                  isRequestingJoin ||
-                  // Only block "submit" if already assigned elsewhere; allow cancel regardless.
-                  (!hasRequestedJoin && isAssignedAnywhere !== false)
-                }
-                style={[
-                  styles.availabilityBtn,
-                  (isOwner ||
-                    isMember ||
-                    isRequestingJoin ||
-                    (!hasRequestedJoin && isAssignedAnywhere !== false))
-                    ? { opacity: 0.6 }
-                    : null,
-                ]}
-              >
-                <Text style={styles.availabilityBtnText}>
-                  {isOwner || isMember
-                    ? 'בדוק זמינות'
-                    : !hasRequestedJoin && isAssignedAnywhere !== false
-                      ? 'לא זמין'
-                      : isRequestingJoin
-                        ? hasRequestedJoin
-                          ? 'מבטל...'
-                          : 'שולח...'
-                        : hasRequestedJoin
-                          ? 'בטל בקשה'
-                          : 'הגש בקשה'}
-                </Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-
         </View>
       </ScrollView>
-      {/* Join request is handled via the main CTA card at the bottom of the content */}
+      {/* Sticky bottom CTA ("הגש בקשה") */}
+      <View
+        onLayout={(e) => {
+          const next = Math.ceil(e.nativeEvent.layout.height);
+          setCtaHeight((prev) => (prev === next ? prev : next));
+        }}
+        style={[
+          styles.stickyCtaWrap,
+          {
+            paddingTop: 8,
+            paddingBottom: (insets.bottom || 0) + 8,
+            position: Platform.OS === 'web' ? ('fixed' as const) : ('absolute' as const),
+          },
+        ]}
+        pointerEvents="box-none"
+      >
+        <View style={[styles.priceCard, styles.stickyCtaCard]}>
+          <View style={styles.priceRight}>
+            <Text style={styles.ctaTitle}>מצטרפים לדירה?</Text>
+            <Text style={styles.ctaSubtitle} numberOfLines={2} ellipsizeMode="tail">
+              בקשו סיסמה מבעל הדירה, או הזינו סיסמה כדי להצטרף מיד.
+            </Text>
+          </View>
+          <View style={styles.ctaActionsRow}>
+            <TouchableOpacity
+              style={styles.keyIconBtn}
+              activeOpacity={0.9}
+              onPress={() => {
+                setIsKeyPanelOpen(true);
+              }}
+              accessibilityRole="button"
+              accessibilityLabel="מפתח"
+            >
+              <Key size={18} color="#5e3f2d" />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.availabilityBtn}
+              activeOpacity={0.9}
+              onPress={() => {
+                if (hasRequestedJoin) {
+                  // On web, RN Alert may be a no-op; use our custom confirm modal.
+                  if (Platform.OS === 'web') {
+                    setConfirmState({
+                      visible: true,
+                      title: 'ביטול בקשה',
+                      message: 'לבטל את הבקשה להצטרף לדירה?',
+                      confirmLabel: 'בטל בקשה',
+                      cancelLabel: 'חזור',
+                      onConfirm: cancelJoinRequest,
+                    });
+                  } else {
+                    Alert.alert('ביטול בקשה', 'לבטל את הבקשה להצטרף לדירה?', [
+                      { text: 'חזור', style: 'cancel' },
+                      { text: 'בטל בקשה', style: 'destructive', onPress: cancelJoinRequest },
+                    ]);
+                  }
+                  return;
+                }
+                handleRequestJoin();
+              }}
+              disabled={
+                isOwner ||
+                isMember ||
+                isRequestingJoin ||
+                // Only block "submit" if already assigned elsewhere; allow cancel regardless.
+                (!hasRequestedJoin && isAssignedAnywhere !== false)
+              }
+            >
+              <Text style={styles.availabilityBtnText}>
+                {isOwner || isMember
+                  ? 'בדוק זמינות'
+                  : !hasRequestedJoin && isAssignedAnywhere !== false
+                    ? 'לא זמין'
+                    : isRequestingJoin
+                      ? hasRequestedJoin
+                        ? 'מבטל...'
+                        : 'שולח...'
+                      : hasRequestedJoin
+                        ? 'בטל בקשה'
+                        : 'הגש בקשה'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+
+      {/* Key button animated panel */}
+      <KeyFabPanel
+        isOpen={isKeyPanelOpen}
+        onClose={() => setIsKeyPanelOpen(false)}
+        onEnterPassword={() => {
+          setIsKeyPanelOpen(false);
+          router.push({ pathname: '/apartment/join-passcode', params: { apartmentId: String(id || '') } });
+        }}
+        bottomOffset={ctaHeight + 14}
+      />
 
       {/* Members Modal */}
       <Modal visible={isMembersOpen} animationType="slide" transparent onRequestClose={() => setIsMembersOpen(false)}>
@@ -2223,7 +2269,45 @@ function ZoomableImage({ uri }: { uri: string }) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    position: 'relative',
     backgroundColor: '#FAFAFA',
+  },
+  stickyCtaWrap: {
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 50,
+    elevation: 18,
+    paddingHorizontal: 0,
+    paddingTop: 0,
+    backgroundColor: '#FFFFFF',
+    borderTopWidth: 0,
+    borderTopColor: 'transparent',
+    ...(Platform.OS === 'ios'
+      ? {
+          shadowColor: '#000',
+          shadowOpacity: 0.12,
+          shadowRadius: 14,
+          // Shadow upwards to separate from content above
+          shadowOffset: { width: 0, height: -6 },
+        }
+      : null),
+  },
+  stickyCtaCard: {
+    // Make the bottom CTA feel like a full-width bar (not a "card inside a card")
+    borderRadius: 0,
+    marginBottom: 0,
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    ...(Platform.OS === 'ios'
+      ? {
+          shadowColor: 'transparent',
+          shadowOpacity: 0,
+          shadowRadius: 0,
+          shadowOffset: { width: 0, height: 0 },
+        }
+      : { elevation: 0 }),
   },
   addAvatar: {
     width: 44,
@@ -2675,6 +2759,26 @@ const styles = StyleSheet.create({
       : { elevation: 4 }),
   },
   priceRight: { flex: 1, alignItems: 'flex-end', gap: 6 },
+  ctaTitle: {
+    color: '#111827',
+    fontSize: 17,
+    fontWeight: '900',
+    letterSpacing: -0.2,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    lineHeight: 22,
+    includeFontPadding: false,
+  },
+  ctaSubtitle: {
+    color: '#6B7280',
+    fontSize: 12,
+    fontWeight: '700',
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    lineHeight: 16,
+    includeFontPadding: false,
+    maxWidth: 260,
+  },
   priceValue: { color: '#0B1220', fontSize: 20, fontWeight: '800' },
   currencySign: { color: '#0B1220', fontSize: 18, fontWeight: '800' },
   pricePerUnit: { color: '#6B7280', fontSize: 13, marginTop: 2, marginBottom: 6 },
@@ -2682,7 +2786,8 @@ const styles = StyleSheet.create({
   statusChip: {
     borderRadius: 14,
     paddingHorizontal: 10,
-    paddingVertical: 8,
+    paddingVertical: 6,
+    justifyContent: 'center',
     flexShrink: 1,
     maxWidth: 260,
   },
@@ -2723,7 +2828,32 @@ const styles = StyleSheet.create({
         }
       : { elevation: 6 }),
   },
+  ctaActionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    gap: 12,
+  },
   availabilityBtnText: { color: '#FFFFFF', fontSize: 13, fontWeight: '900', includeFontPadding: false, lineHeight: 16 },
+  keyIconBtn: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: 'center',
+    justifyContent: 'center',
+    // Match the "location icon pill" styling used in the map/address area
+    backgroundColor: 'rgba(94,63,45,0.10)',
+    borderWidth: 1,
+    borderColor: 'rgba(94,63,45,0.14)',
+    ...(Platform.OS === 'ios'
+      ? {
+          shadowColor: 'transparent',
+          shadowOpacity: 0,
+          shadowRadius: 0,
+          shadowOffset: { width: 0, height: 0 },
+        }
+      : { elevation: 0 }),
+  },
   section: {
     marginTop: 12,
     marginBottom: 16,

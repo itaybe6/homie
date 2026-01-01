@@ -1,8 +1,8 @@
-import { Entypo } from '@expo/vector-icons';
 import { MotiView } from 'moti';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { StyleProp, ViewStyle } from 'react-native';
 import { Pressable, View } from 'react-native';
+import { Heart } from 'lucide-react-native';
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/authStore';
 
@@ -176,7 +176,7 @@ export default function FavoriteHeartButton({
               damping: 12,
             }}
           >
-            <Entypo name="heart" size={icon * 2.2} color={activeColor} />
+            <Heart size={icon * 2.2} color={activeColor} fill={activeColor} />
           </MotiView>
 
           {/* Outline heart (inactive state) */}
@@ -193,7 +193,7 @@ export default function FavoriteHeartButton({
             }}
             style={{ position: 'absolute' }}
           >
-            <Entypo name="heart-outlined" size={icon} color={inactiveColor} />
+            <Heart size={icon} color={inactiveColor} fill="transparent" />
           </MotiView>
 
           {/* Solid heart (active state) */}
@@ -211,7 +211,7 @@ export default function FavoriteHeartButton({
             }}
             style={{ position: 'absolute' }}
           >
-            <Entypo name="heart" size={icon} color="#fff" />
+            <Heart size={icon} color="#fff" fill="#fff" />
           </MotiView>
 
           {/* Ring pop */}

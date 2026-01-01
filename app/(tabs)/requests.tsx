@@ -14,7 +14,7 @@ import {
   Pressable,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { Inbox, Send, Filter, Home, Users, UserPlus2, UserPlus, Sparkles } from 'lucide-react-native';
+import { Inbox, Send, Filter, Home, Users, UserPlus2, UserPlus, Sparkles, MessageCircle } from 'lucide-react-native';
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/authStore';
 import { Apartment, User } from '@/types/database';
@@ -65,7 +65,7 @@ export default function RequestsScreen() {
 
   const DEFAULT_AVATAR = 'https://cdn-icons-png.flaticon.com/512/847/847969.png';
   const APT_PLACEHOLDER = 'https://images.pexels.com/photos/1457842/pexels-photo-1457842.jpeg';
-  const WHATSAPP_ICON = 'https://upload.wikimedia.org/wikipedia/commons/5/5e/WhatsApp_Logo_1.png';
+  // Use a vector icon to ensure it always renders (remote PNGs can fail/tint inconsistently)
 
   const mapMatchStatus = (status: string | null | undefined): UnifiedItem['status'] => {
     const normalized = (status || '').trim();
@@ -1413,6 +1413,10 @@ export default function RequestsScreen() {
             const aptImage = apt ? (Array.isArray(apt.image_urls) && (apt.image_urls as any[]).length ? (apt.image_urls as any[])[0] : APT_PLACEHOLDER) : null;
             const ownerUser = apt && (apt as any).owner_id ? ownersById[(apt as any).owner_id as string] : undefined;
             const ownerPhone = ownerUser?.phone as string | undefined;
+            const showApprovedBadge =
+              item.status === 'APPROVED' &&
+              // Avoid duplicating the existing sender-view approved tags row for JOIN_APT
+              !(!incoming && item.kind === 'APT' && (item.type === 'JOIN_APT' || !item.type));
             return (
               <Animated.View style={{ opacity, transform: [{ scale }] }}>
                 <View style={styles.cardShadow}>
@@ -1527,6 +1531,34 @@ export default function RequestsScreen() {
                         <Text style={styles.aptCity}>{apt.city}</Text>
                       </View>
                     )}
+                    {showApprovedBadge ? (
+                      <View style={styles.approvedRow}>
+                        {incoming &&
+                        item.kind === 'APT' &&
+                        item.status === 'APPROVED' &&
+                        (item.type === 'JOIN_APT' || !item.type) &&
+                        groupMembers.length === 0 &&
+                        !!otherUser?.phone ? (
+                          <TouchableOpacity
+                            style={styles.whatsappBtnPill}
+                            activeOpacity={0.85}
+                            accessibilityLabel="וואטסאפ"
+                            onPress={() =>
+                              openWhatsApp(
+                                otherUser.phone as string,
+                                `היי${otherUser?.full_name ? ` ${otherUser.full_name.split(' ')[0]}` : ''}, ראיתי שהתעניינת לאחרונה בדירה שלי${apt?.title ? `: ${apt.title}` : ''}${apt?.city ? ` (${apt.city})` : ''} ב-Homie. הבקשה אושרה, אשמח לתאם שיחה או צפייה.`
+                              )
+                            }
+                          >
+                            <MessageCircle size={14} color="#FFFFFF" />
+                            <Text style={styles.whatsappBtnText}>וואטסאפ</Text>
+                          </TouchableOpacity>
+                        ) : null}
+                        <View style={styles.approvedInlinePill}>
+                          <Text style={styles.approvedInlinePillText}>מאושרת</Text>
+                        </View>
+                      </View>
+                    ) : null}
                     {/* Unified user display: avatar + name under the title (no side avatar). */}
                     {item.kind === 'MATCH' && !isGroupMatch ? null : item.kind !== 'GROUP' && groupMembersWithId.length ? (
                       <View style={styles.mergeProposersList}>
@@ -1638,147 +1670,31 @@ export default function RequestsScreen() {
                          If sender is a merged profile, show all members' phones; otherwise show a single phone. */}
                       {incoming && item.kind === 'APT' && item.status === 'APPROVED' && (item.type === 'JOIN_APT' || !item.type) && (
                         groupMembers.length > 0 ? (
-                          <View style={{ marginTop: 12, alignItems: 'flex-end', gap: 6 as any }}>
-                            <View
-                              style={{
-                                width: '100%',
-                                gap: 10 as any,
-                              }}
-                            >
+                          <View style={{ marginTop: 12, alignItems: 'flex-end', gap: 10 as any }}>
                               {groupMembers.map((m, idx) => {
                                 const firstName = (m.full_name || '').split(' ')[0] || '';
                                 return (
-                                  <View
-                                    key={idx}
-                                    style={{
-                                      width: '100%',
-                                      backgroundColor: 'rgba(34,197,94,0.08)',
-                                      borderRadius: 12,
-                                      borderWidth: 1,
-                                      borderColor: 'rgba(34,197,94,0.25)',
-                                      paddingVertical: 10,
-                                      paddingHorizontal: 10,
-                                    }}
-                                  >
-                                    <View
-                                      style={{
-                                        flexDirection: 'row-reverse',
-                                        alignItems: 'center',
-                                        justifyContent: 'space-between',
-                                        gap: 10 as any,
-                                      }}
+                                  m.phone ? (
+                                    <TouchableOpacity
+                                      key={idx}
+                                      style={styles.whatsappBtnPill}
+                                      activeOpacity={0.85}
+                                      accessibilityLabel={`וואטסאפ${firstName ? ` ל-${firstName}` : ''}`}
+                                      onPress={() =>
+                                        openWhatsApp(
+                                          m.phone as string,
+                                          `היי${firstName ? ` ${firstName}` : ''}, בקשתך להצטרף לדירה${apt?.title ? `: ${apt.title}` : ''}${apt?.city ? ` (${apt.city})` : ''} אושרה ב-Homie. אשמח לתאם שיחה/צפייה.`
+                                        )
+                                      }
                                     >
-                                      <View style={{ flex: 1, flexDirection: 'row-reverse', alignItems: 'center', gap: 10 as any }}>
-                                        <Image
-                                          source={{ uri: m.avatar_url || DEFAULT_AVATAR }}
-                                          style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: '#1F1F29', borderWidth: 2, borderColor: 'rgba(34,197,94,0.25)' }}
-                                        />
-                                        <View style={{ flex: 1, alignItems: 'flex-end' }}>
-                                          <Text style={{ color: '#0F172A', fontSize: 14, fontWeight: '800' }}>
-                                            {m.full_name}
-                                          </Text>
-                                          <Text style={{ color: '#475569', fontSize: 12, marginTop: 2 }}>
-                                            {m.phone || 'מספר לא זמין'}
-                                          </Text>
-                                        </View>
-                                      </View>
-
-                                      {m.phone ? (
-                                        <TouchableOpacity
-                                          style={{
-                                            flexDirection: 'row-reverse',
-                                            alignItems: 'center',
-                                            justifyContent: 'center',
-                                            gap: 6 as any,
-                                            backgroundColor: '#25D366',
-                                            paddingVertical: 8,
-                                            paddingHorizontal: 10,
-                                            borderRadius: 999,
-                                            alignSelf: 'flex-start',
-                                          }}
-                                          activeOpacity={0.85}
-                                          onPress={() =>
-                                            openWhatsApp(
-                                              m.phone as string,
-                                              `היי${firstName ? ` ${firstName}` : ''}, בקשתך להצטרף לדירה${apt?.title ? `: ${apt.title}` : ''}${apt?.city ? ` (${apt.city})` : ''} אושרה ב-Homie. אשמח לתאם שיחה/צפייה.`
-                                            )
-                                          }
-                                        >
-                                          <Image source={{ uri: WHATSAPP_ICON }} style={styles.whatsappIcon} />
-                                          <Text style={{ color: '#FFFFFF', fontSize: 13, fontWeight: '800' }}>וואטסאפ</Text>
-                                        </TouchableOpacity>
-                                      ) : null}
-                                    </View>
-                                  </View>
+                                      <MessageCircle size={14} color="#FFFFFF" />
+                                      <Text style={styles.whatsappBtnText}>וואטסאפ</Text>
+                                    </TouchableOpacity>
+                                  ) : null
                                 );
                               })}
-                            </View>
                           </View>
-                        ) : (
-                          <View style={{ marginTop: 12, alignItems: 'flex-end', gap: 6 as any }}>
-                            <View
-                              style={{
-                                width: '100%',
-                                backgroundColor: 'rgba(34,197,94,0.08)',
-                                borderRadius: 12,
-                                borderWidth: 1,
-                                borderColor: 'rgba(34,197,94,0.25)',
-                                paddingVertical: 10,
-                                paddingHorizontal: 10,
-                              }}
-                            >
-                              <View
-                                style={{
-                                  flexDirection: 'row-reverse',
-                                  alignItems: 'center',
-                                  justifyContent: 'space-between',
-                                  gap: 10 as any,
-                                }}
-                              >
-                                <View style={{ flex: 1, flexDirection: 'row-reverse', alignItems: 'center', gap: 10 as any }}>
-                                  <Image
-                                    source={{ uri: otherUser?.avatar_url || DEFAULT_AVATAR }}
-                                    style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: '#1F1F29', borderWidth: 2, borderColor: 'rgba(34,197,94,0.25)' }}
-                                  />
-                                  <View style={{ flex: 1, alignItems: 'flex-end' }}>
-                                    <Text style={{ color: '#0F172A', fontSize: 14, fontWeight: '800' }}>
-                                      {otherUser?.full_name || 'משתמש'}
-                                    </Text>
-                                    <Text style={{ color: '#475569', fontSize: 12, marginTop: 2 }}>
-                                      {otherUser?.phone || 'מספר לא זמין'}
-                                    </Text>
-                                  </View>
-                                </View>
-
-                                {otherUser?.phone ? (
-                                  <TouchableOpacity
-                                    style={{
-                                      flexDirection: 'row-reverse',
-                                      alignItems: 'center',
-                                      justifyContent: 'center',
-                                      gap: 6 as any,
-                                      backgroundColor: '#25D366',
-                                      paddingVertical: 8,
-                                      paddingHorizontal: 10,
-                                      borderRadius: 999,
-                                      alignSelf: 'flex-start',
-                                    }}
-                                    activeOpacity={0.85}
-                                    onPress={() =>
-                                      openWhatsApp(
-                                        otherUser.phone as string,
-                                        `היי${otherUser?.full_name ? ` ${otherUser.full_name.split(' ')[0]}` : ''}, ראיתי שהתעניינת לאחרונה בדירה שלי${apt?.title ? `: ${apt.title}` : ''}${apt?.city ? ` (${apt.city})` : ''} ב-Homie. הבקשה אושרה, אשמח לתאם שיחה או צפייה.`
-                                      )
-                                    }
-                                  >
-                                    <Image source={{ uri: WHATSAPP_ICON }} style={styles.whatsappIcon} />
-                                    <Text style={{ color: '#FFFFFF', fontSize: 13, fontWeight: '800' }}>וואטסאפ</Text>
-                                  </TouchableOpacity>
-                                ) : null}
-                              </View>
-                            </View>
-                          </View>
-                        )
+                        ) : null
                       )}
                       {/* Sender view: approved JOIN_APT owner details moved to modal ("פרטים נוספים") */}
                       {/* Sender view (sent): expose recipient phone and WhatsApp action once a MATCH is approved */}
@@ -2068,7 +1984,15 @@ export default function RequestsScreen() {
                       )}
                     </View>
                     {!!item.created_at ? (
-                      <Text style={[styles.cardMeta, styles.cardTime]}>{formatTimeAgoHe(item.created_at)}</Text>
+                      <Text
+                        style={[
+                          styles.cardMeta,
+                          styles.cardTime,
+                          item.status === 'APPROVED' && { marginTop: 6 },
+                        ]}
+                      >
+                        {formatTimeAgoHe(item.created_at)}
+                      </Text>
                     ) : null}
                   </View>
                   {/* Side avatar removed: unified avatar+name row(s) render under the title */}
@@ -2499,6 +2423,24 @@ const styles = StyleSheet.create({
     flexShrink: 1,
     alignSelf: 'stretch',
   },
+  approvedInlinePill: {
+    alignSelf: 'flex-end',
+    backgroundColor: 'rgba(34,197,94,0.18)',
+    borderWidth: 1,
+    borderColor: 'rgba(34,197,94,0.35)',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
+    minHeight: 28,
+    justifyContent: 'center',
+  },
+  approvedInlinePillText: {
+    color: '#16A34A',
+    fontSize: 11,
+    fontWeight: '900',
+    writingDirection: 'rtl',
+    lineHeight: 14,
+  },
   cardSub: {
     color: '#4B5563',
     fontSize: 14,
@@ -2772,9 +2714,32 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '800',
   },
-  whatsappIcon: {
-    width: 16,
-    height: 16,
+  whatsappBtnPill: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6 as any,
+    backgroundColor: '#25D366',
+    paddingVertical: 5,
+    paddingHorizontal: 10,
+    borderRadius: 999,
+    alignSelf: 'flex-start',
+    minHeight: 28,
+  },
+  whatsappBtnText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '800',
+    writingDirection: 'rtl',
+    lineHeight: 14,
+  },
+  approvedRow: {
+    marginTop: 8,
+    alignSelf: 'stretch',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 8 as any,
   },
   rejectBtnLight: {
     backgroundColor: '#FEF2F2',

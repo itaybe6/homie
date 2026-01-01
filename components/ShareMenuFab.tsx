@@ -1,17 +1,12 @@
 import { useMemo, useState } from 'react';
 import { Linking, Share, StyleProp, View, ViewStyle } from 'react-native';
-import { Feather, FontAwesome } from '@expo/vector-icons';
 import { MotiPressable } from 'moti/interactions';
-
-type FeatherIconName = keyof typeof Feather.glyphMap;
-type FontAwesomeIconName = keyof typeof FontAwesome.glyphMap;
+import { MessageCircle, Send, Share2, X } from 'lucide-react-native';
 
 type ShareFabItemId = 'whatsapp' | 'telegram' | 'share';
 type ShareFabItem = {
   id: ShareFabItemId;
-  icon:
-    | { set: 'feather'; name: FeatherIconName }
-    | { set: 'fontawesome'; name: FontAwesomeIconName };
+  icon: React.ComponentType<{ size?: number; color?: string }>;
   accessibilityLabel: string;
   color: string;
 };
@@ -44,19 +39,19 @@ export function ShareMenuFab({
     () => [
       {
         id: 'whatsapp',
-        icon: { set: 'fontawesome', name: 'whatsapp' },
+        icon: MessageCircle,
         accessibilityLabel: 'שתף בוואטסאפ',
         color: '#25D366',
       },
       {
         id: 'telegram',
-        icon: { set: 'fontawesome', name: 'telegram' },
+        icon: Send,
         accessibilityLabel: 'שתף בטלגרם',
         color: '#229ED9',
       },
       {
         id: 'share',
-        icon: { set: 'feather', name: 'share' },
+        icon: Share2,
         accessibilityLabel: 'שיתוף',
         color: '#F59E0B',
       },
@@ -111,6 +106,7 @@ export function ShareMenuFab({
       <View style={{ position: 'absolute', width: size, height: size }}>
         {menu.map((item, index) => {
           const angle = angles[index] ?? angles[1]!;
+          const Icon = item.icon;
           return (
             <MotiPressable
               key={item.id}
@@ -142,11 +138,7 @@ export function ShareMenuFab({
                 elevation: 10,
               }}
             >
-              {item.icon.set === 'fontawesome' ? (
-                <FontAwesome name={item.icon.name} size={iconSize} color={item.color} />
-              ) : (
-                <Feather name={item.icon.name} size={iconSize} color={item.color} />
-              )}
+              <Icon size={iconSize} color={item.color} />
             </MotiPressable>
           );
         })}
@@ -175,7 +167,7 @@ export function ShareMenuFab({
           mainButtonStyle,
         ]}
       >
-        <Feather name={isOpen ? 'x' : 'share-2'} size={iconSize} color="#111827" />
+        {isOpen ? <X size={iconSize} color="#111827" /> : <Share2 size={iconSize} color="#111827" />}
       </MotiPressable>
     </View>
   );
