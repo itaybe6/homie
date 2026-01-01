@@ -92,11 +92,18 @@ export function ShareMenuFab({
     }
   };
 
-  // Angles are picked to look good with 3 items.
-  // When anchored left, open inward (right+up); when anchored right, open inward (left+up).
-  const angles = anchor === 'left'
-    ? [Math.PI / 6, Math.PI / 3, Math.PI / 2.15]
-    : [Math.PI - Math.PI / 6, Math.PI - Math.PI / 3, Math.PI - Math.PI / 2.15];
+  // Compute evenly-spaced angles so spacing between items feels consistent.
+  // translateX uses sin(angle). Positive -> right, negative -> left.
+  // - anchored left: open inward (right + up)  => positive angles
+  // - anchored right: open inward (left + up)  => negative angles
+  const angles = useMemo(() => {
+    const start = Math.PI / 6; // ~30°
+    const end = Math.PI / 2.15; // ~83.7°
+    const count = Math.max(1, menu.length);
+    const step = count === 1 ? 0 : (end - start) / (count - 1);
+    const base = Array.from({ length: count }, (_, i) => start + step * i);
+    return anchor === 'left' ? base : base.map((a) => -a);
+  }, [anchor, menu.length]);
   const radius = size * radiusMultiplier;
 
   return (

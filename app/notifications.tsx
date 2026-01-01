@@ -342,17 +342,32 @@ export default function NotificationsScreen() {
               </View>
             }
             renderItem={({ item, index }) => {
-              // Approximated row height used for the scroll-based animation.
-              // Even if the item height varies a bit (due to description / buttons),
-              // the effect remains smooth and visually consistent.
-              const ITEM_SIZE = 124;
+              /**
+               * Scroll-based fade/scale:
+               * We only want items to start disappearing כשהם מתקרבים לחלק העליון (ליד ההדר),
+               * ולא “באמצע המסך” בזמן גלילה למטה.
+               *
+               * Using an approximate item height is still needed (index-based),
+               * but we keep the fade window small and near the top to avoid the mid-screen fade artifact.
+               */
+              const ITEM_SIZE = 156; // approx height incl. spacing; tuned to match actual card height better
+              const FADE_DISTANCE = 72; // px fade window
+              const FADE_START_OFFSET = 8; // start fading only once the card passes the top edge a bit
+
+              // Start fading only AFTER the item crosses the top of the list viewport.
+              // This avoids the "fade from mid-screen" effect and also keeps inputRange monotonic for index=0.
+              const fadeStart = ITEM_SIZE * index + FADE_START_OFFSET;
+              const fadeEnd = fadeStart + FADE_DISTANCE;
+
               const scale = scrollY.interpolate({
-                inputRange: [-1, 0, ITEM_SIZE * index, ITEM_SIZE * (index + 2)],
-                outputRange: [1, 1, 1, 0],
+                inputRange: [fadeStart, fadeEnd],
+                outputRange: [1, 0.96],
+                extrapolate: 'clamp',
               });
               const opacity = scrollY.interpolate({
-                inputRange: [-1, 0, ITEM_SIZE * index, ITEM_SIZE * (index + 1)],
-                outputRange: [1, 1, 1, 0],
+                inputRange: [fadeStart, fadeEnd],
+                outputRange: [1, 0],
+                extrapolate: 'clamp',
               });
 
               const sender = sendersById[item.sender_id];

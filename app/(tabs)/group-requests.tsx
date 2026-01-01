@@ -545,7 +545,6 @@ export default function GroupRequestsScreen() {
                         {otherUser.full_name}
                       </Text>
                     ) : null}
-                    <Text style={styles.cardMeta}>{new Date(item.created_at).toLocaleString()}</Text>
 
                     <View style={{ marginTop: 10, flexDirection: 'row-reverse', gap: 8 as any }}>
                       <StatusPill status={item.status} />
@@ -570,6 +569,9 @@ export default function GroupRequestsScreen() {
                         </View>
                       )}
                     </View>
+                    {!!item.created_at ? (
+                      <Text style={styles.cardMeta}>{new Date(item.created_at).toLocaleString()}</Text>
+                    ) : null}
                   </View>
 
                   <TouchableOpacity

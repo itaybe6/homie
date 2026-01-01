@@ -1285,15 +1285,13 @@ export default function ApartmentDetailsScreen() {
           {/* top overlay controls (fixed over the whole gallery) */}
           <View style={[styles.topControlsRow, isOwner ? { top: 70 } : null]}>
             <View style={styles.leftControls}>
-              <ShareMenuFab
-                message={`דירה ב-Homie: ${(apartment?.title || '').toString()} ${(apartment?.city || '').toString()}`.trim()}
-                size={36}
-                anchor="left"
-                menuOffsetY={40}
-                radiusMultiplier={2.1}
-                containerStyle={{ width: 36, height: 36 }}
-                mainButtonStyle={styles.circleBtnLight}
-              />
+              <TouchableOpacity
+                style={styles.circleBtnLight}
+                onPress={handleBack}
+                activeOpacity={0.9}
+              >
+                <ArrowLeft size={18} color="#111827" />
+              </TouchableOpacity>
               {isOwner ? (
                 <TouchableOpacity
                   style={[styles.circleBtnLight, (isAdding || isAddPartnerDisabled) ? { opacity: 0.55 } : null]}
@@ -1329,13 +1327,15 @@ export default function ApartmentDetailsScreen() {
                 </TouchableOpacity>
               ) : null}
             </View>
-            <TouchableOpacity
-              style={styles.circleBtnLight}
-              onPress={handleBack}
-              activeOpacity={0.9}
-            >
-              <ArrowRight size={18} color="#111827" />
-            </TouchableOpacity>
+            <ShareMenuFab
+              message={`דירה ב-Homie: ${(apartment?.title || '').toString()} ${(apartment?.city || '').toString()}`.trim()}
+              size={36}
+              anchor="right"
+              menuOffsetY={40}
+              radiusMultiplier={2.1}
+              containerStyle={{ width: 36, height: 36 }}
+              mainButtonStyle={styles.circleBtnLight}
+            />
           </View>
 
           {galleryImages.length > 1 ? (
@@ -1619,6 +1619,7 @@ export default function ApartmentDetailsScreen() {
                         center={aptGeo ? ([aptGeo.lng, aptGeo.lat] as const) : undefined}
                         zoom={aptGeo ? 16.5 : 11}
                         points={aptGeo ? aptMapPoints : { type: 'FeatureCollection', features: [] }}
+                        pointColor="#5e3f2d"
                       />
                     </View>
                     {/* City + address overlay (bottom-right) */}

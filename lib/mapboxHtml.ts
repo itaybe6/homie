@@ -17,6 +17,7 @@ export function buildMapboxHtml(params: {
   center?: MapboxCenter;
   zoom?: number;
   points?: MapboxFeatureCollection;
+  pointColor?: string;
 }): string {
   const hasExplicitCenter = Array.isArray(params.center) && params.center.length === 2;
   const center = params.center ?? [34.7818, 32.0853];
@@ -24,6 +25,7 @@ export function buildMapboxHtml(params: {
   const token = params.accessToken;
   const styleUrl = params.styleUrl || 'mapbox://styles/mapbox/streets-v12';
   const points = params.points ?? { type: 'FeatureCollection', features: [] };
+  const pointColor = (params.pointColor || '').trim() || '#8B5CF6'; // default: purple
   const labelColor = '#6D28D9'; // purple (Tailwind violet-700)
 
   // NOTE: This HTML is used inside WebView (native) and iframe srcDoc (web).
@@ -232,7 +234,7 @@ export function buildMapboxHtml(params: {
                 source: 'apartments',
                 paint: {
                   'circle-radius': 8,
-                  'circle-color': '#8B5CF6',
+                  'circle-color': ${JSON.stringify(pointColor)},
                   'circle-opacity': 0.9,
                   'circle-stroke-width': 2,
                   'circle-stroke-color': '#FFFFFF'

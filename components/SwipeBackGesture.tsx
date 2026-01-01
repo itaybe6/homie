@@ -60,6 +60,24 @@ export default function SwipeBackGesture({
   const gesture = useMemo(() => {
     return Gesture.Pan()
       .enabled(enabled)
+      /**
+       * Critical: this detector wraps the whole screen. If we let the gesture "wait" to decide
+       * (even when the touch didn't start on the edge), it can starve ScrollView of vertical scroll.
+       * Failing immediately when the touch begins away from the edge keeps scrolling responsive.
+       */
+      .onTouchesDown((e, stateManager) => {
+        try {
+          const touch: any = (e as any)?.allTouches?.[0];
+          const x = typeof touch?.x === 'number' ? touch.x : (e as any)?.x;
+          if (typeof x !== 'number') return;
+          const isEdgeStart = edge === 'left' ? x <= edgeWidth : x >= screenWidth - edgeWidth;
+          if (!isEdgeStart) {
+            stateManager.fail();
+          }
+        } catch {
+          // ignore
+        }
+      })
       // Avoid stealing vertical scroll unless it's clearly a horizontal intent
       .activeOffsetX(edge === 'left' ? [14, 9999] : [-9999, -14])
       .failOffsetY([-14, 14])

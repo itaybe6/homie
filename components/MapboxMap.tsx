@@ -10,6 +10,8 @@ export type MapboxMapProps = {
   center?: MapboxCenter;
   zoom?: number;
   points?: MapboxFeatureCollection;
+  /** Color for the point/marker circles (defaults to the current purple). */
+  pointColor?: string;
   onApartmentPress?: (apartmentId: string) => void;
 };
 

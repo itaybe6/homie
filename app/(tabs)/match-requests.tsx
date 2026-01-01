@@ -483,7 +483,6 @@ export default function MatchRequestsScreen() {
                     ) : !!otherUser?.full_name ? (
                       <Text style={styles.cardMeta}>משתמש: {otherUser.full_name}</Text>
                     ) : null}
-                    <Text style={styles.cardMeta}>{new Date(item.created_at).toLocaleString()}</Text>
                     <View style={{ marginTop: 10, flexDirection: 'row-reverse', gap: 8 as any }}>
                       <StatusPill status={item.status} />
                       {incoming && item.status === 'PENDING' && (
@@ -617,6 +616,9 @@ export default function MatchRequestsScreen() {
                         )
                       )}
                     </View>
+                    {!!item.created_at ? (
+                      <Text style={styles.cardMeta}>{new Date(item.created_at).toLocaleString()}</Text>
+                    ) : null}
                   </View>
                   <TouchableOpacity
                     style={styles.avatarWrap}

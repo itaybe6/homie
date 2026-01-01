@@ -760,13 +760,13 @@ export default function ProfileSettingsScreen() {
             activeOpacity={0.9}
           >
             <View style={styles.itemIcon}>
-              <Edit size={18} color="#4C1D95" />
+              <Edit size={18} color="#5e3f2d" />
             </View>
             <View style={styles.itemTextWrap}>
               <Text style={styles.groupItemTitle}>עריכת פרופיל</Text>
               <Text style={styles.groupItemSub}>עדכון פרטים</Text>
             </View>
-            <ChevronLeft size={18} color="#4C1D95" />
+            <ChevronLeft size={18} color="#5e3f2d" />
           </TouchableOpacity>
 
           <View style={styles.divider} />
@@ -777,7 +777,7 @@ export default function ProfileSettingsScreen() {
             activeOpacity={0.9}
           >
             <View style={styles.itemIcon}>
-              <Home size={18} color="#4C1D95" />
+              <Home size={18} color="#5e3f2d" />
             </View>
             <View style={styles.itemTextWrap}>
               <Text style={styles.groupItemTitle}>הדירה שלי</Text>
@@ -796,13 +796,13 @@ export default function ProfileSettingsScreen() {
                 activeOpacity={0.9}
               >
                 <View style={styles.itemIcon}>
-                  <UserPlus2 size={18} color="#4C1D95" />
+                  <UserPlus2 size={18} color="#5e3f2d" />
                 </View>
                 <View style={styles.itemTextWrap}>
                   <Text style={styles.groupItemTitle}>פרופילים משותפים</Text>
                   <Text style={styles.groupItemSub}>צפייה בפרופילים המשותפים שלך</Text>
                 </View>
-                <ChevronLeft size={18} color="#4C1D95" />
+                <ChevronLeft size={18} color="#5e3f2d" />
               </TouchableOpacity>
 
               <View style={styles.divider} />
@@ -815,13 +815,13 @@ export default function ProfileSettingsScreen() {
             activeOpacity={0.9}
           >
             <View style={styles.itemIcon}>
-              <FileText size={18} color="#4C1D95" />
+              <FileText size={18} color="#5e3f2d" />
             </View>
             <View style={styles.itemTextWrap}>
               <Text style={styles.groupItemTitle}>תנאי שימוש</Text>
               <Text style={styles.groupItemSub}>קריאת התקנון והמדיניות</Text>
             </View>
-            <ChevronLeft size={18} color="#4C1D95" />
+            <ChevronLeft size={18} color="#5e3f2d" />
           </TouchableOpacity>
 
           <View style={styles.divider} />

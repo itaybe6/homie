@@ -1357,15 +1357,26 @@ export default function RequestsScreen() {
           scrollEventThrottle={16}
           ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
           renderItem={({ item, index }) => {
-            // Approximate card height for scroll-based scale/fade effect.
-            const ITEM_SIZE = 138;
+            /**
+             * Scroll-based fade/scale (match notifications screen behavior):
+             * Start fading only כשהכרטיס מתקרב לחלק העליון, not mid-screen.
+             */
+            const ITEM_SIZE = 156; // approx height incl. spacing; tuned in notifications
+            const FADE_DISTANCE = 72; // px fade window
+            const FADE_START_OFFSET = 8; // start fading only once the card passes the top edge a bit
+
+            const fadeStart = ITEM_SIZE * index + FADE_START_OFFSET;
+            const fadeEnd = fadeStart + FADE_DISTANCE;
+
             const scale = scrollY.interpolate({
-              inputRange: [-1, 0, ITEM_SIZE * index, ITEM_SIZE * (index + 2)],
-              outputRange: [1, 1, 1, 0],
+              inputRange: [fadeStart, fadeEnd],
+              outputRange: [1, 0.96],
+              extrapolate: 'clamp',
             });
             const opacity = scrollY.interpolate({
-              inputRange: [-1, 0, ITEM_SIZE * index, ITEM_SIZE * (index + 1)],
-              outputRange: [1, 1, 1, 0],
+              inputRange: [fadeStart, fadeEnd],
+              outputRange: [1, 0],
+              extrapolate: 'clamp',
             });
 
             const otherUser = incoming ? usersById[item.sender_id] : usersById[item.recipient_id];
@@ -1407,9 +1418,12 @@ export default function RequestsScreen() {
                 <View style={styles.cardShadow}>
                   <View style={styles.card}>
                     <View style={styles.cardInner}>
-                  {!incoming && item.kind === 'MATCH' && !isGroupMatch ? (
-                    <View style={styles.matchThumbWrap}>
-                      <Sparkles size={34} color="#6B7280" />
+                  {item.kind === 'MATCH' && !isGroupMatch ? (
+                    <View style={styles.thumbWrap}>
+                      <Image
+                        source={{ uri: (otherUser?.avatar_url as string | undefined) || DEFAULT_AVATAR }}
+                        style={styles.thumbImg}
+                      />
                     </View>
                   ) : !!aptImage ? (
                     <View style={styles.thumbWrap}>
@@ -1461,6 +1475,28 @@ export default function RequestsScreen() {
                         ? 'בקשת התאמה'
                         : 'בקשת מיזוג פרופילים'}
                     </Text>
+                    {item.kind === 'MATCH' && !isGroupMatch && !!otherUser?.full_name ? (
+                      <>
+                        <Text style={styles.matchSubtitle}>{otherUser.full_name} אהב את הפרופיל שלך</Text>
+                        <TouchableOpacity
+                          style={styles.matchUserRow}
+                          activeOpacity={0.85}
+                          onPress={() => {
+                            const id = incoming ? item.sender_id : item.recipient_id;
+                            if (id) router.push({ pathname: '/user/[id]', params: { id } });
+                          }}
+                        >
+                          <View style={styles.matchMiniAvatarWrap}>
+                            <Image
+                              source={{ uri: (otherUser.avatar_url as string | undefined) || DEFAULT_AVATAR }}
+                              style={styles.matchMiniAvatarImg}
+                              resizeMode="cover"
+                            />
+                          </View>
+                          <Text style={styles.matchMiniName}>{otherUser.full_name}</Text>
+                        </TouchableOpacity>
+                      </>
+                    ) : null}
                     {incoming && item.kind === 'GROUP' && mergeProposerMembers.length ? (
                       <View style={styles.mergeProposersList}>
                         {mergeProposerMembers.map((m: any, idx: number) => (
@@ -1486,12 +1522,13 @@ export default function RequestsScreen() {
                       </View>
                     ) : null}
                     {!!apt && (
-                      <Text style={styles.cardSub}>
-                        {apt.title} • {apt.city}
-                      </Text>
+                      <View style={{ alignSelf: 'stretch', marginTop: 4 }}>
+                        <Text style={styles.cardSub}>{apt.title}</Text>
+                        <Text style={styles.aptCity}>{apt.city}</Text>
+                      </View>
                     )}
                     {/* Unified user display: avatar + name under the title (no side avatar). */}
-                    {item.kind !== 'GROUP' && groupMembersWithId.length ? (
+                    {item.kind === 'MATCH' && !isGroupMatch ? null : item.kind !== 'GROUP' && groupMembersWithId.length ? (
                       <View style={styles.mergeProposersList}>
                         {groupMembersWithId.slice(0, 3).map((m: any, idx: number) => (
                           <TouchableOpacity
@@ -1514,7 +1551,7 @@ export default function RequestsScreen() {
                           </TouchableOpacity>
                         ))}
                       </View>
-                    ) : !!otherUser?.full_name ? (
+                    ) : item.kind === 'MATCH' && !isGroupMatch ? null : !!otherUser?.full_name ? (
                       <TouchableOpacity
                         style={styles.inviterRow}
                         activeOpacity={0.85}
@@ -1554,9 +1591,6 @@ export default function RequestsScreen() {
                       </View>
                     ) : null}
 
-                    {item.kind !== 'GROUP' && !!item.created_at ? (
-                      <Text style={styles.cardMeta}>{formatTimeAgoHe(item.created_at)}</Text>
-                    ) : null}
                     <View style={{ marginTop: 10, flexDirection: 'row-reverse', gap: 8 as any }}>
                       {incoming && (item.kind === 'APT' || item.kind === 'APT_INVITE') && item.status === 'PENDING' && (
                         <View style={{ flexDirection: 'row-reverse', gap: 8 as any }}>
@@ -1598,9 +1632,6 @@ export default function RequestsScreen() {
                               <Text style={styles.rejectBtnTextLight}>דחייה</Text>
                             </TouchableOpacity>
                           </View>
-                          {!!item.created_at ? (
-                            <Text style={[styles.cardMeta, { marginTop: 10 }]}>{formatTimeAgoHe(item.created_at)}</Text>
-                          ) : null}
                         </View>
                       )}
                       {/* Recipient view (incoming): after approval expose phones.
@@ -2036,6 +2067,9 @@ export default function RequestsScreen() {
                         )
                       )}
                     </View>
+                    {!!item.created_at ? (
+                      <Text style={[styles.cardMeta, styles.cardTime]}>{formatTimeAgoHe(item.created_at)}</Text>
+                    ) : null}
                   </View>
                   {/* Side avatar removed: unified avatar+name row(s) render under the title */}
                     </View>
@@ -2453,7 +2487,7 @@ const styles = StyleSheet.create({
   },
   cardInner: {
     flexDirection: 'row-reverse',
-    alignItems: 'center',
+    alignItems: 'stretch',
     padding: 14,
     gap: 12 as any,
   },
@@ -2473,11 +2507,57 @@ const styles = StyleSheet.create({
     flexShrink: 1,
     alignSelf: 'stretch',
   },
+  aptCity: {
+    color: '#6B7280',
+    fontSize: 13,
+    textAlign: 'right',
+    marginTop: 2,
+    fontWeight: '700',
+    alignSelf: 'stretch',
+  },
+  matchSubtitle: {
+    color: '#4B5563',
+    fontSize: 13,
+    textAlign: 'right',
+    marginTop: 6,
+    fontWeight: '700',
+    alignSelf: 'stretch',
+  },
+  matchUserRow: {
+    marginTop: 10,
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 10 as any,
+    alignSelf: 'stretch',
+  },
+  matchMiniAvatarWrap: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    overflow: 'hidden',
+    backgroundColor: '#E5E7EB',
+    borderWidth: 1,
+    borderColor: 'rgba(17,24,39,0.10)',
+  },
+  matchMiniAvatarImg: {
+    width: '100%',
+    height: '100%',
+  },
+  matchMiniName: {
+    color: '#111827',
+    fontSize: 14,
+    fontWeight: '800',
+    textAlign: 'right',
+    flexShrink: 1,
+  },
   cardMeta: {
     color: '#6B7280',
     fontSize: 12,
     marginTop: 6,
     textAlign: 'right',
+  },
+  cardTime: {
+    marginTop: 12,
   },
   tagsRow: {
     marginTop: 8,
@@ -2657,7 +2737,9 @@ const styles = StyleSheet.create({
   },
   thumbWrap: {
     width: 96,
-    height: 96,
+    alignSelf: 'stretch',
+    minHeight: 96,
+    maxHeight: 150,
     borderRadius: 14,
     overflow: 'hidden',
     backgroundColor: '#F3F4F6',
@@ -2667,6 +2749,7 @@ const styles = StyleSheet.create({
   thumbImg: {
     width: '100%',
     height: '100%',
+    resizeMode: 'cover',
   },
   matchThumbWrap: {
     width: 96,
