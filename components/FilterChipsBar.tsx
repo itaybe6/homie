@@ -6,7 +6,6 @@ import {
   StyleSheet,
   TouchableOpacity,
   ViewStyle,
-  InteractionManager,
   NativeSyntheticEvent,
   NativeScrollEvent,
 } from 'react-native';
@@ -108,9 +107,22 @@ export default function FilterChipsBar({
   // Preserve horizontal scroll offset when toggling chips to avoid jump-to-start
   const scrollRef = useRef<ScrollView | null>(null);
   const savedOffsetXRef = useRef(0);
-  const containerWidthRef = useRef(0);
-  const contentWidthRef = useRef(0);
   const didInitPositionRef = useRef(false);
+  const [containerWidth, setContainerWidth] = useState(0);
+  const [contentWidth, setContentWidth] = useState(0);
+
+  // One-time initial positioning for RTL: start from the "right" end.
+  // Important: do this only after we know BOTH container+content widths,
+  // otherwise it can run later (e.g. on first chip toggle) and "jump" the user back.
+  useEffect(() => {
+    if (didInitPositionRef.current) return;
+    if (containerWidth <= 0) return;
+    if (contentWidth <= containerWidth) return;
+    const target = Math.max(0, contentWidth - containerWidth);
+    savedOffsetXRef.current = target;
+    scrollRef.current?.scrollTo({ x: target, animated: false });
+    didInitPositionRef.current = true;
+  }, [containerWidth, contentWidth]);
 
   // After selection changes, restore previous offset without animation
   useEffect(() => {
@@ -154,7 +166,7 @@ export default function FilterChipsBar({
         // RTL – chips מתחילים מימין, גוללים לשמאל
         style={[{ direction: 'rtl' as any }, styles.scroller]}
         onLayout={(e) => {
-          containerWidthRef.current = e.nativeEvent.layout.width;
+          setContainerWidth(e.nativeEvent.layout.width);
         }}
         onScroll={(e: NativeSyntheticEvent<NativeScrollEvent>) => {
           savedOffsetXRef.current = e.nativeEvent.contentOffset.x;
@@ -166,18 +178,7 @@ export default function FilterChipsBar({
           savedOffsetXRef.current = e.nativeEvent.contentOffset.x;
         }}
         onContentSizeChange={(w) => {
-          contentWidthRef.current = w;
-          const containerW = containerWidthRef.current || 0;
-          if (!didInitPositionRef.current && containerW > 0 && w > containerW) {
-            // Start showing the first chip on the right (RTL visual) by scrolling to maxX
-            const target = Math.max(0, w - containerW);
-            savedOffsetXRef.current = target;
-            scrollRef.current?.scrollTo({ x: target, animated: false });
-            didInitPositionRef.current = true;
-            return;
-          }
-          // After content size changes (e.g., toggle), keep current position
-          scrollRef.current?.scrollTo({ x: savedOffsetXRef.current, animated: false });
+          setContentWidth(w);
         }}
         scrollEventThrottle={16}
       >

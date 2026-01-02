@@ -93,6 +93,10 @@ export interface Apartment {
   has_elevator?: boolean; // מעלית
   kosher_kitchen?: boolean; // מטבח כשר
 
+  // Move-in availability (זמינות כניסה)
+  move_in_date?: string | null; // YYYY-MM-DD
+  move_in_is_immediate?: boolean | null; // true => immediate entry
+
   created_at: string;
   updated_at: string;
 }

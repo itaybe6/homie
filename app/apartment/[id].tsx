@@ -52,6 +52,8 @@ import {
   ArrowUpDown,
   Info,
   Key,
+  Calendar,
+  Heart,
 } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { supabase } from '@/lib/supabase';
@@ -86,6 +88,17 @@ export default function ApartmentDetailsScreen() {
   const [imageCandidateIndex, setImageCandidateIndex] = useState<Record<number, number>>({});
   const [isMembersOpen, setIsMembersOpen] = useState(false);
   const [isAddOpen, setIsAddOpen] = useState(false);
+  const [isJoinRequestsOpen, setIsJoinRequestsOpen] = useState(false);
+  const [joinRequests, setJoinRequests] = useState<
+    Array<{
+      reqId: string;
+      senderId: string;
+      status: 'PENDING' | 'APPROVED' | 'REJECTED';
+      user: Pick<User, 'id' | 'full_name' | 'avatar_url'>;
+    }>
+  >([]);
+  const [isLoadingJoinRequests, setIsLoadingJoinRequests] = useState(false);
+  const [joinRequestsActionId, setJoinRequestsActionId] = useState<string | null>(null);
   const [addCandidates, setAddCandidates] = useState<User[]>([]);
   const [sharedGroups, setSharedGroups] = useState<{ id: string; members: Pick<User, 'id' | 'full_name' | 'avatar_url'>[] }[]>([]);
   const [isAdding, setIsAdding] = useState(false);
@@ -657,6 +670,23 @@ export default function ApartmentDetailsScreen() {
     apartmentType === 'GARDEN' && gardenSqm !== null && gardenSqm > 0 ? `${formatSqm(gardenSqm)} מ״ר גינה` : null;
   const floorTagLabel = floor !== null ? `קומה ${floor}` : null;
 
+  const formatISODateToDDMMYYYY = (iso: string): string => {
+    const s = String(iso || '').trim();
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+    if (!m) return '';
+    return `${m[3]}/${m[2]}/${m[1]}`;
+  };
+
+  const moveInTagLabel = (() => {
+    const immediate = !!(apartment as any)?.move_in_is_immediate;
+    if (immediate) return 'כניסה מיידית';
+    const raw = String((apartment as any)?.move_in_date || '').trim();
+    if (!raw) return null;
+    const formatted = formatISODateToDDMMYYYY(raw);
+    if (!formatted) return null;
+    return `כניסה ${formatted}`;
+  })();
+
   const descriptionText = String((apartment as any)?.description || '').trim();
   const shouldShowReadMore = descriptionText.length > 260;
   
@@ -704,6 +734,137 @@ export default function ApartmentDetailsScreen() {
       return names.length ? names.join(' • ') : 'משתמש';
     } catch {
       return 'משתמש';
+    }
+  };
+
+  const loadJoinRequestsForOwner = async () => {
+    try {
+      if (!apartment?.id || !user?.id) return;
+      setIsLoadingJoinRequests(true);
+
+      // Requests are created per-recipient (owner + partners). Here we show only the
+      // requests that were sent TO the owner (me), so the status reflects my decision.
+      const { data: reqRows, error: reqErr } = await supabase
+        .from('apartments_request')
+        .select('id, sender_id, status, created_at')
+        .eq('apartment_id', apartment.id)
+        .eq('recipient_id', user.id)
+        .eq('type', 'JOIN_APT')
+        .in('status', ['PENDING', 'APPROVED', 'REJECTED'] as any)
+        .order('created_at', { ascending: false });
+      if (reqErr) throw reqErr;
+
+      const rows = (reqRows || []) as any[];
+      const senderIds = Array.from(new Set(rows.map((r) => String(r?.sender_id || '').trim()).filter(Boolean)));
+      if (!senderIds.length) {
+        setJoinRequests([]);
+        return;
+      }
+
+      const { data: usersRows, error: usersErr } = await supabase
+        .from('users')
+        .select('id, full_name, avatar_url')
+        .in('id', senderIds);
+      if (usersErr) throw usersErr;
+
+      const byId: Record<string, Pick<User, 'id' | 'full_name' | 'avatar_url'>> = {};
+      (usersRows || []).forEach((u: any) => {
+        if (!u?.id) return;
+        byId[String(u.id)] = { id: u.id, full_name: u.full_name, avatar_url: u.avatar_url };
+      });
+
+      const mapped = rows
+        .map((r) => {
+          const senderId = String(r?.sender_id || '').trim();
+          const reqId = String(r?.id || '').trim();
+          const status = String(r?.status || '').toUpperCase();
+          if (!senderId || !reqId) return null;
+          const userRow = byId[senderId] || { id: senderId, full_name: 'משתמש', avatar_url: undefined };
+          if (status !== 'PENDING' && status !== 'APPROVED' && status !== 'REJECTED') return null;
+          return {
+            reqId,
+            senderId,
+            status: status as 'PENDING' | 'APPROVED' | 'REJECTED',
+            user: userRow,
+          };
+        })
+        .filter(Boolean) as Array<{
+        reqId: string;
+        senderId: string;
+        status: 'PENDING' | 'APPROVED' | 'REJECTED';
+        user: Pick<User, 'id' | 'full_name' | 'avatar_url'>;
+      }>;
+
+      setJoinRequests(mapped);
+    } catch (e) {
+      console.error('Failed to load join requests', e);
+      setJoinRequests([]);
+    } finally {
+      setIsLoadingJoinRequests(false);
+    }
+  };
+
+  const approveJoinRequest = async (reqId: string, senderId: string) => {
+    try {
+      if (!user?.id || !apartment?.id) return;
+      setJoinRequestsActionId(reqId);
+      const { error } = await supabase
+        .from('apartments_request')
+        .update({ status: 'APPROVED', updated_at: new Date().toISOString() })
+        .eq('id', reqId);
+      if (error) throw error;
+
+      // Best-effort notification to requester
+      try {
+        const ownerName = (owner as any)?.full_name || 'בעל הדירה';
+        await supabase.from('notifications').insert({
+          sender_id: user.id,
+          recipient_id: senderId,
+          title: 'הבקשה אושרה',
+          description: `${ownerName} אישר/ה את בקשתך להצטרף לדירה: ${(apartment as any)?.title || ''} (${(apartment as any)?.city || ''}).`,
+          is_read: false,
+        });
+      } catch {}
+
+      setJoinRequests((prev) =>
+        prev.map((r) => (r.reqId === reqId ? { ...r, status: 'APPROVED' } : r))
+      );
+    } catch (e: any) {
+      Alert.alert('שגיאה', e?.message || 'לא ניתן לאשר את הבקשה');
+    } finally {
+      setJoinRequestsActionId(null);
+    }
+  };
+
+  const rejectJoinRequest = async (reqId: string, senderId: string) => {
+    try {
+      if (!user?.id || !apartment?.id) return;
+      setJoinRequestsActionId(reqId);
+      const { error } = await supabase
+        .from('apartments_request')
+        .update({ status: 'REJECTED', updated_at: new Date().toISOString() })
+        .eq('id', reqId);
+      if (error) throw error;
+
+      // Best-effort notification to requester
+      try {
+        const ownerName = (owner as any)?.full_name || 'בעל הדירה';
+        await supabase.from('notifications').insert({
+          sender_id: user.id,
+          recipient_id: senderId,
+          title: 'הבקשה נדחתה',
+          description: `${ownerName} דחה/תה את בקשתך להצטרף לדירה: ${(apartment as any)?.title || ''} (${(apartment as any)?.city || ''}).`,
+          is_read: false,
+        });
+      } catch {}
+
+      setJoinRequests((prev) =>
+        prev.map((r) => (r.reqId === reqId ? { ...r, status: 'REJECTED' } : r))
+      );
+    } catch (e: any) {
+      Alert.alert('שגיאה', e?.message || 'לא ניתן לדחות את הבקשה');
+    } finally {
+      setJoinRequestsActionId(null);
     }
   };
 
@@ -1366,18 +1527,33 @@ export default function ApartmentDetailsScreen() {
               <Text style={styles.heroPricePer}>/חודש</Text>
             </View>
 
-            <FavoriteHeartButton
-              apartmentId={apartment.id}
-              containerStyle={[styles.circleBtnLight, styles.heroFavBtn]}
-              size={36}
-              iconSize={18}
-              activeBackgroundColor="#FFE6EC"
-              inactiveBackgroundColor="rgba(255,255,255,0.9)"
-              activeColor="#FF2D55"
-              inactiveColor="#5e3f2d"
-              accessibilityLabelInactive="סמן כמועדף"
-              accessibilityLabelActive="הסר ממועדפים"
-            />
+            {isOwner ? (
+              <View
+                style={[
+                  styles.circleBtnLight,
+                  styles.heroFavBtn,
+                  { backgroundColor: '#E5E7EB', borderColor: 'rgba(17, 24, 39, 0.08)' },
+                ]}
+                pointerEvents="none"
+                accessibilityElementsHidden
+                importantForAccessibility="no-hide-descendants"
+              >
+                <Heart size={18} color="#9CA3AF" />
+              </View>
+            ) : (
+              <FavoriteHeartButton
+                apartmentId={apartment.id}
+                containerStyle={[styles.circleBtnLight, styles.heroFavBtn]}
+                size={36}
+                iconSize={18}
+                activeBackgroundColor="#FFE6EC"
+                inactiveBackgroundColor="rgba(255,255,255,0.9)"
+                activeColor="#FF2D55"
+                inactiveColor="#5e3f2d"
+                accessibilityLabelInactive="סמן כמועדף"
+                accessibilityLabelActive="הסר ממועדפים"
+              />
+            )}
           </View>
 
           <Text style={styles.heroTitle} numberOfLines={2}>
@@ -1443,12 +1619,12 @@ export default function ApartmentDetailsScreen() {
           </View>
 
           {/* Description ("על המקום") */}
-          {descriptionText || typeTagLabel || floorTagLabel || gardenSqmTagLabel || sqmTagLabel ? (
+          {descriptionText || typeTagLabel || floorTagLabel || gardenSqmTagLabel || sqmTagLabel || moveInTagLabel ? (
             <View style={styles.section}>
               <View style={styles.whiteCard}>
                 <Text style={styles.sectionTitle}>על המקום</Text>
                 {/* Type / floor / sqm tags (moved inside "About" card) */}
-                {typeTagLabel || floorTagLabel || gardenSqmTagLabel || sqmTagLabel ? (
+                {typeTagLabel || floorTagLabel || gardenSqmTagLabel || sqmTagLabel || moveInTagLabel ? (
                   <View style={styles.tagsRow}>
                     {typeTagLabel ? (
                       <View style={styles.tagPill}>
@@ -1476,6 +1652,12 @@ export default function ApartmentDetailsScreen() {
                       <View style={styles.tagPill}>
                         <Ruler size={14} color="#5e3f2d" />
                         <Text style={styles.tagText}>{sqmTagLabel}</Text>
+                      </View>
+                    ) : null}
+                    {moveInTagLabel ? (
+                      <View style={styles.tagPill}>
+                        <Calendar size={14} color="#5e3f2d" />
+                        <Text style={styles.tagText}>{moveInTagLabel}</Text>
                       </View>
                     ) : null}
                   </View>
@@ -1769,28 +1951,37 @@ export default function ApartmentDetailsScreen() {
       >
         <View style={[styles.priceCard, styles.stickyCtaCard]}>
           <View style={styles.priceRight}>
-            <Text style={styles.ctaTitle}>מצטרפים לדירה?</Text>
+            <Text style={styles.ctaTitle}>{isOwner ? 'זאת הדירה שלך' : 'מצטרפים לדירה?'}</Text>
             <Text style={styles.ctaSubtitle} numberOfLines={2} ellipsizeMode="tail">
-              בקשו סיסמה מבעל הדירה, או הזינו סיסמה כדי להצטרף מיד.
+              {isOwner
+                ? 'כאן אפשר לראות מי ביקש להצטרף לדירה שלך, ולאשר או לדחות את הבקשות.'
+                : 'בקשו סיסמה מבעל הדירה, או הזינו סיסמה כדי להצטרף מיד.'}
             </Text>
           </View>
           <View style={styles.ctaActionsRow}>
-            <TouchableOpacity
-              style={styles.keyIconBtn}
-              activeOpacity={0.9}
-              onPress={() => {
-                setIsKeyPanelOpen(true);
-              }}
-              accessibilityRole="button"
-              accessibilityLabel="מפתח"
-            >
-              <Key size={18} color="#5e3f2d" />
-            </TouchableOpacity>
+            {!isOwner ? (
+              <TouchableOpacity
+                style={styles.keyIconBtn}
+                activeOpacity={0.9}
+                onPress={() => {
+                  setIsKeyPanelOpen(true);
+                }}
+                accessibilityRole="button"
+                accessibilityLabel="מפתח"
+              >
+                <Key size={18} color="#5e3f2d" />
+              </TouchableOpacity>
+            ) : null}
 
             <TouchableOpacity
               style={styles.availabilityBtn}
               activeOpacity={0.9}
               onPress={() => {
+                if (isOwner) {
+                  setIsJoinRequestsOpen(true);
+                  loadJoinRequestsForOwner();
+                  return;
+                }
                 if (hasRequestedJoin) {
                   // On web, RN Alert may be a no-op; use our custom confirm modal.
                   if (Platform.OS === 'web') {
@@ -1813,16 +2004,22 @@ export default function ApartmentDetailsScreen() {
                 handleRequestJoin();
               }}
               disabled={
-                isOwner ||
-                isMember ||
-                isRequestingJoin ||
-                // Only block "submit" if already assigned elsewhere; allow cancel regardless.
-                (!hasRequestedJoin && isAssignedAnywhere !== false)
+                isOwner
+                  ? isLoadingJoinRequests
+                  : isOwner ||
+                    isMember ||
+                    isRequestingJoin ||
+                    // Only block "submit" if already assigned elsewhere; allow cancel regardless.
+                    (!hasRequestedJoin && isAssignedAnywhere !== false)
               }
             >
               <Text style={styles.availabilityBtnText}>
-                {isOwner || isMember
-                  ? 'בדוק זמינות'
+                {isOwner
+                  ? isLoadingJoinRequests
+                    ? 'טוען...'
+                    : 'צפה בבקשות'
+                  : isMember
+                    ? 'בדוק זמינות'
                   : !hasRequestedJoin && isAssignedAnywhere !== false
                     ? 'לא זמין'
                     : isRequestingJoin
@@ -1839,15 +2036,108 @@ export default function ApartmentDetailsScreen() {
       </View>
 
       {/* Key button animated panel */}
-      <KeyFabPanel
-        isOpen={isKeyPanelOpen}
-        onClose={() => setIsKeyPanelOpen(false)}
-        onEnterPassword={() => {
-          setIsKeyPanelOpen(false);
-          router.push({ pathname: '/apartment/join-passcode', params: { apartmentId: String(id || '') } });
-        }}
-        bottomOffset={ctaHeight + 14}
-      />
+      {!isOwner ? (
+        <KeyFabPanel
+          isOpen={isKeyPanelOpen}
+          onClose={() => setIsKeyPanelOpen(false)}
+          onEnterPassword={() => {
+            setIsKeyPanelOpen(false);
+            router.push({ pathname: '/apartment/join-passcode', params: { apartmentId: String(id || '') } });
+          }}
+          bottomOffset={ctaHeight + 14}
+        />
+      ) : null}
+
+      {/* Join Requests animated panel (owner only) */}
+      {isOwner ? (
+        <KeyFabPanel
+          isOpen={isJoinRequestsOpen}
+          onClose={() => setIsJoinRequestsOpen(false)}
+          title="בקשות להצטרפות"
+          subtitle="באישור בקשה המשתמש יקבל את הוואטסאפ שלך. אם מתאים – שלח/י לו/לה סיסמה להצטרפות."
+          bottomOffset={ctaHeight + 14}
+        >
+          <ScrollView
+            contentContainerStyle={{ paddingBottom: 6 }}
+            keyboardShouldPersistTaps="handled"
+            // Let the panel grow with content, but cap to ~a bit over half screen height.
+            style={{ maxHeight: Math.round(Dimensions.get('window').height * 0.58) }}
+          >
+            {isLoadingJoinRequests ? (
+              <View style={{ paddingVertical: 14 }}>
+                <ActivityIndicator size="small" color="#5e3f2d" />
+              </View>
+            ) : joinRequests.length > 0 ? (
+              joinRequests.map((item) => {
+                const statusMeta =
+                  item.status === 'APPROVED'
+                    ? { text: 'אושר', bg: 'rgba(16,185,129,0.16)', color: '#10B981' }
+                    : item.status === 'REJECTED'
+                      ? { text: 'נדחה', bg: 'rgba(248,113,113,0.18)', color: '#F87171' }
+                      : { text: 'ממתין', bg: 'rgba(94,63,45,0.12)', color: '#5e3f2d' };
+
+                const isActing = joinRequestsActionId === item.reqId;
+
+                return (
+                  <View key={`joinreq-${item.reqId}`} style={styles.joinReqRow}>
+                    <TouchableOpacity
+                      activeOpacity={0.9}
+                      onPress={() => {
+                        setIsJoinRequestsOpen(false);
+                        router.push({ pathname: '/user/[id]', params: { id: item.user.id } });
+                      }}
+                      style={styles.joinReqLeft}
+                    >
+                      <Image
+                        source={{
+                          uri:
+                            (item.user as any).avatar_url ||
+                            'https://cdn-icons-png.flaticon.com/512/847/847969.png',
+                        }}
+                        style={styles.avatarLarge}
+                      />
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.memberName}>{item.user.full_name || 'משתמש'}</Text>
+                      </View>
+                    </TouchableOpacity>
+
+                    <View style={styles.joinReqRight}>
+                      {item.status === 'PENDING' ? (
+                        <View style={styles.joinReqActions}>
+                          <TouchableOpacity
+                            style={[styles.joinReqActionBtn, styles.joinReqApproveBtn]}
+                            activeOpacity={0.9}
+                            onPress={() => approveJoinRequest(item.reqId, item.senderId)}
+                            disabled={isActing}
+                          >
+                            <Text style={styles.joinReqApproveText}>{isActing ? 'מאשר...' : 'אישור'}</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={[styles.joinReqActionBtn, styles.joinReqRejectBtn]}
+                            activeOpacity={0.9}
+                            onPress={() => rejectJoinRequest(item.reqId, item.senderId)}
+                            disabled={isActing}
+                          >
+                            <Text style={styles.joinReqRejectText}>{isActing ? 'דוחה...' : 'דחייה'}</Text>
+                          </TouchableOpacity>
+                        </View>
+                      ) : (
+                        <View style={[styles.joinReqStatusPill, { backgroundColor: statusMeta.bg }]}>
+                          <Text style={[styles.joinReqStatusText, { color: statusMeta.color }]}>
+                            {statusMeta.text}
+                          </Text>
+                        </View>
+                      )}
+                    </View>
+                  </View>
+                );
+              })
+            ) : (
+              <Text style={styles.emptyMembers}>אין בקשות להצגה</Text>
+            )}
+          </ScrollView>
+        </KeyFabPanel>
+      ) : null}
 
       {/* Members Modal */}
       <Modal visible={isMembersOpen} animationType="slide" transparent onRequestClose={() => setIsMembersOpen(false)}>
@@ -3397,6 +3687,68 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingVertical: 8,
     borderBottomWidth: 0,
+  },
+  joinReqRow: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(17,24,39,0.06)',
+  },
+  joinReqLeft: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 12,
+    flex: 1,
+  },
+  joinReqRight: {
+    alignItems: 'flex-start',
+    gap: 8,
+  },
+  joinReqStatusPill: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: 'rgba(17,24,39,0.08)',
+  },
+  joinReqStatusText: {
+    fontSize: 12,
+    fontWeight: '800',
+    writingDirection: 'rtl',
+  },
+  joinReqActions: {
+    flexDirection: 'row-reverse',
+    gap: 8,
+  },
+  joinReqActionBtn: {
+    height: 34,
+    paddingHorizontal: 10,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+  },
+  joinReqApproveBtn: {
+    backgroundColor: 'rgba(16,185,129,0.12)',
+    borderColor: 'rgba(16,185,129,0.30)',
+  },
+  joinReqRejectBtn: {
+    backgroundColor: 'rgba(248,113,113,0.12)',
+    borderColor: 'rgba(248,113,113,0.30)',
+  },
+  joinReqApproveText: {
+    color: '#10B981',
+    fontSize: 12,
+    fontWeight: '900',
+    writingDirection: 'rtl',
+  },
+  joinReqRejectText: {
+    color: '#F87171',
+    fontSize: 12,
+    fontWeight: '900',
+    writingDirection: 'rtl',
   },
   candidateRow: {
     flexDirection: 'row',

@@ -17,11 +17,28 @@ import {
 import { useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { LogOut, Edit, Save, X, Plus, MapPin, Inbox, Trash2, Settings, ClipboardList, Building2, Calendar, Camera, Image as ImageIcon } from 'lucide-react-native';
+import {
+  LogOut,
+  Edit,
+  Save,
+  X,
+  Plus,
+  MapPin,
+  Inbox,
+  Trash2,
+  Settings,
+  ClipboardList,
+  Building2,
+  Calendar,
+  Camera,
+  Copy,
+  Image as ImageIcon,
+} from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { MotiPressable } from 'moti/interactions';
+import * as Clipboard from 'expo-clipboard';
 import { supabase } from '@/lib/supabase';
 import { authService } from '@/lib/auth';
 import { useAuthStore } from '@/stores/authStore';
@@ -1653,6 +1670,51 @@ export default function ProfileScreen() {
                   <Text style={styles.sectionEmptyText}>עדיין לא בחרת דירה להצגה בפרופיל.</Text>
                 </View>
               )}
+
+              {/* Apartment passcode (demo for now) */}
+              {(() => {
+                const uid = (user as any)?.id as string | undefined;
+                if (!uid) return null;
+                const ownedApts = userApartments.filter((a: any) => String(a?.owner_id || '') === String(uid));
+                if (!ownedApts.length) return null;
+
+                // DEMO: later connect to real data (e.g. apt.passcode)
+                const raw = '123456';
+                const code = (String(raw).match(/\d/g)?.join('') ?? '').slice(0, 6).padStart(6, '0');
+
+                return (
+                  <View style={styles.aptPasscodeCard}>
+                    <View style={styles.aptPasscodeHeaderRow}>
+                      <Text style={styles.aptPasscodeTitle}>קוד הדירה</Text>
+                      <TouchableOpacity
+                        style={styles.aptPasscodeCopyBtn}
+                        activeOpacity={0.9}
+                        onPress={async () => {
+                          try {
+                            await Clipboard.setStringAsync(code);
+                            Alert.alert('הועתק', 'קוד הדירה הועתק ללוח.');
+                          } catch {
+                            Alert.alert('שגיאה', 'לא הצלחתי להעתיק את הקוד.');
+                          }
+                        }}
+                        accessibilityRole="button"
+                        accessibilityLabel="העתק קוד דירה"
+                      >
+                        <Copy size={16} color="#5e3f2d" />
+                        <Text style={styles.aptPasscodeCopyText}>העתק</Text>
+                      </TouchableOpacity>
+                    </View>
+                    <View style={styles.aptPasscodeDigitsRow}>
+                      {code.split('').map((d, i) => (
+                        <View key={`code-${i}`} style={styles.aptPasscodeDigitBox}>
+                          <Text style={styles.aptPasscodeDigitText}>{d}</Text>
+                        </View>
+                      ))}
+                    </View>
+                    <Text style={styles.aptPasscodeHint}>שתפו את הקוד עם מי שמצטרף לדירה.</Text>
+                  </View>
+                );
+              })()}
             </View>
           </View>
         </View>
@@ -2460,6 +2522,84 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#EEF2F7',
     gap: 10,
+  },
+  aptPasscodeCard: {
+    marginTop: 12,
+    backgroundColor: '#F9FAFB',
+    borderRadius: 16,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: '#EEF2F7',
+  },
+  aptPasscodeHeaderRow: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+    gap: 10,
+  },
+  aptPasscodeTitle: {
+    color: '#111827',
+    fontSize: 14,
+    fontWeight: '900',
+    textAlign: 'right',
+    flex: 1,
+  },
+  aptPasscodeCopyBtn: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: 'rgba(94,63,45,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(94,63,45,0.16)',
+  },
+  aptPasscodeCopyText: {
+    color: '#5e3f2d',
+    fontSize: 12,
+    fontWeight: '900',
+    textAlign: 'center',
+  },
+  aptPasscodeDigitsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 8,
+    direction: 'ltr',
+    marginBottom: 10,
+  },
+  aptPasscodeDigitBox: {
+    flex: 1,
+    height: 48,
+    borderRadius: 14,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000000',
+    shadowOpacity: 0.05,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 2,
+  },
+  aptPasscodeDigitText: {
+    color: '#111827',
+    fontSize: 20,
+    fontWeight: '900',
+    letterSpacing: 0.5,
+    textAlign: 'center',
+    writingDirection: 'ltr',
+  },
+  aptPasscodeHint: {
+    color: '#6B7280',
+    fontSize: 12,
+    fontWeight: '700',
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    lineHeight: 16,
   },
   apartmentsHeaderTitle: {
     color: '#111827',

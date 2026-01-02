@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -273,7 +273,10 @@ export default function HomeScreen() {
 
   // Header for the list – contains search row and filter chips so that
   // the entire grey area scrolls together.
-  const renderListHeader = () => (
+  // IMPORTANT: avoid passing an inline component function to FlatList.
+  // If the function identity changes between renders, FlatList can remount the header,
+  // causing the TextInput to lose focus while filtering/searching updates state.
+  const listHeader = useMemo(() => (
     <Animated.View
       style={[{ backgroundColor: PAGE_BG }, headerOuterStyle]}
     >
@@ -340,7 +343,7 @@ export default function HomeScreen() {
         />
       </Animated.View>
     </Animated.View>
-  );
+  ), [headerOuterStyle, headerInnerStyle, chipsStyle, searchQuery, chipSelected]);
 
   useEffect(() => {
     fetchApartments();
@@ -564,7 +567,7 @@ export default function HomeScreen() {
           keyExtractor={(item: Apartment) => item.id}
           contentContainerStyle={styles.listContent}
           style={{ backgroundColor: PAGE_BG }}
-          ListHeaderComponent={renderListHeader}
+          ListHeaderComponent={listHeader}
           onScroll={onScroll}
           scrollEventThrottle={1000 / 60}
           refreshControl={

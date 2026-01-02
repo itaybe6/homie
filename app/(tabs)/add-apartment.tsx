@@ -10,12 +10,11 @@ import {
   ScrollView,
   ActivityIndicator,
   Alert,
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   Image,
   Switch,
-  Modal,
-  Pressable,
   Dimensions,
 } from 'react-native';
 import { useLocalSearchParams, usePathname, useRouter } from 'expo-router';
@@ -30,6 +29,7 @@ import { autocompleteMapbox, reverseGeocodeMapbox, type MapboxGeocodingFeature }
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import { KeyFabPanel } from '@/components/KeyFabPanel';
 import { getNeighborhoodsForCityName } from '@/lib/neighborhoods';
 import type { Apartment } from '@/types/database';
 import {
@@ -54,6 +54,8 @@ import {
   ArrowLeft,
   ArrowRight,
   Building2,
+  Layers,
+  Ruler,
   Trees,
 } from 'lucide-react-native';
 
@@ -70,6 +72,7 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
   const mapboxToken = process.env.EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN as string | undefined;
   const mapboxStyleUrl = process.env.EXPO_PUBLIC_MAPBOX_STYLE_URL as string | undefined;
   const insets = useSafeAreaInsets();
+  const datePickerBottomOffset = useMemo(() => 92 + (insets.bottom || 0) + 14, [insets.bottom]);
   const screenWidth = Dimensions.get('window').width;
   const previewGalleryRef = useRef<ScrollView>(null);
   const [previewActiveIdx, setPreviewActiveIdx] = useState(0);
@@ -140,6 +143,8 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
   const [images, setImages] = useState<string[]>([]); // local URIs before upload
   const [moveInDate, setMoveInDate] = useState(''); // dd/mm/yyyy (display only)
   const [moveInDateObj, setMoveInDateObj] = useState<Date | null>(null);
+  const [pendingMoveInDateObj, setPendingMoveInDateObj] = useState<Date | null>(null); // iOS: commit on "אישור"
+  const [isImmediateMoveIn, setIsImmediateMoveIn] = useState(false);
   const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
   const [sizeSqm, setSizeSqm] = useState(''); // apartment size in square meters (digits)
   const [gardenSizeSqm, setGardenSizeSqm] = useState(''); // garden size in square meters (digits) - only for garden apartments
@@ -329,6 +334,20 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
         setHasElevator(!!(a as any)?.has_elevator);
         setKosherKitchen(!!(a as any)?.kosher_kitchen);
 
+        // Move-in availability
+        const immediate = !!(a as any)?.move_in_is_immediate;
+        const iso = String((a as any)?.move_in_date || '').trim();
+        if (immediate) {
+          setIsImmediateMoveIn(true);
+        } else if (iso) {
+          const d = parseISODateToLocalDate(iso);
+          if (d) {
+            setIsImmediateMoveIn(false);
+            setMoveInDateObj(d);
+            setMoveInDate(formatDDMMYYYY(d));
+          }
+        }
+
         const partnerIds = normalizeIds((a as any)?.partner_ids);
         setExistingPartnerIds(partnerIds);
         setIncludeAsPartner(partnerIds.includes(authUser.id));
@@ -414,6 +433,39 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
     const d = new Date();
     d.setHours(0, 0, 0, 0);
     return d;
+  }
+
+  function parseISODateToLocalDate(iso: string): Date | null {
+    const s = String(iso || '').trim();
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+    if (!m) return null;
+    const yyyy = Number(m[1]);
+    const mm = Number(m[2]);
+    const dd = Number(m[3]);
+    if (!Number.isFinite(yyyy) || !Number.isFinite(mm) || !Number.isFinite(dd)) return null;
+    const d = new Date(yyyy, mm - 1, dd);
+    d.setHours(0, 0, 0, 0);
+    return d;
+  }
+
+  function toISODateString(d: Date): string {
+    const yyyy = String(d.getFullYear()).padStart(4, '0');
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  }
+
+  function resolveMoveInDateObj(candidate?: Date | null): Date {
+    const min = startOfToday();
+    const d = candidate instanceof Date ? candidate : min;
+    return d < min ? min : d;
+  }
+
+  function dateFromPickerEvent(event: any, selected?: Date): Date | undefined {
+    if (selected instanceof Date) return selected;
+    const ts = event?.nativeEvent?.timestamp;
+    if (typeof ts === 'number' && Number.isFinite(ts)) return new Date(ts);
+    return undefined;
   }
 
   function digitsOnly(s: string): string {
@@ -524,6 +576,10 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
   const propertyTypeLabel = propertyType === 'garden' ? 'דירת גן' : 'בניין';
   const priceLabel = price ? `₪${formatWithCommas(price)}` : '—';
   const locationLine = [address, neighborhood, city].filter(Boolean).join(', ');
+  const previewMapHeight = useMemo(() => {
+    const target = screenWidth - 40; // match apartment page "more square" map card
+    return Math.max(170, Math.min(260, target));
+  }, [screenWidth]);
 
   const previewFeatureItems = useMemo(() => {
     const items: Array<{ key: string; label: string; Icon: any }> = [];
@@ -885,6 +941,9 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
       }
 
       const finalImageUrls = Array.from(new Set([...(existingRemote || []), ...uploadedUrls].filter(Boolean)));
+      const moveInDateIso =
+        !isImmediateMoveIn && moveInDateObj ? toISODateString(resolveMoveInDateObj(moveInDateObj)) : null;
+      const moveInIsImmediate = isImmediateMoveIn ? true : false;
 
       if (mode === 'edit') {
         if (!editingApartmentId) throw new Error('חסר מזהה דירה לעריכה');
@@ -928,6 +987,10 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
             pets_allowed: petsAllowed,
             has_elevator: hasElevator,
             kosher_kitchen: kosherKitchen,
+
+            // Move-in availability
+            move_in_date: moveInDateIso,
+            move_in_is_immediate: moveInIsImmediate,
           })
           .eq('id', editingApartmentId)
           .select()
@@ -974,6 +1037,10 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
             pets_allowed: petsAllowed,
             has_elevator: hasElevator,
             kosher_kitchen: kosherKitchen,
+
+            // Move-in availability
+            move_in_date: moveInDateIso,
+            move_in_is_immediate: moveInIsImmediate,
           })
           .select()
           .single();
@@ -1031,7 +1098,7 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
 
         <ScrollView
           contentContainerStyle={styles.scrollContent}
-          keyboardShouldPersistTaps="handled"
+          keyboardShouldPersistTaps="always"
           keyboardDismissMode={Platform.OS === 'ios' ? 'on-drag' : 'none'}
         >
 
@@ -1202,6 +1269,7 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
                             const nextAddress = `${street}${house ? ` ${house}` : ''}`.trim();
                             setAddress(nextAddress || street || address);
                             setAddressSuggestions([]);
+                            Keyboard.dismiss();
 
                             // derive city from context when possible
                             const derivedCity =
@@ -1236,8 +1304,13 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
                     <Text style={styles.label}>תאריך כניסה</Text>
                     <TouchableOpacity
                       activeOpacity={0.9}
-                      onPress={() => setIsDatePickerOpen(true)}
-                      disabled={isLoading}
+                      onPress={() => {
+                        if (isImmediateMoveIn) return;
+                        // iOS UX: allow "preview" selection and commit only on "אישור"
+                        setPendingMoveInDateObj(resolveMoveInDateObj(moveInDateObj));
+                        setIsDatePickerOpen(true);
+                      }}
+                      disabled={isLoading || isImmediateMoveIn}
                       style={styles.inputWithIcon}
                     >
                       <Calendar size={18} color="#9AA0A6" style={styles.inputIcon} />
@@ -1245,13 +1318,26 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
                         <Text
                           style={[
                             styles.dateFieldText,
-                            !moveInDate ? styles.dateFieldPlaceholder : null,
+                            !isImmediateMoveIn && !moveInDate ? styles.dateFieldPlaceholder : null,
                           ]}
                         >
-                          {moveInDate || 'dd/mm/yyyy'}
+                          {isImmediateMoveIn ? 'מיידית' : (moveInDate || 'dd/mm/yyyy')}
                         </Text>
                       </View>
                     </TouchableOpacity>
+                    <View style={styles.immediateToggleRow}>
+                      <Text style={styles.immediateToggleLabel}>כניסה מיידית</Text>
+                      <Switch
+                        value={isImmediateMoveIn}
+                        onValueChange={(next) => {
+                          setIsImmediateMoveIn(next);
+                          if (next) setIsDatePickerOpen(false);
+                        }}
+                        disabled={isLoading}
+                        trackColor={{ false: '#D1D5DB', true: '#5e3f2d' }}
+                        thumbColor={Platform.OS === 'android' ? '#FFFFFF' : undefined}
+                      />
+                    </View>
                   </View>
 
                   <View style={[styles.inputGroup, styles.halfWidth]}>
@@ -1648,206 +1734,232 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
                   <Text style={styles.step2Subtitle}>תצוגה מקדימה כמו עמוד דירה רגיל.</Text>
                 </View>
 
-                <View style={styles.previewGalleryContainer}>
-                  {images?.length ? (
-                    <>
-                      <ScrollView
-                        ref={previewGalleryRef}
-                        horizontal
-                        pagingEnabled
-                        showsHorizontalScrollIndicator={false}
-                        onMomentumScrollEnd={(e) => {
-                          const idx = Math.round(
-                            e.nativeEvent.contentOffset.x / e.nativeEvent.layoutMeasurement.width
-                          );
-                          setPreviewActiveIdx(idx);
-                        }}
-                      >
-                        {images.map((uri, idx) => (
-                          <View key={`${uri}-${idx}`} style={[styles.previewSlide, { width: screenWidth }]}>
-                            <Image source={{ uri }} style={styles.previewImage} resizeMode="cover" />
-                          </View>
-                        ))}
-                      </ScrollView>
-                      {images.length > 1 ? (
-                        <View style={styles.previewDotsWrap} pointerEvents="none">
-                          <View style={styles.previewDotsPill}>
-                            {images.map((_, i) => (
-                              <View
-                                key={`dot-${i}`}
-                                style={[
-                                  styles.previewDot,
-                                  i === previewActiveIdx ? styles.previewDotActive : null,
-                                ]}
-                              />
-                            ))}
-                          </View>
-                        </View>
-                      ) : null}
-                    </>
-                  ) : (
-                    <View style={styles.previewEmpty}>
-                      <Text style={styles.previewEmptyText}>לא נבחרו תמונות</Text>
-                    </View>
-                  )}
-                </View>
-
-                <View style={styles.previewTopHeader}>
-                  <Text style={styles.previewTitle} numberOfLines={2}>
-                    {title?.trim() ? title.trim() : 'כותרת הדירה'}
-                  </Text>
-                  <View style={styles.previewLocationRow}>
-                    <MapPin size={16} color="#6B7280" />
-                    <Text style={styles.previewLocationText} numberOfLines={1}>
-                      {locationLine || 'כתובת לא מלאה'}
-                    </Text>
-                  </View>
-                </View>
-
-                <View style={styles.previewPriceCard}>
-                  <Text style={styles.previewPrice}>{priceLabel}</Text>
-                  <Text style={styles.previewPriceSub}>שכר דירה (לשותף)</Text>
-                </View>
-
-                <View style={styles.previewStatsRow}>
-                  <View style={styles.previewStat}>
-                    <View style={styles.previewStatIcon}>
-                      <Users size={20} color="#5e3f2d" />
-                    </View>
-                    <View style={styles.previewStatTextCol}>
-                      <Text style={styles.previewStatNumber}>{roommateCapacity ?? '—'}</Text>
-                      <Text style={styles.previewStatLabel}>שותפים</Text>
-                    </View>
-                  </View>
-                  <View style={styles.previewStat}>
-                    <View style={styles.previewStatIcon}>
-                      <Bed size={20} color="#5e3f2d" />
-                    </View>
-                    <View style={styles.previewStatTextCol}>
-                      <Text style={styles.previewStatNumber}>{roomsCount || '—'}</Text>
-                      <Text style={styles.previewStatLabel}>חדרים</Text>
-                    </View>
-                  </View>
-                  <View style={styles.previewStat}>
-                    <View style={styles.previewStatIcon}>
-                      <Bath size={20} color="#5e3f2d" />
-                    </View>
-                    <View style={styles.previewStatTextCol}>
-                      <Text style={styles.previewStatNumber}>{bathroomsCount || '—'}</Text>
-                      <Text style={styles.previewStatLabel}>מקלחות</Text>
-                    </View>
-                  </View>
-                </View>
-
-                <View style={styles.previewSection}>
-                  <View style={styles.previewWhiteCard}>
-                    <Text style={styles.sectionTitle}>על הדירה</Text>
-                    <Text style={styles.previewBodyText}>
-                      {description?.trim() ? description.trim() : 'לא נוסף תיאור עדיין.'}
-                    </Text>
-                    <View style={styles.previewMetaRow}>
-                      <View style={styles.previewMetaPill}>
-                        <Text style={styles.previewMetaText}>{propertyTypeLabel}</Text>
-                      </View>
-                      <View style={styles.previewMetaPill}>
-                        <Text style={styles.previewMetaText}>
-                          {digitsOnly(sizeSqm) ? `${digitsOnly(sizeSqm)} מ״ר` : 'גודל דירה —'}
-                        </Text>
-                      </View>
-                      {propertyType === 'garden' ? (
-                        <View style={styles.previewMetaPill}>
-                          <Text style={styles.previewMetaText}>
-                            {digitsOnly(gardenSizeSqm) ? `${digitsOnly(gardenSizeSqm)} מ״ר גינה` : 'גינה —'}
-                          </Text>
-                        </View>
-                      ) : null}
-                      {propertyType === 'building' ? (
-                        <View style={styles.previewMetaPill}>
-                          <Text style={styles.previewMetaText}>{`קומה ${floor}`}</Text>
-                        </View>
-                      ) : null}
-                      {propertyType === 'building' ? (
-                        <View style={styles.previewMetaPill}>
-                          <Text style={styles.previewMetaText}>{`מרפסות ${balconyCount}`}</Text>
-                        </View>
-                      ) : null}
-                      {moveInDate ? (
-                        <View style={styles.previewMetaPill}>
-                          <Text style={styles.previewMetaText}>{`כניסה ${moveInDate}`}</Text>
-                        </View>
-                      ) : null}
-                    </View>
-                  </View>
-                </View>
-
-                <View style={styles.previewSection}>
-                  <View style={styles.previewWhiteCard}>
-                    <Text style={styles.sectionTitle}>מה יש בדירה?</Text>
-                    {previewFeatureItems.length ? (
-                      <View style={styles.previewFeaturesGrid}>
-                        {previewFeatureItems.map(({ key, label, Icon }) => (
-                          <View key={`feat-${key}`} style={styles.previewFeatureTile}>
-                            <View style={styles.previewFeatureTileIcon}>
-                              <Icon size={18} color="#5e3f2d" />
+                <View style={styles.aptPreviewPage}>
+                  <View style={styles.aptGalleryContainer}>
+                    {images?.length ? (
+                      <>
+                        <ScrollView
+                          ref={previewGalleryRef}
+                          horizontal
+                          pagingEnabled
+                          showsHorizontalScrollIndicator={false}
+                          onMomentumScrollEnd={(e) => {
+                            const idx = Math.round(
+                              e.nativeEvent.contentOffset.x / e.nativeEvent.layoutMeasurement.width
+                            );
+                            setPreviewActiveIdx(idx);
+                          }}
+                        >
+                          {images.map((uri, idx) => (
+                            <View key={`${uri}-${idx}`} style={[styles.aptSlide, { width: screenWidth }]}>
+                              <Image source={{ uri }} style={styles.aptImage} resizeMode="cover" />
                             </View>
-                            <Text style={styles.previewFeatureTileText} numberOfLines={1}>
-                              {label}
-                            </Text>
+                          ))}
+                        </ScrollView>
+                        {images.length > 1 ? (
+                          <View style={styles.aptDotsWrap} pointerEvents="none">
+                            <View style={styles.aptDotsPill}>
+                              {images.map((_, i) => (
+                                <View
+                                  key={`dot-${i}`}
+                                  style={[
+                                    styles.aptDotLight,
+                                    i === previewActiveIdx ? styles.aptDotActiveLight : null,
+                                  ]}
+                                />
+                              ))}
+                            </View>
                           </View>
-                        ))}
-                      </View>
+                        ) : null}
+                      </>
                     ) : (
-                      <View style={styles.previewFeaturesEmpty}>
-                        <View style={styles.previewFeaturesEmptyIcon}>
-                          <Info size={18} color="#5e3f2d" />
-                        </View>
-                        <Text style={styles.previewFeaturesEmptyTitle}>לא צוינו מאפיינים</Text>
-                        <Text style={styles.previewFeaturesEmptyBody}>אפשר להמשיך גם בלי לבחור מאפיינים.</Text>
+                      <View style={styles.previewEmpty}>
+                        <Text style={styles.previewEmptyText}>לא נבחרו תמונות</Text>
                       </View>
                     )}
                   </View>
-                </View>
 
-                <View style={styles.previewSection}>
-                  <View style={styles.previewWhiteCard}>
-                    <Text style={styles.sectionTitle}>מיקום</Text>
-                    <View style={styles.previewMapCard}>
-                      {!selectedGeo ? (
-                        <View style={styles.previewMapFallback}>
-                          <Text style={styles.previewMapFallbackText}>בחר/י כתובת כדי שנציג מפה.</Text>
+                  {/* Match apartment details layout (price -> title -> location) */}
+                  <View style={styles.aptTopHeader}>
+                    <View style={styles.aptHeroPriceRow}>
+                      <View style={styles.aptHeroPriceMeta}>
+                        <Text style={styles.aptHeroPriceValue}>
+                          <Text style={styles.aptHeroCurrency}>₪</Text>
+                          {price ? formatWithCommas(price) : '—'}
+                        </Text>
+                        <Text style={styles.aptHeroPricePer}>שכר דירה (לשותף)</Text>
+                      </View>
+                    </View>
+
+                    <Text style={styles.aptHeroTitle} numberOfLines={2}>
+                      {title?.trim() ? title.trim() : 'כותרת הדירה'}
+                    </Text>
+
+                    <View style={styles.aptHeroLocationRow}>
+                      <View style={styles.aptHeroLocationIcon}>
+                        <MapPin size={16} color="#6B7280" />
+                      </View>
+                      <Text style={styles.aptHeroLocationText} numberOfLines={1}>
+                        {locationLine || 'כתובת לא מלאה'}
+                      </Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.aptContent}>
+                  {/* light stats row */}
+                  <View style={styles.aptStatsRowLight}>
+                    <View style={styles.aptStatLight}>
+                      <View style={styles.aptStatIconCircle}>
+                        <Users size={22} color="#5e3f2d" />
+                      </View>
+                      <View style={styles.aptStatLabelRow}>
+                        {typeof roommateCapacity === 'number' ? (
+                          <Text numberOfLines={1} ellipsizeMode="clip" style={{ color: '#111827' }}>
+                            <Text style={styles.aptStatLabel}>{`מתאימה\u00A0ל`}</Text>
+                            <Text style={styles.aptStatNumber}>{roommateCapacity}</Text>
+                          </Text>
+                        ) : (
+                          <Text style={styles.aptStatLabel} numberOfLines={1} ellipsizeMode="clip">
+                            קיבולת לא צוינה
+                          </Text>
+                        )}
+                      </View>
+                    </View>
+                    <View style={styles.aptStatLight}>
+                      <View style={styles.aptStatIconCircle}>
+                        <Bed size={22} color="#5e3f2d" />
+                      </View>
+                      <View style={styles.aptStatLabelRow}>
+                        <Text style={styles.aptStatNumber}>{roomsCount || '—'}</Text>
+                        <Text style={styles.aptStatLabel}>חדרים</Text>
+                      </View>
+                    </View>
+                    <View style={styles.aptStatLight}>
+                      <View style={styles.aptStatIconCircle}>
+                        <Bath size={22} color="#5e3f2d" />
+                      </View>
+                      <View style={styles.aptStatLabelRow}>
+                        <Text style={styles.aptStatNumber}>{bathroomsCount || '—'}</Text>
+                        <Text style={styles.aptStatLabel}>מקלחות</Text>
+                      </View>
+                    </View>
+                  </View>
+
+                  {/* Description ("על המקום") */}
+                  <View style={styles.aptSection}>
+                    <View style={styles.aptWhiteCard}>
+                      <Text style={styles.aptSectionTitle}>על המקום</Text>
+                      <View style={styles.aptTagsRow}>
+                        <View style={styles.aptTagPill}>
+                          {propertyType === 'garden' ? (
+                            <Trees size={14} color="#5e3f2d" />
+                          ) : (
+                            <Building2 size={14} color="#5e3f2d" />
+                          )}
+                          <Text style={styles.aptTagText}>{propertyTypeLabel}</Text>
                         </View>
-                      ) : (
-                        <View style={styles.previewMapInner}>
-                          {/* Non-interactive map so scroll works */}
-                          <View pointerEvents="none" style={{ flex: 1, alignSelf: 'stretch' }}>
-                            <MapboxMap
-                              accessToken={mapboxToken}
-                              styleUrl={mapboxStyleUrl}
-                              center={selectedGeo ? ([selectedGeo.lng, selectedGeo.lat] as const) : undefined}
-                              zoom={selectedGeo ? 15 : 11}
-                              points={selectedGeo ? previewPoints : { type: 'FeatureCollection', features: [] }}
-                            />
+                        {propertyType === 'building' ? (
+                          <View style={styles.aptTagPill}>
+                            <Layers size={14} color="#5e3f2d" />
+                            <Text style={styles.aptTagText}>{`קומה ${floor}`}</Text>
                           </View>
-                          {locationLine ? (
-                            <View pointerEvents="none" style={styles.previewMapLocationBadge}>
-                              <View style={styles.previewMapLocationIconPill}>
-                                <MapPin size={14} color="#5e3f2d" />
-                              </View>
-                              <View style={{ flex: 1, alignItems: 'flex-end' }}>
-                                <Text style={styles.previewMapLocationCity} numberOfLines={1}>
-                                  {String(city || '').trim()}
-                                </Text>
-                                <Text style={styles.previewMapLocationAddress} numberOfLines={1}>
-                                  {String(address || '').trim()}
-                                </Text>
-                              </View>
+                        ) : null}
+                        {propertyType === 'garden' && digitsOnly(gardenSizeSqm) ? (
+                          <View style={styles.aptTagPill}>
+                            <Trees size={14} color="#5e3f2d" />
+                            <Text style={styles.aptTagText}>{`${digitsOnly(gardenSizeSqm)} מ״ר גינה`}</Text>
+                          </View>
+                        ) : null}
+                        {digitsOnly(sizeSqm) ? (
+                          <View style={styles.aptTagPill}>
+                            <Ruler size={14} color="#5e3f2d" />
+                            <Text style={styles.aptTagText}>{`${digitsOnly(sizeSqm)} מ״ר`}</Text>
+                          </View>
+                        ) : null}
+                        {isImmediateMoveIn || moveInDate ? (
+                          <View style={styles.aptTagPill}>
+                            <Calendar size={14} color="#5e3f2d" />
+                            <Text style={styles.aptTagText}>
+                              {isImmediateMoveIn ? 'כניסה מיידית' : `כניסה ${moveInDate}`}
+                            </Text>
+                          </View>
+                        ) : null}
+                      </View>
+
+                      <Text style={styles.aptDescriptionLight}>
+                        {description?.trim() ? description.trim() : 'לא נוסף תיאור עדיין.'}
+                      </Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.aptSection}>
+                    <View style={styles.aptWhiteCard}>
+                      <Text style={styles.aptSectionTitle}>מה יש בדירה?</Text>
+                      <View style={styles.aptFeaturesGrid}>
+                        {previewFeatureItems.length ? (
+                          previewFeatureItems.map(({ key, label, Icon }) => (
+                            <View key={`feat-${key}`} style={styles.aptFeatureLine}>
+                              <Icon size={20} color="#5e3f2d" />
+                              <Text style={styles.aptFeatureText}>{label}</Text>
                             </View>
-                          ) : null}
-                        </View>
-                      )}
+                          ))
+                        ) : (
+                          <View style={styles.aptFeaturesEmptyWrap}>
+                            <View style={styles.aptFeaturesEmptyIconPill}>
+                              <Info size={18} color="#5e3f2d" />
+                            </View>
+                            <Text style={styles.aptFeaturesEmptyTitle}>לא צוינו מאפיינים</Text>
+                            <Text style={styles.aptFeaturesEmptyText}>אפשר להמשיך גם בלי לבחור מאפיינים.</Text>
+                          </View>
+                        )}
+                      </View>
+                    </View>
+                  </View>
+
+                  <View style={styles.aptSection}>
+                    <View style={styles.aptWhiteCard}>
+                      <Text style={[styles.aptSectionTitle, { marginBottom: 0 }]}>מיקום</Text>
+                      <View style={[styles.aptMapCard, { height: previewMapHeight, marginTop: 10 }]}>
+                        {!selectedGeo ? (
+                          <View style={styles.previewMapFallback}>
+                            <Text style={styles.previewMapFallbackText}>בחר/י כתובת כדי שנציג מפה.</Text>
+                          </View>
+                        ) : (
+                          <View style={styles.aptMapInner}>
+                            {/* Non-interactive map so scroll works */}
+                            <View pointerEvents="none" style={{ flex: 1, alignSelf: 'stretch' }}>
+                              <MapboxMap
+                                accessToken={mapboxToken}
+                                styleUrl={mapboxStyleUrl}
+                                center={selectedGeo ? ([selectedGeo.lng, selectedGeo.lat] as const) : undefined}
+                                zoom={selectedGeo ? 15 : 11}
+                                points={selectedGeo ? previewPoints : { type: 'FeatureCollection', features: [] }}
+                                pointColor="#5e3f2d"
+                                pulsePoints
+                              />
+                            </View>
+                            {locationLine ? (
+                              <View pointerEvents="none" style={styles.aptMapLocationBadge}>
+                                <View style={styles.aptMapLocationIconPill}>
+                                  <MapPin size={14} color="#5e3f2d" />
+                                </View>
+                                <View style={styles.aptMapLocationTextWrap}>
+                                  <Text style={styles.aptMapLocationCity} numberOfLines={1}>
+                                    {String(city || '').trim()}
+                                  </Text>
+                                  <Text style={styles.aptMapLocationAddress} numberOfLines={1}>
+                                    {String(address || '').trim()}
+                                  </Text>
+                                </View>
+                              </View>
+                            ) : null}
+                          </View>
+                        )}
+                      </View>
                     </View>
                   </View>
                 </View>
+              </View>
               </>
             ) : null}
 
@@ -1856,64 +1968,71 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
           <View style={[styles.footerSpacer, { height: 92 + (insets.bottom || 0) }]} />
         </ScrollView>
 
-        {isDatePickerOpen ? (
-          <Modal
-            visible
-            transparent
-            animationType="fade"
-            onRequestClose={() => setIsDatePickerOpen(false)}
-          >
-            <Pressable style={styles.modalOverlay} onPress={() => setIsDatePickerOpen(false)} />
-            <View style={styles.modalSheet}>
-              <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>בחר תאריך כניסה</Text>
-                <TouchableOpacity onPress={() => setIsDatePickerOpen(false)} style={styles.modalCloseBtn}>
-                  <Text style={styles.modalCloseText}>סגור</Text>
-                </TouchableOpacity>
-              </View>
-              <DateTimePicker
-                value={(moveInDateObj && moveInDateObj >= startOfToday()) ? moveInDateObj : startOfToday()}
-                mode="date"
-                display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                locale="he-IL"
-                minimumDate={startOfToday()}
-                onChange={(event: any, selected?: Date) => {
-                  // Android fires "dismissed" and "set". iOS fires continuously.
-                  const type = event?.type;
-                  if (Platform.OS !== 'ios') {
-                    if (type === 'dismissed') {
-                      setIsDatePickerOpen(false);
-                      return;
-                    }
-                    if (type === 'set') {
-                      if (selected) {
-                        const min = startOfToday();
-                        const next = selected < min ? min : selected;
-                        setMoveInDateObj(next);
-                        setMoveInDate(formatDDMMYYYY(next));
-                      }
-                      setIsDatePickerOpen(false);
-                      return;
-                    }
-                  }
-                  if (selected) {
+        <KeyFabPanel
+          isOpen={isDatePickerOpen && !isImmediateMoveIn}
+          onClose={() => setIsDatePickerOpen(false)}
+          title="בחר תאריך כניסה"
+          subtitle=""
+          anchor="bottom"
+          bottomOffset={datePickerBottomOffset}
+        >
+          <DateTimePicker
+            value={
+              Platform.OS === 'ios'
+                ? resolveMoveInDateObj(pendingMoveInDateObj ?? moveInDateObj)
+                : resolveMoveInDateObj(moveInDateObj)
+            }
+            mode="date"
+            display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+            locale="he-IL"
+            minimumDate={startOfToday()}
+            onChange={(event: any, selected?: Date) => {
+              // Android fires "dismissed" and "set". iOS fires continuously.
+              const type = event?.type;
+              if (Platform.OS !== 'ios') {
+                if (type === 'dismissed') {
+                  setIsDatePickerOpen(false);
+                  return;
+                }
+                if (type === 'set') {
+                  const picked = dateFromPickerEvent(event, selected);
+                  if (picked) {
                     const min = startOfToday();
-                    const next = selected < min ? min : selected;
+                    const next = picked < min ? min : picked;
                     setMoveInDateObj(next);
                     setMoveInDate(formatDDMMYYYY(next));
+                    setIsImmediateMoveIn(false);
                   }
+                  setIsDatePickerOpen(false);
+                  return;
+                }
+              }
+              const picked = dateFromPickerEvent(event, selected);
+              if (picked) {
+                const min = startOfToday();
+                const next = picked < min ? min : picked;
+                // iOS: don't commit until "אישור"
+                setPendingMoveInDateObj(next);
+              }
+            }}
+          />
+          {Platform.OS === 'ios' ? (
+            <View style={styles.modalFooter}>
+              <TouchableOpacity
+                style={styles.modalDoneBtn}
+                onPress={() => {
+                  const next = resolveMoveInDateObj(pendingMoveInDateObj ?? moveInDateObj);
+                  setMoveInDateObj(next);
+                  setMoveInDate(formatDDMMYYYY(next));
+                  setIsImmediateMoveIn(false);
+                  setIsDatePickerOpen(false);
                 }}
-              />
-              {Platform.OS === 'ios' ? (
-                <View style={styles.modalFooter}>
-                  <TouchableOpacity style={styles.modalDoneBtn} onPress={() => setIsDatePickerOpen(false)}>
-                    <Text style={styles.modalDoneText}>אישור</Text>
-                  </TouchableOpacity>
-                </View>
-              ) : null}
+              >
+                <Text style={styles.modalDoneText}>אישור</Text>
+              </TouchableOpacity>
             </View>
-          </Modal>
-        ) : null}
+          ) : null}
+        </KeyFabPanel>
 
         <View
           style={[
@@ -2391,6 +2510,18 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 12,
   },
+  immediateToggleRow: {
+    marginTop: 8,
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 4,
+  },
+  immediateToggleLabel: {
+    color: '#6B7280',
+    fontSize: 13,
+    fontWeight: '700',
+  },
   switchRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -2544,40 +2675,6 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
 
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.35)',
-  },
-  modalSheet: {
-    backgroundColor: '#FFFFFF',
-    paddingTop: 12,
-    paddingBottom: 16,
-    paddingHorizontal: 16,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-  },
-  modalHeader: {
-    flexDirection: 'row-reverse',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 8,
-  },
-  modalTitle: {
-    fontSize: 14,
-    fontWeight: '900',
-    color: '#111827',
-  },
-  modalCloseBtn: {
-    paddingVertical: 8,
-    paddingHorizontal: 10,
-    borderRadius: 10,
-    backgroundColor: '#F3F4F6',
-  },
-  modalCloseText: {
-    fontSize: 12,
-    fontWeight: '900',
-    color: '#111827',
-  },
   modalFooter: {
     marginTop: 10,
   },
@@ -2860,6 +2957,335 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     alignItems: 'flex-end',
     gap: 4,
+  },
+  // Step 3 "Apartment details-like" preview styles (match app/apartment/[id].tsx)
+  aptPreviewPage: {
+    marginHorizontal: -16,
+    backgroundColor: '#FAFAFA',
+  },
+  aptGalleryContainer: {
+    position: 'relative',
+    marginBottom: 12,
+  },
+  aptSlide: {
+    width: '100%',
+  },
+  aptImage: {
+    width: '100%',
+    height: 480,
+    backgroundColor: '#f3f4f6',
+    borderBottomLeftRadius: 32,
+    borderBottomRightRadius: 32,
+  },
+  aptDotsWrap: {
+    position: 'absolute',
+    bottom: 16,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  aptDotsPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 999,
+    backgroundColor: 'rgba(0,0,0,0.22)',
+  },
+  aptDotLight: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: 'rgba(255,255,255,0.50)',
+  },
+  aptDotActiveLight: {
+    backgroundColor: '#FFFFFF',
+  },
+  aptTopHeader: {
+    paddingHorizontal: 20,
+    paddingTop: 4,
+    paddingBottom: 8,
+    writingDirection: 'rtl',
+  },
+  aptHeroPriceRow: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 6,
+  },
+  aptHeroPriceMeta: {
+    flexDirection: 'row-reverse',
+    alignItems: 'baseline',
+    justifyContent: 'flex-start',
+    gap: 8,
+  },
+  aptHeroPriceValue: {
+    color: '#5e3f2d',
+    fontSize: 34,
+    fontWeight: '900',
+    letterSpacing: -0.5,
+    writingDirection: 'ltr',
+  },
+  aptHeroCurrency: {
+    color: '#5e3f2d',
+    fontSize: 22,
+    fontWeight: '900',
+  },
+  aptHeroPricePer: {
+    color: '#6B7280',
+    fontSize: 14,
+    fontWeight: '700',
+    writingDirection: 'rtl',
+  },
+  aptHeroTitle: {
+    color: '#111827',
+    fontSize: 20,
+    fontWeight: '800',
+    lineHeight: 26,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
+  aptHeroLocationRow: {
+    marginTop: 8,
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 4,
+  },
+  aptHeroLocationIcon: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'transparent',
+    borderWidth: 0,
+  },
+  aptHeroLocationText: {
+    flex: 1,
+    color: '#6B7280',
+    fontSize: 13,
+    fontWeight: '800',
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
+  aptContent: {
+    padding: 20,
+  },
+  aptStatsRowLight: { flexDirection: 'row-reverse', gap: 12, marginBottom: 12 },
+  aptStatLight: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    padding: 12,
+    aspectRatio: 1,
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...(Platform.OS === 'ios'
+      ? {
+          shadowColor: '#000',
+          shadowOpacity: 0.08,
+          shadowRadius: 8,
+          shadowOffset: { width: 0, height: 4 },
+        }
+      : { elevation: 4 }),
+  },
+  aptStatIconCircle: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(94,63,45,0.08)',
+    marginBottom: 8,
+  },
+  aptStatLabelRow: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 6,
+  },
+  aptStatLabel: { color: '#111827', fontWeight: '800', fontSize: 14 },
+  aptStatNumber: { color: '#111827', fontWeight: '900', fontSize: 16 },
+  aptSection: {
+    marginTop: 12,
+    marginBottom: 16,
+  },
+  aptWhiteCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 16,
+    ...(Platform.OS === 'ios'
+      ? {
+          shadowColor: '#000',
+          shadowOpacity: 0.08,
+          shadowRadius: 14,
+          shadowOffset: { width: 0, height: 8 },
+        }
+      : { elevation: 4 }),
+  },
+  aptSectionTitle: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#111827',
+    marginBottom: 10,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
+  aptTagsRow: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 12,
+  },
+  aptTagPill: {
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 999,
+    backgroundColor: 'rgba(94,63,45,0.08)',
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 6,
+  },
+  aptTagText: {
+    color: '#5e3f2d',
+    fontSize: 12,
+    fontWeight: '900',
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
+  aptDescriptionLight: {
+    fontSize: 15,
+    color: '#374151',
+    lineHeight: 22,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
+  aptFeaturesGrid: {
+    flexDirection: 'row-reverse',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    marginTop: 10,
+    marginBottom: 10,
+    gap: 12,
+  },
+  aptFeatureLine: {
+    width: '48%',
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    gap: 10,
+    minHeight: 56,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    borderRadius: 16,
+    backgroundColor: '#F3F4F6',
+  },
+  aptFeatureText: {
+    color: '#111827',
+    fontSize: 14,
+    fontWeight: '800',
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
+  aptFeaturesEmptyWrap: {
+    width: '100%',
+    backgroundColor: '#F9FAFB',
+    borderRadius: 14,
+    paddingVertical: 16,
+    paddingHorizontal: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  aptFeaturesEmptyIconPill: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(94,63,45,0.10)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(94,63,45,0.14)',
+    marginBottom: 10,
+  },
+  aptFeaturesEmptyTitle: {
+    color: '#111827',
+    fontSize: 14,
+    fontWeight: '900',
+    textAlign: 'center',
+    writingDirection: 'rtl',
+    marginBottom: 4,
+  },
+  aptFeaturesEmptyText: {
+    color: '#6B7280',
+    fontSize: 12,
+    fontWeight: '700',
+    textAlign: 'center',
+    writingDirection: 'rtl',
+    lineHeight: 18,
+  },
+  aptMapCard: {
+    borderRadius: 16,
+    backgroundColor: '#F3F4F6',
+    overflow: 'hidden',
+  },
+  aptMapInner: {
+    flex: 1,
+    alignSelf: 'stretch',
+  },
+  aptMapLocationBadge: {
+    position: 'absolute',
+    right: 10,
+    bottom: 10,
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.92)',
+    borderWidth: 1,
+    borderColor: 'rgba(17, 24, 39, 0.10)',
+    maxWidth: '92%',
+    ...(Platform.OS === 'ios'
+      ? {
+          shadowColor: '#000',
+          shadowOpacity: 0.16,
+          shadowRadius: 14,
+          shadowOffset: { width: 0, height: 8 },
+        }
+      : { elevation: 6 }),
+  },
+  aptMapLocationIconPill: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: 'rgba(94,63,45,0.10)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(94,63,45,0.14)',
+  },
+  aptMapLocationTextWrap: {
+    flex: 1,
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+  },
+  aptMapLocationCity: {
+    color: '#111827',
+    fontSize: 13,
+    fontWeight: '900',
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
+  aptMapLocationAddress: {
+    marginTop: 2,
+    color: '#374151',
+    fontSize: 12,
+    fontWeight: '800',
+    textAlign: 'right',
+    writingDirection: 'rtl',
   },
   previewGalleryContainer: {
     marginHorizontal: -16,
