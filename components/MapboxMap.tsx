@@ -12,6 +12,8 @@ export type MapboxMapProps = {
   points?: MapboxFeatureCollection;
   /** Color for the point/marker circles (defaults to the current purple). */
   pointColor?: string;
+  /** When true, render a slow pulsing ring behind point circles (use for single-location maps). */
+  pulsePoints?: boolean;
   onApartmentPress?: (apartmentId: string) => void;
 };
 

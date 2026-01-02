@@ -8,7 +8,6 @@ import {
   RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Heart } from 'lucide-react-native';
 import { supabase } from '@/lib/supabase';
@@ -17,7 +16,6 @@ import { Apartment } from '@/types/database';
 import ApartmentCard from '@/components/ApartmentCard';
 
 export default function LikesScreen() {
-  const insets = useSafeAreaInsets();
   const router = useRouter();
   const { user } = useAuthStore();
   
@@ -101,23 +99,25 @@ export default function LikesScreen() {
     </View>
   );
 
+  const renderListHeader = () => (
+    <View style={styles.listHeader}>
+      <Text style={styles.title}>דירות שאהבת</Text>
+      <Text style={styles.subtitle}>הלב שלך בחר — כאן מחכות לך כל הדירות שסימנת.</Text>
+    </View>
+  );
+
   const renderApartmentCard = ({ item }: { item: Apartment }) => (
     <ApartmentCard
       apartment={item}
       onPress={() => handleApartmentPress(item.id)}
+      variant="home"
     />
   );
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <View style={[styles.header, { paddingTop: 8 }]}>
-        <Text style={styles.title}>אהבתי</Text>
-        <Text style={styles.subtitle}>
-          {likedApartments.length > 0
-            ? `${likedApartments.length} דירות`
-            : 'הדירות שסימנת באהבתי יופיעו כאן'}
-        </Text>
-      </View>
+      {/* Spacer to avoid content sitting under the absolute GlobalTopBar */}
+      <View style={styles.globalTopBarSpacer} pointerEvents="none" />
 
       {isLoading ? (
         <View style={styles.loadingContainer}>
@@ -130,8 +130,9 @@ export default function LikesScreen() {
           renderItem={renderApartmentCard}
           contentContainerStyle={[
             styles.listContent,
-            likedApartments.length === 0 && styles.emptyListContent,
+            likedApartments.length === 0 && styles.listContentEmpty,
           ]}
+          ListHeaderComponent={likedApartments.length > 0 ? renderListHeader : null}
           ListEmptyComponent={renderEmptyState}
           refreshControl={
             <RefreshControl
@@ -153,11 +154,14 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#FFFFFF',
   },
-  header: {
+  globalTopBarSpacer: {
+    paddingTop: 44,
+    backgroundColor: '#FFFFFF',
+  },
+  listHeader: {
     paddingHorizontal: 16,
+    paddingTop: 12,
     paddingBottom: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F3F4F6',
   },
   title: {
     fontSize: 22,
@@ -180,12 +184,14 @@ const styles = StyleSheet.create({
   },
   listContent: {
     padding: 16,
+    paddingBottom: 140, // Leave room for the bottom tab bar
+    backgroundColor: '#FFFFFF',
   },
-  emptyListContent: {
-    flex: 1,
-    justifyContent: 'center',
+  listContentEmpty: {
+    flexGrow: 1,
   },
   emptyContainer: {
+    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 32,

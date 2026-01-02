@@ -18,6 +18,8 @@ export function buildMapboxHtml(params: {
   zoom?: number;
   points?: MapboxFeatureCollection;
   pointColor?: string;
+  /** When true, render a slow pulsing ring behind point circles (used for single-location maps). */
+  pulsePoints?: boolean;
 }): string {
   const hasExplicitCenter = Array.isArray(params.center) && params.center.length === 2;
   const center = params.center ?? [34.7818, 32.0853];
@@ -27,6 +29,7 @@ export function buildMapboxHtml(params: {
   const points = params.points ?? { type: 'FeatureCollection', features: [] };
   const pointColor = (params.pointColor || '').trim() || '#8B5CF6'; // default: purple
   const labelColor = '#6D28D9'; // purple (Tailwind violet-700)
+  const pulsePoints = !!params.pulsePoints;
 
   // NOTE: This HTML is used inside WebView (native) and iframe srcDoc (web).
   return `<!doctype html>
@@ -135,6 +138,7 @@ export function buildMapboxHtml(params: {
           var styleUrl = ${JSON.stringify(styleUrl)};
           var points = ${JSON.stringify(points)};
           var hasExplicitCenter = ${JSON.stringify(hasExplicitCenter)};
+          var pulsePoints = ${JSON.stringify(pulsePoints)};
           var map = new mapboxgl.Map({
             container: 'map',
             style: styleUrl,
@@ -240,6 +244,52 @@ export function buildMapboxHtml(params: {
                   'circle-stroke-color': '#FFFFFF'
                 }
               });
+
+              // Optional slow pulsing ring (behind the main point)
+              if (pulsePoints) {
+                try {
+                  map.addLayer(
+                    {
+                      id: 'apt-pulse',
+                      type: 'circle',
+                      source: 'apartments',
+                      paint: {
+                        'circle-radius': 12,
+                        'circle-color': ${JSON.stringify(pointColor)},
+                        'circle-opacity': 0.28,
+                        'circle-stroke-width': 0,
+                      },
+                    },
+                    'apt-circles'
+                  );
+
+                  // Animate radius + opacity in a loop (slow pulse)
+                  var __pulseStart = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+                  var __pulseDuration = 2600; // ms
+                  function __tickPulse() {
+                    try {
+                      if (!map || !map.isStyleLoaded || !map.isStyleLoaded()) {
+                        requestAnimationFrame(__tickPulse);
+                        return;
+                      }
+                      // If layer was removed (style change), stop trying.
+                      if (!map.getLayer || !map.getLayer('apt-pulse')) return;
+                      var now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+                      var t = ((now - __pulseStart) % __pulseDuration) / __pulseDuration; // 0..1
+                      // Ease-out-ish curve
+                      var ease = 1 - Math.pow(1 - t, 2);
+                      var radius = 10 + ease * 16; // 10..26
+                      var opacity = (1 - ease) * 0.28; // 0.28..0
+                      map.setPaintProperty('apt-pulse', 'circle-radius', radius);
+                      map.setPaintProperty('apt-pulse', 'circle-opacity', opacity);
+                      requestAnimationFrame(__tickPulse);
+                    } catch (_) {
+                      // swallow errors so the map never crashes
+                    }
+                  }
+                  requestAnimationFrame(__tickPulse);
+                } catch (_) {}
+              }
 
               // Fit bounds to points (only when center isn't explicitly provided)
               if (!hasExplicitCenter) {

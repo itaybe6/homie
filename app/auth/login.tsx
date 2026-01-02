@@ -160,7 +160,7 @@ export default function LoginScreen() {
                   onPress={() => router.push({ pathname: '/auth/forgot-password', params: { email: email.trim() } } as any)}
                   disabled={isLoading}
                 >
-                  <Text style={styles.forgotLinkText}>שכחתי סיסמה</Text>
+                  <Text style={styles.forgotLinkText}>שכחתי סיסמה?</Text>
                 </TouchableOpacity>
                 <TouchableOpacity style={[styles.button, isLoading && styles.buttonDisabled]} onPress={handleLogin} disabled={isLoading}>
                   {isLoading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.buttonText}>התחבר</Text>}
@@ -388,14 +388,16 @@ const styles = StyleSheet.create({
   },
   forgotLinkWrap: {
     alignItems: 'flex-end',
-    marginTop: 2,
-    marginBottom: 2,
+    // Pull closer to the input above (form uses a fixed gap)
+    marginTop: -8,
+    marginBottom: 4,
     paddingRight: 4,
   },
   forgotLinkText: {
     color: ACCENT_BROWN,
     fontSize: 13,
-    fontWeight: '700',
+    fontWeight: '500',
+    textDecorationLine: 'underline',
     textAlign: 'right',
     writingDirection: 'rtl',
   },

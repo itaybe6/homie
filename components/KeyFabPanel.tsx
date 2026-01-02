@@ -1,6 +1,6 @@
 import React from 'react';
 import { Dimensions, Platform, StyleSheet, Text, TouchableWithoutFeedback, View, ViewStyle } from 'react-native';
-import Animated, { FadeIn, FadeInDown, FadeOut, FadeOutDown, LinearTransition } from 'react-native-reanimated';
+import Animated, { FadeIn, FadeInDown, FadeOut, FadeOutDown, FadeOutUp, LinearTransition } from 'react-native-reanimated';
 import { X } from 'lucide-react-native';
 import { TouchableOpacity } from 'react-native';
 
@@ -12,9 +12,26 @@ export type KeyFabPanelProps = {
   onClose: () => void;
   onEnterPassword?: () => void;
   /**
+   * Optional overrides to reuse the same animated panel for other UI (e.g. filters).
+   */
+  title?: string;
+  subtitle?: string;
+  bodyText?: string;
+  primaryActionLabel?: string;
+  onPrimaryAction?: () => void;
+  children?: React.ReactNode;
+  /**
+   * Where the panel is anchored. Defaults to bottom (legacy behavior).
+   */
+  anchor?: 'bottom' | 'top';
+  /**
    * Place the panel above sticky bottom UI (CTA). Example: ctaHeight + 12
    */
   bottomOffset?: number;
+  /**
+   * Place the panel below sticky top UI (e.g. search bar). Used when anchor="top".
+   */
+  topOffset?: number;
   /**
    * Optional style overrides for the panel container.
    */
@@ -27,12 +44,28 @@ export function KeyFabPanel({
   isOpen,
   onClose,
   onEnterPassword,
+  title,
+  subtitle,
+  bodyText,
+  primaryActionLabel,
+  onPrimaryAction,
+  children,
+  anchor = 'bottom',
   bottomOffset = 110,
+  topOffset = 90,
   panelStyle,
   duration = _defaultDuration,
   openedWidth = width * 0.92,
 }: KeyFabPanelProps) {
   if (!isOpen) return null;
+
+  const resolvedTitle = (title ?? 'מצטרפים לדירה?').trim();
+  const resolvedSubtitle = (subtitle ?? 'יש לכם סיסמה מבעל הדירה? תוכלו להכניס אותה ולהצטרף לדירה בלחיצה אחת').trim();
+  const resolvedBodyText = (bodyText ?? 'נמשיך למסך הזנת סיסמה (6 ספרות).').trim();
+  const resolvedPrimaryLabel = (primaryActionLabel ?? 'הכניסו את הסיסמא').trim();
+  const resolvedPrimaryAction = onPrimaryAction ?? onEnterPassword;
+  const placement = anchor === 'top' ? { top: topOffset } : { bottom: bottomOffset };
+  const exitAnim = anchor === 'top' ? FadeOutUp : FadeOutDown;
 
   return (
     <Animated.View
@@ -47,13 +80,13 @@ export function KeyFabPanel({
 
       <Animated.View
         entering={FadeInDown.duration(duration)}
-        exiting={FadeOutDown.duration(duration)}
+        exiting={exitAnim.duration(duration)}
         layout={LinearTransition.duration(duration)}
         style={[
           styles.panel,
           {
             width: openedWidth,
-            bottom: bottomOffset,
+            ...placement,
             left: (width - openedWidth) / 2,
           },
           panelStyle,
@@ -61,10 +94,8 @@ export function KeyFabPanel({
       >
         <View style={styles.headerRow}>
           <View style={{ flex: 1 }}>
-            <Text style={styles.heading}>מצטרפים לדירה?</Text>
-            <Text style={styles.subheading}>
-              יש לכם סיסמה מבעל הדירה? תוכלו להכניס אותה ולבקש להצטרף לדירה בלחיצה אחת.
-            </Text>
+            <Text style={styles.heading}>{resolvedTitle}</Text>
+            {resolvedSubtitle ? <Text style={styles.subheading}>{resolvedSubtitle}</Text> : null}
           </View>
           <TouchableWithoutFeedback onPress={onClose}>
             <Animated.View
@@ -83,16 +114,24 @@ export function KeyFabPanel({
           exiting={FadeOutDown.duration(duration)}
           style={styles.content}
         >
-          <Text style={styles.bodyText}>נמשיך למסך הזנת סיסמה (6 ספרות).</Text>
-          <TouchableOpacity
-            style={styles.primaryBtn}
-            activeOpacity={0.9}
-            onPress={onEnterPassword}
-            accessibilityRole="button"
-            accessibilityLabel="הכניסו את הסיסמא"
-          >
-            <Text style={styles.primaryBtnText}>הכניסו את הסיסמא</Text>
-          </TouchableOpacity>
+          {children ? (
+            children
+          ) : (
+            <>
+              {resolvedBodyText ? <Text style={styles.bodyText}>{resolvedBodyText}</Text> : null}
+              {resolvedPrimaryAction ? (
+                <TouchableOpacity
+                  style={styles.primaryBtn}
+                  activeOpacity={0.9}
+                  onPress={resolvedPrimaryAction}
+                  accessibilityRole="button"
+                  accessibilityLabel={resolvedPrimaryLabel || 'פעולה ראשית'}
+                >
+                  <Text style={styles.primaryBtnText}>{resolvedPrimaryLabel}</Text>
+                </TouchableOpacity>
+              ) : null}
+            </>
+          )}
         </Animated.View>
       </Animated.View>
     </Animated.View>

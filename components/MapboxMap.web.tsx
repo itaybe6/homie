@@ -9,6 +9,7 @@ export default function MapboxMap(props: {
   zoom?: number;
   points?: MapboxFeatureCollection;
   pointColor?: string;
+  pulsePoints?: boolean;
   onApartmentPress?: (apartmentId: string) => void;
 }) {
   const token = props.accessToken ?? '';
@@ -37,8 +38,9 @@ export default function MapboxMap(props: {
       zoom: props.zoom,
       points: props.points,
       pointColor: props.pointColor,
+      pulsePoints: props.pulsePoints,
     });
-  }, [token, props.styleUrl, props.center, props.zoom, props.points, props.pointColor]);
+  }, [token, props.styleUrl, props.center, props.zoom, props.points, props.pointColor, props.pulsePoints]);
 
   if (!token) {
     return (

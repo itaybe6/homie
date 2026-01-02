@@ -5,6 +5,7 @@ import { Apartment } from '@/types/database';
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { LinearGradient } from 'expo-linear-gradient';
 import FavoriteHeartButton from '@/components/FavoriteHeartButton';
+import { formatTimeAgoHe } from '@/utils/time';
 
 interface ApartmentCardProps {
   apartment: Apartment;
@@ -262,6 +263,11 @@ export default function ApartmentCard({
     return isHome ? `₪${formatted}` : `${formatted}₪`;
   }, [apartment.price, isHome]);
 
+  const timeAgoLabel = useMemo(() => {
+    const createdAt = (apartment as any)?.created_at;
+    return createdAt ? formatTimeAgoHe(createdAt) : '';
+  }, [apartment]);
+
   return (
     <View style={[styles.cardOuter, isHome ? styles.cardOuterHome : null]}>
       <View style={[styles.cardInner, isHome ? styles.cardInnerHome : null]}>
@@ -450,6 +456,12 @@ export default function ApartmentCard({
                     ) : null}
                   </View>
                 ) : null}
+
+                {timeAgoLabel ? (
+                  <Text style={styles.timeAgoTextHome} numberOfLines={1}>
+                    {timeAgoLabel}
+                  </Text>
+                ) : null}
               </View>
 
               <View style={styles.metaRowHome}>
@@ -515,6 +527,12 @@ export default function ApartmentCard({
                     </View>
                   ) : null}
                 </View>
+              ) : null}
+
+              {timeAgoLabel ? (
+                <Text style={styles.timeAgoText} numberOfLines={1}>
+                  {timeAgoLabel}
+                </Text>
               ) : null}
 
               <View style={styles.bottomContainer}>
@@ -814,6 +832,24 @@ const styles = StyleSheet.create({
   tagsRowDefault: {
     marginBottom: 8,
     justifyContent: 'flex-end',
+  },
+  timeAgoText: {
+    color: '#6B7280',
+    fontSize: 12,
+    fontWeight: '700',
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    marginTop: 6,
+    marginBottom: 8,
+  },
+  timeAgoTextHome: {
+    color: '#6B7280',
+    fontSize: 11,
+    fontWeight: '700',
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    marginTop: 6,
+    marginBottom: 6,
   },
   tagPill: {
     paddingHorizontal: 10,

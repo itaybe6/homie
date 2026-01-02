@@ -2,13 +2,14 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, ActivityIndicator, TextInput, TouchableOpacity, Platform, ScrollView, Image, Modal } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import MapboxMap from '@/components/MapboxMap';
+import { KeyFabPanel } from '@/components/KeyFabPanel';
 import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { geocodeApartmentAddress, geocodePlace } from '@/lib/mapboxGeocoding';
 import type { Apartment } from '@/types/database';
 import type { MapboxFeatureCollection } from '@/lib/mapboxHtml';
 import FilterChipsBar, { defaultFilterChips, selectedFiltersFromIds, type FilterChip } from '@/components/FilterChipsBar';
-import { Search, X, MapPin, LocateFixed } from 'lucide-react-native';
+import { Search, X, MapPin, LocateFixed, SlidersHorizontal } from 'lucide-react-native';
 import * as Location from 'expo-location';
 
 function chunk<T>(arr: T[], size: number): T[][] {
@@ -63,6 +64,7 @@ export default function MapTabScreen() {
   const token = process.env.EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN as string | undefined;
   const styleUrl = process.env.EXPO_PUBLIC_MAPBOX_STYLE_URL as string | undefined;
   const insets = useSafeAreaInsets();
+  const pointBrown = '#5e3f2d';
 
   const [points, setPoints] = useState<MapboxFeatureCollection>({
     type: 'FeatureCollection',
@@ -72,6 +74,7 @@ export default function MapTabScreen() {
   const [pointsError, setPointsError] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState('');
   const [chipSelected, setChipSelected] = useState<string[]>([]);
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [distanceKm, setDistanceKm] = useState<number | null>(null);
   const [distancePickerOpen, setDistancePickerOpen] = useState(false);
   const [userLocation, setUserLocation] = useState<{ lng: number; lat: number } | null>(null);
@@ -585,6 +588,7 @@ export default function MapTabScreen() {
           center={mapCenter}
           zoom={mapZoom}
           points={filteredPoints}
+          pointColor={pointBrown}
           onApartmentPress={(id: string) => {
             router.push({ pathname: '/apartment/[id]', params: { id, returnTo: '/(tabs)/map' } });
           }}
@@ -692,7 +696,7 @@ export default function MapTabScreen() {
         <View pointerEvents="box-none" style={[styles.topOverlay, { top: (insets.top || 0) + 10 }]}>
           <View style={styles.searchRow}>
             <View style={[styles.searchContainer, { flex: 1 }]}>
-              <Search size={20} color="#4C1D95" style={styles.searchIcon} />
+              <Search size={20} color="#5e3f2d" style={styles.searchIcon} />
               <TextInput
                 style={styles.topSearchInput}
                 placeholder="חיפוש לפי שם, עיר או כתובת..."
@@ -716,21 +720,17 @@ export default function MapTabScreen() {
                 </TouchableOpacity>
               ) : null}
             </View>
-          </View>
 
-          <FilterChipsBar
-            filters={filterChips}
-            selectedIds={selectedChipIds}
-            onChange={(next) => setChipSelected((next || []).filter((id) => id !== 'distance'))}
-            onOpenDropdown={(chip) => {
-              if (chip.id === 'distance') setDistancePickerOpen(true);
-            }}
-            inactiveBackgroundColor="#F3F4F6"
-            inactiveBorderColor="#E5E7EB"
-            activeBackgroundColor="#EFEAFE"
-            activeBorderColor="rgba(76, 29, 149, 0.28)"
-            style={{ marginTop: 8 }}
-          />
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel={filtersOpen ? 'סגור סינון' : 'פתח סינון'}
+              onPress={() => setFiltersOpen((v) => !v)}
+              activeOpacity={0.9}
+              style={styles.filterIconBtn}
+            >
+              <SlidersHorizontal size={18} color="#5e3f2d" />
+            </TouchableOpacity>
+          </View>
 
           {statusText ? (
             <View style={[styles.statusPill, statusTone === 'error' ? styles.statusPillError : styles.statusPillNeutral]}>
@@ -740,6 +740,31 @@ export default function MapTabScreen() {
           ) : null}
         </View>
       ) : null}
+
+      {/* Filters animated panel (reuses the KeyFabPanel animation) */}
+      <KeyFabPanel
+        isOpen={!!token && filtersOpen}
+        onClose={() => setFiltersOpen(false)}
+        title="סינון"
+        subtitle="בחרו סינונים כדי לצמצם את הדירות המוצגות במפה"
+        // Open from the top, right under the search/filter row.
+        anchor="top"
+        topOffset={(insets.top || 0) + 10 + 44 + 10}
+      >
+        <FilterChipsBar
+          filters={filterChips}
+          selectedIds={selectedChipIds}
+          onChange={(next) => setChipSelected((next || []).filter((id) => id !== 'distance'))}
+          onOpenDropdown={(chip) => {
+            if (chip.id === 'distance') setDistancePickerOpen(true);
+          }}
+          inactiveBackgroundColor="#F3F4F6"
+          inactiveBorderColor="#E5E7EB"
+          activeBackgroundColor="#EFEAFE"
+          activeBorderColor="rgba(76, 29, 149, 0.28)"
+          style={{ marginTop: 8 }}
+        />
+      </KeyFabPanel>
 
       {!token ? (
         <View pointerEvents="none" style={styles.envHint}>
@@ -818,12 +843,17 @@ const styles = StyleSheet.create({
   searchContainer: {
     flexDirection: 'row-reverse',
     alignItems: 'center',
-    backgroundColor: '#FAFAFA',
+    backgroundColor: '#FFFFFF',
     borderRadius: 22,
     paddingHorizontal: 10,
     height: 44,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderWidth: 0,
+    borderColor: 'transparent',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.16,
+    shadowRadius: 18,
+    elevation: 12,
   },
   searchIcon: {
     marginLeft: 8,
@@ -844,6 +874,21 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 6,
+  },
+  filterIconBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.96)',
+    // No border; rely on shadow to separate from map background
+    borderWidth: 0,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.16,
+    shadowRadius: 18,
+    elevation: 12,
   },
   envHint: {
     position: 'absolute',
@@ -970,14 +1015,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 999,
-    backgroundColor: '#EFEAFE',
+    backgroundColor: 'rgba(94, 63, 45, 0.10)',
     borderWidth: 1,
-    borderColor: '#E9D5FF',
+    borderColor: 'rgba(94, 63, 45, 0.18)',
   },
   slotsText: {
     fontSize: 11,
     fontWeight: '800',
-    color: '#4C1D95',
+    color: '#5e3f2d',
     textAlign: 'right',
     writingDirection: 'rtl',
   },

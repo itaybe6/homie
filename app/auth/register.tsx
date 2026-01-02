@@ -32,7 +32,8 @@ import KeyboardAwareScrollView from 'react-native-keyboard-aware-scroll-view/lib
 
 // App primary accent color (align with dark theme)
 const PRIMARY = '#5e3f2d';
-const BG_LIGHT = '#F7F1EC';
+// Keep the auth background consistent with the login screen
+const BG_DARK = '#2B1A12';
 
 export default function RegisterScreen() {
   const router = useRouter();
@@ -282,7 +283,7 @@ export default function RegisterScreen() {
     <View style={styles.container}>
       {/* Animated “liquid glass” background */}
       <View pointerEvents="none" style={styles.bgWrap}>
-        <LavaLamp hue="orange" intensity={40} count={5} duration={16000} backgroundColor={BG_LIGHT} />
+        <LavaLamp hue="orange" intensity={60} count={5} duration={16000} backgroundColor={BG_DARK} />
       </View>
       {/* Back to login */}
       <TouchableOpacity
@@ -300,7 +301,7 @@ export default function RegisterScreen() {
         style={[styles.backBtn, { top: insets.top + 8 }]}
         hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
       >
-        <X size={24} color={PRIMARY} />
+        <X size={24} color="#FFFFFF" />
       </TouchableOpacity>
       <KeyboardAwareScrollView
         enableOnAndroid
@@ -315,7 +316,7 @@ export default function RegisterScreen() {
           <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
           <View style={[styles.header, step === 1 && { paddingTop: insets.top + 24, marginBottom: 24 }, step === 0 && styles.headerCentered]}>
             <Image
-              source={require('../../assets/images/logoslogpur.png')}
+              source={require('../../assets/images/logo slog.png')}
               style={[styles.headerLogo, { marginTop: 0 }]}
               resizeMode="contain"
               accessible

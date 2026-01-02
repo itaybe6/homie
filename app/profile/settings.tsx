@@ -29,6 +29,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 
 export default function ProfileSettingsScreen() {
+  const ICON_COLOR = '#5e3f2d';
   const router = useRouter();
   const { user, setUser } = useAuthStore();
   const [isSigningOut, setIsSigningOut] = useState(false);
@@ -910,7 +911,7 @@ export default function ProfileSettingsScreen() {
             activeOpacity={0.9}
           >
             <View style={styles.itemIcon}>
-              <MapPin size={18} color="#4C1D95" />
+              <MapPin size={18} color={ICON_COLOR} />
             </View>
             <View style={styles.itemTextWrap}>
               <Text style={styles.groupItemTitle}>
@@ -920,7 +921,7 @@ export default function ProfileSettingsScreen() {
                 {surveyCompleted ? 'עדכון העדפות התאמה' : 'כמה שאלות קצרות להיכרות'}
               </Text>
             </View>
-            <ChevronLeft size={18} color="#4C1D95" />
+            <ChevronLeft size={18} color={ICON_COLOR} />
           </TouchableOpacity>
 
           <View style={styles.divider} />
@@ -931,41 +932,18 @@ export default function ProfileSettingsScreen() {
             activeOpacity={0.9}
           >
             <View style={styles.itemIcon}>
-              <Inbox size={18} color="#4C1D95" />
+              <Inbox size={18} color={ICON_COLOR} />
             </View>
             <View style={styles.itemTextWrap}>
               <Text style={styles.groupItemTitle}>בקשות</Text>
               <Text style={styles.groupItemSub}>צפייה וניהול בקשות</Text>
             </View>
-            <ChevronLeft size={18} color="#4C1D95" />
+            <ChevronLeft size={18} color={ICON_COLOR} />
           </TouchableOpacity>
         </View>
 
         <Text style={styles.sectionTitle}>אבטחה וחשבון</Text>
         <View style={styles.groupCard}>
-          <TouchableOpacity
-            style={styles.groupItem}
-            onPress={isSigningOut ? undefined : handleSignOut}
-            activeOpacity={0.9}
-          >
-            <View style={[styles.itemIcon, styles.dangerIcon]}>
-              {isSigningOut ? (
-                <ActivityIndicator size="small" color="#F87171" />
-              ) : (
-                <LogOut size={18} color="#F87171" />
-              )}
-            </View>
-            <View style={styles.itemTextWrap}>
-              <Text style={[styles.groupItemTitle, styles.dangerText]}>
-                {isSigningOut ? 'מתנתק...' : 'התנתק'}
-              </Text>
-              <Text style={styles.groupItemSub}>יציאה מהחשבון</Text>
-            </View>
-            <ChevronLeft size={18} color="#4C1D95" />
-          </TouchableOpacity>
-
-          <View style={styles.divider} />
-
           <TouchableOpacity
             style={styles.groupItem}
             onPress={isDeleting ? undefined : handleDeleteProfile}
@@ -984,7 +962,30 @@ export default function ProfileSettingsScreen() {
               </Text>
               <Text style={styles.groupItemSub}>פעולה בלתי ניתנת לשחזור</Text>
             </View>
-            <ChevronLeft size={18} color="#4C1D95" />
+            <ChevronLeft size={18} color={ICON_COLOR} />
+          </TouchableOpacity>
+
+          <View style={styles.divider} />
+
+          <TouchableOpacity
+            style={styles.groupItem}
+            onPress={isSigningOut ? undefined : handleSignOut}
+            activeOpacity={0.9}
+          >
+            <View style={[styles.itemIcon, styles.dangerIcon]}>
+              {isSigningOut ? (
+                <ActivityIndicator size="small" color="#F87171" />
+              ) : (
+                <LogOut size={18} color="#F87171" />
+              )}
+            </View>
+            <View style={styles.itemTextWrap}>
+              <Text style={[styles.groupItemTitle, styles.dangerText]}>
+                {isSigningOut ? 'מתנתק...' : 'התנתק'}
+              </Text>
+              <Text style={styles.groupItemSub}>יציאה מהחשבון</Text>
+            </View>
+            <ChevronLeft size={18} color={ICON_COLOR} />
           </TouchableOpacity>
         </View>
       </ScrollView>

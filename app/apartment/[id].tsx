@@ -1316,18 +1316,11 @@ export default function ApartmentDetailsScreen() {
               </TouchableOpacity>
               {isOwner ? (
                 <TouchableOpacity
-                  style={[styles.circleBtnLight, (isAdding || isAddPartnerDisabled) ? { opacity: 0.55 } : null]}
+                  style={styles.circleBtnLight}
                   activeOpacity={0.9}
-                  disabled={isAdding || isAddPartnerDisabled}
-                  onPress={() => {
-                    if (isAddPartnerDisabled) {
-                      Alert.alert('אין מקום', 'הגעת למספר השותפים המקסימלי בדירה זו');
-                      return;
-                    }
-                    openAddPartnerModal();
-                  }}
+                  onPress={handleDeleteApartment}
                 >
-                  <UserPlus size={18} color="#111827" />
+                  <Trash2 size={18} color="#111827" />
                 </TouchableOpacity>
               ) : null}
               {isOwner ? (
@@ -1337,15 +1330,6 @@ export default function ApartmentDetailsScreen() {
                   onPress={() => router.push({ pathname: '/apartment/edit/[id]', params: { id: apartment.id } })}
                 >
                   <Pencil size={18} color="#111827" />
-                </TouchableOpacity>
-              ) : null}
-              {isOwner ? (
-                <TouchableOpacity
-                  style={styles.circleBtnLight}
-                  activeOpacity={0.9}
-                  onPress={handleDeleteApartment}
-                >
-                  <Trash2 size={18} color="#111827" />
                 </TouchableOpacity>
               ) : null}
             </View>
@@ -1642,6 +1626,7 @@ export default function ApartmentDetailsScreen() {
                         zoom={aptGeo ? 16.5 : 11}
                         points={aptGeo ? aptMapPoints : { type: 'FeatureCollection', features: [] }}
                         pointColor="#5e3f2d"
+                        pulsePoints
                       />
                     </View>
                     {/* City + address overlay (bottom-right) */}
@@ -2350,7 +2335,9 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   leftControls: {
-    flexDirection: 'row-reverse',
+    // Keep "back" as the left-most button visually (even in RTL)
+    ...(Platform.OS !== 'web' ? ({ direction: 'ltr' } as const) : {}),
+    flexDirection: 'row',
     gap: 8,
   },
   circleBtnLight: {
