@@ -17,6 +17,7 @@ import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/authStore';
 import { User } from '@/types/database';
 import { computeGroupAwareLabel } from '@/lib/group';
+import { insertNotificationOnce } from '@/lib/notifications';
 
 type StatusFilterValue = 'ALL' | 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED' | 'NOT_RELEVANT';
 
@@ -383,12 +384,13 @@ export default function GroupRequestsScreen() {
       // Notify inviter
       try {
         const approverName = await computeGroupAwareLabel(user.id);
-        await supabase.from('notifications').insert({
+        await insertNotificationOnce({
           sender_id: user.id,
           recipient_id: item.sender_id,
           title: 'אישרת מיזוג פרופילים',
           description: `${approverName} אישר/ה את בקשת מיזוג הפרופילים.`,
           is_read: false,
+          event_key: `profile_merge:${item.id}:approved`,
         });
       } catch {}
 

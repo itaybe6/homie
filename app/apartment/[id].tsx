@@ -57,6 +57,7 @@ import {
 } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { supabase } from '@/lib/supabase';
+import { insertNotificationOnce } from '@/lib/notifications';
 import { useAuthStore } from '@/stores/authStore';
 import { useApartmentStore } from '@/stores/apartmentStore';
 import { Apartment, User } from '@/types/database';
@@ -79,6 +80,16 @@ export default function ApartmentDetailsScreen() {
   const { id, returnTo, openAdd } = useLocalSearchParams();
   const { user } = useAuthStore();
   const removeApartment = useApartmentStore((state) => state.removeApartment);
+
+  const openUserProfile = (targetUserId: string) => {
+    const myId = String((user as any)?.id || '').trim();
+    const tid = String(targetUserId || '').trim();
+    if (myId && tid && myId === tid) {
+      router.push('/(tabs)/profile' as any);
+      return;
+    }
+    router.push({ pathname: '/user/[id]', params: { id: tid } } as any);
+  };
 
   const [apartment, setApartment] = useState<Apartment | null>(null);
   const [owner, setOwner] = useState<User | null>(null);
@@ -817,12 +828,13 @@ export default function ApartmentDetailsScreen() {
       // Best-effort notification to requester
       try {
         const ownerName = (owner as any)?.full_name || 'בעל הדירה';
-        await supabase.from('notifications').insert({
+        await insertNotificationOnce({
           sender_id: user.id,
           recipient_id: senderId,
           title: 'הבקשה אושרה',
           description: `${ownerName} אישר/ה את בקשתך להצטרף לדירה: ${(apartment as any)?.title || ''} (${(apartment as any)?.city || ''}).`,
           is_read: false,
+          event_key: `apt_join_request:${reqId}:approved`,
         });
       } catch {}
 
@@ -849,12 +861,13 @@ export default function ApartmentDetailsScreen() {
       // Best-effort notification to requester
       try {
         const ownerName = (owner as any)?.full_name || 'בעל הדירה';
-        await supabase.from('notifications').insert({
+        await insertNotificationOnce({
           sender_id: user.id,
           recipient_id: senderId,
           title: 'הבקשה נדחתה',
           description: `${ownerName} דחה/תה את בקשתך להצטרף לדירה: ${(apartment as any)?.title || ''} (${(apartment as any)?.city || ''}).`,
           is_read: false,
+          event_key: `apt_join_request:${reqId}:rejected`,
         });
       } catch {}
 
@@ -1908,7 +1921,7 @@ export default function ApartmentDetailsScreen() {
                             style={styles.personCard}
                             activeOpacity={0.9}
                             onPress={() => {
-                              router.push({ pathname: '/user/[id]', params: { id: p.id } });
+                              openUserProfile(p.id);
                             }}
                           >
                             <View style={styles.personAvatarWrap}>
@@ -2084,7 +2097,7 @@ export default function ApartmentDetailsScreen() {
                       activeOpacity={0.9}
                       onPress={() => {
                         setIsJoinRequestsOpen(false);
-                        router.push({ pathname: '/user/[id]', params: { id: item.user.id } });
+                        openUserProfile(item.user.id);
                       }}
                       style={styles.joinReqLeft}
                     >
@@ -2165,7 +2178,7 @@ export default function ApartmentDetailsScreen() {
                       activeOpacity={0.9}
                       onPress={() => {
                         setIsMembersOpen(false);
-                        router.push({ pathname: '/user/[id]', params: { id: m.id } });
+                        openUserProfile(m.id);
                       }}
                       style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 }}
                     >

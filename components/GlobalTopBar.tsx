@@ -2,7 +2,7 @@ import { memo } from 'react';
 import { View, StyleSheet, Platform, Image } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import NotificationsButton from '@/components/NotificationsButton';
-import RequestsButton from '@/components/RequestsButton';
+import SettingsButton from '@/components/SettingsButton';
 
 function GlobalTopBarBase({ backgroundColor = '#FFFFFF' }: { backgroundColor?: string }) {
   const insets = useSafeAreaInsets();
@@ -51,8 +51,8 @@ function GlobalTopBarBase({ backgroundColor = '#FFFFFF' }: { backgroundColor?: s
             resizeMode="contain"
           />
         </View>
-        {/* Right: requests */}
-        <RequestsButton style={{ right: 16 }} />
+        {/* Right: settings */}
+        <SettingsButton style={{ right: 16 }} />
       </View>
     </View>
   );

@@ -18,6 +18,7 @@ import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/authStore';
 import { User } from '@/types/database';
 import { computeGroupAwareLabel } from '@/lib/group';
+import { insertNotificationOnce } from '@/lib/notifications';
 
 type MatchStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED' | 'NOT_RELEVANT';
 
@@ -395,12 +396,13 @@ export default function MatchRequestsScreen() {
       setActionId(match.id);
       await supabase.from('matches').update({ status: 'APPROVED', updated_at: new Date().toISOString() }).eq('id', match.id);
       const approverLabel = await computeGroupAwareLabel(user.id);
-      await supabase.from('notifications').insert({
+      await insertNotificationOnce({
         sender_id: user.id,
         recipient_id: match.sender_id,
         title: 'בקשת ההתאמה אושרה',
         description: `${approverLabel} אישר/ה את בקשת ההתאמה שלך. ניתן להמשיך לשיחה ולתאם היכרות.`,
         is_read: false,
+        event_key: `match:${match.id}:approved`,
       });
       await fetchAll();
       setTab('incoming');
@@ -420,12 +422,13 @@ export default function MatchRequestsScreen() {
       setActionId(match.id);
       await supabase.from('matches').update({ status: 'REJECTED', updated_at: new Date().toISOString() }).eq('id', match.id);
       const rejecterLabel = await computeGroupAwareLabel(user.id);
-      await supabase.from('notifications').insert({
+      await insertNotificationOnce({
         sender_id: user.id,
         recipient_id: match.sender_id,
         title: 'בקשת ההתאמה נדחתה',
         description: `${rejecterLabel} דחה/תה את בקשת ההתאמה שלך. אפשר להמשיך ולחפש התאמות נוספות.`,
         is_read: false,
+        event_key: `match:${match.id}:rejected`,
       });
       await fetchAll();
     } catch (e: any) {

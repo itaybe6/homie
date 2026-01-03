@@ -27,13 +27,58 @@ function RequestsButtonBase({ style, badgeCount }: Props) {
         if (isMounted) setCount(0);
         return;
       }
-      // Count only pending incoming apartment requests (matches moved to MatchRequestsButton)
-      const { count: c1 } = await supabase
-        .from('apartments_request')
-        .select('id', { count: 'exact', head: true })
-        .eq('recipient_id', user.id)
-        .eq('status', 'PENDING');
-      if (isMounted) setCount(c1 || 0);
+      // Count pending incoming items (apartment requests + match requests + group invites),
+      // including requests addressed to any ACTIVE member of my merged profile(s).
+      let recipientIds: string[] = [user.id];
+      let myGroupIds: string[] = [];
+      try {
+        const { data: myMemberships } = await supabase
+          .from('profile_group_members')
+          .select('group_id')
+          .eq('user_id', user.id)
+          .eq('status', 'ACTIVE');
+        myGroupIds = (myMemberships || []).map((r: any) => r?.group_id).filter(Boolean);
+        if (myGroupIds.length) {
+          const { data: membersRows } = await supabase
+            .from('profile_group_members')
+            .select('user_id')
+            .eq('status', 'ACTIVE')
+            .in('group_id', myGroupIds as any);
+          const memberIds = (membersRows || []).map((r: any) => r?.user_id).filter(Boolean);
+          if (memberIds.length) recipientIds = Array.from(new Set(memberIds));
+        }
+      } catch {
+        // best-effort only
+      }
+
+      const [{ count: aptCount }, { count: matchDirectCount }, { count: matchGroupCount }, { count: groupInvCount }] =
+        await Promise.all([
+          supabase
+            .from('apartments_request')
+            .select('id', { count: 'exact', head: true })
+            .in('recipient_id', recipientIds as any)
+            .eq('status', 'PENDING'),
+          supabase
+            .from('matches')
+            .select('id', { count: 'exact', head: true })
+            .in('receiver_id', recipientIds as any)
+            .eq('status', 'PENDING'),
+          myGroupIds.length
+            ? supabase
+                .from('matches')
+                .select('id', { count: 'exact', head: true })
+                .in('receiver_group_id', myGroupIds as any)
+                .eq('status', 'PENDING')
+            : Promise.resolve({ count: 0 } as any),
+          supabase
+            .from('profile_group_invites')
+            .select('id', { count: 'exact', head: true })
+            .in('invitee_id', recipientIds as any)
+            .eq('status', 'PENDING'),
+        ]);
+
+      const total = (aptCount || 0) + (matchDirectCount || 0) + (matchGroupCount || 0) + (groupInvCount || 0);
+      if (isMounted) setCount(total);
     };
 
     fetchCount();
@@ -44,6 +89,16 @@ function RequestsButtonBase({ style, badgeCount }: Props) {
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'apartments_request', filter: user?.id ? `recipient_id=eq.${user.id}` : undefined },
+        () => fetchCount()
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'matches', filter: user?.id ? `receiver_id=eq.${user.id}` : undefined },
+        () => fetchCount()
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'profile_group_invites', filter: user?.id ? `invitee_id=eq.${user.id}` : undefined },
         () => fetchCount()
       )
       .subscribe();
@@ -60,9 +115,14 @@ function RequestsButtonBase({ style, badgeCount }: Props) {
     <View style={[styles.wrap, { marginTop: Math.max(6, insets.top + 2) }, style]}>
       <TouchableOpacity
         accessibilityRole="button"
-        accessibilityLabel="Requests"
+        accessibilityLabel="Inbox"
         activeOpacity={0.85}
-        onPress={() => router.push('/requests')}
+        onPress={() =>
+          router.push({
+            pathname: '/(tabs)/notifications',
+            params: { tab: 'incoming' },
+          } as any)
+        }
         style={styles.btn}
       >
         <Inbox size={22} color={ICON_COLOR} />

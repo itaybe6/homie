@@ -29,22 +29,97 @@ function NotificationsButtonBase({ style, badgeCount }: Props) {
         if (isMounted) setUnreadCount(0);
         return;
       }
-      const { count: c } = await supabase
-        .from('notifications')
-        .select('id', { count: 'exact', head: true })
-        .eq('recipient_id', user.id)
-        .or('is_read.is.null,is_read.eq.false');
-      if (isMounted) setUnreadCount(c || 0);
+      // Combined badge: unread notifications + pending incoming requests
+      let recipientIds: string[] = [user.id];
+      let myGroupIds: string[] = [];
+      try {
+        const { data: myMemberships } = await supabase
+          .from('profile_group_members')
+          .select('group_id')
+          .eq('user_id', user.id)
+          .eq('status', 'ACTIVE');
+        myGroupIds = (myMemberships || []).map((r: any) => r?.group_id).filter(Boolean);
+        if (myGroupIds.length) {
+          const { data: membersRows } = await supabase
+            .from('profile_group_members')
+            .select('user_id')
+            .eq('status', 'ACTIVE')
+            .in('group_id', myGroupIds as any);
+          const memberIds = (membersRows || []).map((r: any) => r?.user_id).filter(Boolean);
+          if (memberIds.length) recipientIds = Array.from(new Set(memberIds));
+        }
+      } catch {
+        // best-effort only
+      }
+
+      const [
+        { count: unreadNotifCount },
+        { count: aptReqCount },
+        { count: matchDirectCount },
+        { count: matchGroupCount },
+        { count: groupInvCount },
+      ] = await Promise.all([
+        supabase
+          .from('notifications')
+          .select('id', { count: 'exact', head: true })
+          .in('recipient_id', recipientIds as any)
+          .or('is_read.is.null,is_read.eq.false'),
+        supabase
+          .from('apartments_request')
+          .select('id', { count: 'exact', head: true })
+          .in('recipient_id', recipientIds as any)
+          .eq('status', 'PENDING'),
+        supabase
+          .from('matches')
+          .select('id', { count: 'exact', head: true })
+          .in('receiver_id', recipientIds as any)
+          .eq('status', 'PENDING'),
+        myGroupIds.length
+          ? supabase
+              .from('matches')
+              .select('id', { count: 'exact', head: true })
+              .in('receiver_group_id', myGroupIds as any)
+              .eq('status', 'PENDING')
+          : Promise.resolve({ count: 0 } as any),
+        supabase
+          .from('profile_group_invites')
+          .select('id', { count: 'exact', head: true })
+          .in('invitee_id', recipientIds as any)
+          .eq('status', 'PENDING'),
+      ]);
+
+      const total =
+        (unreadNotifCount || 0) +
+        (aptReqCount || 0) +
+        (matchDirectCount || 0) +
+        (matchGroupCount || 0) +
+        (groupInvCount || 0);
+      if (isMounted) setUnreadCount(total);
     };
 
     fetchCount();
 
-    // Realtime updates for this user
+    // Realtime updates (best-effort; filters cover direct-to-user changes)
     const channel = supabase
       .channel(`notifications-count:${user?.id || 'anon'}`)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'notifications', filter: user?.id ? `recipient_id=eq.${user.id}` : undefined },
+        () => fetchCount()
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'apartments_request', filter: user?.id ? `recipient_id=eq.${user.id}` : undefined },
+        () => fetchCount()
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'matches', filter: user?.id ? `receiver_id=eq.${user.id}` : undefined },
+        () => fetchCount()
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'profile_group_invites', filter: user?.id ? `invitee_id=eq.${user.id}` : undefined },
         () => fetchCount()
       )
       .subscribe();

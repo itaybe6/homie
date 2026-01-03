@@ -4,6 +4,7 @@ import {
   Text,
   StyleSheet,
   Animated,
+  SectionList,
   RefreshControl,
   TouchableOpacity,
   ActivityIndicator,
@@ -13,28 +14,25 @@ import {
   Modal,
   Pressable,
 } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
-import { Inbox, Send, Filter, Home, Users, UserPlus2, UserPlus, Sparkles, MessageCircle } from 'lucide-react-native';
+import { useRouter } from 'expo-router';
+import { Bell, Inbox, Filter, Home, Users, UserPlus2, UserPlus, Sparkles, MessageCircle } from 'lucide-react-native';
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/authStore';
-import { Apartment, User } from '@/types/database';
+import { Apartment, Notification, User } from '@/types/database';
 import { computeGroupAwareLabel } from '@/lib/group';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { formatTimeAgoHe } from '@/utils/time';
+import { insertNotificationOnce } from '@/lib/notifications';
+import { useNotificationsStore } from '@/stores/notificationsStore';
 
 export default function RequestsScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ tab?: string | string[] }>();
   const user = useAuthStore((s) => s.user);
   const insets = useSafeAreaInsets();
   const scrollY = useRef(new Animated.Value(0)).current;
   const [ownerDetails, setOwnerDetails] = useState<null | { full_name?: string; avatar_url?: string; phone?: string }>(null);
   const toSingle = (value: string | string[] | undefined): string | undefined =>
     Array.isArray(value) ? value[0] : value;
-  type KindFilterValue = 'APT' | 'APT_INVITE' | 'MATCH' | 'GROUP' | 'ALL';
-  type StatusFilterValue = 'ALL' | 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED' | 'NOT_RELEVANT';
-  const parseTabParam = (value?: string): 'incoming' | 'sent' =>
-    value === 'sent' ? 'sent' : 'incoming';
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   type UnifiedItem = {
@@ -50,18 +48,27 @@ export default function RequestsScreen() {
     _receiver_group_id?: string | null;
     _sender_group_id?: string | null;
   };
-  const [sent, setSent] = useState<UnifiedItem[]>([]);
   const [received, setReceived] = useState<UnifiedItem[]>([]);
   const [actionId, setActionId] = useState<string | null>(null);
-  const [tab, setTab] = useState<'incoming' | 'sent'>(() => parseTabParam(toSingle(params.tab)));
-  // Always show ALL kinds + ALL statuses (UI hidden)
-  const kindFilter: KindFilterValue = 'ALL';
-  const statusFilter: StatusFilterValue = 'ALL';
 
   const [usersById, setUsersById] = useState<Record<string, Partial<User>>>({});
   const [aptsById, setAptsById] = useState<Record<string, Partial<Apartment>>>({});
   const [ownersById, setOwnersById] = useState<Record<string, Partial<User>>>({});
   const [groupMembersByGroupId, setGroupMembersByGroupId] = useState<Record<string, string[]>>({});
+
+  // Notifications (unified inbox: notifications + requests)
+  const [notifItems, setNotifItems] = useState<Notification[]>([]);
+  const [notifLoading, setNotifLoading] = useState(false);
+  // notifications refresh uses the same pull-to-refresh as requests
+  const [notifActionLoadingId, setNotifActionLoadingId] = useState<string | null>(null);
+  const [notifSendersById, setNotifSendersById] = useState<
+    Record<string, { id: string; full_name?: string; avatar_url?: string }>
+  >({});
+  const [notifSenderGroupIdByUserId, setNotifSenderGroupIdByUserId] = useState<Record<string, string>>({});
+  const [notifGroupMembersByGroupId, setNotifGroupMembersByGroupId] = useState<Record<string, string[]>>({});
+  const [notifApartmentsById, setNotifApartmentsById] = useState<
+    Record<string, { id: string; title?: string; city?: string; image_urls?: string[] }>
+  >({});
 
   const DEFAULT_AVATAR = 'https://cdn-icons-png.flaticon.com/512/847/847969.png';
   const APT_PLACEHOLDER = 'https://images.pexels.com/photos/1457842/pexels-photo-1457842.jpeg';
@@ -91,13 +98,281 @@ export default function RequestsScreen() {
     }
   };
 
+  const isPartnerRequestNotification = (n: Notification): boolean => {
+    const t = (n?.title || '').trim();
+    return t.includes('בקשת שותפות חדשה');
+  };
+
+  const isMergeProfileNotification = (n: Notification): boolean => {
+    const t = (n?.title || '').trim();
+    return t.includes('מיזוג פרופילים');
+  };
+
+  const extractInviteApartmentId = (description: string): string | null => {
+    if (!description) return null;
+    const parts = description.split('---');
+    if (parts.length < 2) return null;
+    const meta = parts[1] || '';
+    const match = meta.match(/(?:INVITE_APT|APPROVED_APT):([A-Za-z0-9-]+)/);
+    return match ? match[1] : null;
+  };
+
+  const isInviteApproved = (description: string): boolean => {
+    if (!description) return false;
+    const parts = description.split('---');
+    if (parts.length < 2) return false;
+    const meta = parts[1] || '';
+    return /STATUS:APPROVED/.test(meta) || /APPROVED_APT:/.test(meta);
+  };
+
+  const displayDescription = (description: string): string => {
+    if (!description) return '';
+    const parts = description.split('---');
+    return (parts[0] || '').trim();
+  };
+
+  const fetchNotifications = async (opts?: { markRead?: boolean }) => {
+    if (!user?.id) {
+      setNotifItems([]);
+      setNotifLoading(false);
+      return;
+    }
+    try {
+      setNotifLoading(true);
+      // Determine whether the user is part of an ACTIVE group and, if so, collect all ACTIVE member ids
+      let recipientIds: string[] = [user.id];
+      try {
+        const { data: myMemberships } = await supabase
+          .from('profile_group_members')
+          .select('group_id')
+          .eq('user_id', user.id)
+          .eq('status', 'ACTIVE');
+        const myGroupIds = (myMemberships || []).map((r: any) => r?.group_id).filter(Boolean);
+        if (myGroupIds.length > 0) {
+          const { data: membersRows } = await supabase
+            .from('profile_group_members')
+            .select('user_id')
+            .eq('status', 'ACTIVE')
+            .in('group_id', myGroupIds as any);
+          const memberIds = (membersRows || []).map((r: any) => r.user_id).filter(Boolean);
+          if (memberIds.length > 0) {
+            recipientIds = Array.from(new Set(memberIds));
+          }
+        }
+      } catch {}
+
+      const { data, error } = await supabase
+        .from('notifications')
+        .select('*')
+        .in('recipient_id', recipientIds as any)
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      let notifications = ((data || []) as Notification[]);
+
+      // Best-effort UI dedupe by EVENT_KEY if present (prevents double entries).
+      try {
+        const seen = new Set<string>();
+        const extractEventKey = (desc: string): string | null => {
+          const m = String(desc || '').match(/EVENT_KEY:([^\n\r]+)/);
+          return m ? String(m[1] || '').trim() : null;
+        };
+        notifications = notifications.filter((n) => {
+          const k = extractEventKey(n.description);
+          if (!k) return true;
+          if (seen.has(k)) return false;
+          seen.add(k);
+          return true;
+        });
+      } catch {}
+
+      // Fetch sender profiles for avatars
+      const allSenderIds = Array.from(
+        new Set(
+          notifications
+            .map((n) => n.sender_id)
+            .filter((id): id is string => typeof id === 'string' && id.length > 0)
+        )
+      );
+      let usersMap: Record<string, { id: string; full_name?: string; avatar_url?: string }> = {};
+      if (allSenderIds.length > 0) {
+        const { data: usersData, error: usersErr } = await supabase
+          .from('users')
+          .select('id, full_name, avatar_url')
+          .in('id', allSenderIds);
+        if (usersErr) throw usersErr;
+        (usersData || []).forEach((u: any) => {
+          usersMap[u.id] = u;
+        });
+
+        // If a sender user was deleted, remove their notifications too.
+        const missingSenderIds = allSenderIds.filter((id) => !usersMap[id]);
+        if (missingSenderIds.length > 0) {
+          const missingSet = new Set(missingSenderIds);
+          const orphanNotifIds = notifications
+            .filter((n) => typeof n.sender_id === 'string' && missingSet.has(n.sender_id))
+            .map((n) => n.id);
+
+          if (orphanNotifIds.length > 0) {
+            try {
+              await supabase.from('notifications').delete().in('id', orphanNotifIds as any);
+            } catch {}
+            notifications = notifications.filter((n) => !orphanNotifIds.includes(n.id));
+          }
+        }
+      }
+
+      const uniqueSenderIds = Array.from(
+        new Set(
+          notifications
+            .map((n) => n.sender_id)
+            .filter((id): id is string => typeof id === 'string' && id.length > 0)
+        )
+      );
+
+      // Find if any sender belongs to an ACTIVE merged profile (group)
+      let senderToGroup: Record<string, string> = {};
+      let groupIdToMemberIds: Record<string, string[]> = {};
+      if (uniqueSenderIds.length > 0) {
+        const { data: memberships } = await supabase
+          .from('profile_group_members')
+          .select('user_id, group_id')
+          .eq('status', 'ACTIVE')
+          .in('user_id', uniqueSenderIds);
+        const sendersWithGroups = (memberships || []) as any[];
+        senderToGroup = {};
+        const groupIds = new Set<string>();
+        sendersWithGroups.forEach((m) => {
+          senderToGroup[m.user_id] = m.group_id;
+          groupIds.add(m.group_id);
+        });
+        if (groupIds.size > 0) {
+          const { data: groupMembers } = await supabase
+            .from('profile_group_members')
+            .select('group_id, user_id')
+            .eq('status', 'ACTIVE')
+            .in('group_id', Array.from(groupIds));
+          groupIdToMemberIds = {};
+          (groupMembers || []).forEach((m: any) => {
+            if (!groupIdToMemberIds[m.group_id]) groupIdToMemberIds[m.group_id] = [];
+            groupIdToMemberIds[m.group_id].push(m.user_id);
+          });
+        }
+      }
+
+      // Ensure user profiles are loaded for group members too
+      const extraUserIds = Array.from(new Set(Object.values(groupIdToMemberIds).flat())).filter((id) => !usersMap[id]);
+      if (extraUserIds.length > 0) {
+        const { data: extraUsers } = await supabase
+          .from('users')
+          .select('id, full_name, avatar_url')
+          .in('id', extraUserIds);
+        (extraUsers || []).forEach((u: any) => {
+          usersMap[u.id] = u;
+        });
+      }
+      setNotifSendersById(usersMap);
+      setNotifSenderGroupIdByUserId(senderToGroup);
+      setNotifGroupMembersByGroupId(groupIdToMemberIds);
+
+      // Fetch apartments referenced by notifications
+      const aptIds = Array.from(
+        new Set(
+          notifications
+            .map((n) => extractInviteApartmentId(n.description))
+            .filter((aptId): aptId is string => typeof aptId === 'string' && aptId.length > 0)
+        )
+      );
+      if (aptIds.length > 0) {
+        const { data: apts, error: aptsErr } = await supabase
+          .from('apartments')
+          .select('id, title, city, image_urls')
+          .in('id', aptIds);
+        if (aptsErr) throw aptsErr;
+        const aMap: Record<string, any> = {};
+        (apts || []).forEach((a: any) => {
+          aMap[a.id] = a;
+        });
+        setNotifApartmentsById(aMap);
+      } else {
+        setNotifApartmentsById({});
+      }
+
+      setNotifItems(notifications);
+
+      if (opts?.markRead) {
+        try {
+          await supabase.from('notifications').update({ is_read: true }).eq('recipient_id', user.id);
+          // Do not force-set the badge to 0 here; the bell badge is a combined count
+          // (unread notifications + pending requests) and is refreshed by the button itself.
+        } catch {}
+      }
+    } catch (e) {
+      console.error('Failed to load notifications', e);
+      setNotifItems([]);
+    } finally {
+      setNotifLoading(false);
+    }
+  };
+
+  const handleApproveInviteFromNotification = async (notification: Notification, apartmentId: string) => {
+    if (!user?.id) return;
+    try {
+      setNotifActionLoadingId(notification.id);
+      const { data: apt, error: aptErr } = await supabase
+        .from('apartments')
+        .select('id, partner_ids, owner_id, title, city')
+        .eq('id', apartmentId)
+        .maybeSingle();
+      if (aptErr) throw aptErr;
+      if (!apt) throw new Error('הדירה לא נמצאה');
+
+      const currentPartnerIds: string[] = Array.isArray((apt as any).partner_ids) ? ((apt as any).partner_ids as string[]) : [];
+      if (!currentPartnerIds.includes(user.id)) {
+        const newPartnerIds = Array.from(new Set([...(currentPartnerIds || []), user.id]));
+        const { error: updateErr } = await supabase.from('apartments').update({ partner_ids: newPartnerIds }).eq('id', apartmentId);
+        if (updateErr) throw updateErr;
+      }
+
+      // Update notification in-place to reflect approval and hide the button
+      const approvedTitle = 'אושר צירוף לדירה';
+      const approvedDesc = `אישרת את הבקשה להיות שותף בדירה\n---\nINVITE_APT:${apartmentId}\nSTATUS:APPROVED`;
+      await supabase.from('notifications').update({ title: approvedTitle, description: approvedDesc, is_read: true }).eq('id', notification.id);
+
+      // Notify original sender (deduped)
+      try {
+        const approverName = await computeGroupAwareLabel(user.id);
+        const backTitle = 'שותף אישר להצטרף';
+        const backDesc = `${approverName} אישר/ה להצטרף לדירה${(apt as any)?.title ? `: ${(apt as any).title}` : ''}${
+          (apt as any)?.city ? ` (${(apt as any).city})` : ''
+        }\n---\nAPPROVED_APT:${apartmentId}\nSTATUS:APPROVED`;
+        await insertNotificationOnce({
+          sender_id: user.id,
+          recipient_id: notification.sender_id,
+          title: backTitle,
+          description: backDesc,
+          is_read: false,
+          event_key: `apt_invite_notif:${notification.id}:approved`,
+        });
+      } catch {}
+
+      await fetchNotifications({ markRead: true });
+      Alert.alert('הצלחה', 'אושרת והוספת כשותף לדירה');
+    } catch (e: any) {
+      console.error('Approve invite failed', e);
+      Alert.alert('שגיאה', e?.message || 'לא ניתן לאשר את ההזמנה');
+    } finally {
+      setNotifActionLoadingId(null);
+    }
+  };
+
   useEffect(() => {
     fetchAll();
   }, [user?.id]);
 
+  // When opening this screen (also used for /notifications), mark notifications as read.
   useEffect(() => {
-    setTab(parseTabParam(toSingle(params.tab)));
-  }, [params.tab]);
+    fetchNotifications({ markRead: true });
+  }, [user?.id]);
 
   const fetchAll = async () => {
     if (!user?.id) { setLoading(false); return; }
@@ -112,31 +387,22 @@ export default function RequestsScreen() {
       if (memErr) throw memErr;
       const myGroupIds = (myMemberships || []).map((r: any) => r.group_id as string);
 
-      // 2) Core queries in parallel
+      // 2) Core INCOMING queries in parallel (we no longer show "sent requests")
       const [
-        { data: sData, error: sErr },
         { data: rData, error: rErr },
-        { data: mSent, error: mSErr },
         { data: mRecv, error: mRErr },
-        { data: gSent, error: gSErr },
         { data: gRecv, error: gRErr },
         groupRecvResult,
       ] = await Promise.all([
-        supabase.from('apartments_request').select('*').eq('sender_id', user.id).order('created_at', { ascending: false }),
         supabase.from('apartments_request').select('*').eq('recipient_id', user.id).order('created_at', { ascending: false }),
-        supabase.from('matches').select('*').eq('sender_id', user.id).order('created_at', { ascending: false }),
         supabase.from('matches').select('*').eq('receiver_id', user.id).order('created_at', { ascending: false }),
-        supabase.from('profile_group_invites').select('*').eq('inviter_id', user.id).order('created_at', { ascending: false }),
         supabase.from('profile_group_invites').select('*').eq('invitee_id', user.id).order('created_at', { ascending: false }),
         myGroupIds.length
           ? supabase.from('matches').select('*').in('receiver_group_id', myGroupIds).order('created_at', { ascending: false })
           : Promise.resolve({ data: [], error: null } as any),
       ]);
-      if (sErr) throw sErr;
       if (rErr) throw rErr;
-      if (mSErr) throw mSErr;
       if (mRErr) throw mRErr;
-      if (gSErr) throw gSErr;
       if (gRErr) throw gRErr;
       const mRecvGroup = (groupRecvResult as any)?.data || [];
 
@@ -166,18 +432,6 @@ export default function RequestsScreen() {
         gRecvForMyGroups = [];
       }
 
-      const aptSent: UnifiedItem[] = (sData || [])
-        .filter((row: any) => (row.status || 'PENDING') !== 'NOT_RELEVANT')
-        .map((row: any) => ({
-          id: row.id,
-          kind: (row.type || '') === 'INVITE_APT' ? 'APT_INVITE' : 'APT',
-          sender_id: row.sender_id,
-          recipient_id: row.recipient_id,
-          apartment_id: row.apartment_id,
-          status: row.status || 'PENDING',
-          created_at: row.created_at,
-          type: row.type || null,
-        }));
       let aptRecv: any[] = (rData || [])
         .filter((row: any) => (row.status || 'PENDING') !== 'NOT_RELEVANT')
         .map((row: any) => ({
@@ -226,19 +480,6 @@ export default function RequestsScreen() {
         }
       } catch {}
 
-      const matchSent: UnifiedItem[] = (mSent || [])
-        .filter((row: any) => mapMatchStatus(row.status) !== 'NOT_RELEVANT')
-        .map((row: any) => ({
-          id: row.id,
-          kind: 'MATCH',
-          sender_id: row.sender_id,
-          recipient_id: row.receiver_id, // may be null for group-targeted; we will normalize below
-          apartment_id: null,
-          status: mapMatchStatus(row.status),
-          created_at: row.created_at,
-          // carry through for later normalization
-          _receiver_group_id: row.receiver_group_id,
-        }));
       let matchRecv: any[] = (mRecv || [])
         .filter((row: any) => mapMatchStatus(row.status) !== 'NOT_RELEVANT')
         .map((row: any) => ({
@@ -308,16 +549,6 @@ export default function RequestsScreen() {
         if (s === 'EXPIRED' || s === 'NOT_RELEVANT' || s === 'IRRELEVANT') return 'NOT_RELEVANT';
         return 'PENDING';
       };
-      const groupSent: UnifiedItem[] = (gSent || []).map((row: any) => ({
-        id: row.id,
-        kind: 'GROUP',
-        sender_id: row.inviter_id,
-        recipient_id: row.invitee_id,
-        apartment_id: null,
-        status: mapGroupStatus(row.status),
-        created_at: row.created_at,
-        _sender_group_id: row.group_id, // inviter's group
-      }));
       // Merge direct incoming group invites (to me) with those targeting my groupmates; dedupe by id
       const groupRecvRaw = (() => {
         const map: Record<string, any> = {};
@@ -337,8 +568,6 @@ export default function RequestsScreen() {
         _sender_group_id: row.group_id, // inviter's group
       }));
 
-      const sentUnified = [...aptSent, ...matchSent, ...groupSent]
-        .sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
       const recvUnifiedRaw = [...aptRecv, ...matchRecv, ...matchRecvFromGroups, ...groupRecv]
         .sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
 
@@ -346,11 +575,10 @@ export default function RequestsScreen() {
       // For any item with _receiver_group_id, choose a representative member so recipient_id is a real user id.
       const groupIdsForDisplay = Array.from(
         new Set<string>([
-          ...((matchSent as any[]) || []).map((r: any) => r._receiver_group_id).filter(Boolean),
           ...((matchRecvFromGroups as any[]) || []).map((r: any) => r._receiver_group_id).filter(Boolean),
-          // Also ensure we fetch members for inviter's group in GROUP invites
-          ...((groupSent as any[]) || []).map((r: any) => r._sender_group_id).filter(Boolean),
+          // Ensure we fetch members for inviter's group in GROUP invites and match sender groups
           ...((groupRecv as any[]) || []).map((r: any) => r._sender_group_id).filter(Boolean),
+          ...((matchRecv as any[]) || []).map((r: any) => r._sender_group_id).filter(Boolean),
         ])
       );
       let groupIdToMemberIds: Record<string, string[]> = {};
@@ -382,13 +610,6 @@ export default function RequestsScreen() {
         const candidate = ids.find((id) => id && id !== excludeId);
         return candidate || ids[0];
       };
-      const normalizeSent = sentUnified.map((item: any) => {
-        if (item.kind === 'MATCH' && !item.recipient_id && item._receiver_group_id) {
-          const displayUser = pickGroupDisplayUser(item._receiver_group_id, user.id);
-          return { ...item, recipient_id: displayUser || item.sender_id };
-        }
-        return item;
-      });
       const normalizeRecv = recvUnifiedRaw.map((item: any) => {
         if (item.kind === 'MATCH' && !item.recipient_id && item._receiver_group_id) {
           const displayUser = pickGroupDisplayUser(item._receiver_group_id, user.id);
@@ -397,12 +618,11 @@ export default function RequestsScreen() {
         return item;
       });
 
-      setSent(normalizeSent as any);
       setReceived(normalizeRecv as any);
 
       const userIds = Array.from(new Set([
-        ...(normalizeSent as UnifiedItem[]).map((r) => r.recipient_id),
         ...(normalizeRecv as UnifiedItem[]).map((r) => r.sender_id),
+        ...(normalizeRecv as UnifiedItem[]).map((r) => r.recipient_id),
         ...Object.values(groupIdToMemberIds).flat(), // ensure we have details for group members to display
       ]));
       if (userIds.length) {
@@ -418,10 +638,6 @@ export default function RequestsScreen() {
       }
 
       const aptIds = Array.from(new Set([
-        ...(normalizeSent as UnifiedItem[])
-          .filter((r) => r.kind === 'APT' || r.kind === 'APT_INVITE')
-          .map((r) => r.apartment_id)
-          .filter(Boolean) as string[],
         ...(normalizeRecv as UnifiedItem[])
           .filter((r) => r.kind === 'APT' || r.kind === 'APT_INVITE')
           .map((r) => r.apartment_id)
@@ -457,7 +673,6 @@ export default function RequestsScreen() {
       }
     } catch (e) {
       console.error('Failed to load requests', e);
-      setSent([]);
       setReceived([]);
     } finally {
       setLoading(false);
@@ -466,8 +681,11 @@ export default function RequestsScreen() {
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await fetchAll();
-    setRefreshing(false);
+    try {
+      await Promise.all([fetchAll(), fetchNotifications({ markRead: true })]);
+    } finally {
+      setRefreshing(false);
+    }
   };
 
   const approveIncoming = async (req: UnifiedItem) => {
@@ -551,12 +769,13 @@ export default function RequestsScreen() {
       if (requestType === 'INVITE_APT') {
         // Owner invited; recipient approved — notify owner (sender)
         const approverName = await computeGroupAwareLabel(user.id);
-        await supabase.from('notifications').insert({
+        await insertNotificationOnce({
           sender_id: user.id,
           recipient_id: req.sender_id,
           title: 'הוזמנה אושרה',
           description: `${approverName} אישר/ה והתווסף/ה כשותף/ה לדירה${aptTitle ? `: ${aptTitle}` : ''}${aptCity ? ` (${aptCity})` : ''}.`,
           is_read: false,
+          event_key: `apt_invite:${req.id}:approved`,
         });
         // If invite was sent to a merged profile, approve all parallel requests for group members
         try {
@@ -648,12 +867,13 @@ export default function RequestsScreen() {
       } else {
         // JOIN_APT: requester approved by recipient — notify requester (sender)
         const approverName = await computeGroupAwareLabel(user.id);
-        await supabase.from('notifications').insert({
+        await insertNotificationOnce({
           sender_id: user.id,
           recipient_id: req.sender_id,
           title: 'בקשתך אושרה',
           description: `${approverName} אישר/ה את בקשתך והתווספת כשותף/ה לדירה${aptTitle ? `: ${aptTitle}` : ''}${aptCity ? ` (${aptCity})` : ''}.`,
           is_read: false,
+          event_key: `apt_join:${req.id}:approved`,
         });
       }
 
@@ -1197,12 +1417,13 @@ export default function RequestsScreen() {
       // 5) Notify inviter
       try {
         const approverName = await computeGroupAwareLabel(user.id);
-        await supabase.from('notifications').insert({
+        await insertNotificationOnce({
           sender_id: user.id,
           recipient_id: item.sender_id,
           title: 'אישרת מיזוג פרופילים',
           description: `${approverName} אישר/ה את בקשת מיזוג הפרופילים.`,
           is_read: false,
+          event_key: `profile_merge:${item.id}:approved`,
         });
       } catch {}
       await fetchAll();
@@ -1271,17 +1492,16 @@ export default function RequestsScreen() {
         .eq('id', match.id);
 
       const approverLabel = await computeGroupAwareLabel(user.id);
-      await supabase.from('notifications').insert({
+      await insertNotificationOnce({
         sender_id: user.id,
         recipient_id: match.sender_id,
         title: 'בקשת ההתאמה אושרה',
         description: `${approverLabel} אישר/ה את בקשת ההתאמה שלך. ניתן להמשיך לשיחה ולתאם היכרות.`,
         is_read: false,
+        event_key: `match:${match.id}:approved`,
       });
 
       await fetchAll();
-      setTab('incoming');
-      router.setParams({ tab: 'incoming' });
       Alert.alert('הצלחה', 'בקשת ההתאמה אושרה');
     } catch (e: any) {
       console.error('approve match request failed', e);
@@ -1301,12 +1521,13 @@ export default function RequestsScreen() {
         .eq('id', match.id);
 
       const rejecterLabel = await computeGroupAwareLabel(user.id);
-      await supabase.from('notifications').insert({
+      await insertNotificationOnce({
         sender_id: user.id,
         recipient_id: match.sender_id,
         title: 'בקשת ההתאמה נדחתה',
         description: `${rejecterLabel} דחה/תה את בקשת ההתאמה שלך. אפשר להמשיך ולחפש התאמות נוספות.`,
         is_read: false,
+        event_key: `match:${match.id}:rejected`,
       });
 
       await fetchAll();
@@ -2007,53 +2228,227 @@ export default function RequestsScreen() {
     </View>
   );
 
-  const applyKind = (arr: UnifiedItem[]) => arr.filter((r) => (kindFilter === 'ALL' ? true : r.kind === kindFilter));
-  const applyStatus = (arr: UnifiedItem[]) => arr.filter((r) => (statusFilter === 'ALL' ? true : r.status === statusFilter));
-  const filteredReceived = applyStatus(applyKind(received));
-  const filteredSent = applyStatus(applyKind(sent));
+  type InboxRow =
+    | { kind: 'NOTIFICATION'; id: string; created_at: string; notification: Notification }
+    | { kind: 'REQUEST'; id: string; created_at: string; request: UnifiedItem };
+
+  const bucketLabelHe = (iso: string): string => {
+    const t = Date.parse(iso || '');
+    if (!Number.isFinite(t)) return 'מוקדם יותר';
+    const now = Date.now();
+    const diffDays = Math.floor((now - t) / (24 * 60 * 60 * 1000));
+    if (diffDays <= 0) return 'היום';
+    if (diffDays === 1) return 'אתמול';
+    if (diffDays <= 7) return '7 הימים האחרונים';
+    if (diffDays <= 30) return '30 הימים האחרונים';
+    return 'מוקדם יותר';
+  };
+
+  const timeAgoHe = (iso: string): string => {
+    const t = Date.parse(iso || '');
+    if (!Number.isFinite(t)) return 'לפני רגע';
+    const diffMs = Math.max(0, Date.now() - t);
+    const totalMinutes = Math.floor(diffMs / (60 * 1000));
+    if (totalMinutes < 1) return 'לפני רגע';
+    if (totalMinutes < 60) return `לפני ${totalMinutes} דקות`;
+    const totalHours = Math.floor(totalMinutes / 60);
+    if (totalHours < 24) return `לפני ${totalHours} שעות`;
+    const totalDays = Math.floor(totalHours / 24);
+    if (totalDays < 7) return `לפני ${totalDays} ימים`;
+    const totalWeeks = Math.floor(totalDays / 7);
+    if (totalWeeks < 5) return totalWeeks === 1 ? 'לפני שבוע' : `לפני ${totalWeeks} שבועות`;
+    const totalMonths = Math.floor(totalDays / 30);
+    return totalMonths <= 1 ? 'לפני חודש' : `לפני ${totalMonths} חודשים`;
+  };
+
+  const inboxRows = useMemo<InboxRow[]>(() => {
+    const skipTitles = new Set<string>([
+      'בקשת שותפות חדשה',
+      'בקשת שותפות מפרופיל משותף',
+      'בקשת מיזוג פרופילים חדשה',
+    ]);
+    const notifs = (notifItems || [])
+      .filter((n) => !skipTitles.has(String(n?.title || '').trim()))
+      .map((n) => ({ kind: 'NOTIFICATION' as const, id: n.id, created_at: n.created_at, notification: n }));
+    const reqs = (received || []).map((r) => ({ kind: 'REQUEST' as const, id: r.id, created_at: r.created_at, request: r }));
+    return [...notifs, ...reqs].sort((a, b) => {
+      const ta = Date.parse(a.created_at || '') || 0;
+      const tb = Date.parse(b.created_at || '') || 0;
+      return tb - ta;
+    });
+  }, [notifItems, received]);
+
+  const inboxSections = useMemo(() => {
+    const map: Record<string, InboxRow[]> = {};
+    (inboxRows || []).forEach((row) => {
+      const key = bucketLabelHe(row.created_at);
+      if (!map[key]) map[key] = [];
+      map[key].push(row);
+    });
+    const order = ['היום', 'אתמול', '7 הימים האחרונים', '30 הימים האחרונים', 'מוקדם יותר'];
+    return order
+      .filter((k) => (map[k] || []).length > 0)
+      .map((k) => ({ title: k, data: map[k] }));
+  }, [inboxRows]);
 
   return (
     <View style={styles.container}>
       <View style={{ paddingTop: insets.top + 60, flex: 1 }}>
         <View style={styles.pageBody}>
-          {/* Filters */}
-          <View style={styles.filtersWrap}>
-        <View style={styles.switchWrap}>
-          <TouchableOpacity
-            style={[styles.switchItem, tab === 'incoming' && styles.switchItemActive]}
-            onPress={() => setTab('incoming')}
-            activeOpacity={0.9}
-          >
-            <View style={styles.switchItemContent}>
-              <Text style={[styles.switchText, tab === 'incoming' && styles.switchTextActive]}>בקשות אליי</Text>
-            </View>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.switchItem, tab === 'sent' && styles.switchItemActive]}
-            onPress={() => setTab('sent')}
-            activeOpacity={0.9}
-          >
-            <View style={styles.switchItemContent}>
-              <Text style={[styles.switchText, tab === 'sent' && styles.switchTextActive]}>בקשות שלי</Text>
-            </View>
-          </TouchableOpacity>
-        </View>
-
-            {/* Kind/Status filters intentionally hidden: always showing ALL */}
-          </View>
-
-          {loading ? (
+          {(loading || notifLoading) ? (
             <View style={styles.centerContainer}>
               <ActivityIndicator size="large" color="#5e3f2d" />
             </View>
           ) : (
-            <View style={styles.listContent}>
-              {tab === 'incoming' ? (
-                <Section title="בקשות אליי" data={filteredReceived} incoming />
-              ) : (
-                <Section title="הבקשות שלי" data={filteredSent} />
+            <SectionList
+              sections={inboxSections as any}
+              keyExtractor={(row) => `${row.kind}:${row.id}`}
+              stickySectionHeadersEnabled={false}
+              showsVerticalScrollIndicator={false}
+              refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#5e3f2d" />}
+              contentContainerStyle={[styles.igListContent, inboxRows.length === 0 ? { flex: 1, justifyContent: 'center' } : null]}
+              ListEmptyComponent={
+                <View style={styles.emptyState}>
+                  <View style={styles.emptyIconWrap}>
+                    <Bell size={40} color="#5e3f2d" />
+                  </View>
+                  <Text style={styles.emptyTitle}>אין התראות או בקשות</Text>
+                  <Text style={styles.emptySubtitle}>כשתתקבל התראה או בקשה חדשה נציג אותה כאן</Text>
+                </View>
+              }
+              renderSectionHeader={({ section }) => (
+                <Text style={styles.igSectionHeader}>{(section as any).title}</Text>
               )}
-            </View>
+              ItemSeparatorComponent={() => <View style={styles.igSeparator} />}
+              renderItem={({ item: row }: any) => {
+                const createdAt = row.created_at as string;
+                const timeLabel = timeAgoHe(createdAt);
+
+                if (row.kind === 'NOTIFICATION') {
+                  const n = row.notification as Notification;
+                  const sender = notifSendersById[n.sender_id];
+                  const aptId = extractInviteApartmentId(n.description);
+                  const descText = displayDescription(n.description);
+                  const canApproveInvite = !!aptId && !isInviteApproved(n.description);
+
+                  return (
+                    <View style={styles.igRow}>
+                      <TouchableOpacity
+                        activeOpacity={0.85}
+                        style={styles.igAvatarWrap}
+                        onPress={() => {
+                          if (sender?.id) router.push({ pathname: '/user/[id]', params: { id: sender.id } } as any);
+                        }}
+                      >
+                        <Image source={{ uri: sender?.avatar_url || DEFAULT_AVATAR }} style={styles.igAvatarImg} />
+                      </TouchableOpacity>
+
+                      <View style={styles.igBody}>
+                        <Text style={styles.igMessage} numberOfLines={2}>
+                          <Text style={styles.igTitleStrong}>{n.title}</Text>
+                          {!!descText ? <Text>{` ${descText}`}</Text> : null}
+                        </Text>
+                        <Text style={styles.igTimeBelow}>{timeLabel}</Text>
+                      </View>
+
+                      {canApproveInvite ? (
+                        <View style={styles.igActions}>
+                          <TouchableOpacity
+                            style={[styles.igBtnPrimary, notifActionLoadingId === n.id ? { opacity: 0.7 } : null]}
+                            disabled={notifActionLoadingId === n.id}
+                            activeOpacity={0.85}
+                            onPress={() => handleApproveInviteFromNotification(n, aptId as string)}
+                          >
+                            <Text style={styles.igBtnPrimaryText}>{notifActionLoadingId === n.id ? '...' : 'אישור'}</Text>
+                          </TouchableOpacity>
+                        </View>
+                      ) : null}
+                    </View>
+                  );
+                }
+
+                // REQUEST
+                const r = row.request as UnifiedItem;
+                const otherUser = usersById[r.sender_id];
+                const senderGroupId = (r as any)?._sender_group_id as string | undefined;
+                const groupMemberIds = senderGroupId ? (groupMembersByGroupId[senderGroupId] || []) : [];
+                const groupMembers = groupMemberIds.map((id) => usersById[id]).filter(Boolean) as Partial<User>[];
+                const apt = r.apartment_id ? aptsById[r.apartment_id] : undefined;
+
+                const title =
+                  r.kind === 'APT_INVITE'
+                    ? 'הוזמנת להצטרף לדירה'
+                    : r.kind === 'APT'
+                    ? 'בקשת הצטרפות לדירה'
+                    : r.kind === 'MATCH'
+                    ? 'בקשת שותפות'
+                    : 'בקשת מיזוג פרופילים';
+                const subtitle =
+                  r.kind === 'APT' || r.kind === 'APT_INVITE'
+                    ? `${(apt as any)?.title || 'דירה'}${(apt as any)?.city ? ` • ${(apt as any).city}` : ''}`
+                    : groupMembers.length
+                    ? groupMembers.map((m) => (m as any)?.full_name).filter(Boolean).join(' • ')
+                    : ((otherUser as any)?.full_name || '');
+
+                return (
+                  <View style={styles.igRow}>
+                    <TouchableOpacity
+                      activeOpacity={0.85}
+                      style={styles.igAvatarWrap}
+                      onPress={() => {
+                        const id = r.sender_id;
+                        if (id) router.push({ pathname: '/user/[id]', params: { id } } as any);
+                      }}
+                    >
+                      <Image source={{ uri: (otherUser as any)?.avatar_url || DEFAULT_AVATAR }} style={styles.igAvatarImg} />
+                    </TouchableOpacity>
+
+                    <View style={styles.igBody}>
+                      <Text style={styles.igMessage} numberOfLines={2}>
+                        <Text style={styles.igTitleStrong}>{title}</Text>
+                        {!!subtitle ? <Text>{` ${subtitle}`}</Text> : null}
+                      </Text>
+                      <Text style={styles.igTimeBelow}>{timeLabel}</Text>
+                    </View>
+
+                    <View style={styles.igActions}>
+                      {r.status === 'PENDING' ? (
+                        <View style={styles.igActionsRow}>
+                          <TouchableOpacity
+                            style={[styles.igBtnPrimary, actionId === r.id ? { opacity: 0.7 } : null]}
+                            disabled={actionId === r.id}
+                            activeOpacity={0.85}
+                            onPress={() => {
+                              if (r.kind === 'APT' || r.kind === 'APT_INVITE') return approveIncoming(r);
+                              if (r.kind === 'MATCH') return approveIncomingMatch(r);
+                              if (r.kind === 'GROUP') return approveIncomingGroup(r);
+                            }}
+                          >
+                            <Text style={styles.igBtnPrimaryText}>אישור</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={[styles.igBtnSecondary, actionId === r.id ? { opacity: 0.7 } : null]}
+                            disabled={actionId === r.id}
+                            activeOpacity={0.85}
+                            onPress={() => {
+                              if (r.kind === 'APT' || r.kind === 'APT_INVITE') return rejectIncoming(r);
+                              if (r.kind === 'MATCH') return rejectIncomingMatch(r);
+                              if (r.kind === 'GROUP') return rejectIncomingGroup(r);
+                            }}
+                          >
+                            <Text style={styles.igBtnSecondaryText}>דחייה</Text>
+                          </TouchableOpacity>
+                        </View>
+                      ) : (
+                        <Text style={styles.igStatusText}>
+                          {r.status === 'APPROVED' ? 'אושר' : r.status === 'REJECTED' ? 'נדחה' : 'עודכן'}
+                        </Text>
+                      )}
+                    </View>
+                  </View>
+                );
+              }}
+            />
           )}
         </View>
       </View>
@@ -2115,7 +2510,7 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 24,
     overflow: 'visible',
     paddingTop: 0,
-    paddingHorizontal: 25,
+    paddingHorizontal: 0,
   },
   filtersWrap: {
     paddingHorizontal: 0,
@@ -2331,6 +2726,144 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     paddingBottom: 24,
     gap: 12 as any,
+  },
+  notifListContent: {
+    paddingTop: 12,
+    paddingBottom: 24,
+    gap: 12 as any,
+  },
+  notifActionsRow: {
+    marginTop: 10,
+    alignSelf: 'stretch',
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+  },
+  // Instagram-like list styling (flat rows + section headers)
+  igListContent: {
+    paddingTop: 8,
+    paddingBottom: 18,
+    backgroundColor: '#FAFAFA',
+  },
+  igSectionHeader: {
+    paddingHorizontal: 16,
+    paddingTop: 18,
+    paddingBottom: 8,
+    color: '#111827',
+    fontSize: 13,
+    fontWeight: '900',
+    textAlign: 'right',
+  },
+  igSeparator: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: '#E5E7EB',
+    marginHorizontal: 16,
+  },
+  igRow: {
+    // Always: avatar on RIGHT, actions on LEFT (Instagram-like in Hebrew UI)
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: '#FAFAFA',
+  },
+  igAvatarWrap: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    overflow: 'hidden',
+    backgroundColor: '#F3F4F6',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  igAvatarImg: {
+    width: '100%',
+    height: '100%',
+    resizeMode: 'cover',
+  },
+  igAvatarGrid: {
+    flex: 1,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+  },
+  igAvatarGridCell: {
+    width: '50%',
+    height: '50%',
+    padding: 1,
+  },
+  igAvatarGridImg: {
+    width: '100%',
+    height: '100%',
+    resizeMode: 'cover',
+  },
+  igBody: {
+    flex: 1,
+    marginLeft: 12,
+    marginRight: 12,
+    alignItems: 'flex-end',
+  },
+  igMessage: {
+    color: '#111827',
+    fontSize: 13,
+    lineHeight: 18,
+    textAlign: 'right',
+  },
+  igTitleStrong: {
+    fontWeight: '900',
+    color: '#111827',
+  },
+  igTimeInline: {
+    color: '#9CA3AF',
+    fontWeight: '700',
+  },
+  igTimeBelow: {
+    marginTop: 4,
+    color: '#9CA3AF',
+    fontSize: 12,
+    fontWeight: '700',
+    textAlign: 'right',
+  },
+  igActions: {
+    // This column sits on the LEFT (because row-reverse), so keep buttons aligned left.
+    alignItems: 'flex-start',
+    justifyContent: 'center',
+  },
+  igActionsRow: {
+    flexDirection: 'row',
+    gap: 8 as any,
+    alignItems: 'center',
+  },
+  igBtnPrimary: {
+    backgroundColor: '#5e3f2d',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    minWidth: 66,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  igBtnPrimaryText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  igBtnSecondary: {
+    backgroundColor: '#E5E7EB',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    minWidth: 66,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  igBtnSecondaryText: {
+    color: '#111827',
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  igStatusText: {
+    color: '#6B7280',
+    fontSize: 11,
+    fontWeight: '800',
   },
   sectionTitle: {
     color: '#111827',

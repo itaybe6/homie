@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, ScrollView, Image, ActivityIndicator, Touchable
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { computeGroupAwareLabel } from '@/lib/group';
+import { insertNotificationOnce } from '@/lib/notifications';
 import { supabase } from '@/lib/supabase';
 import { User } from '@/types/database';
 import { ArrowLeft, MapPin, UserPlus2, Cigarette, PawPrint, Utensils, Moon, Users, Home, Calendar, User as UserIcon, Building2, Bed, Heart, Briefcase, ClipboardList, Images, X } from 'lucide-react-native';
@@ -1204,11 +1205,13 @@ export default function UserProfileScreen() {
 
       const title = 'בקשת מיזוג פרופילים חדשה';
       const desc = `${inviterName} מזמין/ה אותך להצטרף לקבוצת שותפים ולהציג פרופיל ממוזג יחד`;
-      await supabase.from('notifications').insert({
+      await insertNotificationOnce({
         sender_id: me.id,
         recipient_id: profile.id,
         title,
         description: desc,
+        is_read: false,
+        event_key: `profile_merge_invite:${groupId}:${profile.id}`,
       });
 
       Alert.alert('נשלח', 'הבקשה נשלחה ונשלחה התראה למשתמש/ת.');
@@ -1329,7 +1332,7 @@ export default function UserProfileScreen() {
       </View>
 
       <ScrollView
-        style={{ flex: 1 }}
+        style={{ flex: 1, backgroundColor: '#FAFAFA' }}
         contentContainerStyle={[
           styles.scrollContent,
           { paddingTop: contentTopPadding, paddingBottom: contentBottomPadding },
@@ -1810,7 +1813,7 @@ export default function UserProfileScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#FAFAFA',
     // Keep text RTL, but avoid flipping the entire layout on web (which can cause double-inversion with row-reverse).
     writingDirection: 'rtl',
   },
@@ -1818,7 +1821,7 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#FAFAFA',
     paddingHorizontal: 16,
   },
   scrollContent: {
@@ -1836,7 +1839,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#FAFAFA',
   },
   topBarRight: {
     flexDirection: 'row-reverse',

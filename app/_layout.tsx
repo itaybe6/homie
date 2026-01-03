@@ -48,9 +48,12 @@ export default function RootLayout() {
     (pathname === '/notifications' ||
       pathname === '/(tabs)/notifications' ||
       pathname.endsWith('/notifications'));
+  const isUserProfileRoute =
+    typeof pathname === 'string' &&
+    (pathname.includes('/user/') || pathname.includes('/(tabs)/user/'));
   // Match the screen background per-route so the Safe Area + global header blend in cleanly.
   const globalTopBarBg =
-    isAddApartmentRoute || isRequestsRoute || isNotificationsRoute ? '#FAFAFA' : '#FFFFFF';
+    isAddApartmentRoute || isRequestsRoute || isNotificationsRoute || isUserProfileRoute ? '#FAFAFA' : '#FFFFFF';
 
   if (!supabaseOk) {
     return (

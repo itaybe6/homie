@@ -34,6 +34,7 @@ import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/authStore';
 import { User, UserSurveyResponse } from '@/types/database';
 import { computeGroupAwareLabel } from '@/lib/group';
+import { insertNotificationOnce } from '@/lib/notifications';
 import RoommateCard from '@/components/RoommateCard';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { cityNeighborhoods, canonicalizeCityName } from '@/assets/data/neighborhoods';
@@ -799,11 +800,13 @@ export default function PartnersScreen() {
       const notifTitle = senderIsMerged ? 'בקשת שותפות מפרופיל משותף' : 'בקשת שותפות חדשה';
       const senderLabel = await computeGroupAwareLabel(currentUser.id);
       const notifDesc = `${senderLabel} מעוניין/ת להיות שותף/ה שלך.`;
-      await supabase.from('notifications').insert({
+      await insertNotificationOnce({
         sender_id: currentUser.id,
         recipient_id: likedUser.id,
         title: notifTitle,
         description: notifDesc,
+        is_read: false,
+        event_key: `match_request:${currentUser.id}:${likedUser.id}`,
       });
 
       if (!opts?.skipSlide) {
@@ -923,13 +926,18 @@ export default function PartnersScreen() {
         const notifTitle = senderIsMerged ? 'בקשת שותפות מפרופיל משותף' : 'בקשת שותפות חדשה';
         const senderLabel = await computeGroupAwareLabel(currentUser.id);
         const notifDesc = `${senderLabel} מעוניין/ת בקבוצה שלך.`;
-        const notifications = recipients.map((u) => ({
-          sender_id: currentUser.id,
-          recipient_id: u.id,
-          title: notifTitle,
-          description: notifDesc,
-        }));
-        await supabase.from('notifications').insert(notifications as any);
+        await Promise.all(
+          recipients.map((u) =>
+            insertNotificationOnce({
+              sender_id: currentUser.id,
+              recipient_id: u.id,
+              title: notifTitle,
+              description: notifDesc,
+              is_read: false,
+              event_key: `group_match_request:${currentUser.id}:${groupId}:${u.id}`,
+            })
+          )
+        );
       }
       if (!opts?.skipSlide) {
         goNext();

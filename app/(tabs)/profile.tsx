@@ -26,7 +26,6 @@ import {
   MapPin,
   Inbox,
   Trash2,
-  Settings,
   ClipboardList,
   Building2,
   Calendar,
@@ -1827,32 +1826,6 @@ export default function ProfileScreen() {
               </View>
             )}
           </View>
-        </View>
-
-        <View style={styles.sectionDark}>
-          <TouchableOpacity
-            style={styles.surveyCTA}
-            activeOpacity={0.9}
-            onPress={() => router.push('/(tabs)/profile/settings')}
-          >
-            <View style={styles.surveyCTATexts}>
-              <Text style={styles.surveyCTATitle}>הגדרות</Text>
-              <Text style={styles.surveyCTASubtitle} numberOfLines={1}>
-                ניהול חשבון, פרופיל ותמונות
-              </Text>
-            </View>
-
-            <View style={styles.surveyCTABadge}>
-              <LinearGradient
-                colors={['#cbb59e', '#5e3f2d']}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={styles.surveyCTABadgeInner}
-              >
-                <Settings size={24} color="#FFFFFF" />
-              </LinearGradient>
-            </View>
-          </TouchableOpacity>
         </View>
 
         {/* moved logout and delete actions to /profile/settings */}
