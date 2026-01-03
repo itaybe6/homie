@@ -73,6 +73,7 @@ export interface Apartment {
   image_url?: string; // legacy: single image url (some environments still use it)
   image_urls?: string[]; // new: multiple images
   partner_ids?: string[]; // national IDs of roommates associated to the apartment
+  join_passcode?: string | null; // 6-digit code used to join the apartment
 
   // Apartment details (פרטי דירה)
   apartment_type?: 'REGULAR' | 'GARDEN'; // סוג הדירה
@@ -95,7 +96,6 @@ export interface Apartment {
 
   // Move-in availability (זמינות כניסה)
   move_in_date?: string | null; // YYYY-MM-DD
-  move_in_is_immediate?: boolean | null; // true => immediate entry
 
   created_at: string;
   updated_at: string;

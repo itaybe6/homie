@@ -481,6 +481,9 @@ export default function ApartmentDetailsScreen() {
     user?.id &&
     String(user.id).toLowerCase() === String(apartment.owner_id || '').toLowerCase()
   );
+  // Disable the "key" entry when the user is already assigned to any apartment (as owner or partner).
+  // We treat null/unknown as disabled (same pattern used for other CTAs) to avoid letting users join twice.
+  const isKeyDisabled = !isOwner && isAssignedAnywhere !== false;
   const PLACEHOLDER =
     'https://images.pexels.com/photos/1457842/pexels-photo-1457842.jpeg';
 
@@ -689,8 +692,6 @@ export default function ApartmentDetailsScreen() {
   };
 
   const moveInTagLabel = (() => {
-    const immediate = !!(apartment as any)?.move_in_is_immediate;
-    if (immediate) return 'כניסה מיידית';
     const raw = String((apartment as any)?.move_in_date || '').trim();
     if (!raw) return null;
     const formatted = formatISODateToDDMMYYYY(raw);
@@ -1751,7 +1752,7 @@ export default function ApartmentDetailsScreen() {
                   if (balcony > 0) {
                     items.push({
                       key: 'balcony_count',
-                      label: balcony === 1 ? 'מרפסת' : `${balcony} מרפסות`,
+                      label: 'מרפסת',
                       Icon: Home,
                     });
                   }
@@ -1974,15 +1975,16 @@ export default function ApartmentDetailsScreen() {
           <View style={styles.ctaActionsRow}>
             {!isOwner ? (
               <TouchableOpacity
-                style={styles.keyIconBtn}
-                activeOpacity={0.9}
+                style={[styles.keyIconBtn, isKeyDisabled ? { opacity: 0.45 } : null]}
+                activeOpacity={isKeyDisabled ? 1 : 0.9}
+                disabled={isKeyDisabled}
                 onPress={() => {
                   setIsKeyPanelOpen(true);
                 }}
                 accessibilityRole="button"
                 accessibilityLabel="מפתח"
               >
-                <Key size={18} color="#5e3f2d" />
+                <Key size={18} color={isKeyDisabled ? 'rgba(17,24,39,0.45)' : '#5e3f2d'} />
               </TouchableOpacity>
             ) : null}
 

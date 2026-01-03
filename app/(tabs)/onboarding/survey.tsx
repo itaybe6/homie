@@ -33,6 +33,7 @@ import Animated, {
   SlideInRight,
   SlideOutLeft,
   SlideOutRight,
+  Easing,
   Extrapolation,
   interpolate,
   interpolateColor,
@@ -64,6 +65,113 @@ const SOFT_ACCENT = 'rgba(94,63,45,0.10)';
 
 // (Animation removed) Survey is rendered as a single static card.
 const PROGRESS_RING_LINES = 100;
+
+// Question transition tuning:
+// - Animate only the header (title/subtitle) to avoid mounting two heavy question bodies at once.
+// - Slightly slower timing + easing to feel smooth and reduce perceived jank.
+const QUESTION_HEADER_IN_MS = 320;
+const QUESTION_HEADER_OUT_MS = 260;
+const QUESTION_HEADER_EASING = Easing.out(Easing.cubic);
+const QUESTION_HEADER_EXIT_EASING = Easing.in(Easing.cubic);
+const PAGINATION_TIMING_MS = 260;
+
+function hasNonEmptyText(v: unknown): boolean {
+  return typeof v === 'string' && v.trim().length > 0;
+}
+
+function hasFiniteNumber(v: unknown): boolean {
+  return typeof v === 'number' && Number.isFinite(v);
+}
+
+function isQuestionAnswered(questionKey: string, s: SurveyState): boolean {
+  switch (questionKey) {
+    // About you
+    case 'occupation':
+      return hasNonEmptyText(s.occupation);
+    case 'student_year':
+      return hasFiniteNumber(s.student_year);
+    case 'works_from_home':
+      return typeof s.works_from_home === 'boolean';
+    case 'shabbat':
+      return typeof s.is_shomer_shabbat === 'boolean';
+    case 'diet':
+      return hasNonEmptyText(s.diet_type);
+    case 'kosher':
+      return typeof s.keeps_kosher === 'boolean';
+    case 'smoker':
+      return typeof s.is_smoker === 'boolean';
+    case 'relationship':
+      return hasNonEmptyText(s.relationship_status);
+    case 'pet':
+      return typeof s.has_pet === 'boolean';
+    case 'lifestyle':
+      return hasNonEmptyText(s.lifestyle);
+    case 'cleanliness':
+      return hasFiniteNumber(s.cleanliness_importance);
+    case 'cleaning_frequency':
+      return hasNonEmptyText(s.cleaning_frequency);
+    case 'hosting':
+      return hasNonEmptyText(s.hosting_preference);
+    case 'cooking':
+      return hasNonEmptyText(s.cooking_style);
+    case 'home_vibe':
+      return hasNonEmptyText(s.home_vibe);
+
+    // Apartment you want
+    case 'price':
+      return hasFiniteNumber(s.price_range);
+    case 'bills':
+      return s.bills_included === true || s.bills_included === false || s.bills_included === null;
+    case 'preferred_city':
+      return hasNonEmptyText(s.preferred_city);
+    case 'preferred_neighborhoods':
+      return Array.isArray(s.preferred_neighborhoods) && s.preferred_neighborhoods.length > 0;
+    case 'floor':
+      return hasNonEmptyText(s.floor_preference);
+    case 'balcony':
+      return s.has_balcony === true || s.has_balcony === false || s.has_balcony === null;
+    case 'elevator':
+      return s.has_elevator === true || s.has_elevator === false || s.has_elevator === null;
+    case 'master':
+      return s.wants_master_room === true || s.wants_master_room === false || s.wants_master_room === null;
+    case 'is_sublet':
+      return typeof s.is_sublet === 'boolean';
+    case 'sublet_period':
+      return hasNonEmptyText(s.sublet_month_from) && hasNonEmptyText(s.sublet_month_to);
+    case 'move_in_month':
+      return hasNonEmptyText(s.move_in_month);
+    case 'roommates_min':
+      return hasFiniteNumber((s as any).preferred_roommates_min);
+    case 'roommates_max':
+      return hasFiniteNumber((s as any).preferred_roommates_max);
+    case 'pets_allowed':
+      return typeof s.pets_allowed === 'boolean';
+    case 'broker':
+      return s.with_broker === true || s.with_broker === false || s.with_broker === null;
+
+    // Partner you want
+    case 'age_min':
+      return hasFiniteNumber((s as any).preferred_age_min);
+    case 'age_max':
+      return hasFiniteNumber((s as any).preferred_age_max);
+    case 'pref_gender':
+      return hasNonEmptyText(s.preferred_gender);
+    case 'pref_occ':
+      return hasNonEmptyText(s.preferred_occupation);
+    case 'partner_shabbat':
+      return hasNonEmptyText(s.partner_shabbat_preference);
+    case 'partner_diet':
+      return hasNonEmptyText(s.partner_diet_preference);
+    case 'partner_smoking':
+      return hasNonEmptyText(s.partner_smoking_preference);
+    case 'partner_pets':
+      return hasNonEmptyText(s.partner_pets_preference);
+
+    default:
+      // Fail-open so we don't accidentally block progression for new/unknown steps.
+      return true;
+  }
+}
 
 const lifestyleOptions = ['רגוע', 'פעיל', 'ספונטני', 'ביתי', 'חברתי'];
 const dietOptions = ['ללא הגבלה', 'צמחוני', 'טבעוני'];
@@ -422,9 +530,9 @@ function PartCarouselPagination({
   const activeIndex = useSharedValue(index);
   useEffect(() => {
     if (activeIndex.value !== index) {
-      activeIndex.value = withTiming(index, { duration: 180 });
+      activeIndex.value = withTiming(index, { duration: PAGINATION_TIMING_MS, easing: QUESTION_HEADER_EASING });
     }
-  }, [index, activeIndex]);
+  }, [index]);
 
   const dotSize = 9;
   const maxDots = 7;
@@ -522,7 +630,7 @@ function PartCarouselPagination({
         ),
       },
       // Title is already displayed in the card header; avoid repeating it inside the toggle row.
-      { key: 'shabbat', title: 'שומר/ת שבת?', render: () => <ToggleRow value={!!state.is_shomer_shabbat} onToggle={(v) => setField('is_shomer_shabbat', v)} centerOptions showYesIcon={false} /> },
+      { key: 'shabbat', title: 'שומר/ת שבת?', render: () => <ToggleRow value={state.is_shomer_shabbat} onToggle={(v) => setField('is_shomer_shabbat', v)} centerOptions showYesIcon={false} /> },
       { key: 'diet', title: 'מה התזונה שלי?', render: () => <ChipSelect options={dietOptions} value={state.diet_type || null} onChange={(v) => setField('diet_type', v || null)} /> },
       {
         key: 'kosher',
@@ -542,10 +650,10 @@ function PartCarouselPagination({
         ),
       },
       // Title is already displayed in the card header; avoid repeating it inside the toggle row.
-      { key: 'smoker', title: 'מעשן/ת?', render: () => <ToggleRow value={!!state.is_smoker} onToggle={(v) => setField('is_smoker', v)} centerOptions showYesIcon={false} /> },
+      { key: 'smoker', title: 'מעשן/ת?', render: () => <ToggleRow value={state.is_smoker} onToggle={(v) => setField('is_smoker', v)} centerOptions showYesIcon={false} /> },
       { key: 'relationship', title: 'מצב זוגי', render: () => <ChipSelect options={relationOptions} value={state.relationship_status || null} onChange={(v) => setField('relationship_status', v || null)} /> },
       // Title is already displayed in the card header; avoid repeating it inside the toggle row.
-      { key: 'pet', title: 'מגיע/ה עם בעל חיים?', render: () => <ToggleRow value={!!state.has_pet} onToggle={(v) => setField('has_pet', v)} centerOptions showYesIcon={false} /> },
+      { key: 'pet', title: 'מגיע/ה עם בעל חיים?', render: () => <ToggleRow value={state.has_pet} onToggle={(v) => setField('has_pet', v)} centerOptions showYesIcon={false} /> },
       { key: 'lifestyle', title: 'האופי היומיומי שלי', render: () => <ChipSelect options={lifestyleOptions} value={state.lifestyle || null} onChange={(v) => setField('lifestyle', v || null)} /> },
       {
         key: 'cleanliness',
@@ -593,7 +701,7 @@ function PartCarouselPagination({
         render: () => (
           <TriChoiceRow
             // Title is already displayed in the card header; avoid repeating it inside the row.
-            value={state.bills_included ?? null}
+            value={state.bills_included}
             yesLabel="כלולים"
             noLabel="לא כלולים"
             anyLabel="לא משנה לי"
@@ -703,7 +811,7 @@ function PartCarouselPagination({
         title: 'עם מרפסת/גינה?',
         render: () => (
           <TriChoiceRow
-            value={state.has_balcony ?? null}
+            value={state.has_balcony}
             anyLabel="לא משנה לי"
             centerOptions
             showYesIcon={false}
@@ -716,7 +824,7 @@ function PartCarouselPagination({
         title: 'חשוב שתהיה מעלית?',
         render: () => (
           <TriChoiceRow
-            value={state.has_elevator ?? null}
+            value={state.has_elevator}
             anyLabel="לא משנה לי"
             centerOptions
             showYesIcon={false}
@@ -729,7 +837,7 @@ function PartCarouselPagination({
         title: 'חדר מאסטר?',
         render: () => (
           <TriChoiceRow
-            value={state.wants_master_room ?? null}
+            value={state.wants_master_room}
             anyLabel="לא משנה לי"
             centerOptions
             showYesIcon={false}
@@ -742,7 +850,7 @@ function PartCarouselPagination({
         title: 'האם מדובר בסאבלט?',
         render: () => (
           <ToggleRow
-            value={!!state.is_sublet}
+            value={state.is_sublet}
             centerOptions
             showYesIcon={false}
             onToggle={(v) =>
@@ -827,7 +935,7 @@ function PartCarouselPagination({
         title: 'אפשר להביא חיות לדירה?',
         render: () => (
           <ToggleRow
-            value={!!state.pets_allowed}
+            value={state.pets_allowed}
             centerOptions
             showYesIcon={false}
             onToggle={(v) => setField('pets_allowed', v)}
@@ -839,7 +947,7 @@ function PartCarouselPagination({
         title: 'משנה לך תיווך?',
         render: () => (
           <TriChoiceRow
-            value={state.with_broker ?? null}
+            value={state.with_broker}
             yesLabel="עם תיווך"
             noLabel="בלי תיווך"
             anyLabel="לא משנה לי"
@@ -1058,6 +1166,10 @@ function PartCarouselPagination({
   const goToStep = (nextStep: number) => {
     if (nextStep === currentStep) return;
     if (nextStep < 0 || nextStep > totalItems - 1) return;
+    // Don't allow skipping forward without answering the current question.
+    if (nextStep > currentStep && activeItem?.type === 'question' && !isQuestionAnswered(activeItem.question.key, state)) {
+      return;
+    }
     transitionDirRef.current = nextStep > currentStep ? 1 : -1;
     // (Animation removed) Immediately switch steps.
     setCurrentStep(nextStep);
@@ -1066,6 +1178,7 @@ function PartCarouselPagination({
 
   const handleNext = () => {
     if (saving) return;
+    if (activeItem?.type === 'question' && !isQuestionAnswered(activeItem.question.key, state)) return;
     if (currentStep < totalItems - 1) goToStep(currentStep + 1);
   };
   const handleBack = () => {
@@ -1312,19 +1425,28 @@ function PartCarouselPagination({
                   ))}
                 </View>
               ) : activeItem?.type === 'question' ? (
-                <Animated.View
-                  // Key forces re-mount so entering/exiting animations run on each question change.
-                  key={activeQuestionKey ?? String(clampedIndex)}
-                  entering={(transitionDirRef.current === 1 ? SlideInRight : SlideInLeft).duration(220)}
-                  exiting={(transitionDirRef.current === 1 ? SlideOutLeft : SlideOutRight).duration(200)}
-                >
-                  <View style={styles.popupHeader}>
-                    <View style={styles.partPill}>
-                      <Text style={styles.partPillText}>{`חלק ${activeItem.partNumber}`}</Text>
+                <View>
+                  <Animated.View
+                    // Key forces re-mount so entering/exiting animations run on each question change.
+                    // Keep this animation scoped to the header only to avoid double-mounting heavy question bodies.
+                    key={`${activeQuestionKey ?? String(clampedIndex)}-header`}
+                    entering={(transitionDirRef.current === 1 ? SlideInRight : SlideInLeft)
+                      .duration(QUESTION_HEADER_IN_MS)
+                      .easing(QUESTION_HEADER_EASING)}
+                    exiting={(transitionDirRef.current === 1 ? SlideOutLeft : SlideOutRight)
+                      .duration(QUESTION_HEADER_OUT_MS)
+                      .easing(QUESTION_HEADER_EXIT_EASING)}
+                  >
+                    <View style={styles.popupHeader}>
+                      <View style={styles.partPill}>
+                        <Text style={styles.partPillText}>{`חלק ${activeItem.partNumber}`}</Text>
+                      </View>
+                      <Text style={styles.popupTitle}>{activeItem.question.title}</Text>
                     </View>
-                    <Text style={styles.popupTitle}>{activeItem.question.title}</Text>
-                  </View>
-                  {!!activeItem.question.subtitle && <Text style={styles.popupSubtitle}>{activeItem.question.subtitle}</Text>}
+                    {!!activeItem.question.subtitle && (
+                      <Text style={styles.popupSubtitle}>{activeItem.question.subtitle}</Text>
+                    )}
+                  </Animated.View>
 
                   {activeItem.question.key === 'cleanliness' ||
                   activeItem.question.key === 'preferred_neighborhoods' ||
@@ -1364,7 +1486,7 @@ function PartCarouselPagination({
                       <View style={styles.questionContentWrap}>{activeItem.question.render?.()}</View>
                     </ScrollView>
                   )}
-                </Animated.View>
+                </View>
               ) : (
                 <View style={[styles.popupBody, styles.sectionBody, { maxHeight: bodyMaxHeight }]}>
                   <View style={styles.sectionHero}>
@@ -1456,6 +1578,7 @@ function PartCarouselPagination({
 
                   const isEditingThisPart = !!(isEditMode && editSelectedPart && part === editSelectedPart);
                   const isLastInPart = nextInPartIdx === null;
+                  const isAnswered = isQuestionAnswered(activeItem.question.key, state);
 
                   return (
                     <>
@@ -1484,7 +1607,7 @@ function PartCarouselPagination({
                         {isEditingThisPart && isLastInPart ? (
                           <TouchableOpacity
                             onPress={promptSaveEditPart}
-                            disabled={saving}
+                            disabled={saving || !isAnswered}
                             style={[styles.primaryBtn, saving ? styles.primaryBtnDisabled : null]}
                           >
                             {saving ? (
@@ -1496,7 +1619,7 @@ function PartCarouselPagination({
                         ) : clampedIndex >= totalItems - 1 ? (
                           <TouchableOpacity
                             onPress={handleSubmit}
-                            disabled={saving}
+                            disabled={saving || !isAnswered}
                             style={[styles.primaryBtn, saving ? styles.primaryBtnDisabled : null]}
                           >
                             {saving ? <ActivityIndicator size="small" color="#FFFFFF" /> : <Text style={styles.primaryBtnText}>סיום</Text>}
@@ -1512,7 +1635,7 @@ function PartCarouselPagination({
                               }
                               handleNext();
                             }}
-                            disabled={saving}
+                            disabled={saving || !isAnswered}
                             style={[styles.primaryBtn, saving ? styles.primaryBtnDisabled : null]}
                           >
                             <Text style={styles.primaryBtnText}>הבא</Text>

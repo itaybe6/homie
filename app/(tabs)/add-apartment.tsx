@@ -28,12 +28,14 @@ import type { MapboxFeatureCollection } from '@/lib/mapboxHtml';
 import { autocompleteMapbox, reverseGeocodeMapbox, type MapboxGeocodingFeature } from '@/lib/mapboxAutocomplete';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import DateTimePicker from '@react-native-community/datetimepicker';
+import { AnimatePresence, MotiText, MotiView } from 'moti';
+import { Easing as ReanimatedEasing } from 'react-native-reanimated';
 import { KeyFabPanel } from '@/components/KeyFabPanel';
 import { getNeighborhoodsForCityName } from '@/lib/neighborhoods';
 import type { Apartment } from '@/types/database';
 import {
   Accessibility,
+  Check,
   Snowflake,
   Fence,
   Sun,
@@ -59,6 +61,26 @@ import {
   Trees,
 } from 'lucide-react-native';
 
+const HEB_MONTH_NAMES = [
+  'ינואר',
+  'פברואר',
+  'מרץ',
+  'אפריל',
+  'מאי',
+  'יוני',
+  'יולי',
+  'אוגוסט',
+  'ספטמבר',
+  'אוקטובר',
+  'נובמבר',
+  'דצמבר',
+];
+
+const { width: _screenW, height: _screenH } = Dimensions.get('window');
+const _brandGreen = '#22C55E';
+const _successDuration = 650;
+const _successNavDelayMs = 2800;
+
 
 type UpsertMode = 'create' | 'edit';
 
@@ -73,9 +95,24 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
   const mapboxStyleUrl = process.env.EXPO_PUBLIC_MAPBOX_STYLE_URL as string | undefined;
   const insets = useSafeAreaInsets();
   const datePickerBottomOffset = useMemo(() => 92 + (insets.bottom || 0) + 14, [insets.bottom]);
+  const moveInMonthOptions = useMemo(() => {
+    // Month+year picker options (e.g. "ינואר 2026").
+    // Show the next 48 months from the current month.
+    const start = startOfToday();
+    start.setDate(1);
+    const out: Array<{ key: string; label: string; date: Date }> = [];
+    for (let i = 0; i < 48; i++) {
+      const d = new Date(start.getFullYear(), start.getMonth() + i, 1);
+      d.setHours(0, 0, 0, 0);
+      out.push({ key: toISODateString(d), label: formatHebMonthYear(d), date: d });
+    }
+    return out;
+  }, []);
   const screenWidth = Dimensions.get('window').width;
   const previewGalleryRef = useRef<ScrollView>(null);
   const [previewActiveIdx, setPreviewActiveIdx] = useState(0);
+  const [isSuccess, setIsSuccess] = useState(false);
+  const successTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const inferredMode: UpsertMode =
     props?.mode ?? (typeof pathname === 'string' && pathname.includes('/apartment/edit') ? 'edit' : 'create');
@@ -94,6 +131,12 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
       router.replace('/add-apartment' as any);
     }
   }, [pathname, router, mode]);
+
+  useEffect(() => {
+    return () => {
+      if (successTimeoutRef.current) clearTimeout(successTimeoutRef.current);
+    };
+  }, []);
 
   // Guard: each user can upload max 1 apartment. If already owns one, block entry.
   useEffect(() => {
@@ -141,10 +184,8 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
   const [bedrooms, setBedrooms] = useState(''); // used as "rooms" count in UI
   const [bathrooms, setBathrooms] = useState('');
   const [images, setImages] = useState<string[]>([]); // local URIs before upload
-  const [moveInDate, setMoveInDate] = useState(''); // dd/mm/yyyy (display only)
+  const [moveInDate, setMoveInDate] = useState(''); // Month+year label (display only)
   const [moveInDateObj, setMoveInDateObj] = useState<Date | null>(null);
-  const [pendingMoveInDateObj, setPendingMoveInDateObj] = useState<Date | null>(null); // iOS: commit on "אישור"
-  const [isImmediateMoveIn, setIsImmediateMoveIn] = useState(false);
   const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
   const [sizeSqm, setSizeSqm] = useState(''); // apartment size in square meters (digits)
   const [gardenSizeSqm, setGardenSizeSqm] = useState(''); // garden size in square meters (digits) - only for garden apartments
@@ -157,6 +198,8 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
   const [error, setError] = useState('');
   const [citySuggestions, setCitySuggestions] = useState<MapboxGeocodingFeature[]>([]);
   const [addressSuggestions, setAddressSuggestions] = useState<MapboxGeocodingFeature[]>([]);
+  const [isNeighborhoodPickerOpen, setIsNeighborhoodPickerOpen] = useState(false);
+  const [neighborhoodSearch, setNeighborhoodSearch] = useState('');
   const [selectedGeo, setSelectedGeo] = useState<{ lng: number; lat: number } | null>(null);
   const [isResolvingNeighborhood, setIsResolvingNeighborhood] = useState(false);
   const [selectedCity, setSelectedCity] = useState<{
@@ -170,7 +213,7 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
   const [existingPartnerIds, setExistingPartnerIds] = useState<string[]>([]);
 
   // Property features (מאפייני הנכס)
-  const [balconyCount, setBalconyCount] = useState<0 | 1 | 2 | 3>(0);
+  const [hasBalcony, setHasBalcony] = useState(false);
   const [wheelchairAccessible, setWheelchairAccessible] = useState(false);
   const [hasAirConditioning, setHasAirConditioning] = useState(false);
   const [hasBars, setHasBars] = useState(false);
@@ -181,6 +224,8 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
   const [petsAllowed, setPetsAllowed] = useState(false);
   const [hasElevator, setHasElevator] = useState(false);
   const [kosherKitchen, setKosherKitchen] = useState(false);
+
+  const generateJoinPasscode = () => String(Math.floor(Math.random() * 1_000_000)).padStart(6, '0');
 
   useEffect(() => {
     let active = true;
@@ -322,7 +367,7 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
           typeof (a as any)?.balcony_count === 'number'
             ? Math.max(0, Math.min(3, (a as any).balcony_count as number))
             : 0;
-        setBalconyCount(bc as 0 | 1 | 2 | 3);
+        setHasBalcony(bc > 0);
         setWheelchairAccessible(!!(a as any)?.wheelchair_accessible);
         setHasAirConditioning(!!(a as any)?.has_air_conditioning);
         setHasBars(!!(a as any)?.has_bars);
@@ -335,16 +380,13 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
         setKosherKitchen(!!(a as any)?.kosher_kitchen);
 
         // Move-in availability
-        const immediate = !!(a as any)?.move_in_is_immediate;
         const iso = String((a as any)?.move_in_date || '').trim();
-        if (immediate) {
-          setIsImmediateMoveIn(true);
-        } else if (iso) {
+        if (iso) {
           const d = parseISODateToLocalDate(iso);
           if (d) {
-            setIsImmediateMoveIn(false);
-            setMoveInDateObj(d);
-            setMoveInDate(formatDDMMYYYY(d));
+            const monthStart = normalizeToMonthStart(d);
+            setMoveInDateObj(monthStart);
+            setMoveInDate(formatHebMonthYear(monthStart));
           }
         }
 
@@ -374,6 +416,7 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
   const closeOverlays = () => {
     setCitySuggestions([]);
     setAddressSuggestions([]);
+    setIsNeighborhoodPickerOpen(false);
   };
 
   const normalizeIds = (value: any): string[] => {
@@ -461,11 +504,15 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
     return d < min ? min : d;
   }
 
-  function dateFromPickerEvent(event: any, selected?: Date): Date | undefined {
-    if (selected instanceof Date) return selected;
-    const ts = event?.nativeEvent?.timestamp;
-    if (typeof ts === 'number' && Number.isFinite(ts)) return new Date(ts);
-    return undefined;
+  function formatHebMonthYear(d: Date): string {
+    const m = HEB_MONTH_NAMES[d.getMonth()] ?? '';
+    return `${m} ${d.getFullYear()}`.trim();
+  }
+
+  function normalizeToMonthStart(d: Date): Date {
+    const out = new Date(d.getFullYear(), d.getMonth(), 1);
+    out.setHours(0, 0, 0, 0);
+    return out;
   }
 
   function digitsOnly(s: string): string {
@@ -547,6 +594,22 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
     };
   }, [selectedGeo]);
 
+  const neighborhoodOptions = useMemo(() => {
+    const c = String(city || '').trim();
+    if (!c) return [];
+    try {
+      return getNeighborhoodsForCityName(c);
+    } catch {
+      return [];
+    }
+  }, [city]);
+
+  const filteredNeighborhoodOptions = useMemo(() => {
+    const q = String(neighborhoodSearch || '').trim();
+    if (!q) return neighborhoodOptions;
+    return neighborhoodOptions.filter((n) => String(n || '').includes(q));
+  }, [neighborhoodOptions, neighborhoodSearch]);
+
   const selectedFeatureLabels = useMemo(() => {
     const out: string[] = [];
     if (wheelchairAccessible) out.push('גישה לנכים');
@@ -583,10 +646,10 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
 
   const previewFeatureItems = useMemo(() => {
     const items: Array<{ key: string; label: string; Icon: any }> = [];
-    if (propertyType === 'building' && balconyCount > 0) {
+    if (propertyType === 'building' && hasBalcony) {
       items.push({
         key: 'balcony_count',
-        label: balconyCount === 1 ? 'מרפסת' : `${balconyCount} מרפסות`,
+        label: 'מרפסת',
         Icon: Home,
       });
     }
@@ -603,7 +666,7 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
     return items;
   }, [
     propertyType,
-    balconyCount,
+    hasBalcony,
     wheelchairAccessible,
     hasAirConditioning,
     hasBars,
@@ -643,7 +706,7 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
   useEffect(() => {
     if (propertyType !== 'garden') return;
     setFloor(0);
-    setBalconyCount(0);
+    setHasBalcony(false);
   }, [propertyType]);
 
   useEffect(() => {
@@ -900,6 +963,25 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
     setError('');
 
     try {
+      const isMissingMoveInColumnError = (e: any): boolean => {
+        const msg = String(e?.message || e?.error || e || '');
+        const code = String(e?.code || '');
+        if (code === '42703') return true; // Postgres undefined_column
+        if (
+          msg.includes('move_in_date') ||
+          msg.toLowerCase().includes('move_in_date')
+        ) {
+          return msg.toLowerCase().includes('does not exist') || msg.toLowerCase().includes('column') || msg.toLowerCase().includes('unknown');
+        }
+        return false;
+      };
+
+      const withoutMoveInFields = <T extends Record<string, any>>(payload: T): Omit<T, 'move_in_date'> => {
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        const { move_in_date, ...rest } = payload as any;
+        return rest as any;
+      };
+
       // Ensure user is authenticated
       const { data: userResp } = await supabase.auth.getUser();
       const authUser = user ?? userResp.user ?? null;
@@ -942,8 +1024,8 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
 
       const finalImageUrls = Array.from(new Set([...(existingRemote || []), ...uploadedUrls].filter(Boolean)));
       const moveInDateIso =
-        !isImmediateMoveIn && moveInDateObj ? toISODateString(resolveMoveInDateObj(moveInDateObj)) : null;
-      const moveInIsImmediate = isImmediateMoveIn ? true : false;
+        moveInDateObj ? toISODateString(normalizeToMonthStart(moveInDateObj)) : null;
+      let supportsMoveInColumns = true;
 
       if (mode === 'edit') {
         if (!editingApartmentId) throw new Error('חסר מזהה דירה לעריכה');
@@ -953,9 +1035,7 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
         const withoutOwner = base.filter((pid) => pid !== authUser.id);
         const nextPartnerIds = includeAsPartner ? Array.from(new Set([...withoutOwner, authUser.id])) : withoutOwner;
 
-        const { data: updated, error: updateErr } = await supabase
-          .from('apartments')
-          .update({
+        const updatePayload = {
             partner_ids: nextPartnerIds,
             title,
             description: description || null,
@@ -976,7 +1056,7 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
             image_urls: finalImageUrls.length ? finalImageUrls : null,
 
             // Property features
-            balcony_count: balconyCount,
+            balcony_count: hasBalcony ? 1 : 0,
             wheelchair_accessible: wheelchairAccessible,
             has_air_conditioning: hasAirConditioning,
             has_bars: hasBars,
@@ -990,62 +1070,130 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
 
             // Move-in availability
             move_in_date: moveInDateIso,
-            move_in_is_immediate: moveInIsImmediate,
-          })
-          .eq('id', editingApartmentId)
-          .select()
-          .single();
+        };
+
+        let updated: any = null;
+        let updateErr: any = null;
+        {
+          const res = await supabase
+            .from('apartments')
+            .update(supportsMoveInColumns ? updatePayload : withoutMoveInFields(updatePayload))
+            .eq('id', editingApartmentId)
+            .select()
+            .single();
+          updated = res.data;
+          updateErr = res.error;
+        }
+
+        if (updateErr && supportsMoveInColumns && isMissingMoveInColumnError(updateErr)) {
+          supportsMoveInColumns = false;
+          const res2 = await supabase
+            .from('apartments')
+            .update(withoutMoveInFields(updatePayload))
+            .eq('id', editingApartmentId)
+            .select()
+            .single();
+          updated = res2.data;
+          updateErr = res2.error;
+        }
 
         if (updateErr) throw updateErr;
         updateApartment(updated as Apartment);
         Alert.alert('הצלחה', 'הדירה עודכנה בהצלחה');
         router.replace(`/apartment/${editingApartmentId}` as any);
       } else {
-        const { data, error: insertError } = await supabase
-          .from('apartments')
-          .insert({
-            owner_id: authUser.id,
-            partner_ids: includeAsPartner ? [authUser.id] : [],
-            title,
-            description: description || null,
-            address,
-            city,
-            neighborhood: neighborhood || null,
-            price: priceNum,
-            // New schema fields
-            apartment_type: propertyType === 'garden' ? 'GARDEN' : 'REGULAR',
-            bedrooms: bedroomsNum,
-            bathrooms: bathroomsNum,
-            square_meters: Number.isFinite(sizeSqmNum) && sizeSqmNum > 0 ? sizeSqmNum : null,
-            floor: propertyType === 'building' ? floor : null,
-            garden_square_meters:
-              propertyType === 'garden' && Number.isFinite(gardenSizeSqmNum) && gardenSizeSqmNum > 0
-                ? gardenSizeSqmNum
-                : null,
-            roommate_capacity: roommatesNum,
-            image_urls: finalImageUrls.length ? finalImageUrls : null,
+        // Generate a 6-digit passcode for joining the apartment.
+        // Retry a few times in case of rare collision (unique index in DB).
+        const maxAttempts = 6;
+        let lastErr: any = null;
+        let data: any = null;
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+          const joinPasscode = generateJoinPasscode();
+          const insertPayload = {
+              owner_id: authUser.id,
+              partner_ids: includeAsPartner ? [authUser.id] : [],
+              title,
+              description: description || null,
+              address,
+              city,
+              neighborhood: neighborhood || null,
+              price: priceNum,
+              join_passcode: joinPasscode,
+              // New schema fields
+              apartment_type: propertyType === 'garden' ? 'GARDEN' : 'REGULAR',
+              bedrooms: bedroomsNum,
+              bathrooms: bathroomsNum,
+              square_meters: Number.isFinite(sizeSqmNum) && sizeSqmNum > 0 ? sizeSqmNum : null,
+              floor: propertyType === 'building' ? floor : null,
+              garden_square_meters:
+                propertyType === 'garden' && Number.isFinite(gardenSizeSqmNum) && gardenSizeSqmNum > 0
+                  ? gardenSizeSqmNum
+                  : null,
+              roommate_capacity: roommatesNum,
+              image_urls: finalImageUrls.length ? finalImageUrls : null,
 
-            // Property features
-            balcony_count: balconyCount,
-            wheelchair_accessible: wheelchairAccessible,
-            has_air_conditioning: hasAirConditioning,
-            has_bars: hasBars,
-            has_solar_heater: hasSolarHeater,
-            is_furnished: isFurnished,
-            has_safe_room: hasSafeRoom,
-            is_renovated: isRenovated,
-            pets_allowed: petsAllowed,
-            has_elevator: hasElevator,
-            kosher_kitchen: kosherKitchen,
+              // Property features
+              balcony_count: hasBalcony ? 1 : 0,
+              wheelchair_accessible: wheelchairAccessible,
+              has_air_conditioning: hasAirConditioning,
+              has_bars: hasBars,
+              has_solar_heater: hasSolarHeater,
+              is_furnished: isFurnished,
+              has_safe_room: hasSafeRoom,
+              is_renovated: isRenovated,
+              pets_allowed: petsAllowed,
+              has_elevator: hasElevator,
+              kosher_kitchen: kosherKitchen,
 
-            // Move-in availability
-            move_in_date: moveInDateIso,
-            move_in_is_immediate: moveInIsImmediate,
-          })
-          .select()
-          .single();
+              // Move-in availability
+              move_in_date: moveInDateIso,
+          };
 
-        if (insertError) throw insertError;
+          let inserted: any = null;
+          let insertError: any = null;
+          {
+            const res = await supabase
+              .from('apartments')
+              .insert(supportsMoveInColumns ? insertPayload : withoutMoveInFields(insertPayload))
+              .select()
+              .single();
+            inserted = res.data;
+            insertError = res.error;
+          }
+
+          // If the remote DB doesn't have move-in columns yet, retry once without them and continue.
+          if (insertError && supportsMoveInColumns && isMissingMoveInColumnError(insertError)) {
+            supportsMoveInColumns = false;
+            const res2 = await supabase
+              .from('apartments')
+              .insert(withoutMoveInFields(insertPayload))
+              .select()
+              .single();
+            inserted = res2.data;
+            insertError = res2.error;
+          }
+
+          if (!insertError) {
+            data = inserted;
+            lastErr = null;
+            break;
+          }
+
+          const msg = String((insertError as any)?.message || '');
+          const isDuplicatePasscode =
+            msg.includes('apartments_join_passcode_unique') ||
+            msg.toLowerCase().includes('duplicate key value') ||
+            msg.toLowerCase().includes('unique constraint');
+
+          if (!isDuplicatePasscode) {
+            lastErr = insertError;
+            break;
+          }
+
+          lastErr = insertError;
+        }
+
+        if (lastErr) throw lastErr;
 
         // Ensure partner_ids contains the creator if user chose to be a partner (fallback if DB ignored the field)
         let apartmentRow = data;
@@ -1062,8 +1210,11 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
         }
 
         addApartment(apartmentRow);
-        Alert.alert('הצלחה', 'הדירה נוספה בהצלחה');
-        router.replace('/(tabs)/home');
+        // Use the same success animation as join-passcode.
+        setIsSuccess(true);
+        successTimeoutRef.current = setTimeout(() => {
+          router.replace('/(tabs)/home');
+        }, _successNavDelayMs);
       }
     } catch (err: any) {
       setError(err.message || 'שגיאה בהוספת דירה');
@@ -1071,6 +1222,8 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
       setIsLoading(false);
     }
   };
+
+  const isUiLocked = isLoading || isSuccess;
 
   return (
     <View style={styles.container}>
@@ -1299,18 +1452,53 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
                   ) : null}
                 </View>
 
+                <View style={styles.inputGroup}>
+                  <Text style={styles.label}>שכונה</Text>
+                  {neighborhoodOptions.length > 0 ? (
+                    <TouchableOpacity
+                      activeOpacity={0.9}
+                      onPress={() => {
+                        Keyboard.dismiss();
+                        setNeighborhoodSearch('');
+                        setIsNeighborhoodPickerOpen(true);
+                      }}
+                      disabled={isUiLocked || !String(city || '').trim()}
+                      style={styles.inputWithIcon}
+                    >
+                      <Home size={18} color="#9AA0A6" style={styles.inputIcon} />
+                      <View style={[styles.input, styles.inputFlex, styles.dateField]}>
+                        <Text
+                          style={[
+                            styles.dateFieldText,
+                            !String(neighborhood || '').trim() ? styles.dateFieldPlaceholder : null,
+                          ]}
+                        >
+                          {String(neighborhood || '').trim() ? neighborhood : 'בחר/י שכונה'}
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                  ) : (
+                    <TextInput
+                      style={styles.input}
+                      placeholder={String(city || '').trim() ? 'הקלד/י שכונה' : 'בחר/י כתובת כדי לזהות עיר'}
+                      value={neighborhood}
+                      onChangeText={setNeighborhood}
+                      editable={!isUiLocked && !!String(city || '').trim()}
+                      placeholderTextColor="#9AA0A6"
+                    />
+                  )}
+                </View>
+
                 <View style={styles.row}>
                   <View style={[styles.inputGroup, styles.halfWidth]}>
                     <Text style={styles.label}>תאריך כניסה</Text>
                     <TouchableOpacity
                       activeOpacity={0.9}
                       onPress={() => {
-                        if (isImmediateMoveIn) return;
-                        // iOS UX: allow "preview" selection and commit only on "אישור"
-                        setPendingMoveInDateObj(resolveMoveInDateObj(moveInDateObj));
+                        Keyboard.dismiss();
                         setIsDatePickerOpen(true);
                       }}
-                      disabled={isLoading || isImmediateMoveIn}
+                      disabled={isUiLocked}
                       style={styles.inputWithIcon}
                     >
                       <Calendar size={18} color="#9AA0A6" style={styles.inputIcon} />
@@ -1318,26 +1506,13 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
                         <Text
                           style={[
                             styles.dateFieldText,
-                            !isImmediateMoveIn && !moveInDate ? styles.dateFieldPlaceholder : null,
+                            !moveInDate ? styles.dateFieldPlaceholder : null,
                           ]}
                         >
-                          {isImmediateMoveIn ? 'מיידית' : (moveInDate || 'dd/mm/yyyy')}
+                          {moveInDate || 'בחר/י חודש ושנה'}
                         </Text>
                       </View>
                     </TouchableOpacity>
-                    <View style={styles.immediateToggleRow}>
-                      <Text style={styles.immediateToggleLabel}>כניסה מיידית</Text>
-                      <Switch
-                        value={isImmediateMoveIn}
-                        onValueChange={(next) => {
-                          setIsImmediateMoveIn(next);
-                          if (next) setIsDatePickerOpen(false);
-                        }}
-                        disabled={isLoading}
-                        trackColor={{ false: '#D1D5DB', true: '#5e3f2d' }}
-                        thumbColor={Platform.OS === 'android' ? '#FFFFFF' : undefined}
-                      />
-                    </View>
                   </View>
 
                   <View style={[styles.inputGroup, styles.halfWidth]}>
@@ -1451,32 +1626,18 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
                       <View style={styles.stepperDivider} />
 
                       <View style={styles.stepperRow}>
-                        <View style={styles.stepperControl} pointerEvents={isLoading ? 'none' : 'auto'}>
-                          <TouchableOpacity
-                            style={[styles.stepperBtn, styles.stepperBtnPrimary]}
-                            onPress={() =>
-                              setBalconyCount((v) => (v < 3 ? ((v + 1) as 0 | 1 | 2 | 3) : v))
-                            }
+                        <View pointerEvents={isLoading ? 'none' : 'auto'}>
+                          <Switch
+                            value={hasBalcony}
+                            onValueChange={setHasBalcony}
                             disabled={isLoading}
-                          >
-                            <Text style={styles.stepperBtnPrimaryText}>+</Text>
-                          </TouchableOpacity>
-                          <View style={styles.stepperValue}>
-                            <Text style={styles.stepperValueText}>{balconyCount}</Text>
-                          </View>
-                          <TouchableOpacity
-                            style={[styles.stepperBtn, styles.stepperBtnSecondary]}
-                            onPress={() =>
-                              setBalconyCount((v) => (v > 0 ? ((v - 1) as 0 | 1 | 2 | 3) : v))
-                            }
-                            disabled={isLoading}
-                          >
-                            <Text style={styles.stepperBtnSecondaryText}>−</Text>
-                          </TouchableOpacity>
+                            trackColor={{ false: '#E5E7EB', true: '#5e3f2d' }}
+                            thumbColor="#FFFFFF"
+                          />
                         </View>
                         <View style={styles.stepperLabels}>
-                          <Text style={styles.stepperTitle}>מרפסות</Text>
-                          <Text style={styles.stepperSubtitle}>אופציונלי</Text>
+                          <Text style={styles.stepperTitle}>מרפסת</Text>
+                          <Text style={styles.stepperSubtitle}>יש / אין</Text>
                         </View>
                       </View>
                     </>
@@ -1876,11 +2037,11 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
                             <Text style={styles.aptTagText}>{`${digitsOnly(sizeSqm)} מ״ר`}</Text>
                           </View>
                         ) : null}
-                        {isImmediateMoveIn || moveInDate ? (
+                        {moveInDate ? (
                           <View style={styles.aptTagPill}>
                             <Calendar size={14} color="#5e3f2d" />
                             <Text style={styles.aptTagText}>
-                              {isImmediateMoveIn ? 'כניסה מיידית' : `כניסה ${moveInDate}`}
+                              {`כניסה ${moveInDate}`}
                             </Text>
                           </View>
                         ) : null}
@@ -1969,69 +2130,98 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
         </ScrollView>
 
         <KeyFabPanel
-          isOpen={isDatePickerOpen && !isImmediateMoveIn}
+          isOpen={isDatePickerOpen}
           onClose={() => setIsDatePickerOpen(false)}
           title="בחר תאריך כניסה"
           subtitle=""
           anchor="bottom"
           bottomOffset={datePickerBottomOffset}
         >
-          <DateTimePicker
-            value={
-              Platform.OS === 'ios'
-                ? resolveMoveInDateObj(pendingMoveInDateObj ?? moveInDateObj)
-                : resolveMoveInDateObj(moveInDateObj)
-            }
-            mode="date"
-            display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-            locale="he-IL"
-            minimumDate={startOfToday()}
-            onChange={(event: any, selected?: Date) => {
-              // Android fires "dismissed" and "set". iOS fires continuously.
-              const type = event?.type;
-              if (Platform.OS !== 'ios') {
-                if (type === 'dismissed') {
-                  setIsDatePickerOpen(false);
-                  return;
-                }
-                if (type === 'set') {
-                  const picked = dateFromPickerEvent(event, selected);
-                  if (picked) {
-                    const min = startOfToday();
-                    const next = picked < min ? min : picked;
-                    setMoveInDateObj(next);
-                    setMoveInDate(formatDDMMYYYY(next));
-                    setIsImmediateMoveIn(false);
-                  }
-                  setIsDatePickerOpen(false);
-                  return;
-                }
-              }
-              const picked = dateFromPickerEvent(event, selected);
-              if (picked) {
-                const min = startOfToday();
-                const next = picked < min ? min : picked;
-                // iOS: don't commit until "אישור"
-                setPendingMoveInDateObj(next);
-              }
-            }}
-          />
-          {Platform.OS === 'ios' ? (
+          <ScrollView style={styles.monthPickerList} showsVerticalScrollIndicator={false}>
+            {moveInMonthOptions.map((opt, idx) => {
+              const active = !!moveInDateObj && toISODateString(normalizeToMonthStart(moveInDateObj)) === opt.key;
+              return (
+                <TouchableOpacity
+                  key={`movein-${opt.key}-${idx}`}
+                  style={[styles.monthPickerOption, active ? styles.monthPickerOptionActive : null]}
+                  activeOpacity={0.85}
+                  onPress={() => {
+                    const monthStart = normalizeToMonthStart(opt.date);
+                    setMoveInDateObj(monthStart);
+                    setMoveInDate(formatHebMonthYear(monthStart));
+                    setIsDatePickerOpen(false);
+                  }}
+                >
+                  <Text style={[styles.monthPickerOptionText, active ? styles.monthPickerOptionTextActive : null]}>
+                    {opt.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+          <View style={styles.modalFooter}>
+            <TouchableOpacity style={styles.modalDoneBtn} onPress={() => setIsDatePickerOpen(false)}>
+              <Text style={styles.modalDoneText}>סגור</Text>
+            </TouchableOpacity>
+          </View>
+        </KeyFabPanel>
+
+        <KeyFabPanel
+          isOpen={isNeighborhoodPickerOpen}
+          onClose={() => setIsNeighborhoodPickerOpen(false)}
+          title={String(city || '').trim() ? `בחר שכונה (${city})` : 'בחר שכונה'}
+          subtitle=""
+          anchor="bottom"
+          bottomOffset={datePickerBottomOffset}
+        >
+          <View style={{ gap: 10 }}>
+            <TextInput
+              style={[styles.input, styles.neighborhoodSearchInput]}
+              placeholder="חיפוש שכונה…"
+              value={neighborhoodSearch}
+              onChangeText={setNeighborhoodSearch}
+              editable={!isUiLocked}
+              placeholderTextColor="#9AA0A6"
+            />
+
+            <ScrollView style={styles.monthPickerList} showsVerticalScrollIndicator={false}>
+              {filteredNeighborhoodOptions.map((opt, idx) => {
+                const active = String(neighborhood || '').trim() === opt;
+                return (
+                  <TouchableOpacity
+                    key={`hood-${opt}-${idx}`}
+                    style={[styles.monthPickerOption, active ? styles.monthPickerOptionActive : null]}
+                    activeOpacity={0.85}
+                    onPress={() => {
+                      setNeighborhood(opt);
+                      setIsNeighborhoodPickerOpen(false);
+                    }}
+                  >
+                    <Text style={[styles.monthPickerOptionText, active ? styles.monthPickerOptionTextActive : null]}>
+                      {opt}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+
             <View style={styles.modalFooter}>
-              <TouchableOpacity
-                style={styles.modalDoneBtn}
-                onPress={() => {
-                  const next = resolveMoveInDateObj(pendingMoveInDateObj ?? moveInDateObj);
-                  setMoveInDateObj(next);
-                  setMoveInDate(formatDDMMYYYY(next));
-                  setIsImmediateMoveIn(false);
-                  setIsDatePickerOpen(false);
-                }}
-              >
-                <Text style={styles.modalDoneText}>אישור</Text>
+              {String(neighborhood || '').trim() ? (
+                <TouchableOpacity
+                  style={[styles.modalDoneBtn, styles.modalDoneBtnSecondary]}
+                  onPress={() => {
+                    setNeighborhood('');
+                    setIsNeighborhoodPickerOpen(false);
+                  }}
+                >
+                  <Text style={[styles.modalDoneText, styles.modalDoneTextSecondary]}>נקה</Text>
+                </TouchableOpacity>
+              ) : null}
+              <TouchableOpacity style={styles.modalDoneBtn} onPress={() => setIsNeighborhoodPickerOpen(false)}>
+                <Text style={styles.modalDoneText}>סגור</Text>
               </TouchableOpacity>
             </View>
-          ) : null}
+          </View>
         </KeyFabPanel>
 
         <View
@@ -2045,9 +2235,9 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
         >
           {step === 1 ? (
             <TouchableOpacity
-              style={[styles.footerCtaBtn, isLoading && styles.buttonDisabled]}
+              style={[styles.footerCtaBtn, isUiLocked && styles.buttonDisabled]}
               onPress={handleNext}
-              disabled={isLoading}
+              disabled={isUiLocked}
               activeOpacity={0.92}
             >
               <ArrowLeft size={20} color="#FFFFFF" />
@@ -2057,9 +2247,9 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
             <View style={styles.footerCtaRow}>
               {step < TOTAL_STEPS ? (
                 <TouchableOpacity
-                  style={[styles.footerCtaBtn, isLoading && styles.buttonDisabled]}
+                  style={[styles.footerCtaBtn, isUiLocked && styles.buttonDisabled]}
                   onPress={handleNext}
-                  disabled={isLoading}
+                  disabled={isUiLocked}
                   activeOpacity={0.92}
                 >
                   <ArrowLeft size={20} color="#FFFFFF" />
@@ -2067,20 +2257,30 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
                 </TouchableOpacity>
               ) : (
                 <TouchableOpacity
-                  style={[styles.footerCtaBtn, isLoading && styles.buttonDisabled]}
+                  style={[
+                    styles.footerCtaBtn,
+                    mode !== 'edit' ? styles.footerCtaBtnPublish : null,
+                    isUiLocked && styles.buttonDisabled,
+                  ]}
                   onPress={handleSubmit}
-                  disabled={isLoading}
+                  disabled={isUiLocked}
                   activeOpacity={0.92}
                 >
-                  {isLoading ? <ActivityIndicator color="#FFFFFF" /> : <ArrowLeft size={20} color="#FFFFFF" />}
+                  {isLoading ? (
+                    <ActivityIndicator color="#FFFFFF" />
+                  ) : mode !== 'edit' ? (
+                    <Check size={20} color="#FFFFFF" />
+                  ) : (
+                    <ArrowLeft size={20} color="#FFFFFF" />
+                  )}
                   <Text style={styles.footerCtaText}>{mode === 'edit' ? 'עדכן דירה' : 'פרסם דירה'}</Text>
                 </TouchableOpacity>
               )}
 
               <TouchableOpacity
-                style={[styles.footerSecondaryBtn, isLoading && styles.buttonDisabled]}
+                style={[styles.footerSecondaryBtn, isUiLocked && styles.buttonDisabled]}
                 onPress={handlePrev}
-                disabled={isLoading}
+                disabled={isUiLocked}
                 activeOpacity={0.92}
               >
                 <ArrowRight size={20} color="#111827" />
@@ -2089,6 +2289,50 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
             </View>
           )}
         </View>
+
+        {/* Success overlay (same style as join-passcode) */}
+        <AnimatePresence>
+          {isSuccess ? (
+            <MotiView
+              key="success"
+              from={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ type: 'timing', duration: 220 }}
+              style={StyleSheet.absoluteFillObject}
+              pointerEvents="none"
+            >
+              <MotiView
+                from={{ scale: 0.1 }}
+                animate={{ scale: 12 }}
+                transition={{
+                  type: 'timing',
+                  duration: _successDuration * 1.8,
+                  easing: ReanimatedEasing.out(ReanimatedEasing.cubic),
+                }}
+                style={styles.successBgCircle}
+              />
+              <MotiView
+                from={{ scale: 0.7, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                transition={{ type: 'timing', duration: 420, delay: 180 }}
+                style={styles.successCenter}
+              >
+                <View style={styles.successBadge}>
+                  <Check size={64} color={_brandGreen} />
+                </View>
+                <MotiText
+                  from={{ opacity: 0, translateY: 6 }}
+                  animate={{ opacity: 1, translateY: 0 }}
+                  transition={{ type: 'timing', duration: 420, delay: 360 }}
+                  style={styles.successText}
+                >
+                  הדירה הועלתה בהצלחה
+                </MotiText>
+              </MotiView>
+            </MotiView>
+          ) : null}
+        </AnimatePresence>
       </KeyboardAvoidingView>
     </View>
   );
@@ -2510,18 +2754,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 12,
   },
-  immediateToggleRow: {
-    marginTop: 8,
-    flexDirection: 'row-reverse',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 4,
-  },
-  immediateToggleLabel: {
-    color: '#6B7280',
-    fontSize: 13,
-    fontWeight: '700',
-  },
   switchRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -2654,6 +2886,9 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 12 },
     elevation: 10,
   },
+  footerCtaBtnPublish: {
+    backgroundColor: '#16A34A',
+  },
   footerCtaText: {
     color: '#FFFFFF',
     fontSize: 15,
@@ -2677,6 +2912,7 @@ const styles = StyleSheet.create({
 
   modalFooter: {
     marginTop: 10,
+    gap: 10,
   },
   modalDoneBtn: {
     height: 44,
@@ -2685,10 +2921,77 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  modalDoneBtnSecondary: {
+    backgroundColor: '#E5E7EB',
+  },
   modalDoneText: {
     color: '#FFFFFF',
     fontSize: 14,
     fontWeight: '900',
+  },
+  modalDoneTextSecondary: {
+    color: '#111827',
+  },
+
+  neighborhoodSearchInput: {
+    marginBottom: 0,
+  },
+
+  monthPickerList: {
+    maxHeight: 320,
+    marginTop: 6,
+  },
+  monthPickerOption: {
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    backgroundColor: '#F3F4F6',
+    marginBottom: 10,
+  },
+  monthPickerOptionActive: {
+    backgroundColor: '#5e3f2d',
+  },
+  monthPickerOptionText: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#111827',
+    textAlign: 'right',
+  },
+  monthPickerOptionTextActive: {
+    color: '#FFFFFF',
+  },
+
+  successBgCircle: {
+    position: 'absolute',
+    width: _screenW * 0.35,
+    height: _screenW * 0.35,
+    borderRadius: (_screenW * 0.35) / 2,
+    backgroundColor: _brandGreen,
+    top: _screenH * 0.45,
+    left: _screenW * 0.325,
+  },
+  successCenter: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  successBadge: {
+    width: _screenW * 0.42,
+    height: _screenW * 0.42,
+    borderRadius: (_screenW * 0.42) / 2,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: 'rgba(94,63,45,0.18)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  successText: {
+    marginTop: 14,
+    fontSize: 20,
+    fontWeight: '900',
+    color: '#FFFFFF',
+    textAlign: 'center',
+    writingDirection: 'rtl',
   },
 
   stepperCard: {

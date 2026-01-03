@@ -1670,16 +1670,19 @@ export default function ProfileScreen() {
                 </View>
               )}
 
-              {/* Apartment passcode (demo for now) */}
+              {/* Apartment join passcode (owner only) */}
               {(() => {
                 const uid = (user as any)?.id as string | undefined;
                 if (!uid) return null;
                 const ownedApts = userApartments.filter((a: any) => String(a?.owner_id || '') === String(uid));
                 if (!ownedApts.length) return null;
 
-                // DEMO: later connect to real data (e.g. apt.passcode)
-                const raw = '123456';
-                const code = (String(raw).match(/\d/g)?.join('') ?? '').slice(0, 6).padStart(6, '0');
+                // Show the code for the first owned apartment (if you support multiple owned apartments,
+                // you can extend this UI to choose which apartment's code to display).
+                const targetApt = ownedApts[0] as any;
+                const raw = String(targetApt?.join_passcode || '');
+                const digitsOnly = (raw.match(/\d/g)?.join('') ?? '').slice(0, 6);
+                const code = digitsOnly.length === 6 ? digitsOnly : null;
 
                 return (
                   <View style={styles.aptPasscodeCard}>
@@ -1688,8 +1691,10 @@ export default function ProfileScreen() {
                       <TouchableOpacity
                         style={styles.aptPasscodeCopyBtn}
                         activeOpacity={0.9}
+                        disabled={!code}
                         onPress={async () => {
                           try {
+                            if (!code) return;
                             await Clipboard.setStringAsync(code);
                             Alert.alert('הועתק', 'קוד הדירה הועתק ללוח.');
                           } catch {
@@ -1704,13 +1709,15 @@ export default function ProfileScreen() {
                       </TouchableOpacity>
                     </View>
                     <View style={styles.aptPasscodeDigitsRow}>
-                      {code.split('').map((d, i) => (
+                      {(code ? code.split('') : ['-', '-', '-', '-', '-', '-']).map((d, i) => (
                         <View key={`code-${i}`} style={styles.aptPasscodeDigitBox}>
                           <Text style={styles.aptPasscodeDigitText}>{d}</Text>
                         </View>
                       ))}
                     </View>
-                    <Text style={styles.aptPasscodeHint}>שתפו את הקוד עם מי שמצטרף לדירה.</Text>
+                    <Text style={styles.aptPasscodeHint}>
+                      {code ? 'שתפו את הקוד עם מי שמצטרף לדירה.' : 'אין קוד לדירה עדיין (וודאו שהמיגרציה רצה).'}
+                    </Text>
                   </View>
                 );
               })()}

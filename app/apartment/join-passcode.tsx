@@ -1,11 +1,13 @@
 // Inspiration: https://dribbble.com/shots/11638410-dinero
 import { AnimatePresence, MotiText, MotiView } from 'moti';
-import React, { useEffect, useMemo, useState } from 'react';
-import { Dimensions, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Dimensions, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import Animated, { Easing, ZoomOut } from 'react-native-reanimated';
 import { Check, ChevronLeft, Delete } from 'lucide-react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { isSupabaseConfigured, supabase } from '@/lib/supabase';
+import { useAuthStore } from '@/stores/authStore';
 
 const { width, height } = Dimensions.get('window');
 
@@ -13,17 +15,33 @@ const keys = [1, 2, 3, 4, 5, 6, 7, 8, 9, 'space', 0, 'delete'] as const;
 type Keys = (typeof keys)[number];
 
 const passcodeLength = 6;
-const _keySize = width / 4;
+// Make the keypad feel "full screen" on tall devices by sizing keys using both width & height.
+// Must stay <= width/3 to keep 3 columns inside the screen.
+const _keySize = Math.min(width / 3.2, Math.max(width / 4, height / 7.2), 140);
 const _passcodeSpacing = (width - 3 * _keySize) / 2;
-const _passCodeSize = width / (passcodeLength + 2);
-const _correctPasscode = '116611'; // placeholder for future wiring
+const _passCodeSize = Math.min(width / (passcodeLength + 1.6), 62);
 const _brandBrown = '#5e3f2d';
+const _brandGreen = '#22C55E';
 const _successDuration = 650;
-// Demo mode: trigger the success animation on a WRONG passcode so you can test the flow without a real code yet.
-const _demoTriggerSuccessOnWrongPasscode = true;
 
 const AnimatedDelete = Animated.createAnimatedComponent(Delete);
 const AnimatedChevronLeft = Animated.createAnimatedComponent(ChevronLeft);
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error('timeout')), ms);
+    promise.then(
+      (v) => {
+        clearTimeout(t);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(t);
+        reject(e);
+      }
+    );
+  });
+}
 
 function PassCodeKeyboard({ onPress }: { onPress: (key: Keys) => void }) {
   return (
@@ -65,11 +83,11 @@ function PassCode({ passcode, isValid }: { passcode: Array<number | 0>; isValid:
             {typeof v === 'number' ? (
               <MotiView
                 key={`passcode-filled-${i}`}
-                from={{ scale: 0, backgroundColor: '#5e3f2d' }}
+                from={{ scale: 0, backgroundColor: _brandGreen }}
                 animate={{
                   scale: isValid && passcode.length === passcodeLength ? [1.06, 1] : 1,
-                  // Keep Homie brand brown for filled digits
-                  backgroundColor: '#5e3f2d',
+                  // Green fill for entered digits
+                  backgroundColor: _brandGreen,
                 }}
                 exiting={ZoomOut.duration(200)}
                 transition={{
@@ -94,42 +112,110 @@ export default function JoinPasscodeScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const params = useLocalSearchParams<{ apartmentId?: string | string[] }>();
+  const { user } = useAuthStore();
+  const mountedRef = useRef(true);
+  const inFlightRef = useRef(false);
 
   const [passcode, setPasscode] = useState<number[]>([]);
   const passcodeStr = useMemo(() => passcode.join(''), [passcode]);
   const [isValid, setIsValid] = useState(true);
   const [isSuccess, setIsSuccess] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [errorText, setErrorText] = useState<string>('');
 
   useEffect(() => {
-    if (passcode.length === passcodeLength) {
-      const isWrong = passcodeStr !== _correctPasscode;
-      const shouldSuccess = _demoTriggerSuccessOnWrongPasscode ? isWrong : !isWrong;
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
-      // Keep the “shake” validation effect only for the non-success path.
-      setIsValid(shouldSuccess ? true : !isWrong);
+  useEffect(() => {
+    if (passcode.length !== passcodeLength) {
+      setIsValid(true);
+      setErrorText('');
+      return;
+    }
+    if (isSuccess || inFlightRef.current) return;
 
-      if (shouldSuccess) {
+    inFlightRef.current = true;
+    const run = async () => {
+      if (mountedRef.current) setIsSubmitting(true);
+      try {
+        if (mountedRef.current) setErrorText('');
+        if (!isSupabaseConfigured()) {
+          throw new Error('Supabase לא מוגדר באפליקציה (חסרים ENV).');
+        }
+        if (!user?.id) throw new Error('יש להתחבר כדי להצטרף לדירה');
+
+        const aptIdRaw = Array.isArray(params.apartmentId) ? params.apartmentId[0] : params.apartmentId;
+        const aptIdStr = aptIdRaw ? String(aptIdRaw) : '';
+        const aptId = aptIdStr.trim() ? aptIdStr.trim() : null;
+
+        const rpcCall = supabase.rpc('join_apartment_with_passcode', {
+          p_passcode: passcodeStr,
+          p_apartment_id: aptId,
+        });
+
+        // Avoid infinite "בודק..." in case of network stall / misconfigured URL.
+        const { data, error } = await withTimeout(rpcCall, 12_000);
+        if (error) throw error;
+
+        // Supabase RPC returns an array for RETURNS TABLE
+        const row = Array.isArray(data) ? data[0] : data;
+        const joinedApartmentId = row?.apartment_id ? String(row.apartment_id) : aptId;
+        if (!joinedApartmentId) throw new Error('שגיאה: לא נמצא מזהה דירה לאחר הצטרפות');
+
+        if (!mountedRef.current) return;
+        setIsValid(true);
         setIsSuccess(true);
-        const aptId = Array.isArray(params.apartmentId) ? params.apartmentId[0] : params.apartmentId;
-        // Give the success animation time to play, then return to the apartment page
+
         const t = setTimeout(() => {
-          if (aptId) {
-            router.replace({ pathname: '/apartment/[id]', params: { id: String(aptId) } });
-          } else {
-            router.back();
-          }
+          router.replace({ pathname: '/apartment/[id]', params: { id: joinedApartmentId } });
         }, 1800);
         return () => clearTimeout(t);
+      } catch (e: any) {
+        if (!mountedRef.current) return;
+        setIsValid(false);
+
+        const msg = String(e?.message || e?.toString?.() || '');
+        const normalized = msg.toLowerCase();
+        if (normalized.includes('wrong_passcode')) {
+          setErrorText('קוד שגוי. נסו שוב.');
+        } else if (normalized.includes('not_authenticated')) {
+          setErrorText('צריך להיות מחוברים כדי להצטרף לדירה.');
+        } else if (normalized.includes('timeout')) {
+          setErrorText('הבדיקה מתעכבת (בעיה בחיבור). נסו שוב.');
+        } else if (normalized.includes('join_apartment_with_passcode') && normalized.includes('does not exist')) {
+          setErrorText('השרת לא עודכן (חסרה פונקציה). הריצו מיגרציות בסופאבייס.');
+        } else if (normalized.includes('supabase לא מוגדר') || normalized.includes('missing expo_public_supabase')) {
+          setErrorText('Supabase לא מוגדר באפליקציה. צריך להגדיר ENV ולהריץ מחדש.');
+        } else {
+          setErrorText('לא הצלחתי לבדוק את הקוד. נסו שוב.');
+        }
+
+        // Reset input so user can try again
+        setTimeout(() => {
+          if (mountedRef.current) {
+            setPasscode([]);
+            setIsValid(true);
+          }
+        }, 650);
+      } finally {
+        inFlightRef.current = false;
+        if (mountedRef.current) setIsSubmitting(false);
       }
-    } else {
-      setIsValid(true);
-    }
-  }, [params.apartmentId, passcode.length, passcodeStr, router]);
+    };
+
+    void run();
+  }, [isSuccess, params.apartmentId, passcode.length, passcodeStr, router, user?.id]);
+
+  const canInteract = !isSuccess && !isSubmitting;
 
   return (
     <MotiView
-      style={[styles.root, { paddingTop: (insets.top || 0) + 10, paddingBottom: (insets.bottom || 0) + 10 }]}
-      animate={{ backgroundColor: isSuccess ? _brandBrown : '#FFFFFF' }}
+      style={[styles.root, { paddingTop: (insets.top || 0) + 6, paddingBottom: (insets.bottom || 0) + 6 }]}
+      animate={{ backgroundColor: isSuccess ? _brandGreen : '#FFFFFF' }}
       transition={{ type: 'timing', duration: _successDuration }}
     >
       <View style={styles.topBar}>
@@ -149,25 +235,34 @@ export default function JoinPasscodeScreen() {
       <View style={styles.header}>
         <Text style={[styles.title, isSuccess ? { color: '#FFFFFF' } : null]}>הכניסו סיסמה</Text>
         <Text style={[styles.subtitle, isSuccess ? { color: 'rgba(255,255,255,0.86)' } : null]}>
-          הכניסו את הסיסמא כדי להצטרף לדירה.
+          {isSubmitting ? 'בודק קוד…' : 'הכניסו את הסיסמא כדי להצטרף לדירה.'}
         </Text>
+        {!isSuccess && errorText ? <Text style={styles.errorText}>{errorText}</Text> : null}
       </View>
 
       <View style={styles.contentWrap}>
         <PassCode passcode={passcode as any} isValid={isValid} />
 
-        <PassCodeKeyboard
-          onPress={(char) => {
-            if (isSuccess) return;
-            if (char === 'delete') {
-              setPasscode((p) => (p.length === 0 ? [] : p.slice(0, p.length - 1)));
-              return;
-            }
-            if (char === 'space') return;
-            if (passcode.length === passcodeLength) return;
-            setPasscode((p) => [...p, Number(char)]);
-          }}
-        />
+        <View style={[styles.keyboardArea, { paddingBottom: Math.max(10, insets.bottom || 0) }]}>
+          <PassCodeKeyboard
+            onPress={(char) => {
+              if (!canInteract) return;
+              if (char === 'delete') {
+                setPasscode((p) => (p.length === 0 ? [] : p.slice(0, p.length - 1)));
+                return;
+              }
+              if (char === 'space') return;
+              if (passcode.length === passcodeLength) return;
+              setPasscode((p) => [...p, Number(char)]);
+            }}
+          />
+          {isSubmitting ? (
+            <View style={styles.loadingRow} pointerEvents="none">
+              <ActivityIndicator size="small" color={_brandBrown} />
+              <Text style={styles.loadingText}>בודק…</Text>
+            </View>
+          ) : null}
+        </View>
       </View>
       {/* Success overlay (check mark + expanding brown) */}
       <AnimatePresence>
@@ -194,7 +289,7 @@ export default function JoinPasscodeScreen() {
               style={styles.successCenter}
             >
               <View style={styles.successBadge}>
-                <Check size={64} color={_brandBrown} />
+                <Check size={64} color={_brandGreen} />
               </View>
               <MotiText
                 from={{ opacity: 0, translateY: 6 }}
@@ -235,7 +330,7 @@ const styles = StyleSheet.create({
   header: {
     width: '100%',
     paddingHorizontal: 24,
-    marginTop: 22,
+    marginTop: 14,
     alignItems: 'center',
   },
   title: {
@@ -248,22 +343,36 @@ const styles = StyleSheet.create({
     flex: 1,
     width: '100%',
     alignItems: 'center',
-    justifyContent: 'flex-start',
-    paddingTop: 10,
-    paddingBottom: 10,
+    justifyContent: 'space-between',
+    paddingTop: 6,
+    paddingBottom: 0,
+  },
+  keyboardArea: {
+    width: '100%',
+    flex: 1,
+    justifyContent: 'center',
   },
   subtitle: {
     marginTop: 8,
-    marginBottom: 14,
+    marginBottom: 8,
     fontSize: 13,
     lineHeight: 18,
     textAlign: 'center',
     color: '#6B7280',
     fontWeight: '700',
   },
+  errorText: {
+    marginTop: 8,
+    fontSize: 13,
+    lineHeight: 18,
+    textAlign: 'center',
+    color: '#B91C1C',
+    fontWeight: '800',
+    writingDirection: 'rtl',
+  },
   passcodeRow: {
     flexDirection: 'row',
-    marginTop: 0,
+    marginTop: -2,
     marginBottom: 10,
     gap: _passCodeSize / 4,
   },
@@ -293,12 +402,24 @@ const styles = StyleSheet.create({
     marginTop: 6,
   },
   keyText: { color: '#000', fontSize: 32, fontWeight: '700' },
+  loadingRow: {
+    marginTop: 10,
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 8,
+  },
+  loadingText: {
+    color: '#5e3f2d',
+    fontSize: 13,
+    fontWeight: '800',
+    writingDirection: 'rtl',
+  },
   successBgCircle: {
     position: 'absolute',
     width: width * 0.35,
     height: width * 0.35,
     borderRadius: (width * 0.35) / 2,
-    backgroundColor: _brandBrown,
+    backgroundColor: _brandGreen,
     top: height * 0.45,
     left: width * 0.325,
   },
