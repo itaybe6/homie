@@ -1,10 +1,10 @@
-import React from 'react';
+import React, { useMemo, useState } from 'react';
 import { Dimensions, Platform, StyleSheet, Text, TouchableWithoutFeedback, View, ViewStyle } from 'react-native';
 import Animated, { FadeIn, FadeInDown, FadeOut, FadeOutDown, FadeOutUp, LinearTransition } from 'react-native-reanimated';
 import { X } from 'lucide-react-native';
 import { TouchableOpacity } from 'react-native';
 
-const { width } = Dimensions.get('window');
+const { width, height } = Dimensions.get('window');
 const _defaultDuration = 450;
 
 export type KeyFabPanelProps = {
@@ -23,7 +23,7 @@ export type KeyFabPanelProps = {
   /**
    * Where the panel is anchored. Defaults to bottom (legacy behavior).
    */
-  anchor?: 'bottom' | 'top';
+  anchor?: 'bottom' | 'top' | 'center';
   /**
    * Place the panel above sticky bottom UI (CTA). Example: ctaHeight + 12
    */
@@ -59,19 +59,31 @@ export function KeyFabPanel({
 }: KeyFabPanelProps) {
   if (!isOpen) return null;
 
+  const [measuredHeight, setMeasuredHeight] = useState<number>(420);
+
   const resolvedTitle = (title ?? 'מצטרפים לדירה?').trim();
   const resolvedSubtitle = (subtitle ?? 'יש לכם סיסמה מבעל הדירה? תוכלו להכניס אותה ולהצטרף לדירה בלחיצה אחת').trim();
   const resolvedBodyText = (bodyText ?? 'נמשיך למסך הזנת סיסמה (6 ספרות).').trim();
   const resolvedPrimaryLabel = (primaryActionLabel ?? 'הכניסו את הסיסמא').trim();
   const resolvedPrimaryAction = onPrimaryAction ?? onEnterPassword;
-  const placement = anchor === 'top' ? { top: topOffset } : { bottom: bottomOffset };
+
+  const placement = useMemo(() => {
+    if (anchor === 'top') return { top: topOffset };
+    if (anchor === 'center') {
+      const clamped = Math.max(topOffset, Math.min(height - measuredHeight - bottomOffset, (height - measuredHeight) / 2));
+      return { top: clamped };
+    }
+    return { bottom: bottomOffset };
+  }, [anchor, topOffset, bottomOffset, measuredHeight]);
+
   const exitAnim = anchor === 'top' ? FadeOutUp : FadeOutDown;
 
   return (
     <Animated.View
       entering={FadeIn.duration(duration)}
       exiting={FadeOut.duration(duration)}
-      style={StyleSheet.absoluteFill}
+      // Ensure the panel is always above screens/cards that use elevation/zIndex (Android especially).
+      style={[StyleSheet.absoluteFill, { zIndex: 100000, elevation: 100000 }]}
       pointerEvents="box-none"
     >
       <TouchableWithoutFeedback onPress={onClose}>
@@ -91,6 +103,10 @@ export function KeyFabPanel({
           },
           panelStyle,
         ]}
+        onLayout={(e) => {
+          const h = e.nativeEvent.layout.height;
+          if (h && Math.abs(h - measuredHeight) > 2) setMeasuredHeight(h);
+        }}
       >
         <View style={styles.headerRow}>
           <View style={{ flex: 1 }}>

@@ -9,13 +9,17 @@ export type SurveyUpsert = Omit<
 };
 
 export async function fetchUserSurvey(userId: string): Promise<UserSurveyResponse | null> {
+  // Some environments may accidentally allow multiple rows per user_id.
+  // Always fetch the most recently updated row (matches profile screen behavior).
   const { data, error } = await supabase
     .from('user_survey_responses')
     .select('*')
     .eq('user_id', userId)
-    .maybeSingle();
+    .order('updated_at', { ascending: false })
+    .limit(1);
   if (error) throw error;
-  return (data as any) || null;
+  const row = Array.isArray(data) ? (data[0] as any) : null;
+  return row || null;
 }
 
 export async function upsertUserSurvey(payload: SurveyUpsert): Promise<UserSurveyResponse> {

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -9,10 +9,10 @@ import {
   TouchableOpacity,
   Pressable,
   useWindowDimensions,
-  Modal,
   ScrollView,
   Alert,
   Platform,
+  BackHandler,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Animated, {
@@ -23,7 +23,7 @@ import Animated, {
   useSharedValue,
 } from 'react-native-reanimated';
 import { useRouter } from 'expo-router';
-import { Search, SlidersHorizontal, X, Map } from 'lucide-react-native';
+import { Search, SlidersHorizontal, Map } from 'lucide-react-native';
 import { getAllCitiesWithNeighborhoods, getNeighborhoodsForCityName } from '@/lib/neighborhoods';
 import { supabase } from '@/lib/supabase';
 import { useApartmentStore } from '@/stores/apartmentStore';
@@ -31,6 +31,7 @@ import { useAuthStore } from '@/stores/authStore';
 import { Apartment } from '@/types/database';
 import ApartmentCard from '@/components/ApartmentCard';
 import FilterChipsBar, { defaultFilterChips, selectedFiltersFromIds } from '@/components/FilterChipsBar';
+import { KeyFabPanel } from '@/components/KeyFabPanel';
 
 function parseOptionalInt(v: string): number | null {
   const t = String(v || '').trim();
@@ -231,6 +232,35 @@ export default function HomeScreen() {
   const [chipSelected, setChipSelected] = useState<string[]>([]);
   // Removed cityPlaceId/sessionToken (no Google city autocomplete)
 
+  const filterBtnRef = useRef<View | null>(null);
+  const DEFAULT_FILTER_TOP_OFFSET = 120;
+  const [filterPanelTopOffset, setFilterPanelTopOffset] = useState(DEFAULT_FILTER_TOP_OFFSET);
+  const [filterPanelHeight, setFilterPanelHeight] = useState(
+    Math.max(320, Math.round(screenHeight * 0.52))
+  );
+
+  const openFilterPanel = useCallback(() => {
+    const node = filterBtnRef.current;
+    if (node?.measureInWindow) {
+      node.measureInWindow((_x: number, y: number, _w: number, h: number) => {
+        // Open DOWNWARD from the filter button (anchor=top)
+        const desiredTop = Math.max(12, Math.round(y + h + 10));
+        const bottomPadding = 18; // keep a little space from bottom edge
+        const available = Math.max(240, Math.floor(screenHeight - desiredTop - bottomPadding));
+        // Keep the panel relatively compact; use internal scrolling for overflow.
+        const maxH = Math.min(520, Math.round(screenHeight * 0.54));
+        const nextH = Math.max(240, Math.min(maxH, available));
+        setFilterPanelTopOffset(desiredTop);
+        setFilterPanelHeight(nextH);
+        setIsFilterOpen(true);
+      });
+      return;
+    }
+    setFilterPanelTopOffset(DEFAULT_FILTER_TOP_OFFSET);
+    setFilterPanelHeight(Math.max(320, Math.round(screenHeight * 0.52)));
+    setIsFilterOpen(true);
+  }, [screenHeight]);
+
   // Reanimated scroll values (drives header)
   const scrollY = useSharedValue(0); // px
 
@@ -295,13 +325,16 @@ export default function HomeScreen() {
             >
               <Map size={22} color="#5e3f2d" />
             </TouchableOpacity>
-            <TouchableOpacity
-              activeOpacity={0.9}
-              style={styles.actionBtnBody}
-              onPress={() => setIsFilterOpen(true)}
-            >
-              <SlidersHorizontal size={22} color="#5e3f2d" />
-            </TouchableOpacity>
+            {/* Wrap in a real View ref so measureInWindow works reliably (esp. Android) */}
+            <View ref={filterBtnRef} collapsable={false}>
+              <TouchableOpacity
+                activeOpacity={0.9}
+                style={styles.actionBtnBody}
+                onPress={openFilterPanel}
+              >
+                <SlidersHorizontal size={22} color="#5e3f2d" />
+              </TouchableOpacity>
+            </View>
           </View>
           {/* Search input */}
           <View style={[styles.searchContainer, { flex: 1 }]}>
@@ -336,14 +369,14 @@ export default function HomeScreen() {
           activeIconColor="#FFFFFF"
           onOpenDropdown={(chip) => {
             if (chip.id === 'price' || chip.id === 'rooms') {
-              setIsFilterOpen(true);
+              openFilterPanel();
             }
           }}
           style={{ marginTop: 8, marginBottom: 20 }}
         />
       </Animated.View>
     </Animated.View>
-  ), [headerOuterStyle, headerInnerStyle, chipsStyle, searchQuery, chipSelected]);
+  ), [headerOuterStyle, headerInnerStyle, chipsStyle, openFilterPanel, router, searchQuery, chipSelected]);
 
   useEffect(() => {
     fetchApartments();
@@ -361,6 +394,16 @@ export default function HomeScreen() {
       setIsCityDropdownOpen(false);
       setCitySearchQuery('');
     }
+  }, [isFilterOpen]);
+
+  // Android hardware back: close the filter panel (KeyFabPanel isn't a native Modal)
+  useEffect(() => {
+    if (!isFilterOpen) return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      setIsFilterOpen(false);
+      return true;
+    });
+    return () => sub.remove();
   }, [isFilterOpen]);
 
   useEffect(() => {
@@ -590,32 +633,27 @@ export default function HomeScreen() {
         />
       </View>
 
-      {/* Filter Modal */}
-      <Modal visible={isFilterOpen} animationType="slide" transparent onRequestClose={() => setIsFilterOpen(false)}>
-        <View style={styles.modalOverlay}>
-          <TouchableOpacity style={styles.modalBackdrop} activeOpacity={1} onPress={() => setIsFilterOpen(false)} />
-
-          <View
-            style={[
-              styles.sheet,
-              {
-                height: Math.max(360, Math.round(screenHeight * 0.58)),
-              },
+      {/* Filter panel – same animated UX as the "key" button panel on apartment page */}
+      <KeyFabPanel
+        isOpen={isFilterOpen}
+        onClose={() => setIsFilterOpen(false)}
+        title="סינון דירות"
+        subtitle=""
+        anchor="top"
+        topOffset={filterPanelTopOffset}
+      >
+        <View style={{ height: filterPanelHeight }}>
+          <ScrollView
+            style={{ flex: 1 }}
+            contentContainerStyle={[
+              styles.sheetContentInner,
+              { paddingHorizontal: 0, paddingTop: 2, paddingBottom: 6 },
             ]}
+            keyboardShouldPersistTaps="handled"
+            nestedScrollEnabled
+            showsVerticalScrollIndicator={false}
+            persistentScrollbar={false}
           >
-            <View style={styles.sheetHeader}>
-              <Text style={styles.sheetTitle}>סינון דירות</Text>
-              <TouchableOpacity onPress={() => setIsFilterOpen(false)} style={styles.closeBtn}>
-                <X size={20} color="#FFFFFF" />
-              </TouchableOpacity>
-            </View>
-
-            <ScrollView
-              style={[styles.sheetContent, { flex: 1 }]}
-              contentContainerStyle={styles.sheetContentInner}
-              keyboardShouldPersistTaps="handled"
-              nestedScrollEnabled
-            >
               <View style={styles.fieldGroup}> 
                 <Text style={styles.fieldLabel}>עיר</Text>
                 <TouchableOpacity
@@ -827,22 +865,29 @@ export default function HomeScreen() {
                   }
                 />
               </View>
-            </ScrollView>
+          </ScrollView>
 
-            <View style={styles.sheetFooter}>
-              <TouchableOpacity style={styles.clearBtn} onPress={() => { clearFilters(); }}>
-                <Text style={styles.clearText}>נקה</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.applyBtn}
-                onPress={() => { setIsFilterOpen(false); filterApartments(); }}
-              >
-                <Text style={styles.applyText}>הצג תוצאות</Text>
-              </TouchableOpacity>
-            </View>
+          <View style={styles.sheetFooter}>
+            <TouchableOpacity
+              style={styles.clearBtn}
+              onPress={() => {
+                clearFilters();
+              }}
+            >
+              <Text style={styles.clearText}>נקה</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.applyBtn}
+              onPress={() => {
+                setIsFilterOpen(false);
+                filterApartments();
+              }}
+            >
+              <Text style={styles.applyText}>הצג תוצאות</Text>
+            </TouchableOpacity>
           </View>
         </View>
-      </Modal>
+      </KeyFabPanel>
     </SafeAreaView>
   );
 }

@@ -12,7 +12,6 @@ import {
   Platform,
   ScrollView,
   Image,
-  Modal,
   Animated,
   Easing,
 } from 'react-native';
@@ -29,6 +28,7 @@ import { autocompleteMapbox, type MapboxGeocodingFeature } from '@/lib/mapboxAut
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import LavaLamp from '../../components/LavaLamp';
 import KeyboardAwareScrollView from 'react-native-keyboard-aware-scroll-view/lib/KeyboardAwareScrollView';
+import { KeyFabPanel } from '@/components/KeyFabPanel';
 
 // App primary accent color (align with dark theme)
 const PRIMARY = '#5e3f2d';
@@ -307,7 +307,9 @@ export default function RegisterScreen() {
         enableOnAndroid
         extraScrollHeight={Platform.OS === 'ios' ? 16 : 24}
         keyboardOpeningTime={0}
-        keyboardShouldPersistTaps="handled"
+        // Ensure autocomplete suggestions can be selected with a single tap while the keyboard is open.
+        // "handled" still allows the first tap to dismiss the keyboard in some cases (esp. iOS).
+        keyboardShouldPersistTaps="always"
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
@@ -508,7 +510,10 @@ export default function RegisterScreen() {
                     <Text style={styles.label}>מגדר</Text>
                     <TouchableOpacity
                       activeOpacity={0.85}
-                      onPress={() => setIsGenderPickerOpen(true)}
+                      onPress={() => {
+                        Keyboard.dismiss();
+                        setIsGenderPickerOpen(true);
+                      }}
                       style={styles.selectInput}
                       disabled={isLoading}
                     >
@@ -520,7 +525,10 @@ export default function RegisterScreen() {
                     <Text style={styles.label}>גיל</Text>
                     <TouchableOpacity
                       activeOpacity={0.85}
-                      onPress={() => setIsAgePickerOpen(true)}
+                      onPress={() => {
+                        Keyboard.dismiss();
+                        setIsAgePickerOpen(true);
+                      }}
                       style={styles.selectInput}
                       disabled={isLoading}
                     >
@@ -721,49 +729,96 @@ export default function RegisterScreen() {
         </View>
       </View>
       </KeyboardAwareScrollView>
-      {/* Gender picker modal */}
-      <Modal visible={isGenderPickerOpen} transparent animationType="fade" onRequestClose={() => setIsGenderPickerOpen(false)}>
-        <TouchableOpacity style={styles.modalBackdrop} activeOpacity={1} onPress={() => setIsGenderPickerOpen(false)}>
-          <View />
+      {/* Gender / Age pickers – reuse the same animated panel UX as the apartment "key" button */}
+      <KeyFabPanel
+        isOpen={isGenderPickerOpen}
+        onClose={() => setIsGenderPickerOpen(false)}
+        title="בחר/י מגדר"
+        subtitle=""
+        bodyText=""
+        primaryActionLabel=""
+        onPrimaryAction={undefined}
+      >
+        <TouchableOpacity
+          style={styles.optionItem}
+          onPress={() => {
+            setGender('male');
+            setIsGenderPickerOpen(false);
+          }}
+          accessibilityRole="button"
+          accessibilityLabel="בחר מגדר זכר"
+        >
+          <Text style={styles.optionText}>זכר</Text>
         </TouchableOpacity>
-        <View style={styles.modalSheet}>
-          <Text style={styles.modalTitle}>בחר/י מגדר</Text>
-          <TouchableOpacity style={styles.optionItem} onPress={() => { setGender('male'); setIsGenderPickerOpen(false); }}>
-            <Text style={styles.optionText}>זכר</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.optionItem} onPress={() => { setGender('female'); setIsGenderPickerOpen(false); }}>
-            <Text style={styles.optionText}>נקבה</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.optionItem} onPress={() => { setGender('other'); setIsGenderPickerOpen(false); }}>
-            <Text style={styles.optionText}>אחר</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={[styles.optionItem, { marginTop: 6 }]} onPress={() => setIsGenderPickerOpen(false)}>
-            <Text style={[styles.optionText, { color: '#6B7280' }]}>ביטול</Text>
-          </TouchableOpacity>
-        </View>
-      </Modal>
-      {/* Age picker modal */}
-      <Modal visible={isAgePickerOpen} transparent animationType="fade" onRequestClose={() => setIsAgePickerOpen(false)}>
-        <TouchableOpacity style={styles.modalBackdrop} activeOpacity={1} onPress={() => setIsAgePickerOpen(false)}>
-          <View />
+        <TouchableOpacity
+          style={styles.optionItem}
+          onPress={() => {
+            setGender('female');
+            setIsGenderPickerOpen(false);
+          }}
+          accessibilityRole="button"
+          accessibilityLabel="בחר מגדר נקבה"
+        >
+          <Text style={styles.optionText}>נקבה</Text>
         </TouchableOpacity>
-        <View style={styles.modalSheet}>
-          <Text style={styles.modalTitle}>בחר/י גיל</Text>
-          <ScrollView style={{ maxHeight: 320 }}>
-            {Array.from({ length: 65 - 18 + 1 }).map((_, idx) => {
-              const val = String(18 + idx);
-              return (
-                <TouchableOpacity key={val} style={styles.optionItem} onPress={() => { setAge(val); setIsAgePickerOpen(false); }}>
-                  <Text style={styles.optionText}>{val}</Text>
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
-          <TouchableOpacity style={[styles.optionItem, { marginTop: 6 }]} onPress={() => setIsAgePickerOpen(false)}>
-            <Text style={[styles.optionText, { color: '#6B7280' }]}>ביטול</Text>
-          </TouchableOpacity>
-        </View>
-      </Modal>
+        <TouchableOpacity
+          style={styles.optionItem}
+          onPress={() => {
+            setGender('other');
+            setIsGenderPickerOpen(false);
+          }}
+          accessibilityRole="button"
+          accessibilityLabel="בחר מגדר אחר"
+        >
+          <Text style={styles.optionText}>אחר</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.optionItem, { marginTop: 6 }]}
+          onPress={() => setIsGenderPickerOpen(false)}
+          accessibilityRole="button"
+          accessibilityLabel="ביטול"
+        >
+          <Text style={[styles.optionText, { color: '#6B7280' }]}>ביטול</Text>
+        </TouchableOpacity>
+      </KeyFabPanel>
+
+      <KeyFabPanel
+        isOpen={isAgePickerOpen}
+        onClose={() => setIsAgePickerOpen(false)}
+        title="בחר/י גיל"
+        subtitle=""
+        bodyText=""
+        primaryActionLabel=""
+        onPrimaryAction={undefined}
+      >
+        <ScrollView style={{ maxHeight: 320 }} keyboardShouldPersistTaps="always">
+          {Array.from({ length: 65 - 18 + 1 }).map((_, idx) => {
+            const val = String(18 + idx);
+            return (
+              <TouchableOpacity
+                key={val}
+                style={styles.optionItem}
+                onPress={() => {
+                  setAge(val);
+                  setIsAgePickerOpen(false);
+                }}
+                accessibilityRole="button"
+                accessibilityLabel={`בחר גיל ${val}`}
+              >
+                <Text style={styles.optionText}>{val}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+        <TouchableOpacity
+          style={[styles.optionItem, { marginTop: 6 }]}
+          onPress={() => setIsAgePickerOpen(false)}
+          accessibilityRole="button"
+          accessibilityLabel="ביטול"
+        >
+          <Text style={[styles.optionText, { color: '#6B7280' }]}>ביטול</Text>
+        </TouchableOpacity>
+      </KeyFabPanel>
     </View>
   );
 }

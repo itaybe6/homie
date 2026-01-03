@@ -1723,11 +1723,7 @@ export default function ProfileScreen() {
             style={styles.surveyCTA}
             activeOpacity={0.9}
             onPress={() => {
-              if (isSurveyCompleted) {
-                setIsSurveyOpen(true);
-              } else {
-                router.push('/(tabs)/onboarding/survey' as any);
-              }
+              router.push({ pathname: '/(tabs)/onboarding/survey', params: { mode: 'edit' } } as any);
             }}
           >
             {profile ? (
@@ -1750,7 +1746,7 @@ export default function ProfileScreen() {
                 {`השאלון של ${(profile?.full_name || '').split(' ')?.[0] || 'אני'}`}
               </Text>
               <Text style={styles.surveyCTASubtitle} numberOfLines={1}>
-                {isSurveyCompleted ? 'לחצו לצפייה בסיכום קצר של השאלון' : 'לחצו למילוי שאלון קצר'}
+                {'לחצו כאן כדי לערוך את השאלון'}
               </Text>
             </View>
             <View style={styles.surveyCTABadge}>
