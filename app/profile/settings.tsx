@@ -17,7 +17,7 @@ import {
 import KeyboardAwareScrollView from 'react-native-keyboard-aware-scroll-view/lib/KeyboardAwareScrollView';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { Edit, FileText, LogOut, Trash2, ChevronLeft, MapPin, UserPlus2, X, Home, Plus, User as UserIcon, Mail, Phone, Hash, Calendar } from 'lucide-react-native';
+import { Edit, FileText, LogOut, Trash2, ChevronLeft, MapPin, UserPlus2, X, Home, Plus, User as UserIcon, Mail, Phone, Hash, Calendar, Instagram } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useAuthStore } from '@/stores/authStore';
 import { authService } from '@/lib/auth';
@@ -40,6 +40,7 @@ export default function ProfileSettingsScreen() {
   const [showSharedModal, setShowSharedModal] = useState(false);
   const [sharedLoading, setSharedLoading] = useState(false);
   const [leavingGroupId, setLeavingGroupId] = useState<string | null>(null);
+  const [confirmLeaveGroupId, setConfirmLeaveGroupId] = useState<string | null>(null);
   const [sharedGroups, setSharedGroups] = useState<
     { id: string; name?: string | null; members: Pick<User, 'id' | 'full_name' | 'avatar_url'>[] }[]
   >([]);
@@ -58,6 +59,7 @@ export default function ProfileSettingsScreen() {
   const [editEmail, setEditEmail] = useState('');
   const [editPhone, setEditPhone] = useState('');
   const [editCity, setEditCity] = useState('');
+  const [editInstagram, setEditInstagram] = useState('');
   const [editSaving, setEditSaving] = useState(false);
   // Animation values for edit sheet
   const sheetTranslateY = useRef(new Animated.Value(600)).current;
@@ -436,22 +438,8 @@ export default function ProfileSettingsScreen() {
 
   const leaveGroup = async (groupId: string) => {
     if (!user?.id) return;
+    if (leavingGroupId) return;
     try {
-      let shouldProceed = true;
-      if (Platform.OS === 'web') {
-        shouldProceed =
-          typeof confirm === 'function'
-            ? confirm('האם לעזוב את הקבוצה הזו? ניתן להצטרף שוב בהזמנה.')
-            : true;
-      } else {
-        shouldProceed = await new Promise<boolean>((resolve) => {
-          Alert.alert('עזיבת קבוצה', 'האם לעזוב את הקבוצה הזו? ניתן להצטרף שוב בהזמנה.', [
-            { text: 'ביטול', style: 'cancel', onPress: () => resolve(false) },
-            { text: 'עזוב/י', style: 'destructive', onPress: () => resolve(true) },
-          ]);
-        });
-      }
-      if (!shouldProceed) return;
       setLeavingGroupId(groupId);
       // Check how many active members are currently in the group.
       // If there are only two, deleting the current user will leave a single member,
@@ -744,6 +732,7 @@ export default function ProfileSettingsScreen() {
                 setEditEmail((profile as any).email || '');
                 setEditPhone((profile as any).phone || '');
                 setEditCity((profile as any).city || '');
+                setEditInstagram(((profile as any).instagram_url as string) || '');
               }
               setShowEditModal(true);
             }}
@@ -1431,6 +1420,46 @@ export default function ProfileSettingsScreen() {
           </Animated.View>
         </Modal>
       )}
+      {/* Confirm leave shared profile group (in-app confirm; avoids mobile-web confirm() issues) */}
+      {!!confirmLeaveGroupId && (
+        <Modal visible transparent animationType="fade" onRequestClose={() => setConfirmLeaveGroupId(null)}>
+          <View style={styles.overlay}>
+            <View style={[styles.sheet, { maxHeight: undefined }]}>
+              <View style={[styles.sheetHeader, { paddingVertical: 8 }]}>
+                <Text style={styles.sheetTitle}>עזיבת קבוצה</Text>
+              </View>
+              <Text style={[styles.sharedEmptyText, { textAlign: 'right', marginTop: 6 }]}>
+                האם לעזוב את הקבוצה הזו? ניתן להצטרף שוב בהזמנה.
+              </Text>
+
+              <View style={[styles.editActionsRow, { marginTop: 14, marginBottom: 0 }]}>
+                <TouchableOpacity
+                  style={styles.clearBtn}
+                  onPress={() => setConfirmLeaveGroupId(null)}
+                  disabled={!!leavingGroupId}
+                  activeOpacity={0.9}
+                >
+                  <Text style={styles.clearText}>ביטול</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.applyBtn, styles.dangerApplyBtn, leavingGroupId && { opacity: 0.75 }]}
+                  onPress={async () => {
+                    const gid = confirmLeaveGroupId;
+                    setConfirmLeaveGroupId(null);
+                    if (!gid) return;
+                    await leaveGroup(gid);
+                  }}
+                  disabled={!!leavingGroupId}
+                  activeOpacity={0.9}
+                >
+                  <Text style={styles.applyText}>עזוב/י קבוצה</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+      )}
+
       {/* Shared profiles modal */}
       {showSharedModal && (
         <Modal visible transparent animationType="fade" onRequestClose={() => setShowSharedModal(false)}>
@@ -1487,13 +1516,14 @@ export default function ProfileSettingsScreen() {
                       <View style={styles.sharedLeaveBtnRow}>
                         <TouchableOpacity
                           style={[styles.sharedLeaveBtnOuter, leavingGroupId === g.id ? { opacity: 0.75 } : null]}
-                          onPress={leavingGroupId ? undefined : () => leaveGroup(g.id)}
+                          onPress={leavingGroupId ? undefined : () => setConfirmLeaveGroupId(g.id)}
                           activeOpacity={0.9}
                           disabled={!!leavingGroupId}
                           accessibilityRole="button"
                           accessibilityLabel="עזוב קבוצה"
                         >
                           <LinearGradient
+                            pointerEvents="none"
                             colors={['#EF4444', '#B91C1C']}
                             start={{ x: 0, y: 0 }}
                             end={{ x: 1, y: 1 }}
@@ -1616,6 +1646,21 @@ export default function ProfileSettingsScreen() {
                 </View>
                 <View style={styles.fieldGroup}>
                   <View style={styles.labelRow}>
+                    <Instagram size={16} color={ICON_COLOR} />
+                    <Text style={styles.fieldLabel}>אינסטגרם</Text>
+                  </View>
+                  <TextInput
+                    style={styles.fieldInput}
+                    value={editInstagram}
+                    onChangeText={setEditInstagram}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    placeholder="@username או instagram.com/username"
+                    editable={!editSaving}
+                  />
+                </View>
+                <View style={styles.fieldGroup}>
+                  <View style={styles.labelRow}>
                     <FileText size={16} color={ICON_COLOR} />
                     <Text style={styles.fieldLabel}>אודות</Text>
                   </View>
@@ -1657,6 +1702,7 @@ export default function ProfileSettingsScreen() {
                             email: editEmail || null,
                             phone: editPhone || null,
                             city: editCity || null,
+                            instagram_url: editInstagram.trim() ? editInstagram.trim() : null,
                             updated_at: new Date().toISOString(),
                           })
                           .eq('id', user.id);
@@ -1954,6 +2000,9 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '800',
   },
+  dangerApplyBtn: {
+    backgroundColor: '#DC2626',
+  },
   sheetHeader: {
     alignItems: 'center',
     justifyContent: 'center',
@@ -2135,6 +2184,7 @@ const styles = StyleSheet.create({
     shadowRadius: 12,
     shadowOffset: { width: 0, height: 8 },
     elevation: 4,
+    ...(Platform.OS === 'web' ? ({ cursor: 'pointer', touchAction: 'manipulation' } as any) : null),
   },
   sharedLeaveBtnInner: {
     flexDirection: 'row-reverse',

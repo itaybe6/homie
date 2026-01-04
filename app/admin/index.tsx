@@ -292,7 +292,7 @@ export default function AdminDashboard() {
           </ScrollView>
 
           <View style={[styles.section, { marginTop: 12 }]}>
-            <SectionHeader title="טווחי גילאים (role='user')" />
+            <SectionHeader title="טווחי גילאים" />
             <View style={{ flexDirection: 'row-reverse', flexWrap: 'wrap', gap: 10 }}>
               {ageStats.map((a) => (
                 <View key={a.label} style={[styles.smallStat, { width: '48%' }]}>

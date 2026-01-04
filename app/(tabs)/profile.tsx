@@ -40,6 +40,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { MotiPressable } from 'moti/interactions';
 import * as Clipboard from 'expo-clipboard';
+import MaskedView from '@react-native-masked-view/masked-view';
 import { supabase } from '@/lib/supabase';
 import { authService } from '@/lib/auth';
 import { useAuthStore } from '@/stores/authStore';
@@ -1294,39 +1295,43 @@ export default function ProfileScreen() {
             </View>
 
             <View style={styles.infoPanel}>
-              <Text style={styles.nameText}>
-                {profile?.full_name || 'משתמש/ת'}
-              </Text>
-
-              {(() => {
-                const igUrl = normalizeInstagramUrl((profile as any)?.instagram_url);
-                if (!igUrl) return null;
-                return (
-                  <TouchableOpacity
-                    style={styles.instagramBtnWrap}
-                    activeOpacity={0.9}
-                    accessibilityRole="button"
-                    accessibilityLabel="פתח אינסטגרם"
-                    onPress={async () => {
-                      try {
-                        await Linking.openURL(igUrl);
-                      } catch {
-                        Alert.alert('שגיאה', 'לא ניתן לפתוח את אינסטגרם');
-                      }
-                    }}
-                  >
-                    <LinearGradient
-                      colors={['#F58529', '#DD2A7B', '#8134AF', '#515BD4']}
-                      start={{ x: 0, y: 0 }}
-                      end={{ x: 1, y: 1 }}
-                      style={styles.instagramBtnGradient}
+              <View style={styles.nameRow}>
+                <Text style={styles.nameText} numberOfLines={2}>
+                  {profile?.full_name || 'משתמש/ת'}
+                </Text>
+                {(() => {
+                  const igUrl = normalizeInstagramUrl((profile as any)?.instagram_url);
+                  if (!igUrl) return null;
+                  const iconSize = 16;
+                  const grad = ['#F58529', '#DD2A7B', '#8134AF', '#515BD4'] as const;
+                  return (
+                    <TouchableOpacity
+                      style={styles.igBtnHit}
+                      activeOpacity={0.9}
+                      accessibilityRole="button"
+                      accessibilityLabel="פתח אינסטגרם"
+                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                      onPress={async () => {
+                        try {
+                          await Linking.openURL(igUrl);
+                        } catch {
+                          Alert.alert('שגיאה', 'לא ניתן לפתוח את אינסטגרם');
+                        }
+                      }}
                     >
-                      <Instagram size={16} color="#FFFFFF" />
-                      <Text style={styles.instagramBtnText}>Instagram</Text>
-                    </LinearGradient>
-                  </TouchableOpacity>
-                );
-              })()}
+                      <LinearGradient colors={grad as any} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.igBtnBorder}>
+                        <View style={styles.igBtnInner}>
+                          <MaskedView
+                            maskElement={<Instagram size={iconSize} color="#000000" />}
+                          >
+                            <LinearGradient colors={grad as any} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ width: iconSize, height: iconSize }} />
+                          </MaskedView>
+                        </View>
+                      </LinearGradient>
+                    </TouchableOpacity>
+                  );
+                })()}
+              </View>
 
               {(profile?.address || profile?.city || profile?.age) ? (
                 <View style={styles.metaChipsRow}>
@@ -2836,28 +2841,27 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '800',
   },
-  instagramBtnWrap: {
-    alignSelf: 'flex-start',
-    borderRadius: 999,
-    overflow: 'hidden',
-    marginTop: 8,
+  nameRow: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
     marginBottom: 10,
   },
-  instagramBtnGradient: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.22)',
+  igBtnHit: {
+    flexShrink: 0,
   },
-  instagramBtnText: {
-    color: '#FFFFFF',
-    fontSize: 12.5,
-    fontWeight: '900',
-    includeFontPadding: false,
+  igBtnBorder: {
+    borderRadius: 999,
+    padding: 1.5,
+  },
+  igBtnInner: {
+    backgroundColor: 'rgba(255,255,255,0.0)',
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   surveyCard: {
     borderRadius: 20,

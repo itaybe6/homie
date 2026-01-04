@@ -28,6 +28,7 @@ import Ticker from '@/components/Ticker';
 import { KeyFabPanel } from '@/components/KeyFabPanel';
 import Animated, { FadeIn, FadeOut, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import DonutChart from '@/components/DonutChart';
+import MaskedView from '@react-native-masked-view/masked-view';
 import {
   calculateMatchScore,
   CompatUserSurvey,
@@ -1399,29 +1400,67 @@ export default function UserProfileScreen() {
   return (
     <SafeAreaView edges={['top']} style={styles.container}>
       <View style={styles.topBar}>
-        <TouchableOpacity
-          style={styles.iconBtn}
-          activeOpacity={0.85}
-          onPress={() => {
-            try {
-              if (from === 'partners') {
-                router.replace('/(tabs)/partners');
-                return;
-              }
-              // Prefer real back when available to preserve position
-              // @ts-ignore - canGoBack exists on Expo Router
-              if (typeof (router as any).canGoBack === 'function' && (router as any).canGoBack()) {
-                router.back();
-              } else {
+        <View style={styles.topBarLeft}>
+          <TouchableOpacity
+            style={styles.iconBtn}
+            activeOpacity={0.85}
+            onPress={() => {
+              try {
+                if (from === 'partners') {
+                  router.replace('/(tabs)/partners');
+                  return;
+                }
+                // Prefer real back when available to preserve position
+                // @ts-ignore - canGoBack exists on Expo Router
+                if (typeof (router as any).canGoBack === 'function' && (router as any).canGoBack()) {
+                  router.back();
+                } else {
+                  router.replace('/(tabs)/home');
+                }
+              } catch {
                 router.replace('/(tabs)/home');
               }
-            } catch {
-              router.replace('/(tabs)/home');
-            }
-          }}
-        >
-          <ArrowLeft size={18} color="#111827" />
-        </TouchableOpacity>
+            }}
+          >
+            <ArrowLeft size={18} color="#111827" />
+          </TouchableOpacity>
+
+          {(() => {
+            const igUrl = normalizeInstagramUrl((profile as any)?.instagram_url);
+            if (!igUrl) return null;
+            const iconSize = 18;
+            const grad = ['#F58529', '#DD2A7B', '#8134AF', '#515BD4'] as const;
+            return (
+              <TouchableOpacity
+                style={styles.igTopBtnHit}
+                activeOpacity={0.9}
+                accessibilityRole="button"
+                accessibilityLabel="פתח אינסטגרם"
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                onPress={async () => {
+                  try {
+                    await Linking.openURL(igUrl);
+                  } catch {
+                    Alert.alert('שגיאה', 'לא ניתן לפתוח את אינסטגרם');
+                  }
+                }}
+              >
+                <LinearGradient colors={grad as any} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.igTopBtnBorder}>
+                  <View style={styles.igTopBtnInner}>
+                    <MaskedView maskElement={<Instagram size={iconSize} color="#000000" />}>
+                      <LinearGradient
+                        colors={grad as any}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 1 }}
+                        style={{ width: iconSize, height: iconSize }}
+                      />
+                    </MaskedView>
+                  </View>
+                </LinearGradient>
+              </TouchableOpacity>
+            );
+          })()}
+        </View>
 
         <View style={styles.topBarRight}>
           {(!profile?.id || (me?.id && me.id === profile.id) || mergeBlockedByApartments || mergeBlockedByTheirSharedGroup) ? null : (() => {
@@ -1559,36 +1598,6 @@ export default function UserProfileScreen() {
                 <Text style={styles.locationText}>{profile.city}</Text>
               </View>
             ) : null}
-
-            {(() => {
-              const igUrl = normalizeInstagramUrl((profile as any)?.instagram_url);
-              if (!igUrl) return null;
-              return (
-                <TouchableOpacity
-                  style={styles.instagramBtnWrap}
-                  activeOpacity={0.9}
-                  accessibilityRole="button"
-                  accessibilityLabel="פתח אינסטגרם"
-                  onPress={async () => {
-                    try {
-                      await Linking.openURL(igUrl);
-                    } catch {
-                      Alert.alert('שגיאה', 'לא ניתן לפתוח את אינסטגרם');
-                    }
-                  }}
-                >
-                  <LinearGradient
-                    colors={['#F58529', '#DD2A7B', '#8134AF', '#515BD4']}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 1 }}
-                    style={styles.instagramBtnGradient}
-                  >
-                    <Instagram size={16} color="#FFFFFF" />
-                    <Text style={styles.instagramBtnText}>Instagram</Text>
-                  </LinearGradient>
-                </TouchableOpacity>
-              );
-            })()}
 
             {!!profile.bio ? (
               <Text style={styles.headerBio} numberOfLines={8}>
@@ -2084,6 +2093,11 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     backgroundColor: '#FAFAFA',
   },
+  topBarLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
   topBarRight: {
     flexDirection: 'row-reverse',
     alignItems: 'center',
@@ -2213,6 +2227,22 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     textAlign: 'center',
   },
+  igTopBtnHit: {
+    flexShrink: 0,
+  },
+  igTopBtnBorder: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    padding: 2,
+  },
+  igTopBtnInner: {
+    flex: 1,
+    borderRadius: 17,
+    backgroundColor: '#FAFAFA',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   locationPill: {
     marginTop: 10,
     alignSelf: 'center',
@@ -2230,28 +2260,6 @@ const styles = StyleSheet.create({
     color: '#5e3f2d',
     fontSize: 13,
     fontWeight: '900',
-  },
-  instagramBtnWrap: {
-    alignSelf: 'center',
-    borderRadius: 999,
-    overflow: 'hidden',
-    marginTop: 10,
-  },
-  instagramBtnGradient: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.18)',
-  },
-  instagramBtnText: {
-    color: '#FFFFFF',
-    fontSize: 12.5,
-    fontWeight: '900',
-    includeFontPadding: false,
   },
   profileCard: {
     padding: 18,
