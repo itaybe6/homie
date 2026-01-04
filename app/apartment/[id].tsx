@@ -23,8 +23,8 @@ import {
   ArrowLeft,
   ArrowRight,
   MapPin,
-  Bed,
-  Bath,
+  BedDouble,
+  ShowerHead,
   Users,
   Building2,
   Trees,
@@ -54,6 +54,7 @@ import {
   Key,
   Calendar,
   Heart,
+  Copy,
 } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { supabase } from '@/lib/supabase';
@@ -73,6 +74,7 @@ import SwipeBackGesture from '@/components/SwipeBackGesture';
 import FavoriteHeartButton from '@/components/FavoriteHeartButton';
 import { ShareMenuFab } from '@/components/ShareMenuFab';
 import { KeyFabPanel } from '@/components/KeyFabPanel';
+import * as Clipboard from 'expo-clipboard';
 
 export default function ApartmentDetailsScreen() {
   const router = useRouter();
@@ -481,6 +483,12 @@ export default function ApartmentDetailsScreen() {
     user?.id &&
     String(user.id).toLowerCase() === String(apartment.owner_id || '').toLowerCase()
   );
+  // IMPORTANT: do NOT use hooks here (component has early returns above).
+  const joinPasscode = (() => {
+    const raw = String((apartment as any)?.join_passcode || '');
+    const digitsOnly = (raw.match(/\d/g)?.join('') ?? '').slice(0, 6);
+    return digitsOnly.length === 6 ? digitsOnly : null;
+  })();
   // Disable the "key" entry when the user is already assigned to any apartment (as owner or partner).
   // We treat null/unknown as disabled (same pattern used for other CTAs) to avoid letting users join twice.
   const isKeyDisabled = !isOwner && isAssignedAnywhere !== false;
@@ -898,16 +906,6 @@ export default function ApartmentDetailsScreen() {
 
       setIsRequestingJoin(true);
 
-      // Optional dedupe for notifications only (still create a request either way)
-      const yesterdayIso = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-      const { count: recentCount } = await supabase
-        .from('notifications')
-        .select('id', { count: 'exact', head: true })
-        .eq('sender_id', user.id)
-        .eq('recipient_id', apartment.owner_id)
-        .gte('created_at', yesterdayIso);
-      const shouldSkipNotifications = (recentCount || 0) > 0;
-
       const recipients = Array.from(
         new Set<string>([apartment.owner_id, ...currentPartnerIds].filter((rid) => rid && rid !== user.id))
       );
@@ -916,28 +914,6 @@ export default function ApartmentDetailsScreen() {
       if (recipients.length === 0) {
         Alert.alert('שגיאה', 'אין למי לשלוח בקשה כרגע');
         return;
-      }
-
-      // Fetch sender label (merged profile if exists)
-      const senderName = await computeSenderLabel(user.id);
-
-      const title = 'בקשה להצטרף כדייר';
-      // Include a stable tag so we can reliably delete the relevant notification on cancel.
-      const aptTag = `[APT:${apartment.id}]`;
-      const description = `${senderName} מעוניין להצטרף לדירה: ${apartment.title} (${apartment.city}) ${aptTag}`;
-
-      const rows = recipients.map((rid) => ({
-        sender_id: user.id!,
-        recipient_id: rid,
-        title,
-        // Important: do NOT embed INVITE_APT metadata here to avoid showing an approve button for recipients
-        description,
-        is_read: false,
-      }));
-
-      if (!shouldSkipNotifications) {
-        const { error: insertErr } = await supabase.from('notifications').insert(rows);
-        if (insertErr) throw insertErr;
       }
 
       // Also create request rows so user can track status
@@ -963,7 +939,7 @@ export default function ApartmentDetailsScreen() {
       }
 
       setHasRequestedJoin(true);
-      Alert.alert('נשלח', shouldSkipNotifications ? 'נוצרה בקשה חדשה' : 'בקשתך נשלחה לבעל הדירה והשותפים');
+      Alert.alert('נשלח', 'נוצרה בקשה חדשה');
     } catch (e: any) {
       console.error('request join failed', e);
       Alert.alert('שגיאה', e?.message || 'לא ניתן לשלוח בקשה כעת');
@@ -1208,20 +1184,6 @@ export default function ApartmentDetailsScreen() {
         return;
       }
 
-      // Create a notification to the invitee with inviter's merged profile label (if exists)
-      const inviterName = await computeSenderLabel(user.id);
-
-      const title = 'הזמנה להצטרף לדירה';
-      const description = `${inviterName} מזמין/ה אותך להיות שותף/ה בדירה${apartment.title ? `: ${apartment.title}` : ''}${apartment.city ? ` (${apartment.city})` : ''}`;
-      const { error: notifErr } = await supabase.from('notifications').insert({
-        sender_id: user.id,
-        recipient_id: partnerId,
-        title,
-        description,
-        is_read: false,
-      });
-      if (notifErr) throw notifErr;
-
       // Create an apartment request row (INVITE_APT) to be approved by the invitee
       const { error: reqErr } = await supabase.from('apartments_request').insert({
         sender_id: user.id,
@@ -1233,7 +1195,7 @@ export default function ApartmentDetailsScreen() {
       } as any);
       if (reqErr) throw reqErr;
 
-      Alert.alert('נשלח', 'הזמנה נשלחה ונוצרה בקשה בעמוד הבקשות');
+      Alert.alert('נשלח', 'נוצרה בקשה חדשה');
       setIsAddOpen(false);
     } catch (e: any) {
       console.error('Failed to add partner', e);
@@ -1262,19 +1224,7 @@ export default function ApartmentDetailsScreen() {
         Alert.alert('שגיאה', 'אין למי לשלוח הזמנה בקבוצה זו');
         return;
       }
-      const inviterName = await computeSenderLabel(user.id);
-      const title = 'הזמנה להצטרף לדירה';
-      const description = `${inviterName} מזמין/ה אותך להיות שותף/ה בדירה${apartment.title ? `: ${apartment.title}` : ''}${apartment.city ? ` (${apartment.city})` : ''}`;
-      // Fan-out notifications
-      const notifRows = recipients.map((rid) => ({
-        sender_id: user.id!,
-        recipient_id: rid,
-        title,
-        description,
-        is_read: false,
-      }));
-      const { error: notifErr } = await supabase.from('notifications').insert(notifRows as any);
-      if (notifErr) throw notifErr;
+
       // Fan-out requests (INVITE_APT)
       const reqRows = recipients.map((rid) => ({
         sender_id: user.id!,
@@ -1286,7 +1236,7 @@ export default function ApartmentDetailsScreen() {
       }));
       const { error: reqErr } = await supabase.from('apartments_request').insert(reqRows as any);
       if (reqErr) throw reqErr;
-      Alert.alert('נשלח', 'הזמנה נשלחה לכל חברי הפרופיל ונוצרו בקשות');
+      Alert.alert('נשלח', 'נוצרו בקשות חדשות');
       setIsAddOpen(false);
     } catch (e: any) {
       console.error('Failed to add shared group', e);
@@ -1574,14 +1524,10 @@ export default function ApartmentDetailsScreen() {
             {apartment.title}
           </Text>
 
-          {locationLabel ? (
-            <View style={styles.heroLocationRow}>
-              <View style={styles.heroLocationIcon}>
-                <MapPin size={16} color="#6B7280" />
-              </View>
-              <Text style={styles.heroLocationText} numberOfLines={1}>
-                {locationLabel}
-              </Text>
+          {moveInTagLabel ? (
+            <View style={styles.moveInDateBadge}>
+              <Calendar size={16} color="#16A34A" />
+              <Text style={styles.moveInDateText}>{moveInTagLabel}</Text>
             </View>
           ) : null}
         </View>
@@ -1614,7 +1560,7 @@ export default function ApartmentDetailsScreen() {
             </TouchableOpacity>
             <View style={styles.statLight}>
               <View style={styles.statIconCircle}>
-                <Bed size={22} color="#5e3f2d" />
+                <BedDouble size={22} color="#5e3f2d" />
               </View>
               <View style={styles.statLabelRow}>
                 <Text style={styles.statNumber}>{apartment.bedrooms}</Text>
@@ -1623,7 +1569,7 @@ export default function ApartmentDetailsScreen() {
             </View>
             <View style={styles.statLight}>
               <View style={styles.statIconCircle}>
-                <Bath size={22} color="#5e3f2d" />
+                <ShowerHead size={22} color="#5e3f2d" />
               </View>
               <View style={styles.statLabelRow}>
                 <Text style={styles.statNumber}>{apartment.bathrooms}</Text>
@@ -1632,13 +1578,51 @@ export default function ApartmentDetailsScreen() {
             </View>
           </View>
 
+          {/* Apartment join passcode (owner only) */}
+          {isOwner ? (
+            <View style={styles.ownerPasscodeCard}>
+              <View style={styles.ownerPasscodeHeaderRow}>
+                <Text style={styles.ownerPasscodeTitle}>קוד הדירה</Text>
+                <TouchableOpacity
+                  style={styles.ownerPasscodeCopyBtn}
+                  activeOpacity={0.9}
+                  disabled={!joinPasscode}
+                  onPress={async () => {
+                    try {
+                      if (!joinPasscode) return;
+                      await Clipboard.setStringAsync(joinPasscode);
+                      Alert.alert('הועתק', 'קוד הדירה הועתק ללוח.');
+                    } catch {
+                      Alert.alert('שגיאה', 'לא הצלחתי להעתיק את הקוד.');
+                    }
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel="העתק קוד דירה"
+                >
+                  <Copy size={16} color="#5e3f2d" />
+                  <Text style={styles.ownerPasscodeCopyText}>העתק</Text>
+                </TouchableOpacity>
+              </View>
+              <View style={styles.ownerPasscodeDigitsRow}>
+                {(joinPasscode ? joinPasscode.split('') : ['-', '-', '-', '-', '-', '-']).map((d, i) => (
+                  <View key={`code-${i}`} style={styles.ownerPasscodeDigitBox}>
+                    <Text style={styles.ownerPasscodeDigitText}>{d}</Text>
+                  </View>
+                ))}
+              </View>
+              <Text style={styles.ownerPasscodeHint}>
+                {joinPasscode ? 'שתפו את הקוד עם מי שמצטרף לדירה.' : 'אין קוד לדירה עדיין (וודאו שהמיגרציה רצה).'}
+              </Text>
+            </View>
+          ) : null}
+
           {/* Description ("על המקום") */}
-          {descriptionText || typeTagLabel || floorTagLabel || gardenSqmTagLabel || sqmTagLabel || moveInTagLabel ? (
+          {descriptionText || typeTagLabel || floorTagLabel || gardenSqmTagLabel || sqmTagLabel ? (
             <View style={styles.section}>
               <View style={styles.whiteCard}>
                 <Text style={styles.sectionTitle}>על המקום</Text>
                 {/* Type / floor / sqm tags (moved inside "About" card) */}
-                {typeTagLabel || floorTagLabel || gardenSqmTagLabel || sqmTagLabel || moveInTagLabel ? (
+                {typeTagLabel || floorTagLabel || gardenSqmTagLabel || sqmTagLabel ? (
                   <View style={styles.tagsRow}>
                     {typeTagLabel ? (
                       <View style={styles.tagPill}>
@@ -1666,12 +1650,6 @@ export default function ApartmentDetailsScreen() {
                       <View style={styles.tagPill}>
                         <Ruler size={14} color="#5e3f2d" />
                         <Text style={styles.tagText}>{sqmTagLabel}</Text>
-                      </View>
-                    ) : null}
-                    {moveInTagLabel ? (
-                      <View style={styles.tagPill}>
-                        <Calendar size={14} color="#5e3f2d" />
-                        <Text style={styles.tagText}>{moveInTagLabel}</Text>
                       </View>
                     ) : null}
                   </View>
@@ -1709,33 +1687,35 @@ export default function ApartmentDetailsScreen() {
           ) : null}
 
           {/* host card */}
-          <View style={styles.hostCard}>
-            <LinearGradient
-              colors={typeof ownerMatchPercent === 'number' ? ['#cbb59e', '#5e3f2d'] : ['#D1D5DB', '#9CA3AF']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 0, y: 1 }}
-              style={styles.hostMatchTab}
-            >
-              <Ticker value={ownerMatchDisplay} fontSize={15} staggerDuration={55} style={styles.hostMatchTabValue} />
-              <Text style={styles.hostMatchTabLabel}>התאמה</Text>
-            </LinearGradient>
-            {/* Right: avatar */}
-            <View style={styles.hostAvatarWrap}>
-              <Image
-                source={{
-                  uri:
-                    (owner as any)?.avatar_url ||
-                    'https://cdn-icons-png.flaticon.com/512/847/847969.png',
-                }}
-                style={styles.hostAvatar}
-              />
+          {!isOwner ? (
+            <View style={styles.hostCard}>
+              <LinearGradient
+                colors={typeof ownerMatchPercent === 'number' ? ['#4ADE80', '#16A34A'] : ['#D1D5DB', '#9CA3AF']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 0, y: 1 }}
+                style={styles.hostMatchTab}
+              >
+                <Ticker value={ownerMatchDisplay} fontSize={15} staggerDuration={55} style={styles.hostMatchTabValue} />
+                <Text style={styles.hostMatchTabLabel}>התאמה</Text>
+              </LinearGradient>
+              {/* Right: avatar */}
+              <View style={styles.hostAvatarWrap}>
+                <Image
+                  source={{
+                    uri:
+                      (owner as any)?.avatar_url ||
+                      'https://cdn-icons-png.flaticon.com/512/847/847969.png',
+                  }}
+                  style={styles.hostAvatar}
+                />
+              </View>
+              {/* Middle: labels */}
+              <View style={{ flex: 1, alignItems: 'flex-end' }}>
+                <Text style={styles.hostTitle}>בעל הדירה</Text>
+                <Text style={styles.hostSub} numberOfLines={1}>{owner?.full_name || 'בעל הדירה'}</Text>
+              </View>
             </View>
-            {/* Middle: labels */}
-            <View style={{ flex: 1, alignItems: 'flex-end' }}>
-              <Text style={styles.hostTitle}>בעל הדירה</Text>
-              <Text style={styles.hostSub} numberOfLines={1}>{owner?.full_name || 'בעל הדירה'}</Text>
-            </View>
-          </View>
+          ) : null}
 
           {/* price card moved to floating overlay at bottom */}
 
@@ -2708,6 +2688,103 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 4,
   },
+  moveInDateBadge: {
+    marginTop: 12,
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: '#F0FDF4',
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#86EFAC',
+  },
+  moveInDateText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#16A34A',
+    writingDirection: 'rtl',
+  },
+  ownerPasscodeCard: {
+    marginBottom: 12,
+    backgroundColor: '#F9FAFB',
+    borderRadius: 16,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: '#EEF2F7',
+  },
+  ownerPasscodeHeaderRow: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+    gap: 10,
+  },
+  ownerPasscodeTitle: {
+    color: '#111827',
+    fontSize: 14,
+    fontWeight: '900',
+    textAlign: 'right',
+    flex: 1,
+  },
+  ownerPasscodeCopyBtn: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: 'rgba(94,63,45,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(94,63,45,0.16)',
+  },
+  ownerPasscodeCopyText: {
+    color: '#5e3f2d',
+    fontSize: 12,
+    fontWeight: '900',
+    textAlign: 'center',
+  },
+  ownerPasscodeDigitsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 8,
+    direction: 'ltr',
+    marginBottom: 10,
+  },
+  ownerPasscodeDigitBox: {
+    flex: 1,
+    height: 48,
+    borderRadius: 14,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000000',
+    shadowOpacity: 0.05,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 2,
+  },
+  ownerPasscodeDigitText: {
+    color: '#111827',
+    fontSize: 20,
+    fontWeight: '900',
+    letterSpacing: 0.5,
+    textAlign: 'center',
+    writingDirection: 'ltr',
+  },
+  ownerPasscodeHint: {
+    color: '#6B7280',
+    fontSize: 12,
+    fontWeight: '700',
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    lineHeight: 16,
+  },
   heroLocationIcon: {
     width: 20,
     height: 20,
@@ -3183,7 +3260,7 @@ const styles = StyleSheet.create({
     writingDirection: 'ltr',
   },
   navPill: {
-    backgroundColor: '#5e3f2d',
+    backgroundColor: '#16A34A',
     borderRadius: 12,
     paddingHorizontal: 12,
     paddingVertical: 8,
@@ -3192,7 +3269,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     ...(Platform.OS === 'ios'
       ? {
-          shadowColor: '#5e3f2d',
+          shadowColor: '#16A34A',
           shadowOpacity: 0.22,
           shadowRadius: 8,
           shadowOffset: { width: 0, height: 5 },
@@ -3462,7 +3539,7 @@ const styles = StyleSheet.create({
     writingDirection: 'rtl',
   },
   mapNavPill: {
-    backgroundColor: '#5e3f2d',
+    backgroundColor: '#16A34A',
     borderRadius: 12,
     paddingHorizontal: 10,
     paddingVertical: 8,

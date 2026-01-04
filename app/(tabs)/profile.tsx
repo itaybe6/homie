@@ -1735,7 +1735,7 @@ export default function ProfileScreen() {
           >
             {profile ? (
               <LinearGradient
-                colors={['#cbb59e', '#5e3f2d']}
+                colors={['#4ADE80', '#16A34A']}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
                 style={styles.surveyCTAAvatarRing}
@@ -1758,7 +1758,7 @@ export default function ProfileScreen() {
             </View>
             <View style={styles.surveyCTABadge}>
               <LinearGradient
-                colors={['#cbb59e', '#5e3f2d']}
+                colors={['#4ADE80', '#16A34A']}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
                 style={styles.surveyCTABadgeInner}

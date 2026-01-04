@@ -34,7 +34,6 @@ import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/authStore';
 import { User, UserSurveyResponse } from '@/types/database';
 import { computeGroupAwareLabel } from '@/lib/group';
-import { insertNotificationOnce } from '@/lib/notifications';
 import RoommateCard from '@/components/RoommateCard';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { cityNeighborhoods, canonicalizeCityName } from '@/assets/data/neighborhoods';
@@ -794,21 +793,6 @@ export default function PartnersScreen() {
       } as any);
       if (insertErr) throw insertErr;
 
-      // optional: also notify the recipient
-      // If sender is part of a merged profile, reflect that in the content
-      const senderIsMerged = !!senderGroupId;
-      const notifTitle = senderIsMerged ? 'בקשת שותפות מפרופיל משותף' : 'בקשת שותפות חדשה';
-      const senderLabel = await computeGroupAwareLabel(currentUser.id);
-      const notifDesc = `${senderLabel} מעוניין/ת להיות שותף/ה שלך.`;
-      await insertNotificationOnce({
-        sender_id: currentUser.id,
-        recipient_id: likedUser.id,
-        title: notifTitle,
-        description: notifDesc,
-        is_read: false,
-        event_key: `match_request:${currentUser.id}:${likedUser.id}`,
-      });
-
       if (!opts?.skipSlide) {
         goNext();
       }
@@ -908,37 +892,6 @@ export default function PartnersScreen() {
         status: 'PENDING',
       } as any);
       if (insertErr) throw insertErr;
-
-      // optional: notify all members (except sender if appears)
-      const recipients = groupUsers.filter((u) => u.id !== currentUser.id);
-      if (recipients.length) {
-        // If sender is part of a merged profile, reflect that in notification content
-        let senderIsMerged = false;
-        try {
-          const { data: myGroup } = await supabase
-            .from('profile_group_members')
-            .select('group_id')
-            .eq('user_id', currentUser.id)
-            .eq('status', 'ACTIVE')
-            .maybeSingle();
-          senderIsMerged = !!myGroup?.group_id;
-        } catch {}
-        const notifTitle = senderIsMerged ? 'בקשת שותפות מפרופיל משותף' : 'בקשת שותפות חדשה';
-        const senderLabel = await computeGroupAwareLabel(currentUser.id);
-        const notifDesc = `${senderLabel} מעוניין/ת בקבוצה שלך.`;
-        await Promise.all(
-          recipients.map((u) =>
-            insertNotificationOnce({
-              sender_id: currentUser.id,
-              recipient_id: u.id,
-              title: notifTitle,
-              description: notifDesc,
-              is_read: false,
-              event_key: `group_match_request:${currentUser.id}:${groupId}:${u.id}`,
-            })
-          )
-        );
-      }
       if (!opts?.skipSlide) {
         goNext();
       }

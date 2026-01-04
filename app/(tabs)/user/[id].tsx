@@ -15,8 +15,6 @@ import {
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
-import { computeGroupAwareLabel } from '@/lib/group';
-import { insertNotificationOnce } from '@/lib/notifications';
 import { supabase } from '@/lib/supabase';
 import { User } from '@/types/database';
 import { ArrowLeft, MapPin, UserPlus2, Cigarette, PawPrint, Utensils, Moon, Users, Home, Calendar, User as UserIcon, Building2, Bed, Heart, Briefcase, ClipboardList, Images, X } from 'lucide-react-native';
@@ -28,6 +26,7 @@ import { UserSurveyResponse } from '@/types/database';
 import Ticker from '@/components/Ticker';
 import { KeyFabPanel } from '@/components/KeyFabPanel';
 import Animated, { FadeIn, FadeOut, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
+import DonutChart from '@/components/DonutChart';
 import {
   calculateMatchScore,
   CompatUserSurvey,
@@ -763,9 +762,27 @@ export default function UserProfileScreen() {
       items.push({ section, label, value: formatTriBool(raw) });
     };
 
+    const formatHebrewYear = (year: number): string => {
+      const map: Record<number, string> = {
+        1: "א'",
+        2: "ב'",
+        3: "ג'",
+        4: "ד'",
+        5: "ה'",
+        6: "ו'",
+        7: "ז'",
+        8: "ח'",
+        9: "ט'",
+        10: "י'",
+      };
+      return map[year] ?? `${year}`;
+    };
+
     // עליי
     add('about', 'עיסוק', survey.occupation);
-    if (typeof survey.student_year === 'number' && survey.student_year > 0) add('about', 'שנת לימודים', `שנה ${survey.student_year}`);
+    if (typeof survey.student_year === 'number' && survey.student_year > 0) {
+      add('about', 'שנת לימודים', `שנה ${formatHebrewYear(survey.student_year)}`);
+    }
     addBool('about', 'עבודה מהבית', survey.works_from_home);
     addBool('about', 'שומר/ת כשרות', survey.keeps_kosher);
     addBool('about', 'שומר/ת שבת', survey.is_shomer_shabbat);
@@ -1260,21 +1277,7 @@ export default function UserProfileScreen() {
       });
       if (iErr) throw iErr;
 
-      // Create notification for recipient (use group-aware label)
-      const inviterName = await computeGroupAwareLabel(me.id);
-
-      const title = 'בקשת מיזוג פרופילים חדשה';
-      const desc = `${inviterName} מזמין/ה אותך להצטרף לקבוצת שותפים ולהציג פרופיל ממוזג יחד`;
-      await insertNotificationOnce({
-        sender_id: me.id,
-        recipient_id: profile.id,
-        title,
-        description: desc,
-        is_read: false,
-        event_key: `profile_merge_invite:${groupId}:${profile.id}`,
-      });
-
-      Alert.alert('נשלח', 'הבקשה נשלחה ונשלחה התראה למשתמש/ת.');
+      Alert.alert('נשלח', 'הבקשה נשלחה.');
       setHasPendingMergeInvite(true);
     } catch (e: any) {
       console.error('send merge invite failed', e);
@@ -1409,6 +1412,25 @@ export default function UserProfileScreen() {
           ) : null}
 
           <View style={styles.profileCard}>
+            <View style={styles.matchDonutFloating}>
+              <DonutChart
+                percentage={typeof matchPercent === 'number' ? matchPercent : 0}
+                size={72}
+                strokeWidth={10}
+                durationMs={850}
+                color="#16A34A"
+                trackColor="rgba(22,163,74,0.14)"
+                disabled={surveyLoading || !survey}
+                onPress={() => {
+                  if (surveyLoading) return;
+                  if (!survey) return;
+                  setSurveyActiveSection('about');
+                  setIsSurveyOpen(true);
+                }}
+                accessibilityLabel="פתח סיכום התאמה"
+              />
+              <Text style={styles.matchDonutLabel}>אחוזי התאמה</Text>
+            </View>
             <Image
               source={{ uri: profile.avatar_url || 'https://cdn-icons-png.flaticon.com/512/847/847969.png' }}
               style={styles.avatar}
@@ -1648,21 +1670,12 @@ export default function UserProfileScreen() {
                 }}
                 disabled={surveyLoading || !survey}
               >
-                <LinearGradient
-                  colors={(surveyLoading || !survey) ? ['#D1D5DB', '#9CA3AF'] : ['#cbb59e', '#5e3f2d']}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 0, y: 1 }}
-                  style={styles.surveyCTAMatchTab}
-                >
-                  <Ticker
-                    value={matchPercentDisplay}
-                    fontSize={15}
-                    staggerDuration={55}
-                    style={styles.surveyCTAMatchTabValue}
+                <View style={styles.surveyCTAAvatarWrap}>
+                  <Image
+                    source={{ uri: profile.avatar_url || 'https://cdn-icons-png.flaticon.com/512/847/847969.png' }}
+                    style={styles.surveyCTAAvatar}
                   />
-                  <Text style={styles.surveyCTAMatchTabLabel}>התאמה</Text>
-                </LinearGradient>
-
+                </View>
                 <View style={styles.surveyCTATexts}>
                   <Text style={styles.surveyCTATitle}>
                     {`קצת על ${profile.full_name?.split(' ')?.[0] || 'המשתמש/ת'}`}
@@ -1678,15 +1691,8 @@ export default function UserProfileScreen() {
                   </Text>
                 </View>
 
-                <View style={styles.surveyCTABadge}>
-                  <LinearGradient
-                    colors={(surveyLoading || !survey) ? ['#D1D5DB', '#9CA3AF'] : ['#cbb59e', '#5e3f2d']}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 1 }}
-                    style={styles.surveyCTABadgeInner}
-                  >
-                    <ClipboardList size={22} color="#FFFFFF" />
-                  </LinearGradient>
+                <View style={styles.surveyCTACtaPill}>
+                  <Text style={styles.surveyCTACtaPillText}>לצפייה</Text>
                 </View>
               </TouchableOpacity>
             </View>
@@ -2037,6 +2043,7 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     backgroundColor: '#FFFFFF',
     alignItems: 'center',
+    position: 'relative',
     borderWidth: 0,
     borderColor: 'transparent',
     shadowColor: '#000',
@@ -2080,7 +2087,7 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     overflow: 'hidden',
     paddingLeft: 16,
-    paddingRight: 92,
+    paddingRight: 16,
     paddingVertical: 14,
   },
   surveyCTADisabled: {
@@ -2099,6 +2106,20 @@ const styles = StyleSheet.create({
   surveyCTATexts: {
     flex: 1,
     marginRight: 8,
+  },
+  surveyCTAAvatarWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    overflow: 'hidden',
+    backgroundColor: '#F3F4F6',
+    borderWidth: 1,
+    borderColor: 'rgba(17,24,39,0.10)',
+    marginLeft: 10,
+  },
+  surveyCTAAvatar: {
+    width: '100%',
+    height: '100%',
   },
   surveyCTATitle: {
     color: '#111827',
@@ -2120,63 +2141,36 @@ const styles = StyleSheet.create({
     textAlign: 'right',
     alignSelf: 'stretch',
   },
-  surveyCTAMatchTab: {
+  matchDonutFloating: {
     position: 'absolute',
-    right: 0,
-    top: 0,
-    bottom: 0,
-    width: 78,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderTopRightRadius: 20,
-    borderBottomRightRadius: 20,
-    // Inner edge stays straight to look like "attached" to the card
-    borderTopLeftRadius: 0,
-    borderBottomLeftRadius: 0,
+    top: 18,
+    left: 18,
+    zIndex: 10,
   },
-  surveyCTAMatchTabValue: {
-    color: '#FFFFFF',
-    fontSize: 15,
+  matchDonutLabel: {
+    marginTop: 6,
+    color: '#16A34A',
+    fontSize: 11,
     fontWeight: '900',
-    lineHeight: 18,
-    includeFontPadding: false,
     textAlign: 'center',
-    writingDirection: 'ltr',
-  },
-  surveyCTAMatchTabLabel: {
-    marginTop: 2,
-    color: 'rgba(255,255,255,0.92)',
-    fontSize: 10,
-    fontWeight: '800',
-    lineHeight: 12,
     includeFontPadding: false,
-    textAlign: 'center',
   },
-  surveyCTABadge: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: '#FFFFFF',
-    borderWidth: 2,
-    borderColor: '#E5E7EB',
+  surveyCTACtaPill: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: 'rgba(22,163,74,0.10)',
+    borderWidth: 1,
+    borderColor: 'rgba(22,163,74,0.20)',
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#000000',
-    shadowOpacity: 0.12,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 6 },
   },
-  surveyCTABadgeInner: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#5e3f2d',
-    shadowColor: '#5e3f2d',
-    shadowOpacity: 0.25,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 4 },
+  surveyCTACtaPillText: {
+    color: '#16A34A',
+    fontSize: 12,
+    fontWeight: '900',
+    textAlign: 'center',
+    includeFontPadding: false,
   },
   modalOverlay: {
     flex: 1,
