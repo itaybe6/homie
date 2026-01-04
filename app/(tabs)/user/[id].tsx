@@ -12,12 +12,13 @@ import {
   Platform,
   Modal,
   useWindowDimensions,
+  Linking,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '@/lib/supabase';
 import { User } from '@/types/database';
-import { ArrowLeft, MapPin, UserPlus2, Cigarette, PawPrint, Utensils, Moon, Users, Home, Calendar, User as UserIcon, Building2, Bed, Heart, Briefcase, ClipboardList, Images, X } from 'lucide-react-native';
+import { ArrowLeft, MapPin, UserPlus2, Cigarette, PawPrint, Utensils, Moon, Users, Home, Calendar, User as UserIcon, Building2, Bed, Heart, Briefcase, ClipboardList, Images, X, Instagram } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuthStore } from '@/stores/authStore';
@@ -120,6 +121,26 @@ function parsePreferredAgeRange(value?: string | null): { min: number | null; ma
   const [first, second] = matches;
   if (second !== undefined) return { min: Math.min(first, second), max: Math.max(first, second) };
   return { min: first, max: null };
+}
+
+function normalizeInstagramUrl(raw: string): string | null {
+  const trimmed = String(raw || '').trim();
+  if (!trimmed) return null;
+
+  if (trimmed.startsWith('@')) {
+    const handle = trimmed.slice(1).trim().replace(/^\/+|\/+$/g, '');
+    return handle ? `https://instagram.com/${handle}` : null;
+  }
+
+  if (!trimmed.includes('/') && !trimmed.includes('://')) {
+    return `https://instagram.com/${trimmed}`;
+  }
+
+  if (!trimmed.includes('://') && trimmed.toLowerCase().includes('instagram.com')) {
+    return `https://${trimmed.replace(/^\/+/, '')}`;
+  }
+
+  return trimmed;
 }
 
 function buildCompatSurvey(
@@ -1539,6 +1560,36 @@ export default function UserProfileScreen() {
               </View>
             ) : null}
 
+            {(() => {
+              const igUrl = normalizeInstagramUrl((profile as any)?.instagram_url);
+              if (!igUrl) return null;
+              return (
+                <TouchableOpacity
+                  style={styles.instagramBtnWrap}
+                  activeOpacity={0.9}
+                  accessibilityRole="button"
+                  accessibilityLabel="פתח אינסטגרם"
+                  onPress={async () => {
+                    try {
+                      await Linking.openURL(igUrl);
+                    } catch {
+                      Alert.alert('שגיאה', 'לא ניתן לפתוח את אינסטגרם');
+                    }
+                  }}
+                >
+                  <LinearGradient
+                    colors={['#F58529', '#DD2A7B', '#8134AF', '#515BD4']}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={styles.instagramBtnGradient}
+                  >
+                    <Instagram size={16} color="#FFFFFF" />
+                    <Text style={styles.instagramBtnText}>Instagram</Text>
+                  </LinearGradient>
+                </TouchableOpacity>
+              );
+            })()}
+
             {!!profile.bio ? (
               <Text style={styles.headerBio} numberOfLines={8}>
                 {profile.bio}
@@ -2179,6 +2230,28 @@ const styles = StyleSheet.create({
     color: '#5e3f2d',
     fontSize: 13,
     fontWeight: '900',
+  },
+  instagramBtnWrap: {
+    alignSelf: 'center',
+    borderRadius: 999,
+    overflow: 'hidden',
+    marginTop: 10,
+  },
+  instagramBtnGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
+  },
+  instagramBtnText: {
+    color: '#FFFFFF',
+    fontSize: 12.5,
+    fontWeight: '900',
+    includeFontPadding: false,
   },
   profileCard: {
     padding: 18,

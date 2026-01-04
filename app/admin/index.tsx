@@ -195,6 +195,10 @@ export default function AdminDashboard() {
       .filter((u) => (u.full_name || '').toLowerCase().includes(q));
   }, [users, userQuery]);
 
+  const userById = useMemo(() => {
+    return Object.fromEntries((users || []).map((u: any) => [u.id, u]));
+  }, [users]);
+
   const filteredApartments = useMemo(() => {
     const q = aptCityQuery.trim().toLowerCase();
     const pmin = priceMin.trim() ? parseInt(priceMin.trim(), 10) : undefined;
@@ -289,7 +293,7 @@ export default function AdminDashboard() {
 
           <View style={[styles.section, { marginTop: 12 }]}>
             <SectionHeader title="טווחי גילאים (role='user')" />
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
+            <View style={{ flexDirection: 'row-reverse', flexWrap: 'wrap', gap: 10 }}>
               {ageStats.map((a) => (
                 <View key={a.label} style={[styles.smallStat, { width: '48%' }]}>
                   <Text style={styles.smallStatTitle}>{a.label}</Text>
@@ -316,7 +320,9 @@ export default function AdminDashboard() {
               data={apartments.slice(0, 8)}
               keyExtractor={(item) => item.id}
               ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
-              renderItem={({ item }) => <ApartmentRow apt={item} partners={apartmentPartners[item.id]} />}
+              renderItem={({ item }) => (
+                <ApartmentRow apt={item} partners={apartmentPartners[item.id]} owner={userById[item.owner_id]} />
+              )}
               scrollEnabled={false}
             />
           </View>
@@ -395,7 +401,9 @@ export default function AdminDashboard() {
             data={filteredApartments}
             keyExtractor={(item) => item.id}
             ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
-            renderItem={({ item }) => <ApartmentRow apt={item} partners={apartmentPartners[item.id]} />}
+            renderItem={({ item }) => (
+              <ApartmentRow apt={item} partners={apartmentPartners[item.id]} owner={userById[item.owner_id]} />
+            )}
           />
 
           <Modal visible={isFiltersOpen} animationType="fade" transparent onRequestClose={() => setIsFiltersOpen(false)}>
@@ -607,17 +615,17 @@ function UserRow({ user, aptCount }: { user: any; aptCount?: number }) {
 function InfoChip({ label, value, icon }: { label: string; value: string; icon?: 'phone' | 'map' }) {
   return (
     <View style={styles.chip}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+      <View style={styles.chipInner}>
+        <Text style={styles.chipLabel}>{label}</Text>
+        <Text style={styles.chipText}>{value}</Text>
         {icon === 'phone' ? <Phone size={14} color={TEXT_MUTED} /> : null}
         {icon === 'map' ? <MapPin size={14} color={TEXT_MUTED} /> : null}
-        <Text style={styles.chipText}>{value}</Text>
-        <Text style={styles.chipLabel}>{label}</Text>
       </View>
     </View>
   );
 }
 
-function ApartmentRow({ apt, partners }: { apt: any; partners?: any[] }) {
+function ApartmentRow({ apt, partners, owner }: { apt: any; partners?: any[]; owner?: any }) {
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const images = apt.image_urls && apt.image_urls.length > 0 ? apt.image_urls : apt.image_url ? [apt.image_url] : [];
   const hasImages = images.length > 0;
@@ -651,6 +659,23 @@ function ApartmentRow({ apt, partners }: { apt: any; partners?: any[] }) {
           <Text style={styles.aptPrice}>₪{apt.price?.toLocaleString() || '—'}</Text>
           <Text style={styles.aptPriceLabel}>לחודש</Text>
         </View>
+
+        <View style={styles.managerRow}>
+          <Text style={styles.managerLabel}>מנהל הנכס:</Text>
+          <View style={styles.managerValueRow}>
+            {owner?.avatar_url ? (
+              <Image source={{ uri: owner.avatar_url }} style={styles.managerAvatar} />
+            ) : (
+              <View style={[styles.managerAvatar, styles.managerAvatarFallback]}>
+                <Users size={12} color={TEXT_MUTED} />
+              </View>
+            )}
+            <Text style={styles.managerName} numberOfLines={1}>
+              {owner?.full_name || owner?.email || 'לא משויך'}
+            </Text>
+          </View>
+        </View>
+
         {partners && partners.length > 0 && (
           <View style={styles.partnersRow}>
             <Text style={styles.partnersLabel}>שותפים:</Text>
@@ -684,12 +709,12 @@ function MatchRow({ match, sender, receiver }: { match: any; sender: any; receiv
   const { bg, color, label } = badgeConfig[status] || badgeConfig.PENDING;
   return (
     <View style={[styles.rowCard, { alignItems: 'center' }]}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1, justifyContent: 'flex-end' }}>
-        <ProfilePreview user={receiver} align="right" />
+      <View style={styles.matchPeopleRow}>
+        <ProfilePreview user={receiver} />
         <Text style={{ color: TEXT_MUTED }}>↔</Text>
-        <ProfilePreview user={sender} align="right" />
+        <ProfilePreview user={sender} />
       </View>
-      <View style={{ alignItems: 'flex-start', marginLeft: 8 }}>
+      <View style={styles.matchMetaCol}>
         <View style={[styles.badge, { backgroundColor: bg }]}>
           <Text style={{ color, fontWeight: '700', fontSize: 12 }}>
             {label}
@@ -701,9 +726,9 @@ function MatchRow({ match, sender, receiver }: { match: any; sender: any; receiv
   );
 }
 
-function ProfilePreview({ user, align }: { user: any; align?: 'left' | 'right' }) {
+function ProfilePreview({ user }: { user: any }) {
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+    <View style={styles.profilePreview}>
       {user?.avatar_url ? (
         <Image source={{ uri: user.avatar_url }} style={styles.avatar} />
       ) : (
@@ -712,12 +737,8 @@ function ProfilePreview({ user, align }: { user: any; align?: 'left' | 'right' }
         </View>
       )}
       <View>
-        <Text style={[styles.rowTitle, { textAlign: align === 'right' ? 'right' : 'left' }]}>
-          {user?.full_name || 'ללא שם'}
-        </Text>
-        <Text style={[styles.rowSubtitle, { textAlign: align === 'right' ? 'right' : 'left' }]}>
-          {user?.city || 'ללא עיר'}
-        </Text>
+        <Text style={styles.rowTitle}>{user?.full_name || 'ללא שם'}</Text>
+        <Text style={styles.rowSubtitle}>{user?.city || 'ללא עיר'}</Text>
       </View>
     </View>
   );
@@ -728,6 +749,7 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#FFFFFF',
     paddingTop: 54,
+    writingDirection: 'rtl',
   },
   header: {
     paddingHorizontal: 16,
@@ -873,7 +895,7 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   sectionHeader: {
-    flexDirection: 'row',
+    flexDirection: 'row-reverse',
     alignItems: 'center',
     justifyContent: 'space-between',
     marginBottom: 10,
@@ -889,7 +911,7 @@ const styles = StyleSheet.create({
     paddingBottom: 40,
   },
   rowCard: {
-    flexDirection: 'row',
+    flexDirection: 'row-reverse',
     alignItems: 'center',
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
@@ -903,13 +925,13 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 6 },
   },
   rowLeft: {
-    marginRight: 12,
+    marginLeft: 12,
   },
   rowMiddle: {
     flex: 1,
   },
   rowRight: {
-    marginLeft: 12,
+    marginRight: 12,
   },
   rowTitle: {
     color: '#111827',
@@ -926,13 +948,14 @@ const styles = StyleSheet.create({
   rowMeta: {
     color: '#6B7280',
     fontSize: 12,
+    textAlign: 'left',
   },
   chipsRow: {
-    flexDirection: 'row',
+    flexDirection: 'row-reverse',
     flexWrap: 'wrap',
     gap: 8,
     marginTop: 8,
-    justifyContent: 'flex-end',
+    justifyContent: 'flex-start',
   },
   chip: {
     backgroundColor: '#F9FAFB',
@@ -941,6 +964,11 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingHorizontal: 10,
     paddingVertical: 6,
+  },
+  chipInner: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 6,
   },
   chipText: {
     color: '#111827',
@@ -959,6 +987,17 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     alignSelf: 'flex-start',
     marginBottom: 4,
+  },
+  matchPeopleRow: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 10,
+    flex: 1,
+    justifyContent: 'flex-start',
+  },
+  matchMetaCol: {
+    alignItems: 'flex-start',
+    marginRight: 8,
   },
   center: {
     flex: 1,
@@ -980,8 +1019,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  profilePreview: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 8,
+  },
   matchesWrap: {
-    flexDirection: 'row',
+    flexDirection: 'row-reverse',
     gap: 10,
   },
   smallStat: {
@@ -1015,7 +1059,7 @@ const styles = StyleSheet.create({
     paddingTop: 10,
   },
   subTabs: {
-    flexDirection: 'row',
+    flexDirection: 'row-reverse',
     gap: 8,
     paddingHorizontal: 16,
     marginTop: 6,
@@ -1056,7 +1100,7 @@ const styles = StyleSheet.create({
     borderColor: '#E5E7EB',
     borderRadius: 16,
     overflow: 'hidden',
-    flexDirection: 'row',
+    flexDirection: 'row-reverse',
     alignItems: 'stretch',
     shadowColor: '#000000',
     shadowOpacity: 0.03,
@@ -1082,7 +1126,7 @@ const styles = StyleSheet.create({
     bottom: 8,
     left: 0,
     right: 0,
-    flexDirection: 'row',
+    flexDirection: 'row-reverse',
     justifyContent: 'center',
     gap: 6,
   },
@@ -1114,7 +1158,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   aptPriceRow: {
-    flexDirection: 'row',
+    flexDirection: 'row-reverse',
     alignItems: 'baseline',
     justifyContent: 'flex-end',
     marginBottom: 10,
@@ -1128,11 +1172,11 @@ const styles = StyleSheet.create({
   aptPriceLabel: {
     color: '#6B7280',
     fontSize: 12,
-    marginLeft: 6,
+    marginRight: 6,
     textAlign: 'right',
   },
   partnersRow: {
-    flexDirection: 'row',
+    flexDirection: 'row-reverse',
     alignItems: 'center',
     justifyContent: 'flex-end',
     gap: 8,
@@ -1143,8 +1187,47 @@ const styles = StyleSheet.create({
     textAlign: 'right',
   },
   partnersAvatars: {
-    flexDirection: 'row',
+    flexDirection: 'row-reverse',
     gap: 6,
+  },
+  managerRow: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 8,
+    marginBottom: 10,
+    flexWrap: 'wrap',
+  },
+  managerLabel: {
+    color: '#6B7280',
+    fontSize: 12,
+    fontWeight: '700',
+    textAlign: 'right',
+  },
+  managerValueRow: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 8,
+    maxWidth: '70%',
+  },
+  managerAvatar: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  managerAvatarFallback: {
+    backgroundColor: '#F3F4F6',
+  },
+  managerName: {
+    color: '#111827',
+    fontSize: 12,
+    fontWeight: '800',
+    textAlign: 'right',
   },
   partnerAvatar: {
     width: 28,
@@ -1165,7 +1248,7 @@ const styles = StyleSheet.create({
   filtersGrid: {
     paddingHorizontal: 16,
     paddingTop: 10,
-    flexDirection: 'row',
+    flexDirection: 'row-reverse',
     flexWrap: 'wrap',
     gap: 8,
   },
@@ -1183,7 +1266,7 @@ const styles = StyleSheet.create({
   toggleRow: {
     paddingHorizontal: 16,
     paddingTop: 10,
-    flexDirection: 'row',
+    flexDirection: 'row-reverse',
     gap: 8,
   },
   toggleBtn: {
@@ -1225,7 +1308,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 10,
     paddingBottom: 0,
-    flexDirection: 'row',
+    flexDirection: 'row-reverse',
     justifyContent: 'flex-end',
   },
   filterBtn: {
@@ -1256,7 +1339,7 @@ const styles = StyleSheet.create({
   },
   modalHeader: {
     paddingHorizontal: 16,
-    flexDirection: 'row',
+    flexDirection: 'row-reverse',
     alignItems: 'center',
     justifyContent: 'space-between',
     marginBottom: 8,
@@ -1274,7 +1357,7 @@ const styles = StyleSheet.create({
   modalActions: {
     paddingHorizontal: 16,
     paddingTop: 12,
-    flexDirection: 'row',
+    flexDirection: 'row-reverse',
     gap: 10,
     justifyContent: 'space-between',
   },

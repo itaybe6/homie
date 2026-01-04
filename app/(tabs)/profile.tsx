@@ -13,6 +13,7 @@ import {
   Platform,
   Modal,
   useWindowDimensions,
+  Linking,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
@@ -32,6 +33,7 @@ import {
   Camera,
   Copy,
   Image as ImageIcon,
+  Instagram,
 } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
@@ -51,6 +53,30 @@ type AvatarFabItem = {
   bg: string;
   accessibilityLabel: string;
 };
+
+function normalizeInstagramUrl(raw: string): string | null {
+  const trimmed = String(raw || '').trim();
+  if (!trimmed) return null;
+
+  // @handle -> https://instagram.com/handle
+  if (trimmed.startsWith('@')) {
+    const handle = trimmed.slice(1).trim().replace(/^\/+|\/+$/g, '');
+    return handle ? `https://instagram.com/${handle}` : null;
+  }
+
+  // plain handle -> https://instagram.com/handle
+  if (!trimmed.includes('/') && !trimmed.includes('://')) {
+    return `https://instagram.com/${trimmed}`;
+  }
+
+  // instagram.com/foo (no protocol) -> https://instagram.com/foo
+  if (!trimmed.includes('://') && trimmed.toLowerCase().includes('instagram.com')) {
+    return `https://${trimmed.replace(/^\/+/, '')}`;
+  }
+
+  // already a URL
+  return trimmed;
+}
 
 function AvatarPhotoFab({
   disabled,
@@ -1271,6 +1297,37 @@ export default function ProfileScreen() {
               <Text style={styles.nameText}>
                 {profile?.full_name || 'משתמש/ת'}
               </Text>
+
+              {(() => {
+                const igUrl = normalizeInstagramUrl((profile as any)?.instagram_url);
+                if (!igUrl) return null;
+                return (
+                  <TouchableOpacity
+                    style={styles.instagramBtnWrap}
+                    activeOpacity={0.9}
+                    accessibilityRole="button"
+                    accessibilityLabel="פתח אינסטגרם"
+                    onPress={async () => {
+                      try {
+                        await Linking.openURL(igUrl);
+                      } catch {
+                        Alert.alert('שגיאה', 'לא ניתן לפתוח את אינסטגרם');
+                      }
+                    }}
+                  >
+                    <LinearGradient
+                      colors={['#F58529', '#DD2A7B', '#8134AF', '#515BD4']}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 1 }}
+                      style={styles.instagramBtnGradient}
+                    >
+                      <Instagram size={16} color="#FFFFFF" />
+                      <Text style={styles.instagramBtnText}>Instagram</Text>
+                    </LinearGradient>
+                  </TouchableOpacity>
+                );
+              })()}
+
               {(profile?.address || profile?.city || profile?.age) ? (
                 <View style={styles.metaChipsRow}>
                   {(profile?.address || profile?.city) ? (
@@ -2778,6 +2835,29 @@ const styles = StyleSheet.create({
     color: '#5e3f2d',
     fontSize: 12,
     fontWeight: '800',
+  },
+  instagramBtnWrap: {
+    alignSelf: 'flex-start',
+    borderRadius: 999,
+    overflow: 'hidden',
+    marginTop: 8,
+    marginBottom: 10,
+  },
+  instagramBtnGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.22)',
+  },
+  instagramBtnText: {
+    color: '#FFFFFF',
+    fontSize: 12.5,
+    fontWeight: '900',
+    includeFontPadding: false,
   },
   surveyCard: {
     borderRadius: 20,
