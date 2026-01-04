@@ -28,9 +28,51 @@ if (!SUPABASE_ENV_OK) {
 const safeSupabaseUrl = supabaseUrl || 'https://example.com';
 const safeSupabaseAnonKey = supabaseAnonKey || 'public-anon-key';
 
+/**
+ * Supabase persists the session JSON in AsyncStorage.
+ * In some edge cases (crashes / hot reloads / interrupted OTP flows) a partial session can be saved
+ * without a `refresh_token`. When that happens, Supabase may attempt an auto-refresh and throw:
+ * "Invalid Refresh Token: Refresh Token Not Found" (even on a fresh login).
+ *
+ * This wrapper proactively clears corrupted auth entries so the app can continue cleanly to login.
+ */
+const supabaseStorage = {
+  async getItem(key: string) {
+    const raw = await AsyncStorage.getItem(key);
+    if (!raw) return raw;
+
+    // Supabase-js v2 uses keys like: sb-<project-ref>-auth-token
+    if (key.includes('auth-token')) {
+      try {
+        const parsed = JSON.parse(raw);
+        const accessToken = parsed?.access_token ?? parsed?.currentSession?.access_token;
+        const refreshToken = parsed?.refresh_token ?? parsed?.currentSession?.refresh_token;
+
+        // If we have an access token but no refresh token, treat it as corrupted and clear it.
+        if (accessToken && !refreshToken) {
+          await AsyncStorage.removeItem(key);
+          return null;
+        }
+      } catch {
+        // Not valid JSON -> clear it
+        await AsyncStorage.removeItem(key);
+        return null;
+      }
+    }
+
+    return raw;
+  },
+  async setItem(key: string, value: string) {
+    await AsyncStorage.setItem(key, value);
+  },
+  async removeItem(key: string) {
+    await AsyncStorage.removeItem(key);
+  },
+};
+
 export const supabase = createClient(safeSupabaseUrl, safeSupabaseAnonKey, {
   auth: {
-    storage: AsyncStorage,
+    storage: supabaseStorage as any,
     autoRefreshToken: true,
     persistSession: true,
     // Not a browser, so no hash parsing

@@ -293,10 +293,18 @@ export const authService = {
   },
 
   async getCurrentUser() {
-    const {
-      data: { session },
-      error: sessionError,
-    } = await supabase.auth.getSession();
+    let session: any = null;
+    let sessionError: any = null;
+
+    try {
+      const res = await supabase.auth.getSession();
+      session = (res as any)?.data?.session ?? null;
+      sessionError = (res as any)?.error ?? null;
+    } catch (err) {
+      // Some edge cases can throw instead of returning { error }
+      sessionError = err;
+      session = null;
+    }
 
     if (sessionError) {
       if (
@@ -308,6 +316,18 @@ export const authService = {
           await supabase.auth.signOut({ scope: 'local' });
         } catch {
           // ignore secondary errors when clearing local session
+        }
+        return null;
+      }
+
+      // Fallback: in case the error isn't an AuthApiError instance (dup deps / thrown error),
+      // still clear local session if the message matches.
+      const msg = String((sessionError as any)?.message || sessionError || '').toLowerCase();
+      if (msg.includes('invalid refresh token')) {
+        try {
+          await supabase.auth.signOut({ scope: 'local' });
+        } catch {
+          // ignore
         }
         return null;
       }

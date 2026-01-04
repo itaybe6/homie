@@ -262,7 +262,12 @@ export default function AdminDashboard() {
         </View>
       </View>
 
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabs}>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={styles.tabsScroll}
+        contentContainerStyle={styles.tabs}
+      >
         <Segment label="סקירה" active={active === 'overview'} onPress={() => setActive('overview')} />
         <Segment label="משתמשים" active={active === 'users'} onPress={() => setActive('users')} />
         <Segment label="בעלי דירות" active={active === 'owners'} onPress={() => setActive('owners')} />
@@ -782,23 +787,30 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '800',
   },
+  tabsScroll: {
+    flexGrow: 0,
+    flexShrink: 0,
+    maxHeight: 54,
+  },
   tabs: {
     paddingHorizontal: 16,
     paddingTop: 10,
     paddingBottom: 8,
     flexDirection: 'row-reverse',
     alignItems: 'center',
+    gap: 8,
   },
   segment: {
-    paddingVertical: 9,
+    height: 38,
+    paddingVertical: 0,
     paddingHorizontal: 12,
     borderRadius: 999,
     borderWidth: 1,
     borderColor: '#E5E7EB',
     alignItems: 'center',
+    justifyContent: 'center',
     backgroundColor: '#F9FAFB',
-    marginLeft: 8,
-    minWidth: 86,
+    minWidth: 92,
   },
   segmentActive: {
     backgroundColor: 'rgba(94,63,45,0.10)',
