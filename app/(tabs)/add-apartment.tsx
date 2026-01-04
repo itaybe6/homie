@@ -340,7 +340,7 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
         if (cancelled) return;
         const a = apt as Apartment;
 
-        setTitle(a.title || '');
+        setTitle(String(a.title || '').slice(0, 25));
         setDescription(a.description || '');
         setAddress(a.address || '');
         setCity(a.city || '');
@@ -1394,9 +1394,10 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
                     style={styles.input}
                     placeholder="לדוגמה: דירת 3 חדרים בתל אביב"
                     value={title}
-                    onChangeText={setTitle}
+                    onChangeText={(t) => setTitle(String(t || '').slice(0, 25))}
                     editable={!isLoading}
                     placeholderTextColor="#9AA0A6"
+                    maxLength={25}
                   />
                 </View>
 

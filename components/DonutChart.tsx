@@ -82,6 +82,15 @@ export default function DonutChart({
         viewBox={`0 0 ${(radius + strokeWidth) * 2} ${(radius + strokeWidth) * 2}`}
       >
         <G rotation="-90" origin={`${radius + strokeWidth}, ${radius + strokeWidth}`}>
+          <Circle
+            cx="50%"
+            cy="50%"
+            r={radius}
+            fill="transparent"
+            stroke={trackColor}
+            strokeWidth={strokeWidth}
+            strokeLinejoin="round"
+          />
           <AnimatedCircle
             cx="50%"
             cy="50%"
@@ -92,15 +101,6 @@ export default function DonutChart({
             strokeLinecap="round"
             strokeDasharray={circumference}
             animatedProps={circleProps}
-          />
-          <Circle
-            cx="50%"
-            cy="50%"
-            r={radius}
-            fill="transparent"
-            stroke={trackColor}
-            strokeWidth={strokeWidth}
-            strokeLinejoin="round"
           />
         </G>
       </Svg>

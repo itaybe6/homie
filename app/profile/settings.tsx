@@ -17,13 +17,13 @@ import {
 import KeyboardAwareScrollView from 'react-native-keyboard-aware-scroll-view/lib/KeyboardAwareScrollView';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { Edit, FileText, LogOut, Trash2, ChevronLeft, Inbox, MapPin, UserPlus2, X, Home, Plus, User as UserIcon, Mail, Phone, Hash, Calendar } from 'lucide-react-native';
+import { Edit, FileText, LogOut, Trash2, ChevronLeft, MapPin, UserPlus2, X, Home, Plus, User as UserIcon, Mail, Phone, Hash, Calendar } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useAuthStore } from '@/stores/authStore';
 import { authService } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
 import { Apartment, User } from '@/types/database';
-import { fetchUserSurvey, upsertUserSurvey } from '@/lib/survey';
+import { upsertUserSurvey } from '@/lib/survey';
 import { getNeighborhoodsForCityName } from '@/lib/neighborhoods';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
@@ -35,7 +35,6 @@ export default function ProfileSettingsScreen() {
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [profile, setProfile] = useState<User | null>(null);
-  const [surveyCompleted, setSurveyCompleted] = useState<boolean>(false);
   const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
   const [hasSharedProfiles, setHasSharedProfiles] = useState(false);
   const [showSharedModal, setShowSharedModal] = useState(false);
@@ -67,7 +66,7 @@ export default function ProfileSettingsScreen() {
   const [showTermsModal, setShowTermsModal] = useState(false);
   const termsTranslateY = useRef(new Animated.Value(600)).current;
   const termsBackdropOpacity = useRef(new Animated.Value(0)).current;
-  // Survey modal
+  // Survey modal (currently not exposed via UI)
   const [showSurveyModal, setShowSurveyModal] = useState(false);
   const surveyTranslateY = useRef(new Animated.Value(600)).current;
   const surveyBackdropOpacity = useRef(new Animated.Value(0)).current;
@@ -142,6 +141,7 @@ export default function ProfileSettingsScreen() {
       if (onDone) onDone();
     }
   };
+
   const openSurveyAnimations = () => {
     try {
       Animated.parallel([
@@ -150,6 +150,7 @@ export default function ProfileSettingsScreen() {
       ]).start();
     } catch {}
   };
+
   const closeSurveyAnimations = (onDone?: () => void) => {
     try {
       Animated.parallel([
@@ -210,6 +211,7 @@ export default function ProfileSettingsScreen() {
       termsBackdropOpacity.setValue(0);
     }
   }, [showTermsModal]);
+
   useEffect(() => {
     if (showSurveyModal) {
       surveyTranslateY.setValue(600);
@@ -229,19 +231,6 @@ export default function ProfileSettingsScreen() {
         setProfile((data as any) || null);
       } catch {
         // ignore
-      }
-    })();
-  }, [user?.id]);
-
-  useEffect(() => {
-    (async () => {
-      try {
-        if (!user?.id) return;
-        const survey = await fetchUserSurvey(user.id);
-        const completed = !!(survey as any)?.is_completed || !!survey;
-        setSurveyCompleted(completed);
-      } catch {
-        setSurveyCompleted(false);
       }
     })();
   }, [user?.id]);
@@ -827,119 +816,6 @@ export default function ProfileSettingsScreen() {
 
           <View style={styles.divider} />
 
-          <TouchableOpacity
-            style={styles.groupItem}
-            onPress={async () => {
-              try {
-                if (!user?.id) { setShowSurveyModal(true); return; }
-                const existing = await fetchUserSurvey(user.id);
-                setSurveyCity((existing as any)?.preferred_city || '');
-                setSurveyPrice(
-                  typeof (existing as any)?.price_range === 'number'
-                    ? String((existing as any).price_range)
-                    : ''
-                );
-                setSurveyMoveIn((existing as any)?.move_in_month || '');
-                setSurveyIsSublet(!!(existing as any)?.is_sublet);
-                const neighborhoodsArr: string[] = Array.isArray((existing as any)?.preferred_neighborhoods)
-                  ? ((existing as any).preferred_neighborhoods as string[])
-                  : [];
-                setSurveyNeighborhoods(neighborhoodsArr.length ? neighborhoodsArr.join(', ') : '');
-
-                const minVal =
-                  typeof (existing as any)?.preferred_roommates_min === 'number'
-                    ? String((existing as any).preferred_roommates_min)
-                    : '';
-                const maxVal =
-                  typeof (existing as any)?.preferred_roommates_max === 'number'
-                    ? String((existing as any).preferred_roommates_max)
-                    : typeof (existing as any)?.preferred_roommates === 'number'
-                      ? String((existing as any).preferred_roommates)
-                      : '';
-                setSurveyRoommatesMin(minVal);
-                setSurveyRoommatesMax(maxVal);
-
-                setSurveyBillsIncluded(
-                  (existing as any)?.bills_included === undefined ? null : ((existing as any).bills_included as any)
-                );
-                setSurveyHasBalcony(
-                  (existing as any)?.has_balcony === undefined ? null : ((existing as any).has_balcony as any)
-                );
-                setSurveyHasElevator(
-                  (existing as any)?.has_elevator === undefined ? null : ((existing as any).has_elevator as any)
-                );
-                setSurveyWantsMasterRoom(
-                  (existing as any)?.wants_master_room === undefined ? null : ((existing as any).wants_master_room as any)
-                );
-                setSurveyWithBroker(
-                  (existing as any)?.with_broker === undefined ? null : ((existing as any).with_broker as any)
-                );
-                setSurveyWorksFromHome(!!(existing as any)?.works_from_home);
-                setSurveyKeepsKosher(!!(existing as any)?.keeps_kosher);
-                setSurveyIsShomerShabbat(!!(existing as any)?.is_shomer_shabbat);
-                setSurveyIsSmoker(!!(existing as any)?.is_smoker);
-                setSurveyHasPet(!!(existing as any)?.has_pet);
-                setSurveyHomeVibe((existing as any)?.home_vibe || '');
-                setSurveyOccupation((existing as any)?.occupation || '');
-                setSurveyRelationshipStatus((existing as any)?.relationship_status || '');
-                setSurveyCleanlinessImportance(
-                  typeof (existing as any)?.cleanliness_importance === 'number' ? (existing as any).cleanliness_importance : null
-                );
-                setSurveyCleaningFrequency((existing as any)?.cleaning_frequency || '');
-                setSurveyHostingPreference((existing as any)?.hosting_preference || '');
-                setSurveyCookingStyle((existing as any)?.cooking_style || '');
-                setSurveyPreferredAgeRange((existing as any)?.preferred_age_range || '');
-                setSurveyPreferredGender((existing as any)?.preferred_gender || '');
-                setSurveyPreferredOccupation((existing as any)?.preferred_occupation || '');
-              } catch {
-                setSurveyCity('');
-                setSurveyPrice('');
-                setSurveyMoveIn('');
-                setSurveyIsSublet(false);
-                setSurveyNeighborhoods('');
-                setSurveyRoommatesMin('');
-                setSurveyRoommatesMax('');
-                setSurveyBillsIncluded(null);
-                setSurveyHasBalcony(null);
-                setSurveyHasElevator(null);
-                setSurveyWantsMasterRoom(null);
-                setSurveyWithBroker(null);
-              } finally {
-                setShowSurveyModal(true);
-              }
-            }}
-            activeOpacity={0.9}
-          >
-            <View style={styles.itemIcon}>
-              <MapPin size={18} color={ICON_COLOR} />
-            </View>
-            <View style={styles.itemTextWrap}>
-              <Text style={styles.groupItemTitle}>
-                {surveyCompleted ? 'עריכת שאלון העדפות' : 'מילוי שאלון העדפות'}
-              </Text>
-              <Text style={styles.groupItemSub}>
-                {surveyCompleted ? 'עדכון העדפות התאמה' : 'כמה שאלות קצרות להיכרות'}
-              </Text>
-            </View>
-            <ChevronLeft size={18} color={ICON_COLOR} />
-          </TouchableOpacity>
-
-          <View style={styles.divider} />
-
-          <TouchableOpacity
-            style={styles.groupItem}
-            onPress={() => router.push('/(tabs)/requests')}
-            activeOpacity={0.9}
-          >
-            <View style={styles.itemIcon}>
-              <Inbox size={18} color={ICON_COLOR} />
-            </View>
-            <View style={styles.itemTextWrap}>
-              <Text style={styles.groupItemTitle}>בקשות</Text>
-              <Text style={styles.groupItemSub}>צפייה וניהול בקשות</Text>
-            </View>
-            <ChevronLeft size={18} color={ICON_COLOR} />
-          </TouchableOpacity>
         </View>
 
         <Text style={styles.sectionTitle}>אבטחה וחשבון</Text>
@@ -1537,7 +1413,6 @@ export default function ProfileSettingsScreen() {
                           } as any);
                           Alert.alert('הצלחה', 'שאלון ההעדפות נשמר');
                           setShowSurveyModal(false);
-                          setSurveyCompleted(true);
                         } catch (e: any) {
                           Alert.alert('שגיאה', e?.message || 'לא ניתן לשמור את השאלון');
                         } finally {

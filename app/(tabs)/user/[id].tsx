@@ -1031,7 +1031,11 @@ export default function UserProfileScreen() {
 
   const handleMergeHeaderPress = () => {
     if (inviteLoading) return;
-    if (!me?.id || !profile?.id) return;
+    if (!me?.id) {
+      Alert.alert('חיבור נדרש', 'כדי לשלוח בקשה למיזוג פרופילים צריך להתחבר.');
+      return;
+    }
+    if (!profile?.id) return;
     if (me.id === profile.id) {
       Alert.alert('שגיאה', 'לא ניתן לשלוח בקשה לעצמך.');
       return;
@@ -1355,8 +1359,52 @@ export default function UserProfileScreen() {
         </TouchableOpacity>
 
         <View style={styles.topBarRight}>
+          {(!profile?.id || (me?.id && me.id === profile.id)) ? null : (() => {
+            const isDisabled =
+              groupLoading ||
+              inviteLoading ||
+              hasPendingMergeInvite;
+            const label = groupLoading
+              ? 'טוען...'
+              : isMeInViewedGroup
+                ? 'פרופיל משותף'
+                : inviteLoading
+                  ? 'שולח...'
+                  : hasPendingMergeInvite
+                    ? 'נשלחה בקשה'
+                    : 'מיזוג';
+            const onPress = () => {
+              if (groupLoading) return;
+              if (isMeInViewedGroup) {
+                router.push('/(tabs)/partners');
+                return;
+              }
+              handleMergeHeaderPress();
+            };
+            const IconComp = isMeInViewedGroup ? Users : UserPlus2;
+            return (
+              <TouchableOpacity
+                style={[
+                  styles.mergeHeaderBtn,
+                  (isDisabled || (meInApartment && profileInApartment)) ? styles.mergeBtnDisabled : null,
+                ]}
+                activeOpacity={0.9}
+                onPress={onPress}
+                disabled={isDisabled}
+              >
+                <IconComp size={16} color="#FFFFFF" />
+                <Text style={styles.mergeHeaderText}>{label}</Text>
+              </TouchableOpacity>
+            );
+          })()}
+
+          {/* Show shared profile chip (if any) after the button so the button stays rightmost */}
           {groupLoading ? null : groupContext && groupContext.members.length >= 2 ? (
-            <TouchableOpacity style={styles.mergedChip} activeOpacity={0.9}>
+            <TouchableOpacity
+              style={styles.mergedChip}
+              activeOpacity={0.9}
+              onPress={() => router.push('/(tabs)/partners')}
+            >
               <View style={styles.mergedAvatarsRow}>
                 {groupContext.members
                   .filter((m) => m.id !== profile.id)
@@ -1374,21 +1422,6 @@ export default function UserProfileScreen() {
                   </View>
                 ))}
               </View>
-            </TouchableOpacity>
-          ) : null}
-          {!groupLoading && me?.id && me.id !== profile.id && !isMeInViewedGroup ? (
-            <TouchableOpacity
-              style={[
-                styles.mergeHeaderBtn,
-                (inviteLoading || hasPendingMergeInvite || (meInApartment && profileInApartment)) ? styles.mergeBtnDisabled : null,
-              ]}
-              activeOpacity={0.9}
-              onPress={handleMergeHeaderPress}
-            >
-              <UserPlus2 size={16} color="#FFFFFF" />
-              <Text style={styles.mergeHeaderText}>
-                {inviteLoading ? 'שולח...' : hasPendingMergeInvite ? 'נשלחה בקשה' : 'מיזוג'}
-              </Text>
             </TouchableOpacity>
           ) : null}
         </View>
@@ -1412,29 +1445,46 @@ export default function UserProfileScreen() {
           ) : null}
 
           <View style={styles.profileCard}>
-            <View style={styles.matchDonutFloating}>
-              <DonutChart
-                percentage={typeof matchPercent === 'number' ? matchPercent : 0}
-                size={72}
-                strokeWidth={10}
-                durationMs={850}
-                color="#16A34A"
-                trackColor="rgba(22,163,74,0.14)"
-                disabled={surveyLoading || !survey}
-                onPress={() => {
-                  if (surveyLoading) return;
-                  if (!survey) return;
-                  setSurveyActiveSection('about');
-                  setIsSurveyOpen(true);
-                }}
-                accessibilityLabel="פתח סיכום התאמה"
+            <View style={styles.avatarRow}>
+              <Image
+                source={{ uri: profile.avatar_url || 'https://cdn-icons-png.flaticon.com/512/847/847969.png' }}
+                style={styles.avatar}
               />
-              <Text style={styles.matchDonutLabel}>אחוזי התאמה</Text>
+              {profile?.id && (!me?.id || me.id !== profile.id) ? (() => {
+                const isDisabled =
+                  groupLoading ||
+                  inviteLoading ||
+                  (!isMeInViewedGroup && hasPendingMergeInvite);
+                const label = groupLoading
+                  ? 'טוען...'
+                  : isMeInViewedGroup
+                    ? 'שותפים'
+                    : inviteLoading
+                      ? 'שולח...'
+                      : hasPendingMergeInvite
+                        ? 'נשלחה'
+                        : 'מיזוג';
+                const IconComp = isMeInViewedGroup ? Users : UserPlus2;
+                return (
+                  <TouchableOpacity
+                    style={[styles.mergeInlinePill, isDisabled ? styles.mergeInlinePillDisabled : null]}
+                    activeOpacity={0.9}
+                    onPress={() => {
+                      if (groupLoading) return;
+                      if (isMeInViewedGroup) {
+                        router.push('/(tabs)/partners');
+                        return;
+                      }
+                      handleMergeHeaderPress();
+                    }}
+                    disabled={isDisabled}
+                  >
+                    <IconComp size={16} color="#5e3f2d" />
+                    <Text style={styles.mergeInlinePillText}>{label}</Text>
+                  </TouchableOpacity>
+                );
+              })() : null}
             </View>
-            <Image
-              source={{ uri: profile.avatar_url || 'https://cdn-icons-png.flaticon.com/512/847/847969.png' }}
-              style={styles.avatar}
-            />
             <Text style={styles.name} numberOfLines={2}>
               {profile.full_name}{profile.age ? `, ${profile.age}` : ''}
             </Text>
@@ -1670,11 +1720,28 @@ export default function UserProfileScreen() {
                 }}
                 disabled={surveyLoading || !survey}
               >
-                <View style={styles.surveyCTAAvatarWrap}>
-                  <Image
-                    source={{ uri: profile.avatar_url || 'https://cdn-icons-png.flaticon.com/512/847/847969.png' }}
-                    style={styles.surveyCTAAvatar}
-                  />
+                <View style={styles.surveyCTAAvatarCol}>
+                  <View style={styles.surveyCTAAvatarRingWrap}>
+                    <DonutChart
+                      percentage={typeof matchPercent === 'number' ? matchPercent : 0}
+                      size={54}
+                      strokeWidth={5}
+                      durationMs={850}
+                      color="#16A34A"
+                      trackColor="rgba(22,163,74,0.14)"
+                      textColor="transparent"
+                      textStyle={{ fontSize: 0 } as any}
+                      accessibilityLabel="אחוזי התאמה"
+                    />
+                    <View style={styles.surveyCTAAvatarWrap}>
+                      <Image
+                        source={{ uri: profile.avatar_url || 'https://cdn-icons-png.flaticon.com/512/847/847969.png' }}
+                        style={styles.surveyCTAAvatar}
+                      />
+                    </View>
+                  </View>
+                  <Text style={styles.surveyCTAMatchValue}>{matchPercentDisplay}</Text>
+                  <Text style={styles.surveyCTAMatchLabel}>אחוזי התאמה</Text>
                 </View>
                 <View style={styles.surveyCTATexts}>
                   <Text style={styles.surveyCTATitle}>
@@ -2010,9 +2077,40 @@ const styles = StyleSheet.create({
     height: 104,
     borderRadius: 52,
     backgroundColor: '#F3F4F6',
-    marginBottom: 12,
+    marginBottom: 0,
     borderWidth: 0,
     borderColor: 'transparent',
+  },
+  avatarRow: {
+    width: '100%',
+    position: 'relative',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+  },
+  matchRingWrap: {
+    position: 'absolute',
+    alignSelf: 'center',
+    top: 0,
+    zIndex: 2,
+  },
+  matchCaption: {
+    marginTop: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 2,
+  },
+  matchPercentText: {
+    color: '#16A34A',
+    fontSize: 18,
+    fontWeight: '900',
+    includeFontPadding: false,
+  },
+  matchCaptionText: {
+    color: '#6B7280',
+    fontSize: 12,
+    fontWeight: '800',
+    includeFontPadding: false,
   },
   name: {
     color: '#111827',
@@ -2088,7 +2186,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     paddingLeft: 16,
     paddingRight: 16,
-    paddingVertical: 14,
+    paddingVertical: 10,
   },
   surveyCTADisabled: {
     backgroundColor: '#F3F4F6',
@@ -2108,6 +2206,9 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   surveyCTAAvatarWrap: {
+    position: 'absolute',
+    left: 5,
+    top: 5,
     width: 44,
     height: 44,
     borderRadius: 22,
@@ -2115,11 +2216,35 @@ const styles = StyleSheet.create({
     backgroundColor: '#F3F4F6',
     borderWidth: 1,
     borderColor: 'rgba(17,24,39,0.10)',
-    marginLeft: 10,
   },
   surveyCTAAvatar: {
     width: '100%',
     height: '100%',
+  },
+  surveyCTAAvatarCol: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 10,
+    gap: 1,
+  },
+  surveyCTAAvatarRingWrap: {
+    width: 54,
+    height: 54,
+    position: 'relative',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  surveyCTAMatchValue: {
+    color: '#16A34A',
+    fontSize: 11,
+    fontWeight: '900',
+    includeFontPadding: false,
+  },
+  surveyCTAMatchLabel: {
+    color: '#6B7280',
+    fontSize: 9,
+    fontWeight: '800',
+    includeFontPadding: false,
   },
   surveyCTATitle: {
     color: '#111827',
@@ -2483,6 +2608,31 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 15,
     fontWeight: '900',
+  },
+  mergeInlinePill: {
+    position: 'absolute',
+    right: 0,
+    top: '50%',
+    // Slightly above the avatar center-line
+    transform: [{ translateY: -58 }],
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: 'rgba(94,63,45,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(94,63,45,0.16)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  mergeInlinePillDisabled: {
+    opacity: 0.7,
+  },
+  mergeInlinePillText: {
+    color: '#5e3f2d',
+    fontSize: 13,
+    fontWeight: '900',
+    includeFontPadding: false,
   },
   mergeHeaderBtn: {
     height: 40,
