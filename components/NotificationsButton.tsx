@@ -18,6 +18,7 @@ function NotificationsButtonBase({ style, badgeCount }: Props) {
   const user = useAuthStore((s) => s.user);
   const unreadCount = useNotificationsStore((s) => s.unreadCount);
   const setUnreadCount = useNotificationsStore((s) => s.setUnreadCount);
+  const lastSeenAt = useNotificationsStore((s) => s.lastSeenAt);
 
   // Keep consistent with Home screen action icons (map/filter/search).
   const ICON_COLOR = '#5e3f2d';
@@ -29,7 +30,7 @@ function NotificationsButtonBase({ style, badgeCount }: Props) {
         if (isMounted) setUnreadCount(0);
         return;
       }
-      // Combined badge: unread notifications + pending incoming requests
+      // Combined badge: NEW unread notifications + NEW pending incoming requests/matches/invites since last open.
       let recipientIds: string[] = [user.id];
       let myGroupIds: string[] = [];
       try {
@@ -51,6 +52,8 @@ function NotificationsButtonBase({ style, badgeCount }: Props) {
       } catch {
         // best-effort only
       }
+
+      const sinceIso = lastSeenAt ? String(lastSeenAt) : null;
 
       const [
         { count: unreadNotifCount },
@@ -88,12 +91,66 @@ function NotificationsButtonBase({ style, badgeCount }: Props) {
           .eq('status', 'PENDING'),
       ]);
 
+      // If we have a "last seen" timestamp, count only items created after it
+      // (requests/matches/invites don't have is_read flags).
+      const counts = await (async () => {
+        if (!sinceIso) {
+          return {
+            unreadNotifCount: unreadNotifCount || 0,
+            aptReqCount: aptReqCount || 0,
+            matchDirectCount: matchDirectCount || 0,
+            matchGroupCount: matchGroupCount || 0,
+            groupInvCount: groupInvCount || 0,
+          };
+        }
+        const [
+          { count: aptReqNew },
+          { count: matchDirectNew },
+          { count: matchGroupNew },
+          { count: groupInvNew },
+        ] = await Promise.all([
+          supabase
+            .from('apartments_request')
+            .select('id', { count: 'exact', head: true })
+            .in('recipient_id', recipientIds as any)
+            .eq('status', 'PENDING')
+            .gte('created_at', sinceIso),
+          supabase
+            .from('matches')
+            .select('id', { count: 'exact', head: true })
+            .in('receiver_id', recipientIds as any)
+            .eq('status', 'PENDING')
+            .gte('created_at', sinceIso),
+          myGroupIds.length
+            ? supabase
+                .from('matches')
+                .select('id', { count: 'exact', head: true })
+                .in('receiver_group_id', myGroupIds as any)
+                .eq('status', 'PENDING')
+                .gte('created_at', sinceIso)
+            : Promise.resolve({ count: 0 } as any),
+          supabase
+            .from('profile_group_invites')
+            .select('id', { count: 'exact', head: true })
+            .in('invitee_id', recipientIds as any)
+            .eq('status', 'PENDING')
+            .gte('created_at', sinceIso),
+        ]);
+        return {
+          unreadNotifCount: unreadNotifCount || 0,
+          aptReqCount: aptReqNew || 0,
+          matchDirectCount: matchDirectNew || 0,
+          matchGroupCount: matchGroupNew || 0,
+          groupInvCount: groupInvNew || 0,
+        };
+      })();
+
       const total =
-        (unreadNotifCount || 0) +
-        (aptReqCount || 0) +
-        (matchDirectCount || 0) +
-        (matchGroupCount || 0) +
-        (groupInvCount || 0);
+        counts.unreadNotifCount +
+        counts.aptReqCount +
+        counts.matchDirectCount +
+        counts.matchGroupCount +
+        counts.groupInvCount;
       if (isMounted) setUnreadCount(total);
     };
 
@@ -124,11 +181,17 @@ function NotificationsButtonBase({ style, badgeCount }: Props) {
       )
       .subscribe();
 
+    // Fallback polling to cover cases realtime filters don't capture (e.g. merged-profile recipients).
+    const poll = setInterval(() => {
+      fetchCount();
+    }, 15000);
+
     return () => {
       isMounted = false;
       supabase.removeChannel(channel);
+      clearInterval(poll);
     };
-  }, [user?.id]);
+  }, [user?.id, lastSeenAt]);
 
   const shownCount = typeof badgeCount === 'number' ? badgeCount : unreadCount;
   const shownLabel = shownCount > 99 ? '99+' : String(shownCount);

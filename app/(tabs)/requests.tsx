@@ -30,6 +30,7 @@ export default function RequestsScreen() {
   const user = useAuthStore((s) => s.user);
   const insets = useSafeAreaInsets();
   const scrollY = useRef(new Animated.Value(0)).current;
+  const markSeenNow = useNotificationsStore((s) => s.markSeenNow);
   const [ownerDetails, setOwnerDetails] = useState<null | { full_name?: string; avatar_url?: string; phone?: string }>(null);
   const toSingle = (value: string | string[] | undefined): string | undefined =>
     Array.isArray(value) ? value[0] : value;
@@ -371,6 +372,8 @@ export default function RequestsScreen() {
 
   // When opening this screen (also used for /notifications), mark notifications as read.
   useEffect(() => {
+    // Reset the bell badge (requests/matches/invites are tracked via lastSeenAt).
+    markSeenNow();
     fetchNotifications({ markRead: true });
   }, [user?.id]);
 

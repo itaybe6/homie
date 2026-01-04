@@ -1756,15 +1756,8 @@ export default function ProfileScreen() {
                 {'לחצו כאן כדי לערוך את השאלון'}
               </Text>
             </View>
-            <View style={styles.surveyCTABadge}>
-              <LinearGradient
-                colors={['#4ADE80', '#16A34A']}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={styles.surveyCTABadgeInner}
-              >
-                <ClipboardList size={24} color="#FFFFFF" />
-              </LinearGradient>
+            <View style={styles.surveyCTACtaPill}>
+              <Text style={styles.surveyCTACtaPillText}>לצפייה</Text>
             </View>
           </TouchableOpacity>
           {!isSurveyCompleted && (
@@ -2994,31 +2987,22 @@ const styles = StyleSheet.create({
     textAlign: 'right',
     alignSelf: 'stretch',
   },
-  surveyCTABadge: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: '#FFFFFF',
-    borderWidth: 2,
-    borderColor: '#E5E7EB',
+  surveyCTACtaPill: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: 'rgba(22,163,74,0.10)',
+    borderWidth: 1,
+    borderColor: 'rgba(22,163,74,0.20)',
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#000000',
-    shadowOpacity: 0.12,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 6 },
   },
-  surveyCTABadgeInner: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#5e3f2d',
-    shadowColor: '#5e3f2d',
-    shadowOpacity: 0.25,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 4 },
+  surveyCTACtaPillText: {
+    color: '#16A34A',
+    fontSize: 12,
+    fontWeight: '900',
+    textAlign: 'center',
+    includeFontPadding: false,
   },
   modalOverlay: {
     flex: 1,

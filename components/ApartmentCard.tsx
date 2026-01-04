@@ -430,6 +430,11 @@ export default function ApartmentCard({
                   <Text style={[styles.title, styles.titleHome]} numberOfLines={1}>
                     {apartment.title}
                   </Text>
+                    {timeAgoLabel ? (
+                      <Text style={[styles.timeAgoInline, styles.timeAgoInlineHome]} numberOfLines={1}>
+                        {timeAgoLabel}
+                      </Text>
+                    ) : null}
                 </View>
 
                 <Text style={styles.subtitleHome} numberOfLines={1}>
@@ -455,12 +460,6 @@ export default function ApartmentCard({
                       </View>
                     ) : null}
                   </View>
-                ) : null}
-
-                {timeAgoLabel ? (
-                  <Text style={styles.timeAgoTextHome} numberOfLines={1}>
-                    {timeAgoLabel}
-                  </Text>
                 ) : null}
               </View>
 
@@ -499,6 +498,11 @@ export default function ApartmentCard({
                 <Text style={styles.title} numberOfLines={1}>
                   {apartment.title}
                 </Text>
+                {timeAgoLabel ? (
+                  <Text style={styles.timeAgoInline} numberOfLines={1}>
+                    {timeAgoLabel}
+                  </Text>
+                ) : null}
               </View>
 
               <View style={styles.locationRow}>
@@ -527,12 +531,6 @@ export default function ApartmentCard({
                     </View>
                   ) : null}
                 </View>
-              ) : null}
-
-              {timeAgoLabel ? (
-                <Text style={styles.timeAgoText} numberOfLines={1}>
-                  {timeAgoLabel}
-                </Text>
               ) : null}
 
               <View style={styles.bottomContainer}>
@@ -788,7 +786,9 @@ const styles = StyleSheet.create({
   },
   titleRow: {
     flexDirection: 'row-reverse',
-    alignItems: 'center',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    width: '100%',
   },
   title: {
     fontSize: 18,
@@ -833,23 +833,19 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     justifyContent: 'flex-end',
   },
-  timeAgoText: {
-    color: '#6B7280',
+  timeAgoInline: {
+    color: '#9CA3AF',
     fontSize: 12,
-    fontWeight: '700',
-    textAlign: 'right',
+    fontWeight: '800',
+    textAlign: 'left',
     writingDirection: 'rtl',
-    marginTop: 6,
-    marginBottom: 8,
+    marginTop: 2,
+    marginLeft: 10,
+    flexShrink: 0,
   },
-  timeAgoTextHome: {
-    color: '#6B7280',
+  timeAgoInlineHome: {
     fontSize: 11,
-    fontWeight: '700',
-    textAlign: 'right',
-    writingDirection: 'rtl',
-    marginTop: 6,
-    marginBottom: 6,
+    marginTop: 2,
   },
   tagPill: {
     paddingHorizontal: 10,

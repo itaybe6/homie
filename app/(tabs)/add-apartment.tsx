@@ -112,6 +112,8 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
   const previewGalleryRef = useRef<ScrollView>(null);
   const [previewActiveIdx, setPreviewActiveIdx] = useState(0);
   const [isSuccess, setIsSuccess] = useState(false);
+  const [successLabel, setSuccessLabel] = useState('הדירה הועלתה בהצלחה');
+  const [successRoute, setSuccessRoute] = useState<string>('/(tabs)/home');
   const successTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const inferredMode: UpsertMode =
@@ -1099,8 +1101,12 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
 
         if (updateErr) throw updateErr;
         updateApartment(updated as Apartment);
-        Alert.alert('הצלחה', 'הדירה עודכנה בהצלחה');
-        router.replace(`/apartment/${editingApartmentId}` as any);
+        setSuccessLabel('הדירה עודכנה בהצלחה');
+        setSuccessRoute(`/apartment/${editingApartmentId}`);
+        setIsSuccess(true);
+        successTimeoutRef.current = setTimeout(() => {
+          router.replace(`/apartment/${editingApartmentId}` as any);
+        }, _successNavDelayMs);
       } else {
         // Generate a 6-digit passcode for joining the apartment.
         // Retry a few times in case of rare collision (unique index in DB).
@@ -1211,6 +1217,8 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
 
         addApartment(apartmentRow);
         // Use the same success animation as join-passcode.
+        setSuccessLabel('הדירה הועלתה בהצלחה');
+        setSuccessRoute('/(tabs)/home');
         setIsSuccess(true);
         successTimeoutRef.current = setTimeout(() => {
           router.replace('/(tabs)/home');
@@ -2235,7 +2243,7 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
         >
           {step === 1 ? (
             <TouchableOpacity
-              style={[styles.footerCtaBtn, isUiLocked && styles.buttonDisabled]}
+              style={[styles.footerCtaBtn, mode === 'edit' ? styles.footerCtaBtnPublish : null, isUiLocked && styles.buttonDisabled]}
               onPress={handleNext}
               disabled={isUiLocked}
               activeOpacity={0.92}
@@ -2247,7 +2255,7 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
             <View style={styles.footerCtaRow}>
               {step < TOTAL_STEPS ? (
                 <TouchableOpacity
-                  style={[styles.footerCtaBtn, isUiLocked && styles.buttonDisabled]}
+                  style={[styles.footerCtaBtn, mode === 'edit' ? styles.footerCtaBtnPublish : null, isUiLocked && styles.buttonDisabled]}
                   onPress={handleNext}
                   disabled={isUiLocked}
                   activeOpacity={0.92}
@@ -2259,7 +2267,7 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
                 <TouchableOpacity
                   style={[
                     styles.footerCtaBtn,
-                    mode !== 'edit' ? styles.footerCtaBtnPublish : null,
+                    styles.footerCtaBtnPublish,
                     isUiLocked && styles.buttonDisabled,
                   ]}
                   onPress={handleSubmit}
@@ -2268,10 +2276,8 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
                 >
                   {isLoading ? (
                     <ActivityIndicator color="#FFFFFF" />
-                  ) : mode !== 'edit' ? (
-                    <Check size={20} color="#FFFFFF" />
                   ) : (
-                    <ArrowLeft size={20} color="#FFFFFF" />
+                    <Check size={20} color="#FFFFFF" />
                   )}
                   <Text style={styles.footerCtaText}>{mode === 'edit' ? 'עדכן דירה' : 'פרסם דירה'}</Text>
                 </TouchableOpacity>
@@ -2327,7 +2333,7 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
                   transition={{ type: 'timing', duration: 420, delay: 360 }}
                   style={styles.successText}
                 >
-                  הדירה הועלתה בהצלחה
+                  {successLabel}
                 </MotiText>
               </MotiView>
             </MotiView>
