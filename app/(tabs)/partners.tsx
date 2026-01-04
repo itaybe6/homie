@@ -35,6 +35,7 @@ import { useAuthStore } from '@/stores/authStore';
 import { User, UserSurveyResponse } from '@/types/database';
 import { computeGroupAwareLabel } from '@/lib/group';
 import RoommateCard from '@/components/RoommateCard';
+import UserParallaxModal from '@/components/UserParallaxModal';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { cityNeighborhoods, canonicalizeCityName } from '@/assets/data/neighborhoods';
 import { Apartment } from '@/types/database';
@@ -152,6 +153,10 @@ export default function PartnersScreen() {
   const [groupSize, setGroupSize] = useState<'any' | 2 | 3>('any');
   const [selectedCities, setSelectedCities] = useState<string[]>([]);
   const [matchScores, setMatchScores] = useState<Record<string, number | null>>({});
+  const [isDetailsOpen, setIsDetailsOpen] = useState(false);
+  const [previewModalVisible, setPreviewModalVisible] = useState(false);
+  const [previewUser, setPreviewUser] = useState<User | null>(null);
+  const [previewMatchPercent, setPreviewMatchPercent] = useState<number | null>(null);
 
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const translateX = useSharedValue(0);
@@ -182,6 +187,13 @@ export default function PartnersScreen() {
 
   const isDeckExhausted = items.length > 0 && currentIndex >= items.length;
 
+  const openPreviewModal = (u: User) => {
+    if (!u?.id) return;
+    setPreviewUser(u);
+    setPreviewMatchPercent(matchScores[u.id] ?? null);
+    setPreviewModalVisible(true);
+  };
+
   const onSwipe = (type: 'like' | 'pass') => {
     const item = items[currentIndex];
     if (!item) return;
@@ -201,7 +213,7 @@ export default function PartnersScreen() {
   };
 
   const swipeGesture = Gesture.Pan()
-    .enabled(!isDeckExhausted)
+    .enabled(!isDeckExhausted && !isDetailsOpen)
     .onChange((e) => {
       translateX.value = e.translationX;
     })
@@ -957,6 +969,8 @@ export default function PartnersScreen() {
           onPass={handlePass}
           style={{ marginBottom: 0 }}
           mediaHeight={swipeCardHeight}
+          enableParallaxDetails
+          onDetailsOpenChange={setIsDetailsOpen}
           onOpen={(u) =>
             router.push({
               pathname: '/(tabs)/user/[id]',
@@ -976,6 +990,7 @@ export default function PartnersScreen() {
         onLike={(groupId, users) => handleGroupLike(groupId, users)}
         onPass={(groupId, users) => handleGroupPass(groupId, users)}
         mediaHeight={swipeCardHeight}
+        onPreviewUser={openPreviewModal}
         onOpen={(userId: string) =>
           router.push({
             pathname: '/(tabs)/user/[id]',
@@ -984,7 +999,7 @@ export default function PartnersScreen() {
         }
         onOpenApartment={(apartmentId: string) =>
           router.push({
-            pathname: '/(tabs)/apartment/[id]',
+            pathname: '/apartment/[id]',
             params: { id: apartmentId } as any,
           })
         }
@@ -1155,7 +1170,7 @@ export default function PartnersScreen() {
       </ScrollView>
 
       {/* Fixed bottom buttons – consistent spacing across devices */}
-      {items.length && !isDeckExhausted ? (
+      {items.length && !isDeckExhausted && !isDetailsOpen ? (
         <View style={[styles.bottomActions, { bottom: actionsBottom }]} pointerEvents="box-none">
           <View style={styles.bottomActionsRow}>
             <TouchableOpacity
@@ -1404,6 +1419,23 @@ export default function PartnersScreen() {
           </View>
         </Modal>
       ) : null}
+
+      <UserParallaxModal
+        visible={previewModalVisible}
+        user={previewUser}
+        matchPercent={previewMatchPercent}
+        onClose={() => {
+          setPreviewModalVisible(false);
+          setPreviewUser(null);
+          setPreviewMatchPercent(null);
+        }}
+        onOpenProfile={(userId) =>
+          router.push({
+            pathname: '/(tabs)/user/[id]',
+            params: { id: userId, from: 'partners' } as any,
+          })
+        }
+      />
     </SafeAreaView>
   );
 }
@@ -1849,6 +1881,7 @@ function GroupCard({
   apartment,
   matchScores,
   onOpen,
+  onPreviewUser,
   onLike,
   onPass,
   onOpenApartment,
@@ -1860,12 +1893,14 @@ function GroupCard({
   apartment?: Apartment;
   matchScores?: Record<string, number | null>;
   onOpen: (id: string) => void;
+  onPreviewUser?: (u: User) => void;
   onLike: (groupId: string, users: User[]) => void;
   onPass: (groupId: string, users: User[]) => void;
   onOpenApartment: (apartmentId: string) => void;
   style?: ViewStyle;
   mediaHeight?: number;
 }) {
+  const didLongPressRef = useRef(false);
   const displayUsers = users.slice(0, 4);
   const extra = users.length - displayUsers.length;
   const DEFAULT_AVATAR = 'https://cdn-icons-png.flaticon.com/512/847/847969.png';
@@ -1887,7 +1922,18 @@ function GroupCard({
             <TouchableOpacity
               key={u.id}
               activeOpacity={0.9}
-              onPress={() => onOpen(u.id)}
+              onPress={() => {
+                if (didLongPressRef.current) {
+                  didLongPressRef.current = false;
+                  return;
+                }
+                onOpen(u.id);
+              }}
+              delayLongPress={350}
+              onLongPress={() => {
+                didLongPressRef.current = true;
+                onPreviewUser?.(u);
+              }}
               style={[
                 groupStyles.cell,
                 {

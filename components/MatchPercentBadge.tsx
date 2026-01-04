@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Platform, StyleSheet, Text, View, ViewStyle } from 'react-native';
+import { Platform, StyleProp, StyleSheet, Text, View, ViewStyle } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import Ticker from '@/components/Ticker';
 
@@ -11,7 +11,7 @@ type MatchPercentBadgeProps = {
    */
   triggerKey?: string | number | null;
   size?: number;
-  style?: ViewStyle;
+  style?: StyleProp<ViewStyle>;
   delayMs?: number;
   label?: string;
 };
