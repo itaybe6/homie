@@ -49,6 +49,7 @@ export default function RegisterScreen() {
   const [age, setAge] = useState('');
   const [city, setCity] = useState('');
   const [avatarUrl, setAvatarUrl] = useState('');
+  const [instagramUrl, setInstagramUrl] = useState('');
   const [citySuggestions, setCitySuggestions] = useState<MapboxGeocodingFeature[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
@@ -220,6 +221,7 @@ export default function RegisterScreen() {
         gender: mode === 'user' && (gender === 'male' || gender === 'female') ? gender : undefined,
         avatarUrl: avatarForSignup,
         avatarLocalUri: mode === 'user' ? avatarLocalUri : undefined,
+        instagramUrl: mode === 'user' ? (instagramUrl.trim() || undefined) : undefined,
       });
 
       // Send 6-digit code email (requires Email OTP enabled in Supabase Auth settings).
@@ -233,6 +235,7 @@ export default function RegisterScreen() {
         bio: mode === 'user' ? (bio.trim() || undefined) : undefined,
         gender: mode === 'user' && (gender === 'male' || gender === 'female') ? gender : undefined,
         avatarUrl: avatarForSignup,
+        instagramUrl: mode === 'user' ? (instagramUrl.trim() || undefined) : undefined,
       });
 
       router.push('/auth/verify-email' as any);
@@ -544,6 +547,18 @@ export default function RegisterScreen() {
                       value={bio}
                       onChangeText={setBio}
                       multiline
+                      editable={!isLoading}
+                      placeholderTextColor="#9DA4AE"
+                    />
+
+                    <Text style={styles.label}>אינסטגרם (אופציונלי)</Text>
+                    <TextInput
+                      style={[styles.input, { writingDirection: 'ltr', textAlign: 'left' }]}
+                      placeholder="https://instagram.com/yourname"
+                      value={instagramUrl}
+                      onChangeText={setInstagramUrl}
+                      autoCapitalize="none"
+                      autoCorrect={false}
                       editable={!isLoading}
                       placeholderTextColor="#9DA4AE"
                     />

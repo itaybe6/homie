@@ -16,6 +16,7 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Bell, Inbox, Filter, Home, Users, UserPlus2, UserPlus, Sparkles, MessageCircle } from 'lucide-react-native';
+import WhatsAppSvg from '@/components/icons/WhatsAppSvg';
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/authStore';
 import { Apartment, Notification, User } from '@/types/database';
@@ -63,7 +64,7 @@ export default function RequestsScreen() {
   // notifications refresh uses the same pull-to-refresh as requests
   const [notifActionLoadingId, setNotifActionLoadingId] = useState<string | null>(null);
   const [notifSendersById, setNotifSendersById] = useState<
-    Record<string, { id: string; full_name?: string; avatar_url?: string }>
+    Record<string, { id: string; full_name?: string; avatar_url?: string; phone?: string }>
   >({});
   const [notifSenderGroupIdByUserId, setNotifSenderGroupIdByUserId] = useState<Record<string, string>>({});
   const [notifGroupMembersByGroupId, setNotifGroupMembersByGroupId] = useState<Record<string, string[]>>({});
@@ -107,6 +108,14 @@ export default function RequestsScreen() {
   const isMergeProfileNotification = (n: Notification): boolean => {
     const t = (n?.title || '').trim();
     return t.includes('מיזוג פרופילים');
+  };
+
+  const isApprovedNotification = (n: Notification): boolean => {
+    const desc = (n?.description || '').trim();
+    const title = (n?.title || '').trim();
+    // Don't show WhatsApp for merge profile notifications
+    if (title.includes('מיזוג פרופילים')) return false;
+    return desc.includes('אישר/ה את בקשת') || desc.includes('אושרה');
   };
 
   const extractInviteApartmentId = (description: string): string | null => {
@@ -194,11 +203,11 @@ export default function RequestsScreen() {
             .filter((id): id is string => typeof id === 'string' && id.length > 0)
         )
       );
-      let usersMap: Record<string, { id: string; full_name?: string; avatar_url?: string }> = {};
+      let usersMap: Record<string, { id: string; full_name?: string; avatar_url?: string; phone?: string }> = {};
       if (allSenderIds.length > 0) {
         const { data: usersData, error: usersErr } = await supabase
           .from('users')
-          .select('id, full_name, avatar_url')
+          .select('id, full_name, avatar_url, phone')
           .in('id', allSenderIds);
         if (usersErr) throw usersErr;
         (usersData || []).forEach((u: any) => {
@@ -874,7 +883,7 @@ export default function RequestsScreen() {
           sender_id: user.id,
           recipient_id: req.sender_id,
           title: 'בקשתך אושרה',
-          description: `${approverName} אישר/ה את בקשתך והתווספת כשותף/ה לדירה${aptTitle ? `: ${aptTitle}` : ''}${aptCity ? ` (${aptCity})` : ''}.`,
+          description: `מנהל הנכס מעוניין בך כשותף בדירה${aptTitle ? `: ${aptTitle}` : ''}${aptCity ? ` (${aptCity})` : ''}. אנא העבירו את השיחה לוואטסאפ כדי להשלים את התהליך.`,
           is_read: false,
           event_key: `apt_join:${req.id}:approved`,
         });
@@ -1774,7 +1783,9 @@ export default function RequestsScreen() {
                               )
                             }
                           >
-                            <MessageCircle size={14} color="#FFFFFF" />
+                            <View style={styles.whatsappIconCircle}>
+                              <WhatsAppSvg size={14} color="#25D366" />
+                            </View>
                             <Text style={styles.whatsappBtnText}>וואטסאפ</Text>
                           </TouchableOpacity>
                         ) : null}
@@ -1895,30 +1906,52 @@ export default function RequestsScreen() {
                       {incoming && item.kind === 'APT' && item.status === 'APPROVED' && (item.type === 'JOIN_APT' || !item.type) && (
                         groupMembers.length > 0 ? (
                           <View style={{ marginTop: 12, alignItems: 'flex-end', gap: 10 as any }}>
-                              {groupMembers.map((m, idx) => {
-                                const firstName = (m.full_name || '').split(' ')[0] || '';
-                                return (
-                                  m.phone ? (
-                                    <TouchableOpacity
-                                      key={idx}
-                                      style={styles.whatsappBtnPill}
-                                      activeOpacity={0.85}
-                                      accessibilityLabel={`וואטסאפ${firstName ? ` ל-${firstName}` : ''}`}
-                                      onPress={() =>
-                                        openWhatsApp(
-                                          m.phone as string,
-                                          `היי${firstName ? ` ${firstName}` : ''}, בקשתך להצטרף לדירה${apt?.title ? `: ${apt.title}` : ''}${apt?.city ? ` (${apt.city})` : ''} אושרה ב-Homie. אשמח לתאם שיחה/צפייה.`
-                                        )
-                                      }
-                                    >
-                                      <MessageCircle size={14} color="#FFFFFF" />
-                                      <Text style={styles.whatsappBtnText}>וואטסאפ</Text>
-                                    </TouchableOpacity>
-                                  ) : null
-                                );
-                              })}
+                            {groupMembers.map((m, idx) => {
+                              const firstName = (m.full_name || '').split(' ')[0] || '';
+                              if (!m.phone) return null;
+                              return (
+                                <TouchableOpacity
+                                  key={idx}
+                                  style={styles.whatsappBtnPill}
+                                  activeOpacity={0.85}
+                                  accessibilityLabel={`וואטסאפ${firstName ? ` ל-${firstName}` : ''}`}
+                                  onPress={() =>
+                                    openWhatsApp(
+                                      m.phone as string,
+                                      `היי${firstName ? ` ${firstName}` : ''}, בקשתך להצטרף לדירה${apt?.title ? `: ${apt.title}` : ''}${apt?.city ? ` (${apt.city})` : ''} אושרה ב-Homie. אנא העבירו את השיחה לוואטסאפ כדי להשלים את התהליך.`
+                                    )
+                                  }
+                                >
+                                  <View style={styles.whatsappIconCircle}>
+                                    <WhatsAppSvg size={14} color="#25D366" />
+                                  </View>
+                                  <Text style={styles.whatsappBtnText}>וואטסאפ</Text>
+                                </TouchableOpacity>
+                              );
+                            })}
                           </View>
-                        ) : null
+                        ) : (
+                          (otherUser as any)?.phone ? (
+                            <TouchableOpacity
+                              style={styles.whatsappBtnPill}
+                              activeOpacity={0.85}
+                              accessibilityLabel="וואטסאפ"
+                              onPress={() => {
+                                const fullName = String((otherUser as any)?.full_name || '').trim();
+                                const firstName = fullName ? fullName.split(' ')[0] : '';
+                                openWhatsApp(
+                                  String((otherUser as any).phone),
+                                  `היי${firstName ? ` ${firstName}` : ''}, בקשתך להצטרף לדירה${apt?.title ? `: ${apt.title}` : ''}${apt?.city ? ` (${apt.city})` : ''} אושרה ב-Homie. אנא העבירו את השיחה לוואטסאפ כדי להשלים את התהליך.`
+                                );
+                              }}
+                            >
+                              <View style={styles.whatsappIconCircle}>
+                                <WhatsAppSvg size={14} color="#25D366" />
+                              </View>
+                              <Text style={styles.whatsappBtnText}>וואטסאפ</Text>
+                            </TouchableOpacity>
+                          ) : null
+                        )
                       )}
                       {/* Sender view: approved JOIN_APT owner details moved to modal ("פרטים נוספים") */}
                       {/* Sender view (sent): expose recipient phone and WhatsApp action once a MATCH is approved */}
@@ -2333,6 +2366,7 @@ export default function RequestsScreen() {
                   const aptId = extractInviteApartmentId(n.description);
                   const descText = displayDescription(n.description);
                   const canApproveInvite = !!aptId && !isInviteApproved(n.description);
+                  const isApproved = isApprovedNotification(n);
 
                   return (
                     <View style={styles.igRow}>
@@ -2363,6 +2397,26 @@ export default function RequestsScreen() {
                             onPress={() => handleApproveInviteFromNotification(n, aptId as string)}
                           >
                             <Text style={styles.igBtnPrimaryText}>{notifActionLoadingId === n.id ? '...' : 'אישור'}</Text>
+                          </TouchableOpacity>
+                        </View>
+                      ) : isApproved && sender?.phone ? (
+                        <View style={styles.igActions}>
+                          <TouchableOpacity
+                            style={styles.igWhatsappBtn}
+                            activeOpacity={0.85}
+                            accessibilityLabel="וואטסאפ"
+                            onPress={() => {
+                              const firstName = (sender?.full_name || '').split(' ')[0] || '';
+                              openWhatsApp(
+                                sender.phone as string,
+                                `היי${firstName ? ` ${firstName}` : ''}, תודה שאישרת את הבקשה שלי ב-Homie! אשמח לדבר ולתאם פגישה 🙂`
+                              );
+                            }}
+                          >
+                            <View style={styles.igWhatsappIconCircle}>
+                              <WhatsAppSvg size={14} color="#25D366" />
+                            </View>
+                            <Text style={styles.igWhatsappBtnText}>וואטסאפ</Text>
                           </TouchableOpacity>
                         </View>
                       ) : null}
@@ -2442,9 +2496,36 @@ export default function RequestsScreen() {
                             <Text style={styles.igBtnSecondaryText}>דחייה</Text>
                           </TouchableOpacity>
                         </View>
+                      ) : r.status === 'APPROVED' ? (
+                        <View style={styles.igActionsRow}>
+                          {((r.kind === 'MATCH' || r.kind === 'APT' || r.kind === 'APT_INVITE') && !!(otherUser as any)?.phone) ? (
+                            <TouchableOpacity
+                              style={styles.igWhatsappBtn}
+                              activeOpacity={0.85}
+                              accessibilityLabel="וואטסאפ"
+                              onPress={() => {
+                                const fullName = String((otherUser as any)?.full_name || '').trim();
+                                const firstName = fullName ? fullName.split(' ')[0] : '';
+                                const aptTitle = (apt as any)?.title || '';
+                                const aptCity = (apt as any)?.city || '';
+                                const message =
+                                  r.kind === 'MATCH'
+                                    ? `היי${firstName ? ` ${firstName}` : ''}, בקשת השותפות שלנו ב-Homie אושרה. אשמח לקבוע שיחה ולהכיר 🙂`
+                                    : `היי${firstName ? ` ${firstName}` : ''}, בקשתך להצטרף לדירה${aptTitle ? `: ${aptTitle}` : ''}${aptCity ? ` (${aptCity})` : ''} אושרה ב-Homie. אשמח לתאם שיחה או צפייה.`;
+                                openWhatsApp(String((otherUser as any).phone), message);
+                              }}
+                            >
+                              <View style={styles.igWhatsappIconCircle}>
+                                <WhatsAppSvg size={14} color="#25D366" />
+                              </View>
+                              <Text style={styles.igWhatsappBtnText}>וואטסאפ</Text>
+                            </TouchableOpacity>
+                          ) : null}
+                          <Text style={styles.igStatusText}>אושר</Text>
+                        </View>
                       ) : (
                         <Text style={styles.igStatusText}>
-                          {r.status === 'APPROVED' ? 'אושר' : r.status === 'REJECTED' ? 'נדחה' : 'עודכן'}
+                          {r.status === 'REJECTED' ? 'נדחה' : 'עודכן'}
                         </Text>
                       )}
                     </View>
@@ -2834,6 +2915,39 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 8 as any,
     alignItems: 'center',
+  },
+  igWhatsappBtn: {
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    minWidth: 88,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row-reverse',
+    gap: 6 as any,
+    borderWidth: 1,
+    borderColor: 'rgba(37, 211, 102, 0.25)',
+    shadowColor: '#25D366',
+    shadowOpacity: 0.12,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
+  },
+  igWhatsappIconCircle: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: 'rgba(37, 211, 102, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(37, 211, 102, 0.20)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  igWhatsappBtnText: {
+    color: '#25D366',
+    fontSize: 12,
+    fontWeight: '900',
   },
   igBtnPrimary: {
     backgroundColor: '#5e3f2d',
@@ -3255,17 +3369,34 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6 as any,
-    backgroundColor: '#25D366',
-    paddingVertical: 5,
-    paddingHorizontal: 10,
+    backgroundColor: '#FFFFFF',
+    paddingVertical: 6,
+    paddingHorizontal: 12,
     borderRadius: 999,
     alignSelf: 'flex-start',
-    minHeight: 28,
+    minHeight: 32,
+    borderWidth: 1,
+    borderColor: 'rgba(37, 211, 102, 0.25)',
+    shadowColor: '#25D366',
+    shadowOpacity: 0.12,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
+  },
+  whatsappIconCircle: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: 'rgba(37, 211, 102, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(37, 211, 102, 0.20)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   whatsappBtnText: {
-    color: '#FFFFFF',
-    fontSize: 11,
-    fontWeight: '800',
+    color: '#25D366',
+    fontSize: 12,
+    fontWeight: '900',
     writingDirection: 'rtl',
     lineHeight: 14,
   },

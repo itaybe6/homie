@@ -51,8 +51,9 @@ export const authService = {
     gender?: 'male' | 'female';
     city?: string;
     avatarUrl?: string;
+    instagramUrl?: string;
   }) {
-    const { email, fullName, role, phone, age, bio, gender, city, avatarUrl } = params;
+    const { email, fullName, role, phone, age, bio, gender, city, avatarUrl, instagramUrl } = params;
 
     // Sends an email OTP (6-digit code) when Email OTP is enabled in Supabase Auth settings.
     // shouldCreateUser ensures a new user is created if it doesn't exist yet.
@@ -69,6 +70,7 @@ export const authService = {
           gender: gender || null,
           city: city || null,
           avatar_url: avatarUrl || null,
+          instagram_url: instagramUrl || null,
         },
       },
     });
@@ -141,6 +143,7 @@ export const authService = {
     gender?: 'male' | 'female';
     city?: string;
     avatarUrl?: string;
+    instagramUrl?: string;
     createProfile?: boolean; // when false, do not upsert into users table
   }) {
     const {
@@ -154,6 +157,7 @@ export const authService = {
       gender,
       city,
       avatarUrl,
+      instagramUrl,
       createProfile = true,
     } = params;
 
@@ -172,6 +176,7 @@ export const authService = {
           gender: gender || null,
           city: city || null,
           avatar_url: avatarUrl || null,
+          instagram_url: instagramUrl || null,
         },
       },
     });
@@ -229,6 +234,7 @@ export const authService = {
               gender: gender || null,
               city: city || null,
               avatar_url: avatarUrl || null,
+              instagram_url: instagramUrl || null,
             }
           : {};
 

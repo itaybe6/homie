@@ -31,6 +31,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AnimatePresence, MotiText, MotiView } from 'moti';
 import { Easing as ReanimatedEasing } from 'react-native-reanimated';
 import { KeyFabPanel } from '@/components/KeyFabPanel';
+import SwipeBackGesture from '@/components/SwipeBackGesture';
 import { getNeighborhoodsForCityName } from '@/lib/neighborhoods';
 import type { Apartment } from '@/types/database';
 import {
@@ -110,6 +111,8 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
   }, []);
   const screenWidth = Dimensions.get('window').width;
   const previewGalleryRef = useRef<ScrollView>(null);
+  const addressInputRef = useRef<TextInput>(null);
+  const skipNextAddressAutocompleteRef = useRef(false);
   const [previewActiveIdx, setPreviewActiveIdx] = useState(0);
   const [isSuccess, setIsSuccess] = useState(false);
   const [successLabel, setSuccessLabel] = useState('הדירה הועלתה בהצלחה');
@@ -188,6 +191,7 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
   const [images, setImages] = useState<string[]>([]); // local URIs before upload
   const [moveInDate, setMoveInDate] = useState(''); // Month+year label (display only)
   const [moveInDateObj, setMoveInDateObj] = useState<Date | null>(null);
+  const [isImmediateMoveIn, setIsImmediateMoveIn] = useState(false);
   const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
   const [sizeSqm, setSizeSqm] = useState(''); // apartment size in square meters (digits)
   const [gardenSizeSqm, setGardenSizeSqm] = useState(''); // garden size in square meters (digits) - only for garden apartments
@@ -200,6 +204,7 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
   const [error, setError] = useState('');
   const [citySuggestions, setCitySuggestions] = useState<MapboxGeocodingFeature[]>([]);
   const [addressSuggestions, setAddressSuggestions] = useState<MapboxGeocodingFeature[]>([]);
+  const [isAddressFocused, setIsAddressFocused] = useState(false);
   const [isNeighborhoodPickerOpen, setIsNeighborhoodPickerOpen] = useState(false);
   const [neighborhoodSearch, setNeighborhoodSearch] = useState('');
   const [selectedGeo, setSelectedGeo] = useState<{ lng: number; lat: number } | null>(null);
@@ -280,6 +285,11 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
   useEffect(() => {
     let active = true;
     const run = async () => {
+      if (skipNextAddressAutocompleteRef.current) {
+        skipNextAddressAutocompleteRef.current = false;
+        return;
+      }
+      if (!isAddressFocused) return;
       const q = address.trim();
       if (!mapboxToken) {
         if (active) setAddressSuggestions([]);
@@ -312,7 +322,16 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
       active = false;
       cleanup?.();
     };
-  }, [address, city, mapboxToken]);
+  }, [address, city, mapboxToken, isAddressFocused]);
+
+  // "Immediate move-in" auto-fills current month.
+  useEffect(() => {
+    if (!isImmediateMoveIn) return;
+    const monthStart = normalizeToMonthStart(startOfToday());
+    setMoveInDateObj(monthStart);
+    setMoveInDate(formatHebMonthYear(monthStart));
+    setIsDatePickerOpen(false);
+  }, [isImmediateMoveIn]);
 
   // EDIT MODE: load apartment and hydrate the same form UI.
   useEffect(() => {
@@ -389,6 +408,11 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
             const monthStart = normalizeToMonthStart(d);
             setMoveInDateObj(monthStart);
             setMoveInDate(formatHebMonthYear(monthStart));
+            // If the saved move-in month equals the current month, reflect it as "immediate"
+            const currentMonthStart = normalizeToMonthStart(startOfToday());
+            setIsImmediateMoveIn(
+              toISODateString(currentMonthStart) === toISODateString(monthStart)
+            );
           }
         }
 
@@ -1232,22 +1256,26 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
   };
 
   const isUiLocked = isLoading || isSuccess;
+  const handleBack = () => {
+    router.back();
+  };
 
   return (
-    <View style={styles.container}>
-      <KeyboardAvoidingView
-        style={styles.keyboardAvoid}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-        <View style={[styles.header, { paddingTop: (insets.top || 0) + 10 }]}>
-          <View style={styles.headerRow}>
-            <TouchableOpacity style={styles.headerBack} onPress={() => router.back()}>
-              <ArrowRight size={22} color="#111827" />
-            </TouchableOpacity>
-            <Text style={styles.headerTitle}>{mode === 'edit' ? 'עריכת דירה' : 'הוספת דירה חדשה'}</Text>
-            {/* Spacer to keep the title centered */}
-            <View style={styles.headerSideSpacer} />
+    <SwipeBackGesture onGoBack={handleBack} edge="right">
+      <View style={styles.container}>
+        <KeyboardAvoidingView
+          style={styles.keyboardAvoid}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+          <View style={[styles.header, { paddingTop: (insets.top || 0) + 10 }]}>
+            <View style={styles.headerRow}>
+              <TouchableOpacity style={styles.headerBack} onPress={handleBack}>
+                <ArrowRight size={22} color="#111827" />
+              </TouchableOpacity>
+              <Text style={styles.headerTitle}>{mode === 'edit' ? 'עריכת דירה' : 'הוספת דירה חדשה'}</Text>
+              {/* Spacer to keep the title centered */}
+              <View style={styles.headerSideSpacer} />
+            </View>
           </View>
-        </View>
 
         <View style={styles.progressMetaRow}>
           <Text style={styles.progressMetaText}>{`הושלם ${Math.round((step / TOTAL_STEPS) * 100)}%`}</Text>
@@ -1408,6 +1436,7 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
                   <View style={styles.inputWithIcon}>
                     <MapPin size={18} color="#9CA3AF" style={styles.inputIcon} />
                     <TextInput
+                      ref={addressInputRef}
                       style={[styles.input, styles.inputFlex]}
                       placeholder="רחוב, מספר, עיר"
                       value={address}
@@ -1415,6 +1444,8 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
                         setAddress(t);
                         if (neighborhood) setNeighborhood('');
                       }}
+                      onFocus={() => setIsAddressFocused(true)}
+                      onBlur={() => setIsAddressFocused(false)}
                       editable={!isLoading}
                       placeholderTextColor="#9AA0A6"
                     />
@@ -1429,8 +1460,11 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
                             const street = String(f.text || '').trim();
                             const house = String(f.address || '').trim();
                             const nextAddress = `${street}${house ? ` ${house}` : ''}`.trim();
+                            // Prevent re-opening suggestions due to the address useEffect firing after selection
+                            skipNextAddressAutocompleteRef.current = true;
                             setAddress(nextAddress || street || address);
                             setAddressSuggestions([]);
+                            addressInputRef.current?.blur();
                             Keyboard.dismiss();
 
                             // derive city from context when possible
@@ -1507,7 +1541,7 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
                         Keyboard.dismiss();
                         setIsDatePickerOpen(true);
                       }}
-                      disabled={isUiLocked}
+                      disabled={isUiLocked || isImmediateMoveIn}
                       style={styles.inputWithIcon}
                     >
                       <Calendar size={18} color="#9AA0A6" style={styles.inputIcon} />
@@ -1526,7 +1560,7 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
 
                   <View style={[styles.inputGroup, styles.halfWidth]}>
                     <Text style={styles.label}>
-                      שכר דירה (לשותף) <Text style={styles.required}>*</Text>
+                      שכר דירה <Text style={styles.required}>*</Text>
                     </Text>
                     <View style={styles.moneyWrap}>
                       <Text style={styles.moneySuffix}>₪</Text>
@@ -1541,6 +1575,18 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
                       />
                     </View>
                   </View>
+                </View>
+
+                <View style={[styles.inputGroup, styles.switchRow, { marginTop: 0 }]}>
+                  <Text style={[styles.label, styles.switchLabel]}>כניסה מיידית</Text>
+                  <Switch
+                    value={isImmediateMoveIn}
+                    onValueChange={setIsImmediateMoveIn}
+                    disabled={isLoading}
+                    trackColor={{ false: '#D1D5DB', true: '#5e3f2d' }}
+                    thumbColor="#FFFFFF"
+                    ios_backgroundColor="#D1D5DB"
+                  />
                 </View>
 
                 <View style={styles.stepperCard}>
@@ -1957,7 +2003,7 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
                           <Text style={styles.aptHeroCurrency}>₪</Text>
                           {price ? formatWithCommas(price) : '—'}
                         </Text>
-                        <Text style={styles.aptHeroPricePer}>שכר דירה (לשותף)</Text>
+                        <Text style={styles.aptHeroPricePer}>שכר דירה</Text>
                       </View>
                     </View>
 
@@ -2158,6 +2204,7 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
                     const monthStart = normalizeToMonthStart(opt.date);
                     setMoveInDateObj(monthStart);
                     setMoveInDate(formatHebMonthYear(monthStart));
+                    setIsImmediateMoveIn(false);
                     setIsDatePickerOpen(false);
                   }}
                 >
@@ -2340,8 +2387,9 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
             </MotiView>
           ) : null}
         </AnimatePresence>
-      </KeyboardAvoidingView>
-    </View>
+        </KeyboardAvoidingView>
+      </View>
+    </SwipeBackGesture>
   );
 }
 

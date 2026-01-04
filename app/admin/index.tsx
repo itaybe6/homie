@@ -19,12 +19,16 @@ import { useAuthStore } from '@/stores/authStore';
 
 type AdminTab = 'overview' | 'users' | 'owners' | 'apartments' | 'matches';
 
+const PRIMARY = '#5e3f2d';
+const TEXT_MUTED = '#6B7280';
+
 export default function AdminDashboard() {
   const router = useRouter();
   const authUser = useAuthStore((s) => s.user);
   const setStoreUser = useAuthStore((s) => s.setUser);
   const [active, setActive] = useState<AdminTab>('overview');
   const [loading, setLoading] = useState(true);
+  const [reloadKey, setReloadKey] = useState(0);
 
   const [users, setUsers] = useState<any[]>([]);
   const [apartments, setApartments] = useState<any[]>([]);
@@ -131,7 +135,7 @@ export default function AdminDashboard() {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [reloadKey]);
 
   const totalUsers = users.length;
   const totalApartments = apartments.length;
@@ -220,7 +224,7 @@ export default function AdminDashboard() {
 
   const statCards = useMemo(
     () => [
-      { key: 'users', title: 'משתמשים', value: totalUsers, icon: Users, color: '#4C1D95' },
+      { key: 'users', title: 'משתמשים', value: totalUsers, icon: Users, color: PRIMARY },
       { key: 'apartments', title: 'דירות', value: totalApartments, icon: HomeIcon, color: '#00BCD4' },
       { key: 'regularUsers', title: 'משתמשים רגילים', value: regularUsersCount, icon: Users, color: '#60A5FA' },
       { key: 'owners', title: 'בעלי דירות', value: ownersCount, icon: HomeIcon, color: '#34D399' },
@@ -237,33 +241,38 @@ export default function AdminDashboard() {
       <View style={styles.header}>
         <Text style={styles.title}>ממשק מנהל</Text>
         <Text style={styles.subtitle}>סקירה וסטטיסטיקות מערכת</Text>
-        <TouchableOpacity
-          style={styles.logoutBtn}
-          activeOpacity={0.9}
-          onPress={async () => {
-            try {
-              await authService.signOut();
-              setStoreUser(null);
-              router.replace('/auth/login');
-            } catch {
-              // ignore
-            }
-          }}>
-          <Text style={styles.logoutText}>התנתק</Text>
-        </TouchableOpacity>
+        <View style={styles.headerActionsRow}>
+          <TouchableOpacity style={styles.refreshBtn} activeOpacity={0.9} onPress={() => setReloadKey((k) => k + 1)}>
+            <Text style={styles.refreshText}>רענן</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.logoutBtn}
+            activeOpacity={0.9}
+            onPress={async () => {
+              try {
+                await authService.signOut();
+                setStoreUser(null);
+                router.replace('/auth/login');
+              } catch {
+                // ignore
+              }
+            }}>
+            <Text style={styles.logoutText}>התנתק</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
-      <View style={styles.tabs}>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabs}>
         <Segment label="סקירה" active={active === 'overview'} onPress={() => setActive('overview')} />
         <Segment label="משתמשים" active={active === 'users'} onPress={() => setActive('users')} />
         <Segment label="בעלי דירות" active={active === 'owners'} onPress={() => setActive('owners')} />
         <Segment label="דירות" active={active === 'apartments'} onPress={() => setActive('apartments')} />
         <Segment label="התאמות" active={active === 'matches'} onPress={() => setActive('matches')} />
-      </View>
+      </ScrollView>
 
       {loading ? (
         <View style={styles.center}>
-          <ActivityIndicator size="large" color="#5e3f2d" />
+          <ActivityIndicator size="large" color={PRIMARY} />
         </View>
       ) : active === 'overview' ? (
         <ScrollView contentContainerStyle={styles.scrollContent}>
@@ -277,9 +286,9 @@ export default function AdminDashboard() {
             <SectionHeader title="טווחי גילאים (role='user')" />
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
               {ageStats.map((a) => (
-                <View key={a.label} style={[styles.smallStat, { borderColor: '#2A2A37', width: '48%' }]}>
+                <View key={a.label} style={[styles.smallStat, { width: '48%' }]}>
                   <Text style={styles.smallStatTitle}>{a.label}</Text>
-                  <Text style={[styles.smallStatValue, { color: '#FFFFFF' }]}>{a.value}</Text>
+                  <Text style={styles.smallStatValue}>{a.value}</Text>
                 </View>
               ))}
             </View>
@@ -334,7 +343,7 @@ export default function AdminDashboard() {
             <TextInput
               style={styles.searchInput}
               placeholder="חיפוש לפי שם..."
-              placeholderTextColor="#9DA4AE"
+              placeholderTextColor="#9CA3AF"
               value={userQuery}
               onChangeText={setUserQuery}
               textAlign="right"
@@ -354,7 +363,7 @@ export default function AdminDashboard() {
             <TextInput
               style={styles.searchInput}
               placeholder="חיפוש בעל דירה לפי שם..."
-              placeholderTextColor="#9DA4AE"
+              placeholderTextColor="#9CA3AF"
               value={userQuery}
               onChangeText={setUserQuery}
               textAlign="right"
@@ -398,7 +407,7 @@ export default function AdminDashboard() {
                   <TextInput
                     style={[styles.searchInput, { flex: 1 }]}
                     placeholder="חיפוש לפי עיר/שכונה..."
-                    placeholderTextColor="#9DA4AE"
+                    placeholderTextColor="#9CA3AF"
                     value={aptCityQuery}
                     onChangeText={setAptCityQuery}
                     textAlign="right"
@@ -408,7 +417,7 @@ export default function AdminDashboard() {
                   <TextInput
                     style={[styles.smallInput]}
                     placeholder="מינ׳ מחיר"
-                    placeholderTextColor="#9DA4AE"
+                    placeholderTextColor="#9CA3AF"
                     keyboardType="number-pad"
                     value={priceMin}
                     onChangeText={setPriceMin}
@@ -417,7 +426,7 @@ export default function AdminDashboard() {
                   <TextInput
                     style={[styles.smallInput]}
                     placeholder="מקס׳ מחיר"
-                    placeholderTextColor="#9DA4AE"
+                    placeholderTextColor="#9CA3AF"
                     keyboardType="number-pad"
                     value={priceMax}
                     onChangeText={setPriceMax}
@@ -426,7 +435,7 @@ export default function AdminDashboard() {
                   <TextInput
                     style={[styles.smallInput]}
                     placeholder="מינ׳ חדרי שינה"
-                    placeholderTextColor="#9DA4AE"
+                    placeholderTextColor="#9CA3AF"
                     keyboardType="number-pad"
                     value={minBedrooms}
                     onChangeText={setMinBedrooms}
@@ -435,7 +444,7 @@ export default function AdminDashboard() {
                   <TextInput
                     style={[styles.smallInput]}
                     placeholder="מינ׳ מקלחות"
-                    placeholderTextColor="#9DA4AE"
+                    placeholderTextColor="#9CA3AF"
                     keyboardType="number-pad"
                     value={minBathrooms}
                     onChangeText={setMinBathrooms}
@@ -512,7 +521,7 @@ function SectionHeader({ title }: { title: string }) {
   return (
     <View style={styles.sectionHeader}>
       <Text style={styles.sectionTitle}>{title}</Text>
-      <BarChart2 size={18} color="#9DA4AE" />
+      <BarChart2 size={18} color={TEXT_MUTED} />
     </View>
   );
 }
@@ -529,7 +538,7 @@ function StatCard({
   color: string;
 }) {
   return (
-    <View style={[styles.statCard, { borderColor: color }]}>
+    <View style={[styles.statCard, { borderRightColor: color }]}>
       <View style={[styles.iconWrap, { backgroundColor: `${color}22` }]}>
         <Icon size={20} color={color} />
       </View>
@@ -548,8 +557,8 @@ function SmallStat({ title, value, color, Icon, onPress, active }: any) {
       style={[
         styles.smallStat,
         {
-          borderColor: active ? color : '#2A2A37',
-          backgroundColor: active ? '#1B1B29' : '#141420',
+          borderColor: active ? color : '#E5E7EB',
+          backgroundColor: active ? `${color}14` : '#FFFFFF',
         },
       ]}>
       <View style={[styles.iconWrap, { backgroundColor: `${color}22` }]}>
@@ -569,7 +578,7 @@ function UserRow({ user, aptCount }: { user: any; aptCount?: number }) {
           <Image source={{ uri: user.avatar_url }} style={styles.avatar} />
         ) : (
           <View style={styles.avatarFallback}>
-            <Users size={16} color="#9DA4AE" />
+            <Users size={16} color={TEXT_MUTED} />
           </View>
         )}
       </View>
@@ -594,8 +603,8 @@ function InfoChip({ label, value, icon }: { label: string; value: string; icon?:
   return (
     <View style={styles.chip}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-        {icon === 'phone' ? <Phone size={14} color="#9DA4AE" /> : null}
-        {icon === 'map' ? <MapPin size={14} color="#9DA4AE" /> : null}
+        {icon === 'phone' ? <Phone size={14} color={TEXT_MUTED} /> : null}
+        {icon === 'map' ? <MapPin size={14} color={TEXT_MUTED} /> : null}
         <Text style={styles.chipText}>{value}</Text>
         <Text style={styles.chipLabel}>{label}</Text>
       </View>
@@ -627,7 +636,7 @@ function ApartmentRow({ apt, partners }: { apt: any; partners?: any[] }) {
         </View>
       ) : (
         <View style={[styles.aptImageWrap, styles.aptImageFallback]}>
-          <HomeIcon size={32} color="#9DA4AE" />
+          <HomeIcon size={32} color={TEXT_MUTED} />
         </View>
       )}
       <View style={styles.aptContent}>
@@ -646,7 +655,7 @@ function ApartmentRow({ apt, partners }: { apt: any; partners?: any[] }) {
                   <Image key={p.id} source={{ uri: p.avatar_url }} style={styles.partnerAvatar} />
                 ) : (
                   <View key={p.id} style={[styles.partnerAvatar, styles.partnerAvatarFallback]}>
-                    <Users size={12} color="#9DA4AE" />
+                    <Users size={12} color={TEXT_MUTED} />
                   </View>
                 )
               )}
@@ -672,7 +681,7 @@ function MatchRow({ match, sender, receiver }: { match: any; sender: any; receiv
     <View style={[styles.rowCard, { alignItems: 'center' }]}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1, justifyContent: 'flex-end' }}>
         <ProfilePreview user={receiver} align="right" />
-        <Text style={{ color: '#9DA4AE' }}>↔</Text>
+        <Text style={{ color: TEXT_MUTED }}>↔</Text>
         <ProfilePreview user={sender} align="right" />
       </View>
       <View style={{ alignItems: 'flex-start', marginLeft: 8 }}>
@@ -694,7 +703,7 @@ function ProfilePreview({ user, align }: { user: any; align?: 'left' | 'right' }
         <Image source={{ uri: user.avatar_url }} style={styles.avatar} />
       ) : (
         <View style={styles.avatarFallback}>
-          <Users size={16} color="#9DA4AE" />
+          <Users size={16} color={TEXT_MUTED} />
         </View>
       )}
       <View>
@@ -712,34 +721,58 @@ function ProfilePreview({ user, align }: { user: any; align?: 'left' | 'right' }
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0F0F14',
+    backgroundColor: '#FFFFFF',
     paddingTop: 54,
   },
   header: {
-    paddingHorizontal: 20,
-    marginBottom: 12,
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E7EB',
+    backgroundColor: '#FFFFFF',
     alignItems: 'flex-end',
   },
   title: {
-    color: '#FFFFFF',
-    fontSize: 26,
-    fontWeight: '800',
+    color: '#111827',
+    fontSize: 24,
+    fontWeight: '900',
     textAlign: 'right',
     writingDirection: 'rtl',
   },
   subtitle: {
-    color: '#9DA4AE',
+    color: '#6B7280',
     fontSize: 13,
     marginTop: 4,
     textAlign: 'right',
     writingDirection: 'rtl',
   },
-  logoutBtn: {
-    marginTop: 10,
-    alignSelf: 'flex-end',
-    backgroundColor: '#1B1B29',
+  headerActionsRow: {
+    marginTop: 12,
+    alignSelf: 'stretch',
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 10,
+  },
+  refreshBtn: {
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
     borderWidth: 1,
-    borderColor: '#2A2A37',
+    borderColor: 'rgba(94,63,45,0.35)',
+    backgroundColor: 'rgba(94,63,45,0.10)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  refreshText: {
+    color: '#5e3f2d',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  logoutBtn: {
+    marginTop: 0,
+    backgroundColor: 'rgba(239,68,68,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(239,68,68,0.35)',
     borderRadius: 10,
     paddingVertical: 8,
     paddingHorizontal: 12,
@@ -750,31 +783,34 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   tabs: {
-    flexDirection: 'row',
-    gap: 8,
     paddingHorizontal: 16,
-    justifyContent: 'space-between',
+    paddingTop: 10,
+    paddingBottom: 8,
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
   },
   segment: {
-    flex: 1,
-    paddingVertical: 10,
-    borderRadius: 12,
+    paddingVertical: 9,
+    paddingHorizontal: 12,
+    borderRadius: 999,
     borderWidth: 1,
-    borderColor: '#2A2A37',
+    borderColor: '#E5E7EB',
     alignItems: 'center',
-    backgroundColor: '#141420',
+    backgroundColor: '#F9FAFB',
+    marginLeft: 8,
+    minWidth: 86,
   },
   segmentActive: {
-    backgroundColor: '#1B1B29',
-    borderColor: '#4C1D95',
+    backgroundColor: 'rgba(94,63,45,0.10)',
+    borderColor: 'rgba(94,63,45,0.45)',
   },
   segmentText: {
-    color: '#9DA4AE',
+    color: '#6B7280',
     fontSize: 13,
-    fontWeight: '700',
+    fontWeight: '800',
   },
   segmentTextActive: {
-    color: '#FFFFFF',
+    color: '#5e3f2d',
   },
   scrollContent: {
     paddingHorizontal: 16,
@@ -782,27 +818,36 @@ const styles = StyleSheet.create({
     paddingBottom: 40,
   },
   statsRow: {
-    gap: 12,
     paddingRight: 4,
+    paddingLeft: 4,
+    flexDirection: 'row-reverse',
   },
   statCard: {
-    width: 180,
+    width: 176,
     borderRadius: 16,
-    padding: 16,
-    backgroundColor: '#141420',
+    padding: 14,
+    backgroundColor: '#FFFFFF',
     borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRightWidth: 4,
+    borderRightColor: '#E5E7EB',
     marginBottom: 16,
+    marginLeft: 12,
+    shadowColor: '#000000',
+    shadowOpacity: 0.06,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 6 },
   },
   iconWrap: {
-    width: 32,
-    height: 32,
-    borderRadius: 10,
+    width: 34,
+    height: 34,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 10,
   },
   statTitle: {
-    color: '#9DA4AE',
+    color: '#6B7280',
     fontSize: 12,
     marginBottom: 6,
     textAlign: 'right',
@@ -822,7 +867,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   sectionTitle: {
-    color: '#FFFFFF',
+    color: '#111827',
     fontSize: 18,
     fontWeight: '800',
   },
@@ -834,12 +879,16 @@ const styles = StyleSheet.create({
   rowCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#141420',
+    backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: '#2A2A37',
+    borderColor: '#E5E7EB',
     borderRadius: 14,
     paddingVertical: 12,
     paddingHorizontal: 12,
+    shadowColor: '#000000',
+    shadowOpacity: 0.04,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 6 },
   },
   rowLeft: {
     marginRight: 12,
@@ -851,19 +900,19 @@ const styles = StyleSheet.create({
     marginLeft: 12,
   },
   rowTitle: {
-    color: '#FFFFFF',
+    color: '#111827',
     fontSize: 15,
     fontWeight: '800',
     textAlign: 'right',
   },
   rowSubtitle: {
-    color: '#9DA4AE',
+    color: '#6B7280',
     fontSize: 12,
     marginTop: 4,
     textAlign: 'right',
   },
   rowMeta: {
-    color: '#9DA4AE',
+    color: '#6B7280',
     fontSize: 12,
   },
   chipsRow: {
@@ -874,21 +923,21 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   chip: {
-    backgroundColor: '#1B1B29',
+    backgroundColor: '#F9FAFB',
     borderWidth: 1,
-    borderColor: '#2A2A37',
+    borderColor: '#E5E7EB',
     borderRadius: 12,
     paddingHorizontal: 10,
     paddingVertical: 6,
   },
   chipText: {
-    color: '#FFFFFF',
+    color: '#111827',
     fontSize: 12,
     fontWeight: '700',
     textAlign: 'right',
   },
   chipLabel: {
-    color: '#9DA4AE',
+    color: '#6B7280',
     fontSize: 11,
     textAlign: 'right',
   },
@@ -909,13 +958,13 @@ const styles = StyleSheet.create({
     height: 48,
     borderRadius: 24,
     borderWidth: 1,
-    borderColor: '#2A2A37',
+    borderColor: '#E5E7EB',
   },
   avatarFallback: {
     width: 48,
     height: 48,
     borderRadius: 24,
-    backgroundColor: '#1B1B29',
+    backgroundColor: '#F3F4F6',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -927,23 +976,24 @@ const styles = StyleSheet.create({
     flex: 1,
     borderRadius: 14,
     borderWidth: 1,
-    backgroundColor: '#141420',
+    backgroundColor: '#FFFFFF',
+    borderColor: '#E5E7EB',
     padding: 14,
   },
   smallStatTitle: {
-    color: '#9DA4AE',
+    color: '#6B7280',
     fontSize: 12,
     marginBottom: 6,
     textAlign: 'right',
   },
   smallStatValue: {
-    color: '#FFFFFF',
+    color: '#111827',
     fontSize: 20,
     fontWeight: '800',
     textAlign: 'right',
   },
   sectionHint: {
-    color: '#9DA4AE',
+    color: '#6B7280',
     fontSize: 12,
     marginTop: 10,
     textAlign: 'right',
@@ -961,41 +1011,45 @@ const styles = StyleSheet.create({
   subTabBtn: {
     flex: 1,
     borderWidth: 1,
-    borderColor: '#2A2A37',
+    borderColor: '#E5E7EB',
     borderRadius: 10,
     paddingVertical: 10,
-    backgroundColor: '#141420',
+    backgroundColor: '#F9FAFB',
     alignItems: 'center',
   },
   subTabBtnActive: {
-    borderColor: '#4C1D95',
-    backgroundColor: '#1B1B29',
+    borderColor: 'rgba(94,63,45,0.45)',
+    backgroundColor: 'rgba(94,63,45,0.10)',
   },
   subTabText: {
-    color: '#9DA4AE',
+    color: '#6B7280',
     fontSize: 13,
     fontWeight: '700',
   },
   subTabTextActive: {
-    color: '#FFFFFF',
+    color: '#5e3f2d',
   },
   searchInput: {
-    backgroundColor: '#141420',
+    backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: '#2A2A37',
+    borderColor: '#E5E7EB',
     borderRadius: 12,
     paddingVertical: 10,
     paddingHorizontal: 14,
-    color: '#FFFFFF',
+    color: '#111827',
   },
   aptCard: {
-    backgroundColor: '#141420',
+    backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: '#2A2A37',
+    borderColor: '#E5E7EB',
     borderRadius: 16,
     overflow: 'hidden',
     flexDirection: 'row',
     alignItems: 'stretch',
+    shadowColor: '#000000',
+    shadowOpacity: 0.03,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 6 },
   },
   aptImageWrap: {
     width: 140,
@@ -1007,7 +1061,7 @@ const styles = StyleSheet.create({
     height: '100%',
   },
   aptImageFallback: {
-    backgroundColor: '#1B1B29',
+    backgroundColor: '#F3F4F6',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1024,10 +1078,10 @@ const styles = StyleSheet.create({
     width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: 'rgba(255,255,255,0.4)',
+    backgroundColor: 'rgba(17,24,39,0.25)',
   },
   indicatorActive: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#111827',
   },
   aptContent: {
     flex: 1,
@@ -1035,14 +1089,14 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   aptTitle: {
-    color: '#FFFFFF',
+    color: '#111827',
     fontSize: 16,
     fontWeight: '800',
     textAlign: 'right',
     marginBottom: 4,
   },
   aptCity: {
-    color: '#9DA4AE',
+    color: '#6B7280',
     fontSize: 13,
     textAlign: 'right',
     marginBottom: 8,
@@ -1060,7 +1114,7 @@ const styles = StyleSheet.create({
     textAlign: 'right',
   },
   aptPriceLabel: {
-    color: '#9DA4AE',
+    color: '#6B7280',
     fontSize: 12,
     marginLeft: 6,
     textAlign: 'right',
@@ -1072,7 +1126,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   partnersLabel: {
-    color: '#9DA4AE',
+    color: '#6B7280',
     fontSize: 12,
     textAlign: 'right',
   },
@@ -1085,10 +1139,10 @@ const styles = StyleSheet.create({
     height: 28,
     borderRadius: 14,
     borderWidth: 2,
-    borderColor: '#141420',
+    borderColor: '#FFFFFF',
   },
   partnerAvatarFallback: {
-    backgroundColor: '#1B1B29',
+    backgroundColor: '#F3F4F6',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1106,13 +1160,13 @@ const styles = StyleSheet.create({
   smallInput: {
     flexGrow: 1,
     minWidth: 120,
-    backgroundColor: '#141420',
+    backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: '#2A2A37',
+    borderColor: '#E5E7EB',
     borderRadius: 12,
     paddingVertical: 10,
     paddingHorizontal: 14,
-    color: '#FFFFFF',
+    color: '#111827',
   },
   toggleRow: {
     paddingHorizontal: 16,
@@ -1123,35 +1177,35 @@ const styles = StyleSheet.create({
   toggleBtn: {
     flex: 1,
     borderWidth: 1,
-    borderColor: '#2A2A37',
-    backgroundColor: '#141420',
+    borderColor: '#E5E7EB',
+    backgroundColor: '#F9FAFB',
     borderRadius: 12,
     alignItems: 'center',
     paddingVertical: 10,
   },
   toggleBtnActive: {
-    borderColor: '#4C1D95',
-    backgroundColor: '#1B1B29',
+    borderColor: 'rgba(94,63,45,0.45)',
+    backgroundColor: 'rgba(94,63,45,0.10)',
   },
   toggleText: {
-    color: '#9DA4AE',
+    color: '#6B7280',
     fontSize: 13,
     fontWeight: '700',
   },
   toggleTextActive: {
-    color: '#FFFFFF',
+    color: '#5e3f2d',
   },
   clearBtn: {
     borderWidth: 1,
-    borderColor: '#2A2A37',
-    backgroundColor: '#141420',
+    borderColor: '#E5E7EB',
+    backgroundColor: '#F9FAFB',
     borderRadius: 12,
     alignItems: 'center',
     paddingVertical: 10,
     paddingHorizontal: 16,
   },
   clearText: {
-    color: '#F59E0B',
+    color: '#B45309',
     fontSize: 13,
     fontWeight: '800',
   },
@@ -1163,28 +1217,28 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   filterBtn: {
-    backgroundColor: '#4C1D95',
+    backgroundColor: '#5e3f2d',
     borderRadius: 12,
     paddingVertical: 10,
     paddingHorizontal: 16,
   },
   filterBtnText: {
-    color: '#0F0F14',
+    color: '#FFFFFF',
     fontSize: 14,
     fontWeight: '800',
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    backgroundColor: 'rgba(0,0,0,0.35)',
     justifyContent: 'center',
     alignItems: 'center',
     padding: 16,
   },
   modalCard: {
     width: '100%',
-    backgroundColor: '#0F0F14',
+    backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: '#2A2A37',
+    borderColor: '#E5E7EB',
     borderRadius: 16,
     paddingVertical: 14,
   },
@@ -1196,12 +1250,12 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   modalTitle: {
-    color: '#FFFFFF',
+    color: '#111827',
     fontSize: 18,
     fontWeight: '800',
   },
   modalClose: {
-    color: '#9DA4AE',
+    color: '#6B7280',
     fontSize: 14,
     fontWeight: '700',
   },
@@ -1213,13 +1267,13 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   applyBtn: {
-    backgroundColor: '#22C55E',
+    backgroundColor: '#5e3f2d',
     borderRadius: 12,
     paddingVertical: 10,
     paddingHorizontal: 20,
   },
   applyText: {
-    color: '#0F0F14',
+    color: '#FFFFFF',
     fontSize: 14,
     fontWeight: '800',
   },

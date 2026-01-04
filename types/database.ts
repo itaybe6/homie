@@ -10,6 +10,7 @@ export interface User {
   bio?: string;
   gender?: 'male' | 'female';
   avatar_url?: string;
+  instagram_url?: string;
   image_urls?: string[]; // up to 6 additional images
   favorites?: string[]; // national IDs of favorited users
   likes?: string[]; // IDs of apartments the user has liked

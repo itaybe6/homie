@@ -116,6 +116,19 @@ export default function VerifyEmailScreen() {
         // ignore
       }
 
+      // 3.25) Best-effort: persist extra profile fields into users table (in case no trigger copies metadata)
+      try {
+        const ig = String(pending.instagramUrl || '').trim();
+        if (ig) {
+          await supabase
+            .from('users')
+            .update({ instagram_url: ig, updated_at: new Date().toISOString() } as any)
+            .eq('id', user.id);
+        }
+      } catch {
+        // ignore
+      }
+
       // 3.5) Best-effort: upload avatar chosen during signup (local file URI)
       // We can only upload after OTP verification because we need an authenticated session.
       try {
@@ -162,6 +175,7 @@ export default function VerifyEmailScreen() {
         gender: pending.gender,
         city: pending.city,
         avatarUrl: pending.avatarUrl,
+        instagramUrl: pending.instagramUrl,
       });
     } catch (e: any) {
       setError(e?.message || 'לא הצלחנו לשלוח קוד שוב');

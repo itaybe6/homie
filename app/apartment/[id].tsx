@@ -74,6 +74,7 @@ import SwipeBackGesture from '@/components/SwipeBackGesture';
 import FavoriteHeartButton from '@/components/FavoriteHeartButton';
 import { ShareMenuFab } from '@/components/ShareMenuFab';
 import { KeyFabPanel } from '@/components/KeyFabPanel';
+import WhatsAppSvg from '@/components/icons/WhatsAppSvg';
 import * as Clipboard from 'expo-clipboard';
 
 export default function ApartmentDetailsScreen() {
@@ -150,6 +151,29 @@ export default function ApartmentDetailsScreen() {
   const [isGeocoding, setIsGeocoding] = useState(false);
   const [geoError, setGeoError] = useState<string>('');
   const [isDescExpanded, setIsDescExpanded] = useState(false);
+
+  const openWhatsApp = async (phone: string, message: string) => {
+    const DEFAULT_COUNTRY_CODE = '972'; // IL
+    let raw = (phone || '').trim();
+    if (!raw) {
+      Alert.alert('שגיאה', 'מספר הטלפון לא זמין');
+      return;
+    }
+    let digits = raw.startsWith('+') ? raw.slice(1).replace(/\D/g, '') : raw.replace(/\D/g, '');
+    if (!digits) {
+      Alert.alert('שגיאה', 'מספר הטלפון לא תקין');
+      return;
+    }
+    if (!digits.startsWith(DEFAULT_COUNTRY_CODE)) {
+      digits = DEFAULT_COUNTRY_CODE + digits.replace(/^0+/, '');
+    }
+    const url = `https://wa.me/${digits}?text=${encodeURIComponent(message)}`;
+    try {
+      await Linking.openURL(url);
+    } catch {
+      Alert.alert('שגיאה', 'לא ניתן לפתוח את וואטסאפ');
+    }
+  };
 
   useEffect(() => {
     fetchApartmentDetails();
@@ -783,14 +807,14 @@ export default function ApartmentDetailsScreen() {
 
       const { data: usersRows, error: usersErr } = await supabase
         .from('users')
-        .select('id, full_name, avatar_url')
+        .select('id, full_name, avatar_url, phone')
         .in('id', senderIds);
       if (usersErr) throw usersErr;
 
-      const byId: Record<string, Pick<User, 'id' | 'full_name' | 'avatar_url'>> = {};
+      const byId: Record<string, Pick<User, 'id' | 'full_name' | 'avatar_url' | 'phone'>> = {};
       (usersRows || []).forEach((u: any) => {
         if (!u?.id) return;
-        byId[String(u.id)] = { id: u.id, full_name: u.full_name, avatar_url: u.avatar_url };
+        byId[String(u.id)] = { id: u.id, full_name: u.full_name, avatar_url: u.avatar_url, phone: u.phone };
       });
 
       const mapped = rows
@@ -799,7 +823,7 @@ export default function ApartmentDetailsScreen() {
           const reqId = String(r?.id || '').trim();
           const status = String(r?.status || '').toUpperCase();
           if (!senderId || !reqId) return null;
-          const userRow = byId[senderId] || { id: senderId, full_name: 'משתמש', avatar_url: undefined };
+          const userRow = byId[senderId] || { id: senderId, full_name: 'משתמש', avatar_url: undefined, phone: undefined };
           if (status !== 'PENDING' && status !== 'APPROVED' && status !== 'REJECTED') return null;
           return {
             reqId,
@@ -812,7 +836,7 @@ export default function ApartmentDetailsScreen() {
         reqId: string;
         senderId: string;
         status: 'PENDING' | 'APPROVED' | 'REJECTED';
-        user: Pick<User, 'id' | 'full_name' | 'avatar_url'>;
+        user: Pick<User, 'id' | 'full_name' | 'avatar_url' | 'phone'>;
       }>;
 
       setJoinRequests(mapped);
@@ -836,12 +860,12 @@ export default function ApartmentDetailsScreen() {
 
       // Best-effort notification to requester
       try {
-        const ownerName = (owner as any)?.full_name || 'בעל הדירה';
         await insertNotificationOnce({
           sender_id: user.id,
           recipient_id: senderId,
           title: 'הבקשה אושרה',
-          description: `${ownerName} אישר/ה את בקשתך להצטרף לדירה: ${(apartment as any)?.title || ''} (${(apartment as any)?.city || ''}).`,
+          description:
+            'מנהל הנכס מעוניין בך כשותף בדירה, אנא העבירו את השיחה לוואטסאפ כדי להשלים את התהליך.',
           is_read: false,
           event_key: `apt_join_request:${reqId}:approved`,
         });
@@ -2117,10 +2141,30 @@ export default function ApartmentDetailsScreen() {
                           </TouchableOpacity>
                         </View>
                       ) : (
-                        <View style={[styles.joinReqStatusPill, { backgroundColor: statusMeta.bg }]}>
-                          <Text style={[styles.joinReqStatusText, { color: statusMeta.color }]}>
-                            {statusMeta.text}
-                          </Text>
+                        <View style={styles.joinReqApprovedRow}>
+                          <View style={[styles.joinReqStatusPill, { backgroundColor: statusMeta.bg }]}>
+                            <Text style={[styles.joinReqStatusText, { color: statusMeta.color }]}>
+                              {statusMeta.text}
+                            </Text>
+                          </View>
+                          {item.status === 'APPROVED' && (item.user as any)?.phone ? (
+                            <TouchableOpacity
+                              style={styles.joinReqWhatsappBtn}
+                              activeOpacity={0.9}
+                              accessibilityLabel="וואטסאפ"
+                              onPress={() => {
+                                const fullName = String((item.user as any)?.full_name || '').trim();
+                                const firstName = fullName ? fullName.split(' ')[0] : '';
+                                const msg = `היי${firstName ? ` ${firstName}` : ''}, אישרתי את בקשתך להצטרף לדירה ב-Homie. נמשיך כאן בוואטסאפ כדי להשלים את התהליך.`;
+                                openWhatsApp(String((item.user as any).phone), msg);
+                              }}
+                            >
+                              <View style={styles.joinReqWhatsappIconCircle}>
+                                <WhatsAppSvg size={14} color="#25D366" />
+                              </View>
+                              <Text style={styles.joinReqWhatsappText}>וואטסאפ</Text>
+                            </TouchableOpacity>
+                          ) : null}
                         </View>
                       )}
                     </View>
@@ -3813,6 +3857,47 @@ const styles = StyleSheet.create({
   joinReqActions: {
     flexDirection: 'row-reverse',
     gap: 8,
+  },
+  joinReqApprovedRow: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    gap: 8,
+  },
+  joinReqWhatsappBtn: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: '#FFFFFF',
+    height: 34,
+    paddingHorizontal: 10,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: 'rgba(37, 211, 102, 0.25)',
+    shadowColor: '#25D366',
+    shadowOpacity: 0.12,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
+    alignSelf: 'flex-start',
+  },
+  joinReqWhatsappIconCircle: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: 'rgba(37, 211, 102, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(37, 211, 102, 0.20)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  joinReqWhatsappText: {
+    color: '#25D366',
+    fontSize: 12,
+    fontWeight: '900',
+    writingDirection: 'rtl',
+    lineHeight: 14,
   },
   joinReqActionBtn: {
     height: 34,
