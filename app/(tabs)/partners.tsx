@@ -36,6 +36,7 @@ import { User, UserSurveyResponse } from '@/types/database';
 import { computeGroupAwareLabel } from '@/lib/group';
 import RoommateCard from '@/components/RoommateCard';
 import UserParallaxModal from '@/components/UserParallaxModal';
+import GroupParallaxModal from '@/components/GroupParallaxModal';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { cityNeighborhoods, canonicalizeCityName } from '@/assets/data/neighborhoods';
 import { Apartment } from '@/types/database';
@@ -157,6 +158,7 @@ export default function PartnersScreen() {
   const [previewModalVisible, setPreviewModalVisible] = useState(false);
   const [previewUser, setPreviewUser] = useState<User | null>(null);
   const [previewMatchPercent, setPreviewMatchPercent] = useState<number | null>(null);
+  const [previewGroupUsers, setPreviewGroupUsers] = useState<User[] | null>(null);
 
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const translateX = useSharedValue(0);
@@ -191,6 +193,16 @@ export default function PartnersScreen() {
     if (!u?.id) return;
     setPreviewUser(u);
     setPreviewMatchPercent(matchScores[u.id] ?? null);
+    setPreviewGroupUsers(null);
+    setPreviewModalVisible(true);
+  };
+
+  const openGroupPreviewModal = (groupUsers: User[]) => {
+    const clean = (groupUsers || []).filter((x) => !!x?.id);
+    if (!clean.length) return;
+    setPreviewGroupUsers(clean);
+    setPreviewUser(null);
+    setPreviewMatchPercent(null);
     setPreviewModalVisible(true);
   };
 
@@ -990,7 +1002,7 @@ export default function PartnersScreen() {
         onLike={(groupId, users) => handleGroupLike(groupId, users)}
         onPass={(groupId, users) => handleGroupPass(groupId, users)}
         mediaHeight={swipeCardHeight}
-        onPreviewUser={openPreviewModal}
+        onPreviewGroup={openGroupPreviewModal}
         onOpen={(userId: string) =>
           router.push({
             pathname: '/(tabs)/user/[id]',
@@ -1421,13 +1433,32 @@ export default function PartnersScreen() {
       ) : null}
 
       <UserParallaxModal
-        visible={previewModalVisible}
+        visible={previewModalVisible && !!previewUser}
         user={previewUser}
         matchPercent={previewMatchPercent}
         onClose={() => {
           setPreviewModalVisible(false);
           setPreviewUser(null);
           setPreviewMatchPercent(null);
+          setPreviewGroupUsers(null);
+        }}
+        onOpenProfile={(userId) =>
+          router.push({
+            pathname: '/(tabs)/user/[id]',
+            params: { id: userId, from: 'partners' } as any,
+          })
+        }
+      />
+
+      <GroupParallaxModal
+        visible={previewModalVisible && !previewUser && !!previewGroupUsers?.length}
+        users={previewGroupUsers}
+        matchScores={matchScores}
+        onClose={() => {
+          setPreviewModalVisible(false);
+          setPreviewUser(null);
+          setPreviewMatchPercent(null);
+          setPreviewGroupUsers(null);
         }}
         onOpenProfile={(userId) =>
           router.push({
@@ -1881,7 +1912,7 @@ function GroupCard({
   apartment,
   matchScores,
   onOpen,
-  onPreviewUser,
+  onPreviewGroup,
   onLike,
   onPass,
   onOpenApartment,
@@ -1893,7 +1924,7 @@ function GroupCard({
   apartment?: Apartment;
   matchScores?: Record<string, number | null>;
   onOpen: (id: string) => void;
-  onPreviewUser?: (u: User) => void;
+  onPreviewGroup?: (users: User[]) => void;
   onLike: (groupId: string, users: User[]) => void;
   onPass: (groupId: string, users: User[]) => void;
   onOpenApartment: (apartmentId: string) => void;
@@ -1932,7 +1963,7 @@ function GroupCard({
               delayLongPress={350}
               onLongPress={() => {
                 didLongPressRef.current = true;
-                onPreviewUser?.(u);
+                onPreviewGroup?.(users);
               }}
               style={[
                 groupStyles.cell,
