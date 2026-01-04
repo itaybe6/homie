@@ -873,7 +873,7 @@ export default function ProfileSettingsScreen() {
               <View style={styles.sheetHeader}>
                 <Text style={styles.sheetTitle}>הדירה שלי</Text>
                 <TouchableOpacity style={styles.sheetClose} onPress={() => setShowAptModal(false)}>
-                  <X size={18} color="#4C1D95" />
+                  <X size={18} color={ICON_COLOR} />
                 </TouchableOpacity>
               </View>
               {aptLoading ? (
@@ -1023,7 +1023,7 @@ export default function ProfileSettingsScreen() {
                     closeSurveyAnimations(() => setShowSurveyModal(false));
                   }}
                 >
-                  <X size={18} color="#4C1D95" />
+                  <X size={18} color={ICON_COLOR} />
                 </TouchableOpacity>
               </View>
               <KeyboardAwareScrollView
@@ -1037,7 +1037,7 @@ export default function ProfileSettingsScreen() {
                   <Text style={styles.subsectionTitle}>מגורים</Text>
                   <View style={styles.fieldGroup}>
                     <View style={styles.labelRow}>
-                      <MapPin size={16} color="#4C1D95" />
+                      <MapPin size={16} color={ICON_COLOR} />
                       <Text style={styles.fieldLabel}>עיר מועדפת</Text>
                     </View>
                     <TextInput
@@ -1049,7 +1049,7 @@ export default function ProfileSettingsScreen() {
                   </View>
                   <View style={styles.fieldGroup}>
                     <View style={styles.labelRow}>
-                      <FileText size={16} color="#4C1D95" />
+                      <FileText size={16} color={ICON_COLOR} />
                       <Text style={styles.fieldLabel}>שכונות מועדפות (מופרד בפסיקים)</Text>
                     </View>
                     <TextInput
@@ -1076,7 +1076,7 @@ export default function ProfileSettingsScreen() {
                   </View>
                   <View style={styles.fieldGroup}>
                     <View style={styles.labelRow}>
-                      <Hash size={16} color="#4C1D95" />
+                      <Hash size={16} color={ICON_COLOR} />
                       <Text style={styles.fieldLabel}>תקציב חודשי (₪)</Text>
                     </View>
                     <TextInput
@@ -1089,7 +1089,7 @@ export default function ProfileSettingsScreen() {
                   </View>
                   <View style={styles.fieldGroup}>
                     <View style={styles.labelRow}>
-                      <Calendar size={16} color="#4C1D95" />
+                      <Calendar size={16} color={ICON_COLOR} />
                       <Text style={styles.fieldLabel}>חודש כניסה (YYYY-MM)</Text>
                     </View>
                     <TextInput
@@ -1101,7 +1101,7 @@ export default function ProfileSettingsScreen() {
                   </View>
                   <View style={styles.fieldGroup}>
                     <View style={styles.labelRow}>
-                      <FileText size={16} color="#4C1D95" />
+                      <FileText size={16} color={ICON_COLOR} />
                       <Text style={styles.fieldLabel}>סאבלט</Text>
                     </View>
                     <View style={{ flexDirection: 'row-reverse', alignItems: 'center', gap: 10 }}>
@@ -1130,7 +1130,7 @@ export default function ProfileSettingsScreen() {
                   <View style={styles.fieldRow}>
                     <View style={styles.fieldHalf}>
                       <View style={styles.labelRow}>
-                        <FileText size={16} color="#4C1D95" />
+                        <FileText size={16} color={ICON_COLOR} />
                         <Text style={styles.fieldLabel}>עם מרפסת / גינה</Text>
                       </View>
                       <View style={{ flexDirection: 'row-reverse', gap: 10, flexWrap: 'wrap' }}>
@@ -1141,7 +1141,7 @@ export default function ProfileSettingsScreen() {
                     </View>
                     <View style={styles.fieldHalf}>
                       <View style={styles.labelRow}>
-                        <FileText size={16} color="#4C1D95" />
+                        <FileText size={16} color={ICON_COLOR} />
                         <Text style={styles.fieldLabel}>מעלית</Text>
                       </View>
                       <View style={{ flexDirection: 'row-reverse', gap: 10, flexWrap: 'wrap' }}>
@@ -1154,7 +1154,7 @@ export default function ProfileSettingsScreen() {
                   <View style={styles.fieldRow}>
                     <View style={styles.fieldHalf}>
                       <View style={styles.labelRow}>
-                        <FileText size={16} color="#4C1D95" />
+                        <FileText size={16} color={ICON_COLOR} />
                         <Text style={styles.fieldLabel}>חדר מאסטר</Text>
                       </View>
                       <View style={{ flexDirection: 'row-reverse', gap: 10, flexWrap: 'wrap' }}>
@@ -1165,7 +1165,7 @@ export default function ProfileSettingsScreen() {
                     </View>
                     <View style={styles.fieldHalf}>
                       <View style={styles.labelRow}>
-                        <FileText size={16} color="#4C1D95" />
+                        <FileText size={16} color={ICON_COLOR} />
                         <Text style={styles.fieldLabel}>חשבונות כלולים</Text>
                       </View>
                       <View style={{ flexDirection: 'row-reverse', gap: 10, flexWrap: 'wrap' }}>
@@ -1177,7 +1177,7 @@ export default function ProfileSettingsScreen() {
                   </View>
                   <View style={styles.fieldGroup}>
                     <View style={styles.labelRow}>
-                      <FileText size={16} color="#4C1D95" />
+                      <FileText size={16} color={ICON_COLOR} />
                       <Text style={styles.fieldLabel}>תיווך</Text>
                     </View>
                     <View style={{ flexDirection: 'row-reverse', gap: 10, flexWrap: 'wrap' }}>
@@ -1192,7 +1192,7 @@ export default function ProfileSettingsScreen() {
                   <View style={styles.fieldRow}>
                     <View style={styles.fieldHalf}>
                       <View style={styles.labelRow}>
-                        <FileText size={16} color="#4C1D95" />
+                        <FileText size={16} color={ICON_COLOR} />
                         <Text style={styles.fieldLabel}>עבודה מהבית</Text>
                       </View>
                       <View style={{ flexDirection: 'row-reverse', gap: 10 }}>
@@ -1202,7 +1202,7 @@ export default function ProfileSettingsScreen() {
                     </View>
                     <View style={styles.fieldHalf}>
                       <View style={styles.labelRow}>
-                        <FileText size={16} color="#4C1D95" />
+                        <FileText size={16} color={ICON_COLOR} />
                         <Text style={styles.fieldLabel}>שומר/ת כשרות</Text>
                       </View>
                       <View style={{ flexDirection: 'row-reverse', gap: 10 }}>
@@ -1214,7 +1214,7 @@ export default function ProfileSettingsScreen() {
                   <View style={styles.fieldRow}>
                     <View style={styles.fieldHalf}>
                       <View style={styles.labelRow}>
-                        <FileText size={16} color="#4C1D95" />
+                        <FileText size={16} color={ICON_COLOR} />
                         <Text style={styles.fieldLabel}>שומר/ת שבת</Text>
                       </View>
                       <View style={{ flexDirection: 'row-reverse', gap: 10 }}>
@@ -1224,7 +1224,7 @@ export default function ProfileSettingsScreen() {
                     </View>
                     <View style={styles.fieldHalf}>
                       <View style={styles.labelRow}>
-                        <FileText size={16} color="#4C1D95" />
+                        <FileText size={16} color={ICON_COLOR} />
                         <Text style={styles.fieldLabel}>מעשן/ת</Text>
                       </View>
                       <View style={{ flexDirection: 'row-reverse', gap: 10 }}>
@@ -1236,7 +1236,7 @@ export default function ProfileSettingsScreen() {
                   <View style={styles.fieldRow}>
                     <View style={styles.fieldHalf}>
                       <View style={styles.labelRow}>
-                        <FileText size={16} color="#4C1D95" />
+                        <FileText size={16} color={ICON_COLOR} />
                         <Text style={styles.fieldLabel}>חיית מחמד בבית</Text>
                       </View>
                       <View style={{ flexDirection: 'row-reverse', gap: 10 }}>
@@ -1246,7 +1246,7 @@ export default function ProfileSettingsScreen() {
                     </View>
                     <View style={styles.fieldHalf}>
                       <View style={styles.labelRow}>
-                        <FileText size={16} color="#4C1D95" />
+                        <FileText size={16} color={ICON_COLOR} />
                         <Text style={styles.fieldLabel}>וייב בבית</Text>
                       </View>
                       <TextInput style={styles.fieldInput} value={surveyHomeVibe} onChangeText={setSurveyHomeVibe} placeholder="רגוע/חברתי..." />
@@ -1255,7 +1255,7 @@ export default function ProfileSettingsScreen() {
                   <View style={styles.fieldRow}>
                     <View style={styles.fieldHalf}>
                       <View style={styles.labelRow}>
-                        <FileText size={16} color="#4C1D95" />
+                        <FileText size={16} color={ICON_COLOR} />
                         <Text style={styles.fieldLabel}>חשיבות ניקיון (1‑5)</Text>
                       </View>
                       <View style={{ flexDirection: 'row-reverse', gap: 8 }}>
@@ -1266,7 +1266,7 @@ export default function ProfileSettingsScreen() {
                     </View>
                     <View style={styles.fieldHalf}>
                       <View style={styles.labelRow}>
-                        <FileText size={16} color="#4C1D95" />
+                        <FileText size={16} color={ICON_COLOR} />
                         <Text style={styles.fieldLabel}>תדירות ניקיון</Text>
                       </View>
                       <TextInput style={styles.fieldInput} value={surveyCleaningFrequency} onChangeText={setSurveyCleaningFrequency} placeholder="שבועי/דו‑שבועי..." />
@@ -1275,14 +1275,14 @@ export default function ProfileSettingsScreen() {
                   <View style={styles.fieldRow}>
                     <View style={styles.fieldHalf}>
                       <View style={styles.labelRow}>
-                        <FileText size={16} color="#4C1D95" />
+                        <FileText size={16} color={ICON_COLOR} />
                         <Text style={styles.fieldLabel}>העדפת אירוח</Text>
                       </View>
                       <TextInput style={styles.fieldInput} value={surveyHostingPreference} onChangeText={setSurveyHostingPreference} placeholder="לעיתים/תדיר/מעט..." />
                     </View>
                     <View style={styles.fieldHalf}>
                       <View style={styles.labelRow}>
-                        <FileText size={16} color="#4C1D95" />
+                        <FileText size={16} color={ICON_COLOR} />
                         <Text style={styles.fieldLabel}>סטייל בישול</Text>
                       </View>
                       <TextInput style={styles.fieldInput} value={surveyCookingStyle} onChangeText={setSurveyCookingStyle} placeholder="ביתי/פשוט/גורמה..." />
@@ -1293,7 +1293,7 @@ export default function ProfileSettingsScreen() {
                   <Text style={styles.subsectionTitle}>שותפים מועדפים</Text>
                   <View style={styles.fieldGroup}>
                     <View style={styles.labelRow}>
-                      <UserIcon size={16} color="#4C1D95" />
+                      <UserIcon size={16} color={ICON_COLOR} />
                       <Text style={styles.fieldLabel}>טווח שותפים מועדף</Text>
                     </View>
                     <View style={{ flexDirection: 'row-reverse', gap: 12 }}>
@@ -1316,14 +1316,14 @@ export default function ProfileSettingsScreen() {
                   <View style={styles.fieldRow}>
                     <View style={styles.fieldHalf}>
                       <View style={styles.labelRow}>
-                        <FileText size={16} color="#4C1D95" />
+                        <FileText size={16} color={ICON_COLOR} />
                         <Text style={styles.fieldLabel}>טווח גילאים רצוי</Text>
                       </View>
                       <TextInput style={styles.fieldInput} value={surveyPreferredAgeRange} onChangeText={setSurveyPreferredAgeRange} placeholder="23‑30" />
                     </View>
                     <View style={styles.fieldHalf}>
                       <View style={styles.labelRow}>
-                        <FileText size={16} color="#4C1D95" />
+                        <FileText size={16} color={ICON_COLOR} />
                         <Text style={styles.fieldLabel}>מגדר שותפים</Text>
                       </View>
                       <TextInput style={styles.fieldInput} value={surveyPreferredGender} onChangeText={setSurveyPreferredGender} placeholder="לא משנה/ז/נ/מעורב" />
@@ -1332,14 +1332,14 @@ export default function ProfileSettingsScreen() {
                   <View style={styles.fieldRow}>
                     <View style={styles.fieldHalf}>
                       <View style={styles.labelRow}>
-                        <FileText size={16} color="#4C1D95" />
+                        <FileText size={16} color={ICON_COLOR} />
                         <Text style={styles.fieldLabel}>עיסוק שותפים</Text>
                       </View>
                       <TextInput style={styles.fieldInput} value={surveyPreferredOccupation} onChangeText={setSurveyPreferredOccupation} placeholder="סטודנטים/הייטק..." />
                     </View>
                     <View style={styles.fieldHalf}>
                       <View style={styles.labelRow}>
-                        <FileText size={16} color="#4C1D95" />
+                        <FileText size={16} color={ICON_COLOR} />
                         <Text style={styles.fieldLabel}>עיסוק</Text>
                       </View>
                       <TextInput style={styles.fieldInput} value={surveyOccupation} onChangeText={setSurveyOccupation} placeholder="עבודתך כיום" />
@@ -1347,7 +1347,7 @@ export default function ProfileSettingsScreen() {
                   </View>
                   <View style={styles.fieldGroup}>
                     <View style={styles.labelRow}>
-                      <FileText size={16} color="#4C1D95" />
+                      <FileText size={16} color={ICON_COLOR} />
                       <Text style={styles.fieldLabel}>מצב זוגי</Text>
                     </View>
                     <TextInput style={styles.fieldInput} value={surveyRelationshipStatus} onChangeText={setSurveyRelationshipStatus} placeholder="רווק/נשוי/בקשר..." />
@@ -1439,7 +1439,7 @@ export default function ProfileSettingsScreen() {
               <View style={styles.sheetHeader}>
                 <Text style={styles.sheetTitle}>פרופילים משותפים</Text>
                 <TouchableOpacity style={styles.sheetClose} onPress={() => setShowSharedModal(false)}>
-                  <X size={18} color="#4C1D95" />
+                  <X size={18} color={ICON_COLOR} />
                 </TouchableOpacity>
               </View>
 
@@ -1539,7 +1539,7 @@ export default function ProfileSettingsScreen() {
                     closeEditAnimations(() => setShowEditModal(false));
                   }}
                 >
-                  <X size={18} color="#4C1D95" />
+                  <X size={18} color={ICON_COLOR} />
                 </TouchableOpacity>
               </View>
               <KeyboardAwareScrollView
@@ -1551,7 +1551,7 @@ export default function ProfileSettingsScreen() {
                 <View style={styles.editCard}>
                 <View style={styles.fieldGroup}>
                   <View style={styles.labelRow}>
-                    <UserIcon size={16} color="#4C1D95" />
+                    <UserIcon size={16} color={ICON_COLOR} />
                     <Text style={styles.fieldLabel}>שם מלא</Text>
                   </View>
                   <TextInput style={styles.fieldInput} value={editFullName} onChangeText={setEditFullName} editable={!editSaving} />
@@ -1559,7 +1559,7 @@ export default function ProfileSettingsScreen() {
                 <View style={styles.fieldRow}>
                   <View style={styles.fieldHalf}>
                     <View style={styles.labelRow}>
-                      <Hash size={16} color="#4C1D95" />
+                      <Hash size={16} color={ICON_COLOR} />
                       <Text style={styles.fieldLabel}>גיל</Text>
                     </View>
                     <TextInput
@@ -1573,7 +1573,7 @@ export default function ProfileSettingsScreen() {
                   </View>
                   <View style={styles.fieldHalf}>
                     <View style={styles.labelRow}>
-                      <MapPin size={16} color="#4C1D95" />
+                      <MapPin size={16} color={ICON_COLOR} />
                       <Text style={styles.fieldLabel}>עיר</Text>
                     </View>
                     <TextInput
@@ -1587,7 +1587,7 @@ export default function ProfileSettingsScreen() {
                 </View>
                 <View style={styles.fieldGroup}>
                   <View style={styles.labelRow}>
-                    <Mail size={16} color="#4C1D95" />
+                    <Mail size={16} color={ICON_COLOR} />
                     <Text style={styles.fieldLabel}>אימייל</Text>
                   </View>
                   <TextInput
@@ -1602,7 +1602,7 @@ export default function ProfileSettingsScreen() {
                 </View>
                 <View style={styles.fieldGroup}>
                   <View style={styles.labelRow}>
-                    <Phone size={16} color="#4C1D95" />
+                    <Phone size={16} color={ICON_COLOR} />
                     <Text style={styles.fieldLabel}>טלפון</Text>
                   </View>
                   <TextInput
@@ -1616,7 +1616,7 @@ export default function ProfileSettingsScreen() {
                 </View>
                 <View style={styles.fieldGroup}>
                   <View style={styles.labelRow}>
-                    <FileText size={16} color="#4C1D95" />
+                    <FileText size={16} color={ICON_COLOR} />
                     <Text style={styles.fieldLabel}>אודות</Text>
                   </View>
                   <TextInput
@@ -1707,7 +1707,7 @@ export default function ProfileSettingsScreen() {
                     closeTermsAnimations(() => setShowTermsModal(false));
                   }}
                 >
-                  <X size={18} color="#4C1D95" />
+                  <X size={18} color={ICON_COLOR} />
                 </TouchableOpacity>
               </View>
               <ScrollView contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 16, paddingTop: 8 }}>
@@ -1947,7 +1947,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#4C1D95',
+    backgroundColor: '#5e3f2d',
   },
   applyText: {
     color: '#FFFFFF',
@@ -1992,7 +1992,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: '#4C1D95',
+    backgroundColor: '#5e3f2d',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -2273,11 +2273,11 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   aptOccupantOverflow: {
-    borderColor: '#E9D5FF',
-    backgroundColor: 'rgba(139,92,246,0.10)',
+    borderColor: 'rgba(94,63,45,0.25)',
+    backgroundColor: 'rgba(94,63,45,0.10)',
   },
   aptOccupantOverflowText: {
-    color: '#8B5CF6',
+    color: '#5e3f2d',
     fontSize: 12,
     fontWeight: '800',
   },
@@ -2436,7 +2436,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   galleryAddLightBtn: {
-    backgroundColor: '#4C1D95',
+    backgroundColor: '#5e3f2d',
     borderWidth: 0,
     borderColor: 'transparent',
     paddingHorizontal: 14,
@@ -2467,14 +2467,14 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     borderWidth: 2,
     borderStyle: 'dashed',
-    borderColor: '#A78BFA',
+    borderColor: 'rgba(94,63,45,0.35)',
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#F9FAFB',
   },
   galleryAddTileText: {
     marginTop: 6,
-    color: '#4C1D95',
+    color: '#5e3f2d',
     fontWeight: '800',
     fontSize: 12,
   },
@@ -2518,8 +2518,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
   },
   chipToggleActive: {
-    borderColor: '#4C1D95',
-    backgroundColor: '#EFEAFE',
+    borderColor: '#5e3f2d',
+    backgroundColor: 'rgba(94,63,45,0.10)',
   },
   chipToggleText: {
     color: '#6B7280',
@@ -2527,7 +2527,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
   chipToggleTextActive: {
-    color: '#4C1D95',
+    color: '#5e3f2d',
   },
 });
 

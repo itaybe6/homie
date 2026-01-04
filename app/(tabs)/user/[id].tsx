@@ -1040,6 +1040,10 @@ export default function UserProfileScreen() {
       Alert.alert('שגיאה', 'לא ניתן לשלוח בקשה לעצמך.');
       return;
     }
+    if (mergeBlockedByTheirSharedGroup) {
+      Alert.alert('לא ניתן למזג', 'המשתמש/ת כבר נמצא/ת בפרופיל משותף.');
+      return;
+    }
     if (hasPendingMergeInvite) {
       Alert.alert('כבר שלחת', 'כבר קיימת בקשת מיזוג בהמתנה עבור משתמש זה.');
       return;
@@ -1052,11 +1056,18 @@ export default function UserProfileScreen() {
           mePartner,
           profOwned,
           profPartner,
+          profMembership,
         ] = await Promise.all([
           supabase.from('apartments').select('id').eq('owner_id', me.id).limit(1),
           supabase.from('apartments').select('id').contains('partner_ids', [me.id] as any).limit(1),
           supabase.from('apartments').select('id').eq('owner_id', profile.id).limit(1),
           supabase.from('apartments').select('id').contains('partner_ids', [profile.id] as any).limit(1),
+          supabase
+            .from('profile_group_members')
+            .select('group_id')
+            .eq('user_id', profile.id)
+            .eq('status', 'ACTIVE')
+            .maybeSingle(),
         ]);
         const isMeLinkedNow = ((meOwned.data || []).length + (mePartner.data || []).length) > 0;
         const isProfileLinkedNow = ((profOwned.data || []).length + (profPartner.data || []).length) > 0;
@@ -1064,10 +1075,35 @@ export default function UserProfileScreen() {
           showMergeBlockedAlert();
           return;
         }
+        // Live check: block if invitee belongs to an ACTIVE group with 2+ members.
+        const inviteeGroupId = (profMembership as any)?.data?.group_id as string | undefined;
+        if (inviteeGroupId) {
+          try {
+            const { data: inviteeMembers } = await supabase
+              .from('profile_group_members')
+              .select('user_id')
+              .eq('group_id', inviteeGroupId)
+              .eq('status', 'ACTIVE');
+            const memberCount = (inviteeMembers || []).filter((r: any) => !!r?.user_id).length;
+            if (memberCount >= 2) {
+              Alert.alert('לא ניתן למזג', 'המשתמש/ת כבר נמצא/ת בפרופיל משותף.');
+              return;
+            }
+          } catch {
+            if (mergeBlockedByTheirSharedGroup) {
+              Alert.alert('לא ניתן למזג', 'המשתמש/ת כבר נמצא/ת בפרופיל משותף.');
+              return;
+            }
+          }
+        }
       } catch (e) {
         // If the live check fails for any reason, fall back to state values
         if (meInApartment && profileInApartment) {
           showMergeBlockedAlert();
+          return;
+        }
+        if (mergeBlockedByTheirSharedGroup) {
+          Alert.alert('לא ניתן למזג', 'המשתמש/ת כבר נמצא/ת בפרופיל משותף.');
           return;
         }
       }
@@ -1315,6 +1351,14 @@ export default function UserProfileScreen() {
     : defaultItemSize;
   const isMeInViewedGroup =
     !!me?.id && !!groupContext?.members?.some((m) => m.id === me.id);
+  const profileIsInSharedGroup =
+    !!groupContext && Array.isArray(groupContext.members) && groupContext.members.length >= 2;
+  const mergeBlockedByApartments =
+    !!me?.id && !isMeInViewedGroup && meInApartment && profileInApartment;
+  // Block sending merge invite if the viewed user is already in an ACTIVE shared profile (2+ members),
+  // unless I'm already part of that same shared profile.
+  const mergeBlockedByTheirSharedGroup =
+    !isMeInViewedGroup && profileIsInSharedGroup;
 
   const SurveyPill = ({
     children,
@@ -1359,7 +1403,7 @@ export default function UserProfileScreen() {
         </TouchableOpacity>
 
         <View style={styles.topBarRight}>
-          {(!profile?.id || (me?.id && me.id === profile.id)) ? null : (() => {
+          {(!profile?.id || (me?.id && me.id === profile.id) || mergeBlockedByApartments || mergeBlockedByTheirSharedGroup) ? null : (() => {
             const isDisabled =
               groupLoading ||
               inviteLoading ||
@@ -1450,7 +1494,7 @@ export default function UserProfileScreen() {
                 source={{ uri: profile.avatar_url || 'https://cdn-icons-png.flaticon.com/512/847/847969.png' }}
                 style={styles.avatar}
               />
-              {profile?.id && (!me?.id || me.id !== profile.id) ? (() => {
+              {profile?.id && (!me?.id || me.id !== profile.id) && !mergeBlockedByApartments && !mergeBlockedByTheirSharedGroup ? (() => {
                 const isDisabled =
                   groupLoading ||
                   inviteLoading ||

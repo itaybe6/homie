@@ -35,8 +35,7 @@ import { useAuthStore } from '@/stores/authStore';
 import { User, UserSurveyResponse } from '@/types/database';
 import { computeGroupAwareLabel } from '@/lib/group';
 import RoommateCard from '@/components/RoommateCard';
-import UserParallaxModal from '@/components/UserParallaxModal';
-import GroupParallaxModal from '@/components/GroupParallaxModal';
+import GroupCardComponent from '@/components/GroupCard';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { cityNeighborhoods, canonicalizeCityName } from '@/assets/data/neighborhoods';
 import { Apartment } from '@/types/database';
@@ -155,10 +154,6 @@ export default function PartnersScreen() {
   const [selectedCities, setSelectedCities] = useState<string[]>([]);
   const [matchScores, setMatchScores] = useState<Record<string, number | null>>({});
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
-  const [previewModalVisible, setPreviewModalVisible] = useState(false);
-  const [previewUser, setPreviewUser] = useState<User | null>(null);
-  const [previewMatchPercent, setPreviewMatchPercent] = useState<number | null>(null);
-  const [previewGroupUsers, setPreviewGroupUsers] = useState<User[] | null>(null);
 
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const translateX = useSharedValue(0);
@@ -188,23 +183,6 @@ export default function PartnersScreen() {
   );
 
   const isDeckExhausted = items.length > 0 && currentIndex >= items.length;
-
-  const openPreviewModal = (u: User) => {
-    if (!u?.id) return;
-    setPreviewUser(u);
-    setPreviewMatchPercent(matchScores[u.id] ?? null);
-    setPreviewGroupUsers(null);
-    setPreviewModalVisible(true);
-  };
-
-  const openGroupPreviewModal = (groupUsers: User[]) => {
-    const clean = (groupUsers || []).filter((x) => !!x?.id);
-    if (!clean.length) return;
-    setPreviewGroupUsers(clean);
-    setPreviewUser(null);
-    setPreviewMatchPercent(null);
-    setPreviewModalVisible(true);
-  };
 
   const onSwipe = (type: 'like' | 'pass') => {
     const item = items[currentIndex];
@@ -994,7 +972,7 @@ export default function PartnersScreen() {
     }
 
     return (
-      <GroupCard
+      <GroupCardComponent
         groupId={(item as any).groupId}
         users={(item as any).users}
         apartment={(item as any).apartment}
@@ -1002,7 +980,7 @@ export default function PartnersScreen() {
         onLike={(groupId, users) => handleGroupLike(groupId, users)}
         onPass={(groupId, users) => handleGroupPass(groupId, users)}
         mediaHeight={swipeCardHeight}
-        onPreviewGroup={openGroupPreviewModal}
+        onDetailsOpenChange={setIsDetailsOpen}
         onOpen={(userId: string) =>
           router.push({
             pathname: '/(tabs)/user/[id]',
@@ -1088,12 +1066,12 @@ export default function PartnersScreen() {
           <View style={[styles.cardStack, { height: swipeCardHeight, justifyContent: 'center', alignItems: 'center' }]}>
             <View style={styles.emptyStateCard}>
               <LinearGradient
-                colors={['rgba(124,92,255,0.18)', 'rgba(124,92,255,0.06)']}
+                colors={['rgba(94,63,45,0.18)', 'rgba(94,63,45,0.06)']}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
                 style={styles.emptyStateIconWrap}
               >
-                <Users size={34} color="#6D28D9" />
+                <Users size={34} color="#5e3f2d" />
               </LinearGradient>
               <Text style={styles.emptyStateTitle}>לא נמצאו שותפים להצגה</Text>
               <Text style={styles.emptyStateSubtitle}>
@@ -1117,12 +1095,12 @@ export default function PartnersScreen() {
           <View style={[styles.cardStack, { height: swipeCardHeight, justifyContent: 'center', alignItems: 'center' }]}>
             <View style={styles.endOfDeckCard}>
               <LinearGradient
-                colors={['rgba(124,92,255,0.18)', 'rgba(124,92,255,0.06)']}
+                colors={['rgba(94,63,45,0.18)', 'rgba(94,63,45,0.06)']}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
                 style={styles.endOfDeckIconWrap}
               >
-                <Users size={34} color="#6D28D9" />
+                <Users size={34} color="#5e3f2d" />
               </LinearGradient>
               <Text style={styles.endOfDeckTitle}>אין יותר שותפים להציג</Text>
               <Text style={styles.endOfDeckSubtitle}>
@@ -1432,41 +1410,6 @@ export default function PartnersScreen() {
         </Modal>
       ) : null}
 
-      <UserParallaxModal
-        visible={previewModalVisible && !!previewUser}
-        user={previewUser}
-        matchPercent={previewMatchPercent}
-        onClose={() => {
-          setPreviewModalVisible(false);
-          setPreviewUser(null);
-          setPreviewMatchPercent(null);
-          setPreviewGroupUsers(null);
-        }}
-        onOpenProfile={(userId) =>
-          router.push({
-            pathname: '/(tabs)/user/[id]',
-            params: { id: userId, from: 'partners' } as any,
-          })
-        }
-      />
-
-      <GroupParallaxModal
-        visible={previewModalVisible && !previewUser && !!previewGroupUsers?.length}
-        users={previewGroupUsers}
-        matchScores={matchScores}
-        onClose={() => {
-          setPreviewModalVisible(false);
-          setPreviewUser(null);
-          setPreviewMatchPercent(null);
-          setPreviewGroupUsers(null);
-        }}
-        onOpenProfile={(userId) =>
-          router.push({
-            pathname: '/(tabs)/user/[id]',
-            params: { id: userId, from: 'partners' } as any,
-          })
-        }
-      />
     </SafeAreaView>
   );
 }
@@ -1573,7 +1516,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.35)',
   },
   likeOverlay: {
-    backgroundColor: 'rgba(124,92,255,0.42)',
+    backgroundColor: 'rgba(94,63,45,0.42)',
   },
   passOverlay: {
     backgroundColor: 'rgba(239,68,68,0.35)',
@@ -1617,7 +1560,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginBottom: 14,
     borderWidth: 1,
-    borderColor: 'rgba(124,92,255,0.22)',
+    borderColor: 'rgba(94,63,45,0.22)',
   },
   emptyStateTitle: {
     fontSize: 18,
@@ -1651,9 +1594,9 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   emptyStateBtnPrimary: {
-    backgroundColor: '#6D28D9',
+    backgroundColor: '#5e3f2d',
     borderWidth: 1,
-    borderColor: 'rgba(109,40,217,0.25)',
+    borderColor: 'rgba(94,63,45,0.25)',
   },
   emptyStateBtnSecondary: {
     backgroundColor: '#FFFFFF',
@@ -1694,7 +1637,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginBottom: 14,
     borderWidth: 1,
-    borderColor: 'rgba(124,92,255,0.22)',
+    borderColor: 'rgba(94,63,45,0.22)',
   },
   endOfDeckTitle: {
     fontSize: 18,
@@ -1728,9 +1671,9 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   endOfDeckBtnPrimary: {
-    backgroundColor: '#6D28D9',
+    backgroundColor: '#5e3f2d',
     borderWidth: 1,
-    borderColor: 'rgba(109,40,217,0.25)',
+    borderColor: 'rgba(94,63,45,0.25)',
   },
   endOfDeckBtnSecondary: {
     backgroundColor: '#FFFFFF',
@@ -1779,7 +1722,7 @@ const styles = StyleSheet.create({
   },
   actionBtnLike: {
     borderWidth: 1,
-    borderColor: 'rgba(124,92,255,0.22)',
+    borderColor: 'rgba(94,63,45,0.22)',
   },
   actionBtnShare: {
     width: 56,
