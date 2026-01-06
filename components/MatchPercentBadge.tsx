@@ -56,7 +56,9 @@ export default function MatchPercentBadge({
     isDisabled
       ? (['rgba(17,24,39,0.55)', 'rgba(17,24,39,0.35)'] as const)
       : (['#4ADE80', '#16A34A'] as const);
-  const borderColor = isDisabled ? 'rgba(255,255,255,0.22)' : 'rgba(134,239,172,0.60)';
+  // White outline to pop on top of photos (especially the green "match" badge)
+  const borderColor = isDisabled ? 'rgba(255,255,255,0.22)' : 'rgba(255,255,255,0.90)';
+  const borderWidth = isDisabled ? 1 : 2;
 
   // Fit text better for different sizes (slightly more compact)
   const valueFontSize = Math.max(12, Math.round(size * 0.235));
@@ -75,6 +77,7 @@ export default function MatchPercentBadge({
             height: size,
             borderRadius: size / 2,
             borderColor,
+            borderWidth,
           },
         ]}
       >
