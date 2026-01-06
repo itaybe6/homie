@@ -589,6 +589,7 @@ export default function MapTabScreen() {
           zoom={mapZoom}
           points={filteredPoints}
           pointColor={pointBrown}
+          userLocation={userLocation ? ([userLocation.lng, userLocation.lat] as const) : undefined}
           onApartmentPress={(id: string) => {
             router.push({ pathname: '/apartment/[id]', params: { id, returnTo: '/(tabs)/map' } });
           }}
@@ -734,8 +735,15 @@ export default function MapTabScreen() {
 
           {statusText ? (
             <View style={[styles.statusPill, statusTone === 'error' ? styles.statusPillError : styles.statusPillNeutral]}>
-              {loadingPoints ? <ActivityIndicator color="#FFFFFF" /> : null}
-              <Text style={styles.statusText}>{statusText}</Text>
+              {loadingPoints ? <ActivityIndicator color="#5e3f2d" /> : null}
+              <Text
+                style={[
+                  styles.statusText,
+                  statusTone === 'error' ? styles.statusTextError : styles.statusTextNeutral,
+                ]}
+              >
+                {statusText}
+              </Text>
             </View>
           ) : null}
         </View>
@@ -908,27 +916,39 @@ const styles = StyleSheet.create({
   statusPill: {
     marginTop: 10,
     paddingVertical: 10,
-    paddingHorizontal: 12,
-    borderRadius: 14,
+    paddingHorizontal: 14,
+    borderRadius: 16,
     flexDirection: 'row-reverse',
     alignItems: 'center',
     gap: 10,
-    borderWidth: 1,
+    borderWidth: 0,
+    shadowColor: '#000000',
+    shadowOpacity: 0.10,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 4,
+    ...(Platform.OS === 'web' ? ({ boxShadow: '0 12px 28px rgba(0,0,0,0.10)' } as any) : null),
   },
   statusPillNeutral: {
-    backgroundColor: 'rgba(17, 24, 39, 0.86)',
-    borderColor: 'rgba(255,255,255,0.14)',
+    backgroundColor: '#FFFFFF',
+    borderColor: 'transparent',
   },
   statusPillError: {
-    backgroundColor: 'rgba(153, 27, 27, 0.92)',
-    borderColor: 'rgba(255,255,255,0.14)',
+    backgroundColor: '#FEF2F2',
+    borderColor: 'rgba(153, 27, 27, 0.18)',
+    borderWidth: 1,
   },
   statusText: {
-    color: '#FFFFFF',
     fontSize: 12,
     fontWeight: '800',
     textAlign: 'right',
     flex: 1,
+  },
+  statusTextNeutral: {
+    color: '#5e3f2d',
+  },
+  statusTextError: {
+    color: '#991B1B',
   },
   floatingActions: {
     position: 'absolute',

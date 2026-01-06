@@ -45,7 +45,6 @@ import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { MotiPressable } from 'moti/interactions';
 import * as Clipboard from 'expo-clipboard';
-import MaskedView from '@react-native-masked-view/masked-view';
 import Animated, { FadeIn, FadeOut, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { supabase } from '@/lib/supabase';
 import { authService } from '@/lib/auth';
@@ -1361,14 +1360,13 @@ export default function ProfileScreen() {
                         }
                       }}
                     >
-                      <LinearGradient colors={grad as any} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.igBtnBorder}>
-                        <View style={styles.igBtnInner}>
-                          <MaskedView
-                            maskElement={<Instagram size={iconSize} color="#000000" />}
-                          >
-                            <LinearGradient colors={grad as any} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ width: iconSize, height: iconSize }} />
-                          </MaskedView>
-                        </View>
+                      <LinearGradient
+                        colors={grad as any}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 1 }}
+                        style={styles.igBtnInner}
+                      >
+                        <Instagram size={iconSize} color="#FFFFFF" />
                       </LinearGradient>
                     </TouchableOpacity>
                   );
@@ -1454,6 +1452,71 @@ export default function ProfileScreen() {
             </View>
           </View>
         )}
+
+        {/* Survey CTA */}
+        <View style={styles.sectionDark}>
+          <View style={styles.surveyCTA}>
+            {profile ? (
+              <LinearGradient
+                colors={['#4ADE80', '#16A34A']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.surveyCTAAvatarRing}
+              >
+                <View style={styles.surveyCTAAvatarInner}>
+                  <Image
+                    source={{ uri: profile.avatar_url || 'https://cdn-icons-png.flaticon.com/512/847/847969.png' }}
+                    style={styles.surveyCTAAvatar}
+                  />
+                </View>
+              </LinearGradient>
+            ) : null}
+
+            <TouchableOpacity
+              style={styles.surveyCTATexts}
+              activeOpacity={0.9}
+              onPress={() => {
+                router.push({ pathname: '/(tabs)/onboarding/survey', params: { mode: 'edit' } } as any);
+              }}
+              accessibilityRole="button"
+              accessibilityLabel="עריכת שאלון"
+            >
+              <Text style={styles.surveyCTATitle}>
+                {`השאלון של ${(profile?.full_name || '').split(' ')?.[0] || 'אני'}`}
+              </Text>
+              <Text style={styles.surveyCTASubtitle} numberOfLines={1}>
+                {surveyResponse ? 'לחצו כאן כדי לערוך את השאלון' : 'לחצו כאן כדי למלא את השאלון'}
+              </Text>
+            </TouchableOpacity>
+
+            <View style={styles.surveyCTAActions}>
+              {surveyResponse ? (
+                <TouchableOpacity
+                  style={styles.surveyEyeBtn}
+                  activeOpacity={0.9}
+                  onPress={() => setIsSurveyOpen(true)}
+                  accessibilityRole="button"
+                  accessibilityLabel="צפייה בשאלון"
+                >
+                  <Eye size={18} color="#5e3f2d" />
+                </TouchableOpacity>
+              ) : null}
+              <TouchableOpacity
+                style={[styles.surveyCTACtaPill, surveyResponse ? styles.surveyCTACtaPillBrown : null]}
+                activeOpacity={0.9}
+                onPress={() => {
+                  router.push({ pathname: '/(tabs)/onboarding/survey', params: { mode: 'edit' } } as any);
+                }}
+                accessibilityRole="button"
+                accessibilityLabel={surveyResponse ? 'עריכת שאלון' : 'מילוי שאלון'}
+              >
+                <Text style={[styles.surveyCTACtaPillText, surveyResponse ? styles.surveyCTACtaPillTextBrown : null]}>
+                  {surveyResponse ? 'עריכה' : 'מילוי'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
 
         {/* Shared profile (if any) */}
         <View style={styles.sectionDark}>
@@ -1853,75 +1916,6 @@ export default function ProfileScreen() {
               </LinearGradient>
             </View>
           </TouchableOpacity>
-        </View>
-
-        <View style={styles.sectionDark}>
-          <View style={styles.surveyCTA}>
-            {profile ? (
-              <LinearGradient
-                colors={['#4ADE80', '#16A34A']}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={styles.surveyCTAAvatarRing}
-              >
-                <View style={styles.surveyCTAAvatarInner}>
-                  <Image
-                    source={{ uri: profile.avatar_url || 'https://cdn-icons-png.flaticon.com/512/847/847969.png' }}
-                    style={styles.surveyCTAAvatar}
-                  />
-                </View>
-              </LinearGradient>
-            ) : null}
-
-            <TouchableOpacity
-              style={styles.surveyCTATexts}
-              activeOpacity={0.9}
-              onPress={() => {
-                router.push({ pathname: '/(tabs)/onboarding/survey', params: { mode: 'edit' } } as any);
-              }}
-              accessibilityRole="button"
-              accessibilityLabel="עריכת שאלון"
-            >
-              <Text style={styles.surveyCTATitle}>
-                {`השאלון של ${(profile?.full_name || '').split(' ')?.[0] || 'אני'}`}
-              </Text>
-              <Text style={styles.surveyCTASubtitle} numberOfLines={1}>
-                {surveyResponse ? 'לחצו כאן כדי לערוך את השאלון' : 'לחצו כאן כדי למלא את השאלון'}
-              </Text>
-            </TouchableOpacity>
-
-            <View style={styles.surveyCTAActions}>
-              {surveyResponse ? (
-                <TouchableOpacity
-                  style={styles.surveyEyeBtn}
-                  activeOpacity={0.9}
-                  onPress={() => setIsSurveyOpen(true)}
-                  accessibilityRole="button"
-                  accessibilityLabel="צפייה בשאלון"
-                >
-                  <Eye size={18} color="#5e3f2d" />
-                </TouchableOpacity>
-              ) : null}
-              <TouchableOpacity
-                style={[styles.surveyCTACtaPill, surveyResponse ? styles.surveyCTACtaPillBrown : null]}
-                activeOpacity={0.9}
-                onPress={() => {
-                  router.push({ pathname: '/(tabs)/onboarding/survey', params: { mode: 'edit' } } as any);
-                }}
-                accessibilityRole="button"
-                accessibilityLabel={surveyResponse ? 'עריכת שאלון' : 'מילוי שאלון'}
-              >
-                <Text style={[styles.surveyCTACtaPillText, surveyResponse ? styles.surveyCTACtaPillTextBrown : null]}>
-                  {surveyResponse ? 'עריכה' : 'מילוי'}
-                </Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-          {!isSurveyCompleted && (
-            <Text style={styles.surveyCTAHint}>
-              מלא/י את השאלון כדי שנוכל לחפש לך התאמות טובות יותר.
-            </Text>
-          )}
         </View>
 
         {/* Gallery section */}
@@ -2972,12 +2966,7 @@ const styles = StyleSheet.create({
   igBtnHit: {
     flexShrink: 0,
   },
-  igBtnBorder: {
-    borderRadius: 999,
-    padding: 1.5,
-  },
   igBtnInner: {
-    backgroundColor: 'rgba(255,255,255,0.0)',
     borderRadius: 999,
     paddingHorizontal: 10,
     paddingVertical: 7,
@@ -3229,15 +3218,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderWidth: 0,
+    borderColor: 'transparent',
     borderRadius: 20,
     paddingHorizontal: 16,
     paddingVertical: 14,
     shadowColor: '#000000',
-    shadowOpacity: 0.06,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 3,
+    ...(Platform.OS === 'web' ? ({ boxShadow: '0 12px 28px rgba(0,0,0,0.10)' } as any) : null),
   },
   surveyCTAActions: {
     flexDirection: 'row-reverse',
@@ -3269,14 +3260,6 @@ const styles = StyleSheet.create({
     color: '#6B7280',
     fontSize: 13,
     textAlign: 'right',
-  },
-  surveyCTAHint: {
-    marginTop: 10,
-    color: '#6B7280',
-    fontSize: 13,
-    lineHeight: 18,
-    textAlign: 'right',
-    alignSelf: 'stretch',
   },
   surveyCTACtaPill: {
     paddingHorizontal: 12,
@@ -3539,15 +3522,14 @@ const styles = StyleSheet.create({
   likesCard: {
     backgroundColor: '#FFFFFF',
     borderRadius: 20,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderWidth: 0,
+    borderColor: 'transparent',
     shadowColor: '#000000',
     shadowOpacity: 0.08,
     shadowRadius: 16,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 4,
-    overflow: 'hidden',
-    ...(Platform.OS === 'web' ? ({ boxShadow: '0 10px 28px rgba(0,0,0,0.10)' } as any) : null),
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 3,
+    ...(Platform.OS === 'web' ? ({ boxShadow: '0 12px 28px rgba(0,0,0,0.10)' } as any) : null),
   },
   likesCardContent: {
     flexDirection: 'row-reverse',

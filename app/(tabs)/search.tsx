@@ -266,11 +266,11 @@ const styles = StyleSheet.create({
   searchBarShadow: {
     borderRadius: 18,
     shadowColor: '#000000',
-    shadowOpacity: 0.06,
-    shadowRadius: 12,
+    shadowOpacity: 0.08,
+    shadowRadius: 10,
     shadowOffset: { width: 0, height: 6 },
-    elevation: 4,
-    ...(Platform.OS === 'web' ? ({ boxShadow: '0 6px 18px rgba(0,0,0,0.08)' } as any) : null),
+    elevation: 3,
+    ...(Platform.OS === 'web' ? ({ boxShadow: '0 8px 16px rgba(0,0,0,0.10)' } as any) : null),
   },
   searchBar: {
     flexDirection: 'row-reverse',
@@ -280,8 +280,8 @@ const styles = StyleSheet.create({
     paddingVertical: 9,
     borderRadius: 18,
     backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderWidth: 0,
+    borderColor: 'transparent',
   },
   searchIconGradient: {
     width: 36,
@@ -366,7 +366,6 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   userCard: {
-    marginBottom: 10,
     borderRadius: 18,
     backgroundColor: '#FFFFFF',
     width: '100%',
@@ -374,18 +373,18 @@ const styles = StyleSheet.create({
     borderWidth: 0,
     borderColor: 'transparent',
     overflow: 'hidden',
-    shadowColor: '#000000',
-    shadowOpacity: 0.08,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 3,
-    ...(Platform.OS === 'web' ? ({ boxShadow: '0 8px 24px rgba(0,0,0,0.08)' } as any) : null),
   },
-  // On web, sometimes the animation wrapper becomes the visible background.
-  // Keep it explicitly white so each result is guaranteed to be white.
+  // Shadow must be on the OUTER wrapper (iOS doesn't render shadow when overflow: hidden).
   userCardOuter: {
+    marginBottom: 10,
     backgroundColor: '#FFFFFF',
     borderRadius: 18,
+    shadowColor: '#000000',
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 3,
+    ...(Platform.OS === 'web' ? ({ boxShadow: '0 8px 18px rgba(0,0,0,0.10)' } as any) : null),
   },
   cardContent: {
     flexDirection: 'row-reverse',

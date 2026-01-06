@@ -14,6 +14,8 @@ export type MapboxMapProps = {
   pointColor?: string;
   /** When true, render a slow pulsing ring behind point circles (use for single-location maps). */
   pulsePoints?: boolean;
+  /** User's current location (renders as a green dot when provided). */
+  userLocation?: MapboxCenter;
   onApartmentPress?: (apartmentId: string) => void;
 };
 
