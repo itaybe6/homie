@@ -115,7 +115,7 @@ export default function SearchUsersScreen() {
   const renderItem = ({ item, index }: { item: SearchUserRow; index: number }) => {
     const displayName = (item.full_name || 'משתמש/ת').toString();
     return (
-      <Animated.View entering={FadeInDown.delay(index * 50).springify()}>
+      <Animated.View style={styles.userCardOuter} entering={FadeInDown.delay(index * 50).springify()}>
         <TouchableOpacity
           style={styles.userCard}
           activeOpacity={0.95}
@@ -369,8 +369,10 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     borderRadius: 18,
     backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
+    width: '100%',
+    alignSelf: 'stretch',
+    borderWidth: 0,
+    borderColor: 'transparent',
     overflow: 'hidden',
     shadowColor: '#000000',
     shadowOpacity: 0.08,
@@ -379,12 +381,19 @@ const styles = StyleSheet.create({
     elevation: 3,
     ...(Platform.OS === 'web' ? ({ boxShadow: '0 8px 24px rgba(0,0,0,0.08)' } as any) : null),
   },
+  // On web, sometimes the animation wrapper becomes the visible background.
+  // Keep it explicitly white so each result is guaranteed to be white.
+  userCardOuter: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 18,
+  },
   cardContent: {
     flexDirection: 'row-reverse',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingVertical: 11,
+    backgroundColor: '#FFFFFF',
   },
   avatarContainer: {
     marginLeft: 14,
