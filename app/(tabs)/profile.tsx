@@ -28,12 +28,16 @@ import {
   Inbox,
   Trash2,
   ClipboardList,
+  User as UserIcon,
+  Users,
+  Home,
   Building2,
   Calendar,
   Camera,
   Copy,
   Image as ImageIcon,
   Instagram,
+  Eye,
 } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
@@ -41,11 +45,13 @@ import * as ImageManipulator from 'expo-image-manipulator';
 import { MotiPressable } from 'moti/interactions';
 import * as Clipboard from 'expo-clipboard';
 import MaskedView from '@react-native-masked-view/masked-view';
+import Animated, { FadeIn, FadeOut, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { supabase } from '@/lib/supabase';
 import { authService } from '@/lib/auth';
 import { useAuthStore } from '@/stores/authStore';
 import { useApartmentStore } from '@/stores/apartmentStore';
 import { User, Apartment, UserSurveyResponse } from '@/types/database';
+import { KeyFabPanel } from '@/components/KeyFabPanel';
 
 
 type AvatarFabItem = {
@@ -195,7 +201,7 @@ export default function ProfileScreen() {
   const apartments = useApartmentStore((state) => state.apartments);
   const removeApartmentFromStore = useApartmentStore((state) => state.removeApartment);
   const insets = useSafeAreaInsets();
-  const { height: windowHeight } = useWindowDimensions();
+  const { height: windowHeight, width: windowWidth } = useWindowDimensions();
 
   const [profile, setProfile] = useState<User | null>(null);
   const [userApartments, setUserApartments] = useState<Apartment[]>([]);
@@ -211,6 +217,9 @@ export default function ProfileScreen() {
   const [isDeletingImage, setIsDeletingImage] = useState(false);
   const [isAddingImage, setIsAddingImage] = useState(false);
   const [isSurveyOpen, setIsSurveyOpen] = useState(false);
+  const [surveyActiveSection, setSurveyActiveSection] = useState<'about' | 'apartment' | 'partner'>('about');
+  const segW = useSharedValue(1);
+  const tabIdx = useSharedValue(0);
   const [sharedGroups, setSharedGroups] = useState<
     { id: string; name?: string | null; members: Pick<User, 'id' | 'full_name' | 'avatar_url'>[] }[]
   >([]);
@@ -260,6 +269,38 @@ export default function ProfileScreen() {
     const safeMax = Math.max(420, Math.round(windowHeight - (insets.top + 24)));
     return Math.min(hardMax, safeMax);
   }, [windowHeight, insets.top]);
+
+  // Match the survey viewer sizing used on other user's profile screen.
+  const surveyPanelWidth = useMemo(() => {
+    return Math.min(420, Math.max(320, Math.round(windowWidth - 32)));
+  }, [windowWidth]);
+
+  const surveyPanelMaxHeight = useMemo(() => {
+    return Math.min(560, Math.round(windowHeight * 0.72));
+  }, [windowHeight]);
+
+  const surveyPanelScrollMaxHeight = useMemo(() => {
+    return Math.min(440, Math.round(windowHeight * 0.42));
+  }, [windowHeight]);
+
+  const activeTabIndex = useMemo(() => {
+    if (surveyActiveSection === 'about') return 0;
+    if (surveyActiveSection === 'apartment') return 1;
+    return 2;
+  }, [surveyActiveSection]);
+
+  useEffect(() => {
+    tabIdx.value = withTiming(activeTabIndex, { duration: 220 });
+  }, [activeTabIndex, tabIdx]);
+
+  const indicatorStyle = useAnimatedStyle(() => {
+    // Buttons are laid out row-reverse visually: index 0 is rightmost.
+    const x = (2 - tabIdx.value) * segW.value;
+    return {
+      width: segW.value,
+      transform: [{ translateX: x }],
+    };
+  });
 
   const [fullName, setFullName] = useState('');
   const [age, setAge] = useState('');
@@ -1788,13 +1829,7 @@ export default function ProfileScreen() {
         </View>
 
         <View style={styles.sectionDark}>
-          <TouchableOpacity
-            style={styles.surveyCTA}
-            activeOpacity={0.9}
-            onPress={() => {
-              router.push({ pathname: '/(tabs)/onboarding/survey', params: { mode: 'edit' } } as any);
-            }}
-          >
+          <View style={styles.surveyCTA}>
             {profile ? (
               <LinearGradient
                 colors={['#4ADE80', '#16A34A']}
@@ -1810,18 +1845,51 @@ export default function ProfileScreen() {
                 </View>
               </LinearGradient>
             ) : null}
-            <View style={styles.surveyCTATexts}>
+
+            <TouchableOpacity
+              style={styles.surveyCTATexts}
+              activeOpacity={0.9}
+              onPress={() => {
+                router.push({ pathname: '/(tabs)/onboarding/survey', params: { mode: 'edit' } } as any);
+              }}
+              accessibilityRole="button"
+              accessibilityLabel="עריכת שאלון"
+            >
               <Text style={styles.surveyCTATitle}>
                 {`השאלון של ${(profile?.full_name || '').split(' ')?.[0] || 'אני'}`}
               </Text>
               <Text style={styles.surveyCTASubtitle} numberOfLines={1}>
-                {'לחצו כאן כדי לערוך את השאלון'}
+                {surveyResponse ? 'לחצו כאן כדי לערוך את השאלון' : 'לחצו כאן כדי למלא את השאלון'}
               </Text>
+            </TouchableOpacity>
+
+            <View style={styles.surveyCTAActions}>
+              {surveyResponse ? (
+                <TouchableOpacity
+                  style={styles.surveyEyeBtn}
+                  activeOpacity={0.9}
+                  onPress={() => setIsSurveyOpen(true)}
+                  accessibilityRole="button"
+                  accessibilityLabel="צפייה בשאלון"
+                >
+                  <Eye size={18} color="#5e3f2d" />
+                </TouchableOpacity>
+              ) : null}
+              <TouchableOpacity
+                style={[styles.surveyCTACtaPill, surveyResponse ? styles.surveyCTACtaPillBrown : null]}
+                activeOpacity={0.9}
+                onPress={() => {
+                  router.push({ pathname: '/(tabs)/onboarding/survey', params: { mode: 'edit' } } as any);
+                }}
+                accessibilityRole="button"
+                accessibilityLabel={surveyResponse ? 'עריכת שאלון' : 'מילוי שאלון'}
+              >
+                <Text style={[styles.surveyCTACtaPillText, surveyResponse ? styles.surveyCTACtaPillTextBrown : null]}>
+                  {surveyResponse ? 'עריכה' : 'מילוי'}
+                </Text>
+              </TouchableOpacity>
             </View>
-            <View style={styles.surveyCTACtaPill}>
-              <Text style={styles.surveyCTACtaPillText}>לצפייה</Text>
-            </View>
-          </TouchableOpacity>
+          </View>
           {!isSurveyCompleted && (
             <Text style={styles.surveyCTAHint}>
               מלא/י את השאלון כדי שנוכל לחפש לך התאמות טובות יותר.
@@ -1929,103 +1997,114 @@ export default function ProfileScreen() {
           </View>
         </Modal>
       )}
-      <Modal visible={isSurveyOpen} animationType="slide" transparent onRequestClose={() => setIsSurveyOpen(false)}>
-        <View style={styles.modalOverlay}>
-          <TouchableOpacity style={styles.modalBackdrop} activeOpacity={1} onPress={() => setIsSurveyOpen(false)} />
-          <View style={[styles.sheet, { height: surveySheetMaxHeight }]}>
-            <View style={styles.sheetHandleWrap}>
-              <View style={styles.sheetHandle} />
-            </View>
-            <View style={styles.sheetHeader}>
-              <Text style={styles.sheetTitle}>סיכום ההעדפות</Text>
-              <TouchableOpacity onPress={() => setIsSurveyOpen(false)} style={styles.closeBtn}>
-                <X size={20} color="#FFFFFF" />
-              </TouchableOpacity>
-            </View>
-            <ScrollView
-              style={styles.sheetScroll}
-              contentContainerStyle={[styles.sheetContent, { paddingBottom: 16 + (insets.bottom || 0) }]}
-              showsVerticalScrollIndicator={false}
-              keyboardShouldPersistTaps="handled"
+      <KeyFabPanel
+        isOpen={isSurveyOpen}
+        onClose={() => setIsSurveyOpen(false)}
+        title="סיכום ההעדפות"
+        subtitle=""
+        anchor="center"
+        topOffset={insets.top + 24}
+        bottomOffset={insets.bottom + 24}
+        openedWidth={surveyPanelWidth}
+        panelStyle={{ maxHeight: surveyPanelMaxHeight, borderRadius: 22, padding: 14 }}
+      >
+        <View
+          style={styles.surveySegWrap}
+          onLayout={(e) => {
+            const w = Math.max(1, e.nativeEvent.layout.width);
+            // account for horizontal padding inside the segmented control
+            segW.value = Math.max(1, (w - 12) / 3);
+          }}
+        >
+          <Animated.View style={[styles.surveySegIndicator, indicatorStyle]} />
+          <View style={styles.surveySegRow}>
+            <TouchableOpacity
+              style={styles.surveySegBtn}
+              onPress={() => setSurveyActiveSection('about')}
+              activeOpacity={0.9}
             >
-              {!!surveyHighlights.length && (
-                <View style={styles.surveyHighlightsRow}>
-                  {surveyHighlights.map((item) => (
-                    <View key={`${item.label}-${item.value}`} style={styles.surveyHighlightPill}>
-                      <Text style={styles.surveyHighlightLabel}>{item.label}</Text>
-                      <Text style={styles.surveyHighlightValue}>{item.value}</Text>
-                    </View>
-                  ))}
-                </View>
-              )}
-              {surveyResponse ? (
-                surveyItems.length ? (
-                  <>
-                    <Text style={styles.surveyAllAnswersTitle}>{`סיכום מלא (${surveyItems.length})`}</Text>
-
-                    <View style={styles.surveySectionCard}>
-                      <Text style={styles.surveySectionTitle}>עליי</Text>
-                      {surveyItems.filter((i) => i.section === 'about').map((item, idx, arr) => (
-                        <View key={`${item.section}-${item.label}-${item.value}`}>
-                          <View style={styles.surveyRow}>
-                            <Text style={styles.surveyRowLabel}>{item.label}</Text>
-                            <View style={styles.surveyRowValuePill}>
-                              <Text style={styles.surveyRowValueText}>{item.value}</Text>
-                            </View>
-                          </View>
-                          {idx < arr.length - 1 ? <View style={styles.surveyRowDivider} /> : null}
-                        </View>
-                      ))}
-                    </View>
-
-                    <View style={styles.surveySectionCard}>
-                      <Text style={styles.surveySectionTitle}>הדירה שאני מחפש/ת</Text>
-                      {surveyItems.filter((i) => i.section === 'apartment').map((item, idx, arr) => (
-                        <View key={`${item.section}-${item.label}-${item.value}`}>
-                          <View style={styles.surveyRow}>
-                            <Text style={styles.surveyRowLabel}>{item.label}</Text>
-                            <View style={styles.surveyRowValuePill}>
-                              <Text style={styles.surveyRowValueText}>{item.value}</Text>
-                            </View>
-                          </View>
-                          {idx < arr.length - 1 ? <View style={styles.surveyRowDivider} /> : null}
-                        </View>
-                      ))}
-                    </View>
-
-                    <View style={styles.surveySectionCard}>
-                      <Text style={styles.surveySectionTitle}>השותפ/ה שאני מחפש/ת</Text>
-                      {surveyItems.filter((i) => i.section === 'partner').map((item, idx, arr) => (
-                        <View key={`${item.section}-${item.label}-${item.value}`}>
-                          <View style={styles.surveyRow}>
-                            <Text style={styles.surveyRowLabel}>{item.label}</Text>
-                            <View style={styles.surveyRowValuePill}>
-                              <Text style={styles.surveyRowValueText}>{item.value}</Text>
-                            </View>
-                          </View>
-                          {idx < arr.length - 1 ? <View style={styles.surveyRowDivider} /> : null}
-                        </View>
-                      ))}
-                    </View>
-                  </>
-                ) : (
-                  <View style={styles.surveyEmptyState}>
-                    <Text style={styles.surveyEmptyText}>
-                      סקר ההעדפות הושלם אך אין עדיין נתונים להצגה.
-                    </Text>
-                  </View>
-                )
-              ) : (
-                <View style={styles.surveyEmptyState}>
-                  <Text style={styles.surveyEmptyText}>
-                    ברגע שתמלא/י את סקר ההעדפות נציג כאן את ההתאמות האישיות שלך.
-                  </Text>
-                </View>
-              )}
-            </ScrollView>
+              <UserIcon size={16} color={surveyActiveSection === 'about' ? '#5e3f2d' : '#6B7280'} />
+              <Text style={[styles.surveySegText, surveyActiveSection === 'about' ? styles.surveySegTextActive : null]}>
+                קצת עליי
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.surveySegBtn}
+              onPress={() => setSurveyActiveSection('apartment')}
+              activeOpacity={0.9}
+            >
+              <Home size={16} color={surveyActiveSection === 'apartment' ? '#5e3f2d' : '#6B7280'} />
+              <Text
+                style={[
+                  styles.surveySegText,
+                  surveyActiveSection === 'apartment' ? styles.surveySegTextActive : null,
+                ]}
+              >
+                הדירה
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.surveySegBtn}
+              onPress={() => setSurveyActiveSection('partner')}
+              activeOpacity={0.9}
+            >
+              <Users size={16} color={surveyActiveSection === 'partner' ? '#5e3f2d' : '#6B7280'} />
+              <Text
+                style={[
+                  styles.surveySegText,
+                  surveyActiveSection === 'partner' ? styles.surveySegTextActive : null,
+                ]}
+              >
+                השותפים
+              </Text>
+            </TouchableOpacity>
           </View>
         </View>
-      </Modal>
+
+        <ScrollView
+          style={[styles.surveyPanelScroll, { maxHeight: surveyPanelScrollMaxHeight }]}
+          contentContainerStyle={styles.surveyPanelContent}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="always"
+          nestedScrollEnabled
+        >
+          {surveyResponse && surveyItems.length ? (
+            <Animated.View
+              key={`survey-part-${surveyActiveSection}`}
+              entering={FadeIn.duration(160)}
+              exiting={FadeOut.duration(120)}
+              style={styles.surveySectionCard}
+            >
+              <Text style={styles.surveySectionTitle}>
+                {surveyActiveSection === 'about'
+                  ? 'קצת עליי'
+                  : surveyActiveSection === 'apartment'
+                    ? 'העדפות לדירה'
+                    : 'העדפות לשותפים'}
+              </Text>
+              {surveyItems
+                .filter((i) => i.section === surveyActiveSection)
+                .map((item, idx, arr) => (
+                  <View key={`${item.section}-${item.label}-${item.value}`}>
+                    <View style={styles.surveyRow}>
+                      <Text style={styles.surveyRowLabel}>{item.label}</Text>
+                      <View style={styles.surveyRowValuePill}>
+                        <Text style={styles.surveyRowValueText}>{item.value}</Text>
+                      </View>
+                    </View>
+                    {idx < arr.length - 1 ? <View style={styles.surveyRowDivider} /> : null}
+                  </View>
+                ))}
+            </Animated.View>
+          ) : (
+            <View style={styles.surveyEmptyState}>
+              <Text style={styles.surveyEmptyText}>
+                {surveyResponse ? 'אין נתונים להצגה.' : 'עדיין לא מילאת את השאלון.'}
+              </Text>
+            </View>
+          )}
+        </ScrollView>
+      </KeyFabPanel>
       {(isSaving || isAddingImage) && (
         <View style={styles.fullScreenLoader}>
           <ActivityIndicator size="large" color="#FFFFFF" />
@@ -2923,9 +3002,8 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   surveySectionCard: {
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
+    backgroundColor: '#F3F4F6',
+    borderWidth: 0,
     borderRadius: 18,
     padding: 14,
     marginBottom: 12,
@@ -2953,9 +3031,9 @@ const styles = StyleSheet.create({
   },
   surveyRowValuePill: {
     maxWidth: '55%',
-    backgroundColor: 'rgba(94,63,45,0.08)',
+    backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: 'rgba(94,63,45,0.18)',
+    borderColor: 'rgba(17,24,39,0.10)',
     paddingHorizontal: 10,
     paddingVertical: 8,
     borderRadius: 14,
@@ -2969,8 +3047,59 @@ const styles = StyleSheet.create({
   },
   surveyRowDivider: {
     height: StyleSheet.hairlineWidth,
-    backgroundColor: '#EEF2F7',
+    backgroundColor: 'rgba(17,24,39,0.10)',
     marginVertical: 10,
+  },
+  surveySegWrap: {
+    position: 'relative',
+    backgroundColor: '#E5E7EB',
+    borderWidth: 0,
+    borderRadius: 999,
+    padding: 6,
+    marginBottom: 12,
+    overflow: 'hidden',
+  },
+  surveySegRow: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+  },
+  surveySegIndicator: {
+    position: 'absolute',
+    top: 6,
+    bottom: 6,
+    left: 6,
+    borderRadius: 999,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 0,
+    shadowColor: '#000',
+    shadowOpacity: 0.08,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 2,
+  },
+  surveySegBtn: {
+    flex: 1,
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 8,
+  },
+  surveySegText: {
+    color: '#6B7280',
+    fontSize: 13,
+    fontWeight: '900',
+    textAlign: 'center',
+    writingDirection: 'rtl',
+  },
+  surveySegTextActive: {
+    color: '#5e3f2d',
+  },
+  surveyPanelScroll: {
+    // maxHeight is set dynamically based on screen size
+  },
+  surveyPanelContent: {
+    paddingBottom: 10,
   },
   surveyHighlightPill: {
     backgroundColor: '#F9FAFB',
@@ -3047,6 +3176,21 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     shadowOffset: { width: 0, height: 4 },
   },
+  surveyCTAActions: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 10,
+  },
+  surveyEyeBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(94,63,45,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(94,63,45,0.16)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   surveyCTATexts: {
     flex: 1,
     marginRight: 8,
@@ -3087,6 +3231,13 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     textAlign: 'center',
     includeFontPadding: false,
+  },
+  surveyCTACtaPillBrown: {
+    backgroundColor: '#5e3f2d',
+    borderColor: 'rgba(94,63,45,0.25)',
+  },
+  surveyCTACtaPillTextBrown: {
+    color: '#FFFFFF',
   },
   modalOverlay: {
     flex: 1,

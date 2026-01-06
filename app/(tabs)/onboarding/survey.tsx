@@ -19,6 +19,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useNavigation } from '@react-navigation/native';
 import { Sparkles, Check, ChevronRight, X } from 'lucide-react-native';
 import { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuthStore } from '@/stores/authStore';
 import { UserSurveyResponse } from '@/types/database';
 import { fetchUserSurvey, upsertUserSurvey } from '@/lib/survey';
@@ -203,6 +204,10 @@ const HEB_MONTH_NAMES = [
   'דצמבר',
 ];
 
+function draftStepStorageKey(userId: string) {
+  return `survey:draft_step_key:${userId}`;
+}
+
 // Stable ordering for resume fallbacks (in case the draft question is currently hidden).
 const PART_1_KEYS = [
   'occupation',
@@ -326,13 +331,42 @@ export default function SurveyScreen() {
           setState(hydrated);
           setCityQuery(hydrated.preferred_city || '');
           setNeighborhoodSearch('');
-          setResumeStepKey(existing.is_completed ? null : (existing.draft_step_key ?? null));
+          // Prefer server draft_step_key, fallback to local storage (useful if the DB column is missing in some envs).
+          let localDraftKey: string | null = null;
+          try {
+            localDraftKey = await AsyncStorage.getItem(draftStepStorageKey(user.id));
+          } catch {
+            localDraftKey = null;
+          }
+          const preferredDraftKey = (existing as any).draft_step_key ?? localDraftKey ?? null;
+          // If we have a draft pointer (especially for edit sessions), always keep it so we can resume.
+          // Only clear local storage when the survey is completed AND there's no draft pointer.
+          setResumeStepKey(preferredDraftKey);
+          if (existing.is_completed && !preferredDraftKey) {
+            try {
+              await AsyncStorage.removeItem(draftStepStorageKey(user.id));
+            } catch {
+              // ignore
+            }
+          } else if (preferredDraftKey) {
+            // Keep local storage in sync (best effort).
+            try {
+              await AsyncStorage.setItem(draftStepStorageKey(user.id), String(preferredDraftKey));
+            } catch {
+              // ignore
+            }
+          }
           didResumeRef.current = false;
         } else {
           setState({ is_completed: false });
           setCityQuery('');
           setNeighborhoodSearch('');
           setResumeStepKey(null);
+          try {
+            await AsyncStorage.removeItem(draftStepStorageKey(user.id));
+          } catch {
+            // ignore
+          }
           didResumeRef.current = true;
           setCurrentStep(0);
         }
@@ -764,7 +798,7 @@ function PartCarouselPagination({
         render: () => (
           <TriChoiceRow
             // Title is already displayed in the card header; avoid repeating it inside the row.
-            value={state.bills_included}
+            value={state.bills_included ?? null}
             yesLabel="כלולים"
             noLabel="לא כלולים"
             anyLabel="לא משנה לי"
@@ -874,7 +908,7 @@ function PartCarouselPagination({
         title: 'עם מרפסת/גינה?',
         render: () => (
           <TriChoiceRow
-            value={state.has_balcony}
+            value={state.has_balcony ?? null}
             anyLabel="לא משנה לי"
             centerOptions
             showYesIcon={false}
@@ -887,7 +921,7 @@ function PartCarouselPagination({
         title: 'חשוב שתהיה מעלית?',
         render: () => (
           <TriChoiceRow
-            value={state.has_elevator}
+            value={state.has_elevator ?? null}
             anyLabel="לא משנה לי"
             centerOptions
             showYesIcon={false}
@@ -900,7 +934,7 @@ function PartCarouselPagination({
         title: 'חדר מאסטר?',
         render: () => (
           <TriChoiceRow
-            value={state.wants_master_room}
+            value={state.wants_master_room ?? null}
             anyLabel="לא משנה לי"
             centerOptions
             showYesIcon={false}
@@ -1010,7 +1044,7 @@ function PartCarouselPagination({
         title: 'משנה לך תיווך?',
         render: () => (
           <TriChoiceRow
-            value={state.with_broker}
+            value={state.with_broker ?? null}
             yesLabel="עם תיווך"
             noLabel="בלי תיווך"
             anyLabel="לא משנה לי"
@@ -1258,11 +1292,24 @@ function PartCarouselPagination({
   // Resume draft at the last seen question (once per screen mount).
   useEffect(() => {
     if (loading) return;
-    if (isEditMode) return;
     if (didResumeRef.current) return;
     const key = resumeStepKey;
     didResumeRef.current = true;
     if (!key) return;
+
+    // If we're entering via edit mode and we have a draft key, jump directly into that part.
+    if (isEditModeRequested) {
+      const k = String(key);
+      const part: 1 | 2 | 3 | null = (PART_1_KEYS as readonly string[]).includes(k)
+        ? 1
+        : (PART_2_KEYS as readonly string[]).includes(k)
+          ? 2
+          : (PART_3_KEYS as readonly string[]).includes(k)
+            ? 3
+            : null;
+      if (part) setEditSelectedPart(part);
+    }
+
     const directIdx = items.findIndex((it) => it.type === 'question' && it.question.key === key);
     if (directIdx >= 0) {
       setCurrentStep(directIdx);
@@ -1368,6 +1415,12 @@ function PartCarouselPagination({
           : null,
       });
       await upsertUserSurvey(payload);
+      // Clear local draft pointer on completion.
+      try {
+        await AsyncStorage.removeItem(draftStepStorageKey(user.id));
+      } catch {
+        // ignore
+      }
       Alert.alert('נשמר', 'השאלון נשמר בהצלחה');
       router.back();
     } catch (e: any) {
@@ -1392,6 +1445,13 @@ function PartCarouselPagination({
       coerceBooleans: false,
     });
     await upsertUserSurvey(payload);
+    // Also persist locally so resume works even if the server doesn't have draft_step_key column.
+    try {
+      const key = latestStepKeyRef.current;
+      if (key) await AsyncStorage.setItem(draftStepStorageKey(user.id), key);
+    } catch {
+      // ignore
+    }
   };
 
   const saveEdit = async (): Promise<void> => {
@@ -1399,7 +1459,8 @@ function PartCarouselPagination({
     // In edit mode we keep is_completed=true but DO NOT coerce missing booleans to false.
     const payload = normalizePayload(user.id, latestStateRef.current, {
       isCompleted: true,
-      draftStepKey: null,
+      // Save the last question key so we can resume the edit session later.
+      draftStepKey: latestStepKeyRef.current,
       coerceBooleans: false,
     });
     await upsertUserSurvey(payload);
@@ -1565,12 +1626,26 @@ function PartCarouselPagination({
                       onPress={() => {
                         // Snapshot current saved state so we can discard changes for this edit session.
                         editSnapshotRef.current = JSON.parse(JSON.stringify(state || {})) as SurveyState;
-                        const firstIdx = items.findIndex(
-                          (it) => it.type === 'question' && it.partNumber === p.partNumber
-                        );
-                        if (firstIdx >= 0) {
+                        const firstIdx = items.findIndex((it) => it.type === 'question' && it.partNumber === p.partNumber);
+
+                        // If we have a stored draft_step_key (from server/local) and it belongs to this part,
+                        // resume from that question instead of starting the part over.
+                        const draftKey = (state as any)?.draft_step_key as string | null | undefined;
+                        const belongsToPart =
+                          p.partNumber === 1
+                            ? !!draftKey && (PART_1_KEYS as readonly string[]).includes(draftKey)
+                            : p.partNumber === 2
+                              ? !!draftKey && (PART_2_KEYS as readonly string[]).includes(draftKey)
+                              : !!draftKey && (PART_3_KEYS as readonly string[]).includes(draftKey);
+                        const resumeIdx =
+                          belongsToPart && draftKey
+                            ? items.findIndex((it) => it.type === 'question' && it.question.key === draftKey)
+                            : -1;
+
+                        const targetIdx = resumeIdx >= 0 ? resumeIdx : firstIdx;
+                        if (targetIdx >= 0) {
                           setEditSelectedPart(p.partNumber);
-                          setCurrentStep(firstIdx);
+                          setCurrentStep(targetIdx);
                         }
                       }}
                     >
@@ -1982,7 +2057,9 @@ function normalizePayload(
   const payload: any = {
     user_id: userId,
     is_completed: opts.isCompleted,
-    draft_step_key: opts.isCompleted ? null : (opts.draftStepKey ?? null),
+    // Allow saving a draft pointer even when is_completed=true (useful for edit sessions that want to resume).
+    // Callers should pass null explicitly when they want to clear it (e.g. final submit).
+    draft_step_key: opts.draftStepKey ?? null,
     is_sublet: coerce ? (s.is_sublet ?? false) : (s.is_sublet ?? null),
     occupation: s.occupation ?? null,
     student_year: s.student_year ?? null,
@@ -2317,27 +2394,29 @@ function ToggleRow({
   showYesIcon = true,
 }: {
   label?: string;
-  value: boolean;
+  value: boolean | undefined;
   onToggle: (v: boolean) => void;
   centerOptions?: boolean;
   showYesIcon?: boolean;
 }) {
+  const isYes = value === true;
+  const isNo = value === false;
   return (
     <View style={[styles.toggleRow, centerOptions ? styles.toggleRowCentered : null]}>
       {!!label && <Text style={styles.label}>{label}</Text>}
       <View style={[styles.toggleOptions, centerOptions ? styles.toggleOptionsCentered : null]}>
         <TouchableOpacity
-          style={[styles.toggleBtn, value ? styles.toggleActive : null]}
+          style={[styles.toggleBtn, isYes ? styles.toggleActive : null]}
           onPress={() => onToggle(true)}
         >
-          {showYesIcon ? <Check size={16} color={value ? '#0F0F14' : '#9DA4AE'} /> : null}
-          <Text style={[styles.toggleText, value ? styles.toggleTextActive : null]}>כן</Text>
+          {showYesIcon ? <Check size={16} color={isYes ? '#0F0F14' : '#9DA4AE'} /> : null}
+          <Text style={[styles.toggleText, isYes ? styles.toggleTextActive : null]}>כן</Text>
         </TouchableOpacity>
         <TouchableOpacity
-          style={[styles.toggleBtn, !value ? styles.toggleActive : null]}
+          style={[styles.toggleBtn, isNo ? styles.toggleActive : null]}
           onPress={() => onToggle(false)}
         >
-          <Text style={[styles.toggleText, !value ? styles.toggleTextActive : null]}>לא</Text>
+          <Text style={[styles.toggleText, isNo ? styles.toggleTextActive : null]}>לא</Text>
         </TouchableOpacity>
       </View>
     </View>
