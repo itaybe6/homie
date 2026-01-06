@@ -18,7 +18,7 @@ import {
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useNavigation } from '@react-navigation/native';
 import { Sparkles, Check, ChevronRight, X } from 'lucide-react-native';
-import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
+import { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { useAuthStore } from '@/stores/authStore';
 import { UserSurveyResponse } from '@/types/database';
 import { fetchUserSurvey, upsertUserSurvey } from '@/lib/survey';
@@ -203,9 +203,55 @@ const HEB_MONTH_NAMES = [
   'דצמבר',
 ];
 
+// Stable ordering for resume fallbacks (in case the draft question is currently hidden).
+const PART_1_KEYS = [
+  'occupation',
+  'student_year',
+  'works_from_home',
+  'shabbat',
+  'diet',
+  'kosher',
+  'smoker',
+  'relationship',
+  'pet',
+  'lifestyle',
+  'cleanliness',
+  'cleaning_frequency',
+  'hosting',
+  'cooking',
+  'home_vibe',
+] as const;
+const PART_2_KEYS = [
+  'price',
+  'bills',
+  'preferred_city',
+  'preferred_neighborhoods',
+  'floor',
+  'balcony',
+  'elevator',
+  'master',
+  'is_sublet',
+  'sublet_period',
+  'move_in_month',
+  'roommates_min',
+  'roommates_max',
+  'pets_allowed',
+  'broker',
+] as const;
+const PART_3_KEYS = [
+  'age_min',
+  'age_max',
+  'pref_gender',
+  'pref_occ',
+  'partner_shabbat',
+  'partner_diet',
+  'partner_smoking',
+  'partner_pets',
+] as const;
+
 export default function SurveyScreen() {
   const params = useLocalSearchParams<{ mode?: string }>();
-  const isEditMode = String(params?.mode || '') === 'edit';
+  const isEditModeRequested = String(params?.mode || '') === 'edit';
   const router = useRouter();
   const navigation = useNavigation<any>();
   const { user } = useAuthStore();
@@ -234,7 +280,6 @@ export default function SurveyScreen() {
   const [monthPickerTarget, setMonthPickerTarget] = useState<MonthPickerTarget>('move_in_month');
   const [monthPickerTitle, setMonthPickerTitle] = useState<string>('בחר חודש');
   const [monthPickerTempDate, setMonthPickerTempDate] = useState<Date>(() => new Date());
-  const [monthPickerPendingDate, setMonthPickerPendingDate] = useState<Date | null>(null);
 
   // List picker (KeyFabPanel) for select-style questions (e.g. age).
   type ListPickerTarget = 'preferred_age_min' | 'preferred_age_max';
@@ -244,13 +289,23 @@ export default function SurveyScreen() {
 
   const latestStateRef = useRef<SurveyState>({});
   const exitingRef = useRef(false);
+  const savingRef = useRef(false);
   const latestStepKeyRef = useRef<string | null>(null);
   const didResumeRef = useRef(false);
   const transitionDirRef = useRef<1 | -1>(1);
 
+  // "Edit mode" should only apply when the survey is already completed.
+  // If a user enters from profile with mode=edit but they have an incomplete draft,
+  // we should resume the draft instead of forcing them back to the start of a part.
+  const isEditMode = isEditModeRequested && state.is_completed === true;
+
   useEffect(() => {
     latestStateRef.current = state;
   }, [state]);
+
+  useEffect(() => {
+    savingRef.current = saving;
+  }, [saving]);
 
   useEffect(() => {
     const showSub = Keyboard.addListener('keyboardDidShow', () => setKeyboardVisible(true));
@@ -415,7 +470,6 @@ export default function SurveyScreen() {
     setMonthPickerTarget(target);
     setMonthPickerTitle(title);
     setMonthPickerTempDate(new Date(base.getFullYear(), base.getMonth(), 1));
-    setMonthPickerPendingDate(null);
     setMonthPickerOpen(true);
   };
 
@@ -450,6 +504,15 @@ export default function SurveyScreen() {
       });
       setMonthPickerOpen(false);
     }
+  };
+
+  const commitMonthPickerYYYYMM = (yyyymm: string) => {
+    const parsed = parseYYYYMM(yyyymm);
+    if (!parsed) {
+      setMonthPickerOpen(false);
+      return;
+    }
+    commitMonthPicker(parsed);
   };
 
   const clearMonthPicker = () => {
@@ -1099,6 +1162,47 @@ function PartCarouselPagination({
     return null;
   }, [activeItem, clampedIndex, items]);
 
+  // IMPORTANT:
+  // Some questions show a default UI selection (e.g. sliders) even when the value is not yet stored in `state`.
+  // This can block "Next" because `isQuestionAnswered` checks the stored state, not the rendered default.
+  // So when entering such questions, we persist their defaults once (without overriding real user choices).
+  const activeRenderedQuestionKey = useMemo(() => {
+    return activeItem?.type === 'question' ? activeItem.question.key : null;
+  }, [activeItem]);
+
+  useEffect(() => {
+    if (loading) return;
+    if (!activeRenderedQuestionKey) return;
+
+    setState((prev) => {
+      let next: SurveyState | null = null;
+
+      if (activeRenderedQuestionKey === 'cleanliness') {
+        if (!hasFiniteNumber(prev.cleanliness_importance)) {
+          next = { ...(next ?? prev), cleanliness_importance: 3 };
+        }
+      }
+
+      if (activeRenderedQuestionKey === 'roommates_min') {
+        const min = (prev as any).preferred_roommates_min;
+        if (!hasFiniteNumber(min)) {
+          next = { ...(next ?? prev), preferred_roommates_min: 1 } as any;
+        }
+      }
+
+      if (activeRenderedQuestionKey === 'roommates_max') {
+        const minRaw = (prev as any).preferred_roommates_min;
+        const maxRaw = (prev as any).preferred_roommates_max;
+        const min = hasFiniteNumber(minRaw) ? minRaw : 1;
+        if (!hasFiniteNumber(minRaw) || !hasFiniteNumber(maxRaw)) {
+          next = { ...(next ?? prev), preferred_roommates_min: min, preferred_roommates_max: min } as any;
+        }
+      }
+
+      return next ?? prev;
+    });
+  }, [activeRenderedQuestionKey, loading]);
+
   const activeQuestionNumber = useMemo(() => {
     if (!activeQuestionKey) return 0;
     const idx = questionIndexByKey.get(activeQuestionKey);
@@ -1159,8 +1263,62 @@ function PartCarouselPagination({
     const key = resumeStepKey;
     didResumeRef.current = true;
     if (!key) return;
-    const idx = items.findIndex((it) => it.type === 'question' && it.question.key === key);
-    if (idx >= 0) setCurrentStep(idx);
+    const directIdx = items.findIndex((it) => it.type === 'question' && it.question.key === key);
+    if (directIdx >= 0) {
+      setCurrentStep(directIdx);
+      return;
+    }
+
+    // Fallback: draft key might refer to a question that is currently hidden (isVisible=false).
+    // Try to resume to the nearest visible question in the same part (forward preference).
+    const pickNearestVisible = (orderedKeys: readonly string[]) => {
+      const pos = orderedKeys.indexOf(key);
+      const visibleKeySet = questionIndexByKey; // Map<key, visibleIndex>
+      const findItemIdxByQuestionKey = (k: string) =>
+        items.findIndex((it) => it.type === 'question' && it.question.key === k);
+
+      if (pos >= 0) {
+        for (let i = pos; i < orderedKeys.length; i++) {
+          const candidate = orderedKeys[i];
+          if (visibleKeySet.has(candidate)) {
+            const idx = findItemIdxByQuestionKey(candidate);
+            if (idx >= 0) return idx;
+          }
+        }
+        for (let i = pos - 1; i >= 0; i--) {
+          const candidate = orderedKeys[i];
+          if (visibleKeySet.has(candidate)) {
+            const idx = findItemIdxByQuestionKey(candidate);
+            if (idx >= 0) return idx;
+          }
+        }
+      }
+
+      for (let i = 0; i < orderedKeys.length; i++) {
+        const candidate = orderedKeys[i];
+        if (visibleKeySet.has(candidate)) {
+          const idx = findItemIdxByQuestionKey(candidate);
+          if (idx >= 0) return idx;
+        }
+      }
+      return null;
+    };
+
+    const p1 = pickNearestVisible(PART_1_KEYS as any);
+    if (p1 != null) {
+      setCurrentStep(p1);
+      return;
+    }
+    const p2 = pickNearestVisible(PART_2_KEYS as any);
+    if (p2 != null) {
+      setCurrentStep(p2);
+      return;
+    }
+    const p3 = pickNearestVisible(PART_3_KEYS as any);
+    if (p3 != null) {
+      setCurrentStep(p3);
+      return;
+    }
   }, [loading, resumeStepKey, items]);
 
   const goToStep = (nextStep: number) => {
@@ -1274,7 +1432,7 @@ function PartCarouselPagination({
       // Prevent infinite loop when we dispatch the saved action
       if (exitingRef.current) return;
       // If we're already saving, let the navigation proceed
-      if (saving) return;
+      if (savingRef.current) return;
 
       // We want to save draft before leaving
       e.preventDefault();
@@ -1674,48 +1832,46 @@ function PartCarouselPagination({
         anchor="bottom"
         bottomOffset={120}
       >
-        {Platform.OS === 'android' ? (
-          <DateTimePicker
-            value={monthPickerTempDate}
-            mode="date"
-            display="default"
-            onChange={(event: any, selected?: Date) => {
-              const type = event?.type;
-              if (type === 'dismissed') {
-                setMonthPickerOpen(false);
-                return;
-              }
-              if (type === 'set') {
-                const picked = selected ?? monthPickerTempDate;
-                commitMonthPicker(picked);
-              }
-            }}
-          />
-        ) : (
-          <>
-            <DateTimePicker
-              value={monthPickerPendingDate ?? monthPickerTempDate}
-              mode="date"
-              display="spinner"
-              locale="he-IL"
-              onChange={(_, selected) => {
-                if (!selected) return;
-                setMonthPickerPendingDate(new Date(selected.getFullYear(), selected.getMonth(), 1));
-              }}
-            />
-            <View style={{ flexDirection: 'row-reverse', gap: 10, justifyContent: 'space-between' }}>
-              <TouchableOpacity style={[styles.pickerCancel, { marginTop: 0 }]} onPress={clearMonthPicker}>
-                <Text style={styles.pickerCancelText}>נקה</Text>
-              </TouchableOpacity>
+        <ScrollView
+          style={{ maxHeight: 360 }}
+          contentContainerStyle={{ paddingVertical: 8 }}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="always"
+          nestedScrollEnabled
+        >
+          {buildMonthOptions({ baseDate: monthPickerTempDate, monthsBack: 3, monthsForward: 24 }).map((opt) => {
+            const currentValue =
+              monthPickerTarget === 'move_in_month'
+                ? state.move_in_month ?? null
+                : monthPickerTarget === 'sublet_month_from'
+                  ? state.sublet_month_from ?? null
+                  : monthPickerTarget === 'sublet_month_to'
+                    ? state.sublet_month_to ?? null
+                    : null;
+            const active = currentValue === opt.value;
+            return (
               <TouchableOpacity
-                style={[styles.primaryBtn, { minWidth: 120 }]}
-                onPress={() => commitMonthPicker(monthPickerPendingDate ?? monthPickerTempDate)}
+                key={`month-${opt.value}`}
+                style={[styles.pickerOption, active ? styles.pickerOptionActive : null]}
+                onPress={() => commitMonthPickerYYYYMM(opt.value)}
+                activeOpacity={0.85}
               >
-                <Text style={styles.primaryBtnText}>אישור</Text>
+                <Text style={[styles.pickerOptionText, active ? styles.pickerOptionTextActive : null]}>{opt.label}</Text>
               </TouchableOpacity>
-            </View>
-          </>
-        )}
+            );
+          })}
+        </ScrollView>
+        <View style={{ flexDirection: 'row-reverse', gap: 10, justifyContent: 'space-between', marginTop: 8 }}>
+          <TouchableOpacity style={[styles.pickerCancel, { marginTop: 0, flex: 1 }]} onPress={clearMonthPicker}>
+            <Text style={styles.pickerCancelText}>נקה</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.primaryBtn, { minWidth: 120, flex: 1 }]}
+            onPress={() => setMonthPickerOpen(false)}
+          >
+            <Text style={styles.primaryBtnText}>סגור</Text>
+          </TouchableOpacity>
+        </View>
       </KeyFabPanel>
 
       {/* Shared list picker panel (outside the clipped card) */}
@@ -1924,6 +2080,32 @@ function generateUpcomingMonths(count = 12): string[] {
     list.push(label);
   }
   return list;
+}
+
+function addMonths(date: Date, deltaMonths: number): Date {
+  return new Date(date.getFullYear(), date.getMonth() + deltaMonths, 1);
+}
+
+function buildMonthOptions({
+  baseDate,
+  monthsBack = 3,
+  monthsForward = 24,
+}: {
+  baseDate: Date;
+  monthsBack?: number;
+  monthsForward?: number;
+}): { label: string; value: string }[] {
+  const start = addMonths(baseDate, -Math.max(0, monthsBack));
+  const total = Math.max(1, monthsBack + monthsForward + 1);
+  const out: { label: string; value: string }[] = [];
+  for (let i = 0; i < total; i++) {
+    const d = addMonths(start, i);
+    out.push({
+      label: `${HEB_MONTH_NAMES[d.getMonth()]} ${d.getFullYear()}`,
+      value: formatDateToYYYYMM(d),
+    });
+  }
+  return out;
 }
 
 function parseYYYYMM(value?: string | null): Date | null {
