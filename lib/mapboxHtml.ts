@@ -20,6 +20,8 @@ export function buildMapboxHtml(params: {
   pointColor?: string;
   /** When true, render a slow pulsing ring behind point circles (used for single-location maps). */
   pulsePoints?: boolean;
+  /** User's current location rendered as a green dot. */
+  userLocation?: MapboxCenter;
 }): string {
   const hasExplicitCenter = Array.isArray(params.center) && params.center.length === 2;
   const center = params.center ?? [34.7818, 32.0853];
@@ -30,6 +32,8 @@ export function buildMapboxHtml(params: {
   const pointColor = (params.pointColor || '').trim() || '#8B5CF6'; // default: purple
   const labelColor = '#6D28D9'; // purple (Tailwind violet-700)
   const pulsePoints = !!params.pulsePoints;
+  const userLocation = params.userLocation;
+  const userDotColor = '#22C55E';
 
   // NOTE: This HTML is used inside WebView (native) and iframe srcDoc (web).
   return `<!doctype html>
@@ -139,6 +143,7 @@ export function buildMapboxHtml(params: {
           var points = ${JSON.stringify(points)};
           var hasExplicitCenter = ${JSON.stringify(hasExplicitCenter)};
           var pulsePoints = ${JSON.stringify(pulsePoints)};
+          var userLocation = ${JSON.stringify(userLocation ?? null)};
           var map = new mapboxgl.Map({
             container: 'map',
             style: styleUrl,
@@ -225,7 +230,35 @@ export function buildMapboxHtml(params: {
           map.on('load', function () {
             try {
               scheduleApply();
-              if (!points || !points.features || points.features.length === 0) return;
+              // User location (green dot)
+              if (userLocation && Array.isArray(userLocation) && userLocation.length === 2) {
+                try {
+                  map.addSource('user-location', {
+                    type: 'geojson',
+                    data: {
+                      type: 'FeatureCollection',
+                      features: [
+                        { type: 'Feature', geometry: { type: 'Point', coordinates: userLocation }, properties: {} }
+                      ]
+                    }
+                  });
+                  map.addLayer({
+                    id: 'user-location-dot',
+                    type: 'circle',
+                    source: 'user-location',
+                    paint: {
+                      'circle-radius': 7,
+                      'circle-color': ${JSON.stringify(userDotColor)},
+                      'circle-opacity': 1,
+                      'circle-stroke-width': 2,
+                      'circle-stroke-color': '#FFFFFF'
+                    }
+                  });
+                } catch (_) {}
+              }
+
+              var hasApts = !!(points && points.features && points.features.length);
+              if (!hasApts) return;
 
               map.addSource('apartments', {
                 type: 'geojson',
