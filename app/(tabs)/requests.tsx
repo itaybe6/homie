@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Dimensions,
   View,
   Text,
   StyleSheet,
@@ -16,8 +17,9 @@ import {
   Pressable,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { Bell, Inbox, Filter, Home, Users, UserPlus2, UserPlus, Sparkles, MessageCircle } from 'lucide-react-native';
+import { Bell, Inbox, Filter, Home, Users, UserPlus2, UserPlus, Sparkles, MessageCircle, X } from 'lucide-react-native';
 import WhatsAppSvg from '@/components/icons/WhatsAppSvg';
+import { FabButton } from '@/components/FabButton';
 import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/authStore';
@@ -32,6 +34,7 @@ export default function RequestsScreen() {
   const router = useRouter();
   const user = useAuthStore((s) => s.user);
   const insets = useSafeAreaInsets();
+  const { width: screenW, height: screenH } = Dimensions.get('window');
   const scrollY = useRef(new Animated.Value(0)).current;
   const markSeenNow = useNotificationsStore((s) => s.markSeenNow);
   const [ownerDetails, setOwnerDetails] = useState<null | { full_name?: string; avatar_url?: string; phone?: string }>(null);
@@ -41,6 +44,9 @@ export default function RequestsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   type InboxFilterId = 'ALL' | 'MATCHES' | 'MERGE' | 'APARTMENTS';
   const [inboxFilter, setInboxFilter] = useState<InboxFilterId>('ALL');
+  const [aptPanelAptId, setAptPanelAptId] = useState<string | null>(null);
+  const [aptPanelOpen, setAptPanelOpen] = useState(false);
+  const aptPanelCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   type UnifiedItem = {
     id: string;
     kind: 'APT' | 'APT_INVITE' | 'MATCH' | 'GROUP';
@@ -162,6 +168,21 @@ export default function RequestsScreen() {
     if (!description) return '';
     const parts = description.split('---');
     return (parts[0] || '').trim();
+  };
+
+  const openApartmentPanel = (aptId: string) => {
+    if (!aptId) return;
+    if (aptPanelCloseTimerRef.current) clearTimeout(aptPanelCloseTimerRef.current);
+    setAptPanelAptId(aptId);
+    requestAnimationFrame(() => setAptPanelOpen(true));
+  };
+
+  const closeApartmentPanel = () => {
+    if (aptPanelCloseTimerRef.current) clearTimeout(aptPanelCloseTimerRef.current);
+    setAptPanelOpen(false);
+    aptPanelCloseTimerRef.current = setTimeout(() => {
+      setAptPanelAptId(null);
+    }, 520);
   };
 
   const fetchNotifications = async (opts?: { markRead?: boolean }) => {
@@ -2467,9 +2488,16 @@ export default function RequestsScreen() {
                   const descText = displayDescription(n.description);
                   const canApproveInvite = !!aptId && !isInviteApproved(n.description);
                   const isApproved = isApprovedNotification(n);
+                  const canOpenApartmentPanel = !!aptId;
 
                   return (
-                    <View style={styles.igRow}>
+                    <Pressable
+                      style={styles.igRow}
+                      onPress={() => {
+                        if (!canOpenApartmentPanel) return;
+                        openApartmentPanel(aptId as string);
+                      }}
+                    >
                       <TouchableOpacity
                         activeOpacity={0.85}
                         style={styles.igAvatarWrap}
@@ -2520,7 +2548,7 @@ export default function RequestsScreen() {
                           </TouchableOpacity>
                         </View>
                       ) : null}
-                    </View>
+                    </Pressable>
                   );
                 }
 
@@ -2531,6 +2559,7 @@ export default function RequestsScreen() {
                 const groupMemberIds = senderGroupId ? (groupMembersByGroupId[senderGroupId] || []) : [];
                 const groupMembers = groupMemberIds.map((id) => usersById[id]).filter(Boolean) as Partial<User>[];
                 const apt = r.apartment_id ? aptsById[r.apartment_id] : undefined;
+                const canOpenApartmentPanel = (r.kind === 'APT' || r.kind === 'APT_INVITE') && !!r.apartment_id;
 
                 const title =
                   r.kind === 'APT_INVITE'
@@ -2548,7 +2577,13 @@ export default function RequestsScreen() {
                     : ((otherUser as any)?.full_name || '');
 
                 return (
-                  <View style={styles.igRow}>
+                  <Pressable
+                    style={styles.igRow}
+                    onPress={() => {
+                      if (!canOpenApartmentPanel) return;
+                      openApartmentPanel(r.apartment_id as string);
+                    }}
+                  >
                     <TouchableOpacity
                       activeOpacity={0.85}
                       style={styles.igAvatarWrap}
@@ -2629,7 +2664,7 @@ export default function RequestsScreen() {
                         </Text>
                       )}
                     </View>
-                  </View>
+                  </Pressable>
                 );
               }}
             />
@@ -2676,6 +2711,89 @@ export default function RequestsScreen() {
             </View>
           </Pressable>
         </Pressable>
+      </Modal>
+
+      {/* Apartment details animated panel (opens when tapping apartment-related notifications/requests) */}
+      <Modal
+        visible={!!aptPanelAptId}
+        transparent
+        animationType="fade"
+        onRequestClose={closeApartmentPanel}
+      >
+        <View style={StyleSheet.absoluteFill}>
+          <Pressable
+            style={styles.aptPanelBackdrop}
+            onPress={closeApartmentPanel}
+            pointerEvents={aptPanelOpen ? 'auto' : 'none'}
+          />
+          <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
+            <FabButton
+              isOpen={aptPanelOpen}
+              onPress={closeApartmentPanel}
+              duration={480}
+              title="פרטי הדירה"
+              showToggleButton={false}
+              openedSize={Math.min(screenW - 32, screenW * 0.92)}
+              closedSize={0}
+              panelStyle={{
+                right: undefined,
+                bottom: undefined,
+                left: (screenW - Math.min(screenW - 32, screenW * 0.92)) / 2,
+                top: Math.max(insets.top + 110, screenH * 0.22),
+                backgroundColor: '#FFFFFF',
+              }}
+            >
+              {(() => {
+                const a = aptPanelAptId
+                  ? ((notifApartmentsById as any)?.[aptPanelAptId] || (aptsById as any)?.[aptPanelAptId])
+                  : undefined;
+                const image = a
+                  ? (Array.isArray(a.image_urls) && (a.image_urls as any[]).length ? (a.image_urls as any[])[0] : APT_PLACEHOLDER)
+                  : APT_PLACEHOLDER;
+                const title = (a?.title as string) || 'דירה';
+                const city = (a?.city as string) || '';
+                return (
+                  <View style={styles.aptPanelCard}>
+                    {/* Close button */}
+                    <TouchableOpacity
+                      activeOpacity={0.8}
+                      style={styles.aptPanelCloseBtn}
+                      onPress={closeApartmentPanel}
+                    >
+                      <X size={20} color="#6B7280" strokeWidth={2.5} />
+                    </TouchableOpacity>
+
+                    <Image source={{ uri: image }} style={styles.aptPanelImage} />
+                    <View style={styles.aptPanelInfo}>
+                      <Text style={styles.aptPanelTitle} numberOfLines={1}>
+                        {title}
+                      </Text>
+                      {!!city ? (
+                        <Text style={styles.aptPanelCity} numberOfLines={1}>
+                          {city}
+                        </Text>
+                      ) : null}
+                      <View style={styles.aptPanelActions}>
+                        <TouchableOpacity
+                          activeOpacity={0.9}
+                          style={styles.aptPanelPrimaryBtn}
+                          onPress={() => {
+                            const id = aptPanelAptId;
+                            if (!id) return;
+                            closeApartmentPanel();
+                            router.push({ pathname: '/apartment/[id]', params: { id } } as any);
+                          }}
+                        >
+                          <Text style={styles.aptPanelPrimaryBtnText}>מעבר לדירה</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  </View>
+                );
+              })()}
+            </FabButton>
+          </View>
+        </View>
       </Modal>
     </View>
   );
@@ -3300,6 +3418,10 @@ const styles = StyleSheet.create({
     padding: 20,
     justifyContent: 'center',
   },
+  aptPanelBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+  },
   modalCard: {
     backgroundColor: '#FFFFFF',
     borderRadius: 20,
@@ -3365,6 +3487,77 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 15,
     fontWeight: '800',
+  },
+  aptPanelCard: {
+    borderRadius: 16,
+    overflow: 'hidden',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    shadowColor: '#111827',
+    shadowOpacity: 0.15,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 8,
+  },
+  aptPanelCloseBtn: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.95)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 10,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    shadowColor: '#000',
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 3,
+  },
+  aptPanelImage: {
+    width: '100%',
+    height: 140,
+    resizeMode: 'cover',
+  },
+  aptPanelInfo: {
+    paddingTop: 12,
+    paddingBottom: 8,
+    paddingHorizontal: 12,
+    alignItems: 'flex-end',
+    gap: 6 as any,
+  },
+  aptPanelTitle: {
+    color: '#111827',
+    fontSize: 16,
+    fontWeight: '900',
+    textAlign: 'right',
+  },
+  aptPanelCity: {
+    color: '#6B7280',
+    fontSize: 13,
+    fontWeight: '700',
+    textAlign: 'right',
+  },
+  aptPanelActions: {
+    width: '100%',
+    marginTop: 8,
+    alignItems: 'flex-end',
+  },
+  aptPanelPrimaryBtn: {
+    backgroundColor: '#5e3f2d',
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  aptPanelPrimaryBtnText: {
+    color: '#FFFFFF',
+    fontWeight: '900',
+    fontSize: 13,
   },
   inviterRow: {
     marginTop: 8,
