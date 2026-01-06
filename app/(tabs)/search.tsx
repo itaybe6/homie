@@ -5,6 +5,7 @@ import {
   StyleSheet,
   TextInput,
   TouchableOpacity,
+  TouchableWithoutFeedback,
   ActivityIndicator,
   Image,
   FlatList,
@@ -14,7 +15,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { Search, X, Users, MapPin } from 'lucide-react-native';
+import { Search, X, Users, MapPin, Calendar } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { supabase } from '@/lib/supabase';
@@ -25,7 +26,33 @@ type SearchUserRow = {
   full_name: string | null;
   avatar_url: string | null;
   city?: string | null;
+  age?: number | null;
 };
+
+function UserAvatar({ uri }: { uri?: string | null }) {
+  const FALLBACK = 'https://cdn-icons-png.flaticon.com/512/847/847969.png';
+  const cleaned = (uri || '').trim();
+  const [candidateIdx, setCandidateIdx] = useState(0);
+  const candidates = useMemo(() => {
+    const arr = [cleaned, FALLBACK].map((u) => (u || '').trim()).filter(Boolean);
+    // ensure fallback always exists
+    return arr.length ? arr : [FALLBACK];
+  }, [cleaned]);
+
+  useEffect(() => {
+    setCandidateIdx(0);
+  }, [cleaned]);
+
+  const resolved = candidates[Math.min(candidateIdx, candidates.length - 1)] || FALLBACK;
+
+  return (
+    <Image
+      source={{ uri: resolved }}
+      style={styles.avatar}
+      onError={() => setCandidateIdx((i) => Math.min(i + 1, candidates.length - 1))}
+    />
+  );
+}
 
 export default function SearchUsersScreen() {
   const router = useRouter();
@@ -51,7 +78,7 @@ export default function SearchUsersScreen() {
       // Basic user search by full name (case-insensitive). Keep results small & fast.
       let req = supabase
         .from('users')
-        .select('id, full_name, avatar_url, city')
+        .select('id, full_name, avatar_url, city, age')
         .ilike('full_name', `%${safe}%`)
         .limit(30);
 
@@ -98,19 +125,6 @@ export default function SearchUsersScreen() {
           }}
         >
           <View style={styles.cardContent}>
-            <View style={styles.userTextWrap}>
-              <Text style={styles.userName} numberOfLines={1}>
-                {displayName}
-              </Text>
-              {!!item.city ? (
-                <View style={styles.cityRow}>
-                  <MapPin size={11} color="#6B7280" />
-                  <Text style={styles.userCity} numberOfLines={1}>
-                    {item.city}
-                  </Text>
-                </View>
-              ) : null}
-            </View>
             <View style={styles.avatarContainer}>
               <LinearGradient
                 colors={['#5e3f2d', '#8B6F47']}
@@ -119,12 +133,32 @@ export default function SearchUsersScreen() {
                 style={styles.avatarRing}
               >
                 <View style={styles.avatarInner}>
-                  <Image
-                    source={{ uri: item.avatar_url || 'https://cdn-icons-png.flaticon.com/512/847/847969.png' }}
-                    style={styles.avatar}
-                  />
+                  <UserAvatar uri={item.avatar_url} />
                 </View>
               </LinearGradient>
+            </View>
+            <View style={styles.userTextWrap}>
+              <Text style={styles.userName} numberOfLines={1}>
+                {displayName}
+              </Text>
+              {(!!item.city || typeof item.age === 'number') ? (
+                <View style={styles.metaRow}>
+                  {!!item.city ? (
+                    <View style={styles.cityRow}>
+                      <MapPin size={11} color="#6B7280" />
+                      <Text style={styles.userCity} numberOfLines={1}>
+                        {item.city}
+                      </Text>
+                    </View>
+                  ) : null}
+                  {typeof item.age === 'number' && item.age > 0 ? (
+                    <View style={styles.ageRow}>
+                      <Calendar size={11} color="#6B7280" />
+                      <Text style={styles.userAge}>גיל {item.age}</Text>
+                    </View>
+                  ) : null}
+                </View>
+              ) : null}
             </View>
           </View>
         </TouchableOpacity>
@@ -134,86 +168,83 @@ export default function SearchUsersScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      {/* Spacer to avoid content sitting under the absolute GlobalTopBar */}
-      <View style={styles.globalTopBarSpacer} pointerEvents="none" />
+      <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+        <View style={{ flex: 1 }}>
+          {/* Spacer to avoid content sitting under the absolute GlobalTopBar */}
+          <View style={styles.globalTopBarSpacer} pointerEvents="none" />
 
-      {/* Search bar (no header) */}
-      <View style={styles.searchContainer}>
-        <View style={styles.searchBarShadow}>
-          <View style={styles.searchBar}>
-            <TouchableOpacity
-              style={[styles.clearBtn, !query && styles.clearBtnHidden]}
-              accessibilityRole="button"
-              accessibilityLabel="נקה חיפוש"
-              onPress={() => setQuery('')}
-              disabled={!query}
-              activeOpacity={0.8}
-            >
-              <X size={18} color="#6B7280" />
-            </TouchableOpacity>
-            <TextInput
-              value={query}
-              onChangeText={setQuery}
-              placeholder="חפש/י לפי שם..."
-              placeholderTextColor="#9CA3AF"
-              style={styles.input}
-              autoCorrect={false}
-              autoCapitalize="words"
-              returnKeyType="search"
-              onSubmitEditing={() => {
-                Keyboard.dismiss();
-                runSearch(trimmed);
-              }}
-            />
-            <LinearGradient
-              colors={['#5e3f2d', '#8B6F47']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={styles.searchIconGradient}
-            >
-              <Search size={20} color="#FFFFFF" />
-            </LinearGradient>
-          </View>
-        </View>
-      </View>
-
-      {/* Results */}
-      {isLoading && !refreshing ? (
-        <View style={styles.loadingWrap}>
-          <ActivityIndicator size="large" color="#5e3f2d" />
-          <Text style={styles.loadingText}>מחפש משתמשים...</Text>
-        </View>
-      ) : (
-        <FlatList
-          data={rows}
-          keyExtractor={(i) => i.id}
-          renderItem={renderItem}
-          contentContainerStyle={styles.listContent}
-          keyboardShouldPersistTaps="always"
-          showsVerticalScrollIndicator={false}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={onRefresh}
-              tintColor="#5e3f2d"
-              colors={['#5e3f2d']}
-            />
-          }
-          ListEmptyComponent={
-            <View style={styles.emptyWrap}>
-              <View style={styles.emptyIconContainer}>
-                {trimmed ? <Search size={48} color="#D1D5DB" /> : <Users size={48} color="#D1D5DB" />}
+          {/* Search bar (no header) */}
+          <View style={styles.searchContainer}>
+            <View style={styles.searchBarShadow}>
+              <View style={styles.searchBar}>
+                <View style={styles.searchIconPlain} pointerEvents="none">
+                  <Search size={20} color="#5e3f2d" />
+                </View>
+                <TextInput
+                  value={query}
+                  onChangeText={setQuery}
+                  placeholder="חפש/י לפי שם..."
+                  placeholderTextColor="#9CA3AF"
+                  style={styles.input}
+                  autoCorrect={false}
+                  autoCapitalize="words"
+                  returnKeyType="search"
+                  onSubmitEditing={() => {
+                    Keyboard.dismiss();
+                    runSearch(trimmed);
+                  }}
+                />
+                <TouchableOpacity
+                  style={[styles.clearBtn, !query && styles.clearBtnHidden]}
+                  accessibilityRole="button"
+                  accessibilityLabel="נקה חיפוש"
+                  onPress={() => setQuery('')}
+                  disabled={!query}
+                  activeOpacity={0.8}
+                >
+                  <X size={18} color="#6B7280" />
+                </TouchableOpacity>
               </View>
-              <Text style={styles.emptyTitle}>
-                {trimmed ? 'לא נמצאו תוצאות' : 'התחל/י חיפוש'}
-              </Text>
-              <Text style={styles.emptySub}>
-                {trimmed ? 'נסה/י שם אחר או בדוק/י איות' : 'הקלד/י שם כדי למצוא משתמשים'}
-              </Text>
             </View>
-          }
-        />
-      )}
+          </View>
+
+          {/* Results */}
+          {isLoading && !refreshing ? (
+            <View style={styles.loadingWrap}>
+              <ActivityIndicator size="large" color="#5e3f2d" />
+              <Text style={styles.loadingText}>מחפש משתמשים...</Text>
+            </View>
+          ) : (
+            <FlatList
+              data={rows}
+              keyExtractor={(i) => i.id}
+              renderItem={renderItem}
+              contentContainerStyle={styles.listContent}
+              keyboardShouldPersistTaps="handled"
+              keyboardDismissMode="on-drag"
+              onScrollBeginDrag={() => Keyboard.dismiss()}
+              showsVerticalScrollIndicator={false}
+              refreshControl={
+                <RefreshControl
+                  refreshing={refreshing}
+                  onRefresh={onRefresh}
+                  tintColor="#5e3f2d"
+                  colors={['#5e3f2d']}
+                />
+              }
+              ListEmptyComponent={
+                <View style={styles.emptyWrap}>
+                  <View style={styles.emptyIconContainer}>
+                    {trimmed ? <Search size={48} color="#D1D5DB" /> : <Users size={48} color="#D1D5DB" />}
+                  </View>
+                  <Text style={styles.emptyTitle}>{trimmed ? 'לא נמצאו תוצאות' : 'התחל/י חיפוש'}</Text>
+                  <Text style={styles.emptySub}>{trimmed ? 'נסה/י שם אחר או בדוק/י איות' : 'הקלד/י שם כדי למצוא משתמשים'}</Text>
+                </View>
+              }
+            />
+          )}
+        </View>
+      </TouchableWithoutFeedback>
     </SafeAreaView>
   );
 }
@@ -221,11 +252,11 @@ export default function SearchUsersScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F9FAFB',
+    backgroundColor: '#FFFFFF',
   },
   globalTopBarSpacer: {
     paddingTop: 52,
-    backgroundColor: '#F9FAFB',
+    backgroundColor: '#FFFFFF',
   },
   searchContainer: {
     paddingHorizontal: 16,
@@ -235,11 +266,11 @@ const styles = StyleSheet.create({
   searchBarShadow: {
     borderRadius: 18,
     shadowColor: '#000000',
-    shadowOpacity: 0.12,
-    shadowRadius: 20,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 8,
-    ...(Platform.OS === 'web' ? ({ boxShadow: '0 10px 30px rgba(0,0,0,0.12)' } as any) : null),
+    shadowOpacity: 0.06,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 4,
+    ...(Platform.OS === 'web' ? ({ boxShadow: '0 6px 18px rgba(0,0,0,0.08)' } as any) : null),
   },
   searchBar: {
     flexDirection: 'row-reverse',
@@ -263,6 +294,10 @@ const styles = StyleSheet.create({
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 4 },
     elevation: 6,
+  },
+  searchIconPlain: {
+    paddingHorizontal: 2,
+    paddingVertical: 2,
   },
   input: {
     flex: 1,
@@ -352,7 +387,7 @@ const styles = StyleSheet.create({
     paddingVertical: 11,
   },
   avatarContainer: {
-    marginLeft: 0,
+    marginLeft: 14,
   },
   avatarRing: {
     width: 50,
@@ -377,7 +412,7 @@ const styles = StyleSheet.create({
   },
   userTextWrap: {
     flex: 1,
-    marginRight: 14,
+    marginLeft: 0,
     alignItems: 'flex-end',
     gap: 5,
   },
@@ -389,6 +424,12 @@ const styles = StyleSheet.create({
     writingDirection: 'rtl',
     letterSpacing: -0.3,
   },
+  metaRow: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
   cityRow: {
     flexDirection: 'row-reverse',
     alignItems: 'center',
@@ -399,6 +440,22 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(94,63,45,0.05)',
   },
   userCity: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#6B7280',
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
+  ageRow: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 10,
+    backgroundColor: 'rgba(17,24,39,0.05)',
+  },
+  userAge: {
     fontSize: 12,
     fontWeight: '700',
     color: '#6B7280',

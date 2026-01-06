@@ -38,6 +38,8 @@ export default function RequestsScreen() {
     Array.isArray(value) ? value[0] : value;
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  type InboxFilterId = 'ALL' | 'MATCHES' | 'MERGE' | 'APARTMENTS';
+  const [inboxFilter, setInboxFilter] = useState<InboxFilterId>('ALL');
   type UnifiedItem = {
     id: string;
     kind: 'APT' | 'APT_INVITE' | 'MATCH' | 'GROUP';
@@ -111,6 +113,15 @@ export default function RequestsScreen() {
     return t.includes('מיזוג פרופילים');
   };
 
+  const isMatchNotification = (n: Notification): boolean => {
+    const title = String(n?.title || '').trim();
+    const desc = String(n?.description || '').trim();
+    if (title.includes('בקשת התאמה') || title.includes('בקשת ההתאמה') || title.includes('התאמה')) return true;
+    // Our EVENT_KEY convention: "match:<matchId>:approved"
+    if (/EVENT_KEY:match:/.test(desc)) return true;
+    return false;
+  };
+
   const isApprovedNotification = (n: Notification): boolean => {
     const desc = (n?.description || '').trim();
     const title = (n?.title || '').trim();
@@ -126,6 +137,16 @@ export default function RequestsScreen() {
     const meta = parts[1] || '';
     const match = meta.match(/(?:INVITE_APT|APPROVED_APT):([A-Za-z0-9-]+)/);
     return match ? match[1] : null;
+  };
+
+  const isApartmentNotification = (n: Notification): boolean => {
+    const title = String(n?.title || '').trim();
+    const desc = String(n?.description || '').trim();
+    if (extractInviteApartmentId(desc)) return true;
+    if (/INVITE_APT:|APPROVED_APT:/.test(desc)) return true;
+    // Keep heuristic broad: copy variants mention "דירה" / "שותף בדירה"
+    if (title.includes('דירה') || desc.includes('דירה') || desc.includes('שותף בדירה')) return true;
+    return false;
   };
 
   const isInviteApproved = (description: string): boolean => {
@@ -2287,6 +2308,21 @@ export default function RequestsScreen() {
     | { kind: 'NOTIFICATION'; id: string; created_at: string; notification: Notification }
     | { kind: 'REQUEST'; id: string; created_at: string; request: UnifiedItem };
 
+  const inboxDomainForRow = (row: InboxRow): InboxFilterId | 'OTHER' => {
+    if (row.kind === 'REQUEST') {
+      const k = row.request.kind;
+      if (k === 'MATCH') return 'MATCHES';
+      if (k === 'GROUP') return 'MERGE';
+      if (k === 'APT' || k === 'APT_INVITE') return 'APARTMENTS';
+      return 'OTHER';
+    }
+    const n = row.notification;
+    if (isMergeProfileNotification(n)) return 'MERGE';
+    if (isMatchNotification(n)) return 'MATCHES';
+    if (isApartmentNotification(n)) return 'APARTMENTS';
+    return 'OTHER';
+  };
+
   const bucketLabelHe = (iso: string): string => {
     const t = Date.parse(iso || '');
     if (!Number.isFinite(t)) return 'מוקדם יותר';
@@ -2316,7 +2352,7 @@ export default function RequestsScreen() {
     return totalMonths <= 1 ? 'לפני חודש' : `לפני ${totalMonths} חודשים`;
   };
 
-  const inboxRows = useMemo<InboxRow[]>(() => {
+  const inboxRowsAll = useMemo<InboxRow[]>(() => {
     const skipTitles = new Set<string>([
       'בקשת שותפות חדשה',
       'בקשת שותפות מפרופיל משותף',
@@ -2332,6 +2368,11 @@ export default function RequestsScreen() {
       return tb - ta;
     });
   }, [notifItems, received]);
+
+  const inboxRows = useMemo<InboxRow[]>(() => {
+    if (inboxFilter === 'ALL') return inboxRowsAll;
+    return (inboxRowsAll || []).filter((row) => inboxDomainForRow(row) === inboxFilter);
+  }, [inboxRowsAll, inboxFilter]);
 
   const inboxSections = useMemo(() => {
     const map: Record<string, InboxRow[]> = {};
@@ -2361,7 +2402,51 @@ export default function RequestsScreen() {
               stickySectionHeadersEnabled={false}
               showsVerticalScrollIndicator={false}
               refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#5e3f2d" />}
-              contentContainerStyle={[styles.igListContent, inboxRows.length === 0 ? { flex: 1, justifyContent: 'center' } : null]}
+              contentContainerStyle={[styles.igListContent, inboxRows.length === 0 ? { paddingTop: 14 } : null]}
+              ListHeaderComponent={
+                <View style={styles.filtersWrap}>
+                  {/* Extra "end" padding so the right-most chip ("הכל") won't be clipped on RTL */}
+                  <View style={{ paddingHorizontal: 16, paddingTop: 10, paddingRight: 44 }}>
+                    <View style={styles.segmentWrap}>
+                      <TouchableOpacity
+                        activeOpacity={0.85}
+                        onPress={() => setInboxFilter('ALL')}
+                        style={[styles.segmentBtn, inboxFilter === 'ALL' ? styles.segmentBtnActive : null]}
+                      >
+                        <Text style={[styles.segmentText, inboxFilter === 'ALL' ? styles.segmentTextActive : null]}>הכל</Text>
+                        <Bell size={16} color={inboxFilter === 'ALL' ? '#5e3f2d' : '#6B7280'} />
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        activeOpacity={0.85}
+                        onPress={() => setInboxFilter('MATCHES')}
+                        style={[styles.segmentBtn, inboxFilter === 'MATCHES' ? styles.segmentBtnActive : null]}
+                      >
+                        <Text style={[styles.segmentText, inboxFilter === 'MATCHES' ? styles.segmentTextActive : null]}>מאצ׳ים</Text>
+                        <Sparkles size={16} color={inboxFilter === 'MATCHES' ? '#5e3f2d' : '#6B7280'} />
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        activeOpacity={0.85}
+                        onPress={() => setInboxFilter('MERGE')}
+                        style={[styles.segmentBtn, inboxFilter === 'MERGE' ? styles.segmentBtnActive : null]}
+                      >
+                        <Text style={[styles.segmentText, inboxFilter === 'MERGE' ? styles.segmentTextActive : null]}>מיזוג פרופילים</Text>
+                        <Users size={16} color={inboxFilter === 'MERGE' ? '#5e3f2d' : '#6B7280'} />
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        activeOpacity={0.85}
+                        onPress={() => setInboxFilter('APARTMENTS')}
+                        style={[styles.segmentBtn, inboxFilter === 'APARTMENTS' ? styles.segmentBtnActive : null]}
+                      >
+                        <Text style={[styles.segmentText, inboxFilter === 'APARTMENTS' ? styles.segmentTextActive : null]}>דירות</Text>
+                        <Home size={16} color={inboxFilter === 'APARTMENTS' ? '#5e3f2d' : '#6B7280'} />
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                </View>
+              }
               ListEmptyComponent={
                 <View style={styles.emptyState}>
                   <View style={styles.emptyIconWrap}>
@@ -2624,6 +2709,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row-reverse',
     alignItems: 'center',
     justifyContent: 'flex-end',
+    paddingRight: 18,
     gap: 8 as any,
   },
   segmentBtn: {
