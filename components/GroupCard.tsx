@@ -297,17 +297,27 @@ export default function GroupCard({
                     </View>
                     <View style={styles.membersStripDivider} />
                   </View>
-                  <View style={styles.membersStripRow}>
+                  <View
+                    style={[
+                      styles.membersStripRow,
+                      displayUsers.length === 3 && extra === 0 ? styles.membersStripRowThreeAcross : null,
+                    ]}
+                  >
                     {displayUsers.map((u, i) => {
                       const isLast = i === displayUsers.length - 1;
                       const showExtra = isLast && extra > 0;
                       const isActive = u.id === activeUser?.id;
+                      const isThreeAcross = displayUsers.length === 3 && extra === 0;
                       return (
                         <TouchableOpacity
                           key={u.id}
                           activeOpacity={0.85}
                           onPress={() => setActiveUserId(u.id)}
-                          style={[styles.memberPill, isActive ? styles.memberPillActive : null]}
+                          style={[
+                            styles.memberPill,
+                            isThreeAcross ? styles.memberPillThreeAcross : null,
+                            isActive ? styles.memberPillActive : null,
+                          ]}
                           accessibilityRole="button"
                           accessibilityLabel={`בחר פרופיל ${u.full_name || 'משתמש/ת'}`}
                         >
@@ -339,7 +349,14 @@ export default function GroupCard({
                               ) : null}
                             </View>
                           </View>
-                          <Text style={[styles.memberPillName, { color: palette.text }]} numberOfLines={1}>
+                          <Text
+                            style={[
+                              styles.memberPillName,
+                              isThreeAcross ? styles.memberPillNameThreeAcross : null,
+                              { color: palette.text },
+                            ]}
+                            numberOfLines={1}
+                          >
                             {u.full_name || 'משתמש/ת'}
                           </Text>
                         </TouchableOpacity>
@@ -847,6 +864,11 @@ const styles = StyleSheet.create({
     gap: 14 as any,
     flexWrap: 'wrap',
   },
+  membersStripRowThreeAcross: {
+    width: '100%',
+    justifyContent: 'space-between',
+    gap: 8 as any,
+  },
   memberPill: {
     flexDirection: 'column',
     alignItems: 'center',
@@ -860,6 +882,15 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     maxWidth: 132,
     minWidth: 104,
+  },
+  memberPillThreeAcross: {
+    // Force 3 tiles in one row
+    flexBasis: '31%' as any,
+    maxWidth: '31%' as any,
+    minWidth: 0,
+    paddingHorizontal: 8,
+    paddingVertical: 8,
+    borderRadius: 18,
   },
   memberPillActive: {
     borderWidth: 2,
@@ -899,6 +930,9 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     includeFontPadding: false,
     letterSpacing: 0.2,
+  },
+  memberPillNameThreeAcross: {
+    fontSize: 11,
   },
   memberExtraOverlay: {
     ...StyleSheet.absoluteFillObject,
