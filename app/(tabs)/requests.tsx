@@ -6,6 +6,7 @@ import {
   Animated,
   SectionList,
   RefreshControl,
+  ScrollView,
   TouchableOpacity,
   ActivityIndicator,
   Image,
@@ -2401,50 +2402,45 @@ export default function RequestsScreen() {
               keyExtractor={(row) => `${row.kind}:${row.id}`}
               stickySectionHeadersEnabled={false}
               showsVerticalScrollIndicator={false}
+              // Allow pull-to-refresh even when content doesn't fill the screen
+              bounces
+              alwaysBounceVertical
+              overScrollMode="always"
               refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#5e3f2d" />}
-              contentContainerStyle={[styles.igListContent, inboxRows.length === 0 ? { paddingTop: 14 } : null]}
+              contentContainerStyle={[
+                styles.igListContent,
+                { flexGrow: 1 },
+                inboxRows.length === 0 ? { paddingTop: 8 } : null,
+              ]}
               ListHeaderComponent={
                 <View style={styles.filtersWrap}>
-                  {/* Extra "end" padding so the right-most chip ("הכל") won't be clipped on RTL */}
-                  <View style={{ paddingHorizontal: 16, paddingTop: 10, paddingRight: 44 }}>
-                    <View style={styles.segmentWrap}>
-                      <TouchableOpacity
-                        activeOpacity={0.85}
-                        onPress={() => setInboxFilter('ALL')}
-                        style={[styles.segmentBtn, inboxFilter === 'ALL' ? styles.segmentBtnActive : null]}
-                      >
-                        <Text style={[styles.segmentText, inboxFilter === 'ALL' ? styles.segmentTextActive : null]}>הכל</Text>
-                        <Bell size={16} color={inboxFilter === 'ALL' ? '#5e3f2d' : '#6B7280'} />
-                      </TouchableOpacity>
-
-                      <TouchableOpacity
-                        activeOpacity={0.85}
-                        onPress={() => setInboxFilter('MATCHES')}
-                        style={[styles.segmentBtn, inboxFilter === 'MATCHES' ? styles.segmentBtnActive : null]}
-                      >
-                        <Text style={[styles.segmentText, inboxFilter === 'MATCHES' ? styles.segmentTextActive : null]}>מאצ׳ים</Text>
-                        <Sparkles size={16} color={inboxFilter === 'MATCHES' ? '#5e3f2d' : '#6B7280'} />
-                      </TouchableOpacity>
-
-                      <TouchableOpacity
-                        activeOpacity={0.85}
-                        onPress={() => setInboxFilter('MERGE')}
-                        style={[styles.segmentBtn, inboxFilter === 'MERGE' ? styles.segmentBtnActive : null]}
-                      >
-                        <Text style={[styles.segmentText, inboxFilter === 'MERGE' ? styles.segmentTextActive : null]}>מיזוג פרופילים</Text>
-                        <Users size={16} color={inboxFilter === 'MERGE' ? '#5e3f2d' : '#6B7280'} />
-                      </TouchableOpacity>
-
-                      <TouchableOpacity
-                        activeOpacity={0.85}
-                        onPress={() => setInboxFilter('APARTMENTS')}
-                        style={[styles.segmentBtn, inboxFilter === 'APARTMENTS' ? styles.segmentBtnActive : null]}
-                      >
-                        <Text style={[styles.segmentText, inboxFilter === 'APARTMENTS' ? styles.segmentTextActive : null]}>דירות</Text>
-                        <Home size={16} color={inboxFilter === 'APARTMENTS' ? '#5e3f2d' : '#6B7280'} />
-                      </TouchableOpacity>
-                    </View>
-                  </View>
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    style={{ direction: 'rtl' as any }}
+                    contentContainerStyle={styles.segmentScrollContent}
+                  >
+                    {/* Keep "הכל" right-most in RTL */}
+                    {[
+                      { id: 'APARTMENTS' as const, label: 'דירות', Icon: Home },
+                      { id: 'MERGE' as const, label: 'מיזוג פרופילים', Icon: Users },
+                      { id: 'MATCHES' as const, label: 'מאצ׳ים', Icon: Sparkles },
+                      { id: 'ALL' as const, label: 'הכל', Icon: Bell },
+                    ].map(({ id, label, Icon }) => {
+                      const active = inboxFilter === id;
+                      return (
+                        <TouchableOpacity
+                          key={id}
+                          activeOpacity={0.85}
+                          onPress={() => setInboxFilter(id)}
+                          style={[styles.segmentBtn, active ? styles.segmentBtnActive : null]}
+                        >
+                          <Text style={[styles.segmentText, active ? styles.segmentTextActive : null]}>{label}</Text>
+                          <Icon size={14} color={active ? '#5e3f2d' : '#6B7280'} />
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </ScrollView>
                 </View>
               }
               ListEmptyComponent={
@@ -2702,8 +2698,16 @@ const styles = StyleSheet.create({
   },
   filtersWrap: {
     paddingHorizontal: 0,
-    paddingBottom: 6,
+    paddingBottom: 4,
     alignItems: 'flex-end',
+  },
+  segmentScrollContent: {
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 2,
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 8 as any,
   },
   segmentWrap: {
     flexDirection: 'row-reverse',
@@ -2716,8 +2720,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row-reverse',
     alignItems: 'center',
     gap: 8 as any,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
     borderRadius: 999,
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
@@ -2735,7 +2739,7 @@ const styles = StyleSheet.create({
   segmentText: {
     color: '#6B7280',
     fontWeight: '800',
-    fontSize: 13,
+    fontSize: 12,
   },
   segmentTextActive: {
     color: '#5e3f2d',
@@ -3100,8 +3104,9 @@ const styles = StyleSheet.create({
   },
   emptyState: {
     alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 60,
+    justifyContent: 'flex-start',
+    paddingTop: 28,
+    paddingBottom: 36,
     gap: 12 as any,
   },
   emptyIconWrap: {
