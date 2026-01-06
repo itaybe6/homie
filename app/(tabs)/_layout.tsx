@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useAuthStore } from '@/stores/authStore';
 import { fetchUserSurvey } from '@/lib/survey';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Home, Users, Plus, Heart, User as UserIcon } from 'lucide-react-native';
+import { Home, Users, Plus, Search, User as UserIcon } from 'lucide-react-native';
 import { supabase } from '@/lib/supabase';
 
 function FloatingCenterTabButton({
@@ -254,10 +254,10 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
-        name="likes"
+        name="search"
         options={{
-          tabBarLabel: 'אהבתי',
-          tabBarIcon: ({ color }) => <Heart size={24} color={color} />,
+          tabBarLabel: 'חיפוש',
+          tabBarIcon: ({ color }) => <Search size={24} color={color} />,
         }}
       />
       <Tabs.Screen
@@ -269,6 +269,8 @@ export default function TabLayout() {
       />
       {/* Map screen: keep tab bar visible but hide from tab items */}
       <Tabs.Screen name="map" options={{ href: null }} />
+      {/* Likes screen: keep route accessible but hide from tab items (opened from profile) */}
+      <Tabs.Screen name="likes" options={{ href: null }} />
       {/* Hide nested detail routes from the tab bar */}
       <Tabs.Screen name="user/[id]" options={{ href: null }} />
       <Tabs.Screen name="group-requests" options={{ href: null }} />

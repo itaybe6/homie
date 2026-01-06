@@ -1708,12 +1708,12 @@ export default function ProfileSettingsScreen() {
                           .eq('id', user.id);
                         if (error) throw error;
                         Alert.alert('הצלחה', 'הפרופיל עודכן');
+                        setShowEditModal(false);
                         // refresh local profile view
                         try {
                           const { data } = await supabase.from('users').select('*').eq('id', user.id).maybeSingle();
                           setProfile((data as any) || null);
                         } catch {}
-                        setShowEditModal(false);
                       } catch (e: any) {
                         Alert.alert('שגיאה', e?.message || 'לא ניתן לשמור');
                       } finally {

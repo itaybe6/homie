@@ -18,7 +18,8 @@ import {
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useNavigation } from '@react-navigation/native';
 import { Sparkles, Check, ChevronRight, X } from 'lucide-react-native';
-import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
+import { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuthStore } from '@/stores/authStore';
 import { UserSurveyResponse } from '@/types/database';
 import { fetchUserSurvey, upsertUserSurvey } from '@/lib/survey';
@@ -203,9 +204,60 @@ const HEB_MONTH_NAMES = [
   'דצמבר',
 ];
 
+function draftStepStorageKey(userId: string) {
+  return `survey:draft_step_key:${userId}`;
+}
+
+// Stable ordering for resume fallbacks (in case the draft question is currently hidden).
+const PART_1_KEYS = [
+  'occupation',
+  'student_year',
+  'works_from_home',
+  'shabbat',
+  'diet',
+  'kosher',
+  'smoker',
+  'relationship',
+  'pet',
+  'lifestyle',
+  'cleanliness',
+  'cleaning_frequency',
+  'hosting',
+  'cooking',
+  'home_vibe',
+] as const;
+const PART_2_KEYS = [
+  'price',
+  'bills',
+  'preferred_city',
+  'preferred_neighborhoods',
+  'floor',
+  'balcony',
+  'elevator',
+  'master',
+  'is_sublet',
+  'sublet_period',
+  'move_in_month',
+  'roommates_min',
+  'roommates_max',
+  'pets_allowed',
+  'broker',
+] as const;
+const PART_3_KEYS = [
+  'age_min',
+  'age_max',
+  'pref_gender',
+  'pref_occ',
+  'partner_shabbat',
+  'partner_diet',
+  'partner_smoking',
+  'partner_pets',
+] as const;
+
 export default function SurveyScreen() {
+  const __debugRunId = 'resume-debug-1';
   const params = useLocalSearchParams<{ mode?: string }>();
-  const isEditMode = String(params?.mode || '') === 'edit';
+  const isEditModeRequested = String(params?.mode || '') === 'edit';
   const router = useRouter();
   const navigation = useNavigation<any>();
   const { user } = useAuthStore();
@@ -234,7 +286,6 @@ export default function SurveyScreen() {
   const [monthPickerTarget, setMonthPickerTarget] = useState<MonthPickerTarget>('move_in_month');
   const [monthPickerTitle, setMonthPickerTitle] = useState<string>('בחר חודש');
   const [monthPickerTempDate, setMonthPickerTempDate] = useState<Date>(() => new Date());
-  const [monthPickerPendingDate, setMonthPickerPendingDate] = useState<Date | null>(null);
 
   // List picker (KeyFabPanel) for select-style questions (e.g. age).
   type ListPickerTarget = 'preferred_age_min' | 'preferred_age_max';
@@ -244,13 +295,23 @@ export default function SurveyScreen() {
 
   const latestStateRef = useRef<SurveyState>({});
   const exitingRef = useRef(false);
+  const savingRef = useRef(false);
   const latestStepKeyRef = useRef<string | null>(null);
   const didResumeRef = useRef(false);
   const transitionDirRef = useRef<1 | -1>(1);
 
+  // "Edit mode" should only apply when the survey is already completed.
+  // If a user enters from profile with mode=edit but they have an incomplete draft,
+  // we should resume the draft instead of forcing them back to the start of a part.
+  const isEditMode = isEditModeRequested && state.is_completed === true;
+
   useEffect(() => {
     latestStateRef.current = state;
   }, [state]);
+
+  useEffect(() => {
+    savingRef.current = saving;
+  }, [saving]);
 
   useEffect(() => {
     const showSub = Keyboard.addListener('keyboardDidShow', () => setKeyboardVisible(true));
@@ -271,13 +332,66 @@ export default function SurveyScreen() {
           setState(hydrated);
           setCityQuery(hydrated.preferred_city || '');
           setNeighborhoodSearch('');
-          setResumeStepKey(existing.is_completed ? null : (existing.draft_step_key ?? null));
+          // Prefer server draft_step_key, fallback to local storage (useful if the DB column is missing in some envs).
+          let localDraftKey: string | null = null;
+          try {
+            localDraftKey = await AsyncStorage.getItem(draftStepStorageKey(user.id));
+          } catch {
+            localDraftKey = null;
+          }
+          const preferredDraftKey = (existing as any).draft_step_key ?? localDraftKey ?? null;
+          // #region agent log
+          fetch('http://127.0.0.1:7242/ingest/1e8b170c-0b87-47bb-bc4f-bb72ea5d43b8', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              sessionId: 'debug-session',
+              runId: __debugRunId,
+              hypothesisId: 'H1',
+              location: 'app/(tabs)/onboarding/survey.tsx:loadSurvey',
+              message: 'loaded survey row',
+              data: {
+                userId: user.id,
+                rowId: (existing as any)?.id ?? null,
+                updatedAt: (existing as any)?.updated_at ?? null,
+                isCompleted: (existing as any)?.is_completed ?? null,
+                serverDraftKey: (existing as any)?.draft_step_key ?? null,
+                localDraftKey,
+                preferredDraftKey,
+                modeParam: String(params?.mode || ''),
+              },
+              timestamp: Date.now(),
+            }),
+          }).catch(() => {});
+          // #endregion
+          // If we have a draft pointer (especially for edit sessions), always keep it so we can resume.
+          // Only clear local storage when the survey is completed AND there's no draft pointer.
+          setResumeStepKey(preferredDraftKey);
+          if (existing.is_completed && !preferredDraftKey) {
+            try {
+              await AsyncStorage.removeItem(draftStepStorageKey(user.id));
+            } catch {
+              // ignore
+            }
+          } else if (preferredDraftKey) {
+            // Keep local storage in sync (best effort).
+            try {
+              await AsyncStorage.setItem(draftStepStorageKey(user.id), String(preferredDraftKey));
+            } catch {
+              // ignore
+            }
+          }
           didResumeRef.current = false;
         } else {
           setState({ is_completed: false });
           setCityQuery('');
           setNeighborhoodSearch('');
           setResumeStepKey(null);
+          try {
+            await AsyncStorage.removeItem(draftStepStorageKey(user.id));
+          } catch {
+            // ignore
+          }
           didResumeRef.current = true;
           setCurrentStep(0);
         }
@@ -415,7 +529,6 @@ export default function SurveyScreen() {
     setMonthPickerTarget(target);
     setMonthPickerTitle(title);
     setMonthPickerTempDate(new Date(base.getFullYear(), base.getMonth(), 1));
-    setMonthPickerPendingDate(null);
     setMonthPickerOpen(true);
   };
 
@@ -450,6 +563,15 @@ export default function SurveyScreen() {
       });
       setMonthPickerOpen(false);
     }
+  };
+
+  const commitMonthPickerYYYYMM = (yyyymm: string) => {
+    const parsed = parseYYYYMM(yyyymm);
+    if (!parsed) {
+      setMonthPickerOpen(false);
+      return;
+    }
+    commitMonthPicker(parsed);
   };
 
   const clearMonthPicker = () => {
@@ -701,7 +823,7 @@ function PartCarouselPagination({
         render: () => (
           <TriChoiceRow
             // Title is already displayed in the card header; avoid repeating it inside the row.
-            value={state.bills_included}
+            value={state.bills_included ?? null}
             yesLabel="כלולים"
             noLabel="לא כלולים"
             anyLabel="לא משנה לי"
@@ -811,7 +933,7 @@ function PartCarouselPagination({
         title: 'עם מרפסת/גינה?',
         render: () => (
           <TriChoiceRow
-            value={state.has_balcony}
+            value={state.has_balcony ?? null}
             anyLabel="לא משנה לי"
             centerOptions
             showYesIcon={false}
@@ -824,7 +946,7 @@ function PartCarouselPagination({
         title: 'חשוב שתהיה מעלית?',
         render: () => (
           <TriChoiceRow
-            value={state.has_elevator}
+            value={state.has_elevator ?? null}
             anyLabel="לא משנה לי"
             centerOptions
             showYesIcon={false}
@@ -837,7 +959,7 @@ function PartCarouselPagination({
         title: 'חדר מאסטר?',
         render: () => (
           <TriChoiceRow
-            value={state.wants_master_room}
+            value={state.wants_master_room ?? null}
             anyLabel="לא משנה לי"
             centerOptions
             showYesIcon={false}
@@ -947,7 +1069,7 @@ function PartCarouselPagination({
         title: 'משנה לך תיווך?',
         render: () => (
           <TriChoiceRow
-            value={state.with_broker}
+            value={state.with_broker ?? null}
             yesLabel="עם תיווך"
             noLabel="בלי תיווך"
             anyLabel="לא משנה לי"
@@ -1099,6 +1221,47 @@ function PartCarouselPagination({
     return null;
   }, [activeItem, clampedIndex, items]);
 
+  // IMPORTANT:
+  // Some questions show a default UI selection (e.g. sliders) even when the value is not yet stored in `state`.
+  // This can block "Next" because `isQuestionAnswered` checks the stored state, not the rendered default.
+  // So when entering such questions, we persist their defaults once (without overriding real user choices).
+  const activeRenderedQuestionKey = useMemo(() => {
+    return activeItem?.type === 'question' ? activeItem.question.key : null;
+  }, [activeItem]);
+
+  useEffect(() => {
+    if (loading) return;
+    if (!activeRenderedQuestionKey) return;
+
+    setState((prev) => {
+      let next: SurveyState | null = null;
+
+      if (activeRenderedQuestionKey === 'cleanliness') {
+        if (!hasFiniteNumber(prev.cleanliness_importance)) {
+          next = { ...(next ?? prev), cleanliness_importance: 3 };
+        }
+      }
+
+      if (activeRenderedQuestionKey === 'roommates_min') {
+        const min = (prev as any).preferred_roommates_min;
+        if (!hasFiniteNumber(min)) {
+          next = { ...(next ?? prev), preferred_roommates_min: 1 } as any;
+        }
+      }
+
+      if (activeRenderedQuestionKey === 'roommates_max') {
+        const minRaw = (prev as any).preferred_roommates_min;
+        const maxRaw = (prev as any).preferred_roommates_max;
+        const min = hasFiniteNumber(minRaw) ? minRaw : 1;
+        if (!hasFiniteNumber(minRaw) || !hasFiniteNumber(maxRaw)) {
+          next = { ...(next ?? prev), preferred_roommates_min: min, preferred_roommates_max: min } as any;
+        }
+      }
+
+      return next ?? prev;
+    });
+  }, [activeRenderedQuestionKey, loading]);
+
   const activeQuestionNumber = useMemo(() => {
     if (!activeQuestionKey) return 0;
     const idx = questionIndexByKey.get(activeQuestionKey);
@@ -1149,18 +1312,127 @@ function PartCarouselPagination({
   // Track the user's current question so "exit & save" can resume next time.
   useEffect(() => {
     latestStepKeyRef.current = activeQuestionKey ?? null;
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/1e8b170c-0b87-47bb-bc4f-bb72ea5d43b8', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sessionId: 'debug-session',
+        runId: __debugRunId,
+        hypothesisId: 'H3',
+        location: 'app/(tabs)/onboarding/survey.tsx:latestStepKeyRef',
+        message: 'activeQuestionKey changed',
+        data: {
+          activeQuestionKey: activeQuestionKey ?? null,
+          isEditModeRequested,
+          isEditMode,
+          editSelectedPart,
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
   }, [activeQuestionKey]);
 
   // Resume draft at the last seen question (once per screen mount).
   useEffect(() => {
     if (loading) return;
-    if (isEditMode) return;
     if (didResumeRef.current) return;
     const key = resumeStepKey;
     didResumeRef.current = true;
     if (!key) return;
-    const idx = items.findIndex((it) => it.type === 'question' && it.question.key === key);
-    if (idx >= 0) setCurrentStep(idx);
+
+    // If we're entering via edit mode and we have a draft key, jump directly into that part.
+    if (isEditModeRequested) {
+      const k = String(key);
+      const part: 1 | 2 | 3 | null = (PART_1_KEYS as readonly string[]).includes(k)
+        ? 1
+        : (PART_2_KEYS as readonly string[]).includes(k)
+          ? 2
+          : (PART_3_KEYS as readonly string[]).includes(k)
+            ? 3
+            : null;
+      if (part) setEditSelectedPart(part);
+    }
+
+    const directIdx = items.findIndex((it) => it.type === 'question' && it.question.key === key);
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/1e8b170c-0b87-47bb-bc4f-bb72ea5d43b8', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sessionId: 'debug-session',
+        runId: __debugRunId,
+        hypothesisId: 'H4',
+        location: 'app/(tabs)/onboarding/survey.tsx:resumeEffect',
+        message: 'resume attempt',
+        data: {
+          resumeStepKey: key,
+          directIdx,
+          totalItems: items.length,
+          isEditModeRequested,
+          isEditMode,
+          editSelectedPart,
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
+    if (directIdx >= 0) {
+      setCurrentStep(directIdx);
+      return;
+    }
+
+    // Fallback: draft key might refer to a question that is currently hidden (isVisible=false).
+    // Try to resume to the nearest visible question in the same part (forward preference).
+    const pickNearestVisible = (orderedKeys: readonly string[]) => {
+      const pos = orderedKeys.indexOf(key);
+      const visibleKeySet = questionIndexByKey; // Map<key, visibleIndex>
+      const findItemIdxByQuestionKey = (k: string) =>
+        items.findIndex((it) => it.type === 'question' && it.question.key === k);
+
+      if (pos >= 0) {
+        for (let i = pos; i < orderedKeys.length; i++) {
+          const candidate = orderedKeys[i];
+          if (visibleKeySet.has(candidate)) {
+            const idx = findItemIdxByQuestionKey(candidate);
+            if (idx >= 0) return idx;
+          }
+        }
+        for (let i = pos - 1; i >= 0; i--) {
+          const candidate = orderedKeys[i];
+          if (visibleKeySet.has(candidate)) {
+            const idx = findItemIdxByQuestionKey(candidate);
+            if (idx >= 0) return idx;
+          }
+        }
+      }
+
+      for (let i = 0; i < orderedKeys.length; i++) {
+        const candidate = orderedKeys[i];
+        if (visibleKeySet.has(candidate)) {
+          const idx = findItemIdxByQuestionKey(candidate);
+          if (idx >= 0) return idx;
+        }
+      }
+      return null;
+    };
+
+    const p1 = pickNearestVisible(PART_1_KEYS as any);
+    if (p1 != null) {
+      setCurrentStep(p1);
+      return;
+    }
+    const p2 = pickNearestVisible(PART_2_KEYS as any);
+    if (p2 != null) {
+      setCurrentStep(p2);
+      return;
+    }
+    const p3 = pickNearestVisible(PART_3_KEYS as any);
+    if (p3 != null) {
+      setCurrentStep(p3);
+      return;
+    }
   }, [loading, resumeStepKey, items]);
 
   const goToStep = (nextStep: number) => {
@@ -1210,6 +1482,12 @@ function PartCarouselPagination({
           : null,
       });
       await upsertUserSurvey(payload);
+      // Clear local draft pointer on completion.
+      try {
+        await AsyncStorage.removeItem(draftStepStorageKey(user.id));
+      } catch {
+        // ignore
+      }
       Alert.alert('נשמר', 'השאלון נשמר בהצלחה');
       router.back();
     } catch (e: any) {
@@ -1228,20 +1506,74 @@ function PartCarouselPagination({
 
   const saveDraft = async (): Promise<void> => {
     if (!user?.id) return;
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/1e8b170c-0b87-47bb-bc4f-bb72ea5d43b8', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sessionId: 'debug-session',
+        runId: __debugRunId,
+        hypothesisId: 'H2',
+        location: 'app/(tabs)/onboarding/survey.tsx:saveDraft',
+        message: 'saveDraft called',
+        data: {
+          userId: user.id,
+          latestStepKeyRef: latestStepKeyRef.current,
+          resumeStepKey,
+          currentStep,
+          isEditModeRequested,
+          isEditMode,
+          editSelectedPart,
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
     const payload = normalizePayload(user.id, latestStateRef.current, {
       isCompleted: false,
       draftStepKey: latestStepKeyRef.current,
       coerceBooleans: false,
     });
     await upsertUserSurvey(payload);
+    // Also persist locally so resume works even if the server doesn't have draft_step_key column.
+    try {
+      const key = latestStepKeyRef.current;
+      if (key) await AsyncStorage.setItem(draftStepStorageKey(user.id), key);
+    } catch {
+      // ignore
+    }
   };
 
   const saveEdit = async (): Promise<void> => {
     if (!user?.id) return;
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/1e8b170c-0b87-47bb-bc4f-bb72ea5d43b8', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sessionId: 'debug-session',
+        runId: __debugRunId,
+        hypothesisId: 'H2',
+        location: 'app/(tabs)/onboarding/survey.tsx:saveEdit',
+        message: 'saveEdit called',
+        data: {
+          userId: user.id,
+          latestStepKeyRef: latestStepKeyRef.current,
+          resumeStepKey,
+          currentStep,
+          isEditModeRequested,
+          isEditMode,
+          editSelectedPart,
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
     // In edit mode we keep is_completed=true but DO NOT coerce missing booleans to false.
     const payload = normalizePayload(user.id, latestStateRef.current, {
       isCompleted: true,
-      draftStepKey: null,
+      // Save the last question key so we can resume the edit session later.
+      draftStepKey: latestStepKeyRef.current,
       coerceBooleans: false,
     });
     await upsertUserSurvey(payload);
@@ -1274,7 +1606,7 @@ function PartCarouselPagination({
       // Prevent infinite loop when we dispatch the saved action
       if (exitingRef.current) return;
       // If we're already saving, let the navigation proceed
-      if (saving) return;
+      if (savingRef.current) return;
 
       // We want to save draft before leaving
       e.preventDefault();
@@ -1407,12 +1739,26 @@ function PartCarouselPagination({
                       onPress={() => {
                         // Snapshot current saved state so we can discard changes for this edit session.
                         editSnapshotRef.current = JSON.parse(JSON.stringify(state || {})) as SurveyState;
-                        const firstIdx = items.findIndex(
-                          (it) => it.type === 'question' && it.partNumber === p.partNumber
-                        );
-                        if (firstIdx >= 0) {
+                        const firstIdx = items.findIndex((it) => it.type === 'question' && it.partNumber === p.partNumber);
+
+                        // If we have a stored draft_step_key (from server/local) and it belongs to this part,
+                        // resume from that question instead of starting the part over.
+                        const draftKey = (state as any)?.draft_step_key as string | null | undefined;
+                        const belongsToPart =
+                          p.partNumber === 1
+                            ? !!draftKey && (PART_1_KEYS as readonly string[]).includes(draftKey)
+                            : p.partNumber === 2
+                              ? !!draftKey && (PART_2_KEYS as readonly string[]).includes(draftKey)
+                              : !!draftKey && (PART_3_KEYS as readonly string[]).includes(draftKey);
+                        const resumeIdx =
+                          belongsToPart && draftKey
+                            ? items.findIndex((it) => it.type === 'question' && it.question.key === draftKey)
+                            : -1;
+
+                        const targetIdx = resumeIdx >= 0 ? resumeIdx : firstIdx;
+                        if (targetIdx >= 0) {
                           setEditSelectedPart(p.partNumber);
-                          setCurrentStep(firstIdx);
+                          setCurrentStep(targetIdx);
                         }
                       }}
                     >
@@ -1674,48 +2020,46 @@ function PartCarouselPagination({
         anchor="bottom"
         bottomOffset={120}
       >
-        {Platform.OS === 'android' ? (
-          <DateTimePicker
-            value={monthPickerTempDate}
-            mode="date"
-            display="default"
-            onChange={(event: any, selected?: Date) => {
-              const type = event?.type;
-              if (type === 'dismissed') {
-                setMonthPickerOpen(false);
-                return;
-              }
-              if (type === 'set') {
-                const picked = selected ?? monthPickerTempDate;
-                commitMonthPicker(picked);
-              }
-            }}
-          />
-        ) : (
-          <>
-            <DateTimePicker
-              value={monthPickerPendingDate ?? monthPickerTempDate}
-              mode="date"
-              display="spinner"
-              locale="he-IL"
-              onChange={(_, selected) => {
-                if (!selected) return;
-                setMonthPickerPendingDate(new Date(selected.getFullYear(), selected.getMonth(), 1));
-              }}
-            />
-            <View style={{ flexDirection: 'row-reverse', gap: 10, justifyContent: 'space-between' }}>
-              <TouchableOpacity style={[styles.pickerCancel, { marginTop: 0 }]} onPress={clearMonthPicker}>
-                <Text style={styles.pickerCancelText}>נקה</Text>
-              </TouchableOpacity>
+        <ScrollView
+          style={{ maxHeight: 360 }}
+          contentContainerStyle={{ paddingVertical: 8 }}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="always"
+          nestedScrollEnabled
+        >
+          {buildMonthOptions({ baseDate: monthPickerTempDate, monthsBack: 3, monthsForward: 24 }).map((opt) => {
+            const currentValue =
+              monthPickerTarget === 'move_in_month'
+                ? state.move_in_month ?? null
+                : monthPickerTarget === 'sublet_month_from'
+                  ? state.sublet_month_from ?? null
+                  : monthPickerTarget === 'sublet_month_to'
+                    ? state.sublet_month_to ?? null
+                    : null;
+            const active = currentValue === opt.value;
+            return (
               <TouchableOpacity
-                style={[styles.primaryBtn, { minWidth: 120 }]}
-                onPress={() => commitMonthPicker(monthPickerPendingDate ?? monthPickerTempDate)}
+                key={`month-${opt.value}`}
+                style={[styles.pickerOption, active ? styles.pickerOptionActive : null]}
+                onPress={() => commitMonthPickerYYYYMM(opt.value)}
+                activeOpacity={0.85}
               >
-                <Text style={styles.primaryBtnText}>אישור</Text>
+                <Text style={[styles.pickerOptionText, active ? styles.pickerOptionTextActive : null]}>{opt.label}</Text>
               </TouchableOpacity>
-            </View>
-          </>
-        )}
+            );
+          })}
+        </ScrollView>
+        <View style={{ flexDirection: 'row-reverse', gap: 10, justifyContent: 'space-between', marginTop: 8 }}>
+          <TouchableOpacity style={[styles.pickerCancel, { marginTop: 0, flex: 1 }]} onPress={clearMonthPicker}>
+            <Text style={styles.pickerCancelText}>נקה</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.primaryBtn, { minWidth: 120, flex: 1 }]}
+            onPress={() => setMonthPickerOpen(false)}
+          >
+            <Text style={styles.primaryBtnText}>סגור</Text>
+          </TouchableOpacity>
+        </View>
       </KeyFabPanel>
 
       {/* Shared list picker panel (outside the clipped card) */}
@@ -1826,7 +2170,9 @@ function normalizePayload(
   const payload: any = {
     user_id: userId,
     is_completed: opts.isCompleted,
-    draft_step_key: opts.isCompleted ? null : (opts.draftStepKey ?? null),
+    // Allow saving a draft pointer even when is_completed=true (useful for edit sessions that want to resume).
+    // Callers should pass null explicitly when they want to clear it (e.g. final submit).
+    draft_step_key: opts.draftStepKey ?? null,
     is_sublet: coerce ? (s.is_sublet ?? false) : (s.is_sublet ?? null),
     occupation: s.occupation ?? null,
     student_year: s.student_year ?? null,
@@ -1924,6 +2270,32 @@ function generateUpcomingMonths(count = 12): string[] {
     list.push(label);
   }
   return list;
+}
+
+function addMonths(date: Date, deltaMonths: number): Date {
+  return new Date(date.getFullYear(), date.getMonth() + deltaMonths, 1);
+}
+
+function buildMonthOptions({
+  baseDate,
+  monthsBack = 3,
+  monthsForward = 24,
+}: {
+  baseDate: Date;
+  monthsBack?: number;
+  monthsForward?: number;
+}): { label: string; value: string }[] {
+  const start = addMonths(baseDate, -Math.max(0, monthsBack));
+  const total = Math.max(1, monthsBack + monthsForward + 1);
+  const out: { label: string; value: string }[] = [];
+  for (let i = 0; i < total; i++) {
+    const d = addMonths(start, i);
+    out.push({
+      label: `${HEB_MONTH_NAMES[d.getMonth()]} ${d.getFullYear()}`,
+      value: formatDateToYYYYMM(d),
+    });
+  }
+  return out;
 }
 
 function parseYYYYMM(value?: string | null): Date | null {
@@ -2135,27 +2507,29 @@ function ToggleRow({
   showYesIcon = true,
 }: {
   label?: string;
-  value: boolean;
+  value: boolean | undefined;
   onToggle: (v: boolean) => void;
   centerOptions?: boolean;
   showYesIcon?: boolean;
 }) {
+  const isYes = value === true;
+  const isNo = value === false;
   return (
     <View style={[styles.toggleRow, centerOptions ? styles.toggleRowCentered : null]}>
       {!!label && <Text style={styles.label}>{label}</Text>}
       <View style={[styles.toggleOptions, centerOptions ? styles.toggleOptionsCentered : null]}>
         <TouchableOpacity
-          style={[styles.toggleBtn, value ? styles.toggleActive : null]}
+          style={[styles.toggleBtn, isYes ? styles.toggleActive : null]}
           onPress={() => onToggle(true)}
         >
-          {showYesIcon ? <Check size={16} color={value ? '#0F0F14' : '#9DA4AE'} /> : null}
-          <Text style={[styles.toggleText, value ? styles.toggleTextActive : null]}>כן</Text>
+          {showYesIcon ? <Check size={16} color={isYes ? '#0F0F14' : '#9DA4AE'} /> : null}
+          <Text style={[styles.toggleText, isYes ? styles.toggleTextActive : null]}>כן</Text>
         </TouchableOpacity>
         <TouchableOpacity
-          style={[styles.toggleBtn, !value ? styles.toggleActive : null]}
+          style={[styles.toggleBtn, isNo ? styles.toggleActive : null]}
           onPress={() => onToggle(false)}
         >
-          <Text style={[styles.toggleText, !value ? styles.toggleTextActive : null]}>לא</Text>
+          <Text style={[styles.toggleText, isNo ? styles.toggleTextActive : null]}>לא</Text>
         </TouchableOpacity>
       </View>
     </View>
