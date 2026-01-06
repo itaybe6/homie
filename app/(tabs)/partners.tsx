@@ -199,7 +199,6 @@ export default function PartnersScreen() {
       const next = i + 1;
       return next >= items.length ? items.length : next;
     });
-    translateX.value = 0;
   };
 
   const swipeGesture = Gesture.Pan()
@@ -211,11 +210,18 @@ export default function PartnersScreen() {
       'worklet';
       if (translateX.value > SWIPE_THRESHOLD) {
         translateX.value = withTiming(screenWidth + 200, { duration: 180 }, (finished) => {
-          if (finished) runOnJS(onSwipe)('like');
+          if (finished) {
+            // Reset on the UI thread BEFORE swapping the underlying item (prevents the next card "jumping" in).
+            translateX.value = 0;
+            runOnJS(onSwipe)('like');
+          }
         });
       } else if (translateX.value < -SWIPE_THRESHOLD) {
         translateX.value = withTiming(-screenWidth - 200, { duration: 180 }, (finished) => {
-          if (finished) runOnJS(onSwipe)('pass');
+          if (finished) {
+            translateX.value = 0;
+            runOnJS(onSwipe)('pass');
+          }
         });
       } else {
         translateX.value = withSpring(0, { damping: 18, stiffness: 180 });
@@ -244,8 +250,10 @@ export default function PartnersScreen() {
       Extrapolate.CLAMP,
     );
     return {
-      transform: [{ scale: 0.985 + progress * 0.015 }, { translateY: 10 - progress * 10 }],
-      opacity: 0.92 + progress * 0.08,
+      // Keep the next card in a stable position to avoid any perceived "jump" when swapping cards.
+      // We only apply a very subtle scale/opacity change.
+      transform: [{ scale: 0.99 + progress * 0.01 }],
+      opacity: 0.94 + progress * 0.06,
     };
   });
 
@@ -1004,7 +1012,10 @@ export default function PartnersScreen() {
     if (isDeckExhausted) return;
     const outTarget = type === 'like' ? screenWidth + 200 : -screenWidth - 200;
     translateX.value = withTiming(outTarget, { duration: 180 }, (finished) => {
-      if (finished) runOnJS(onSwipe)(type);
+      if (finished) {
+        translateX.value = 0;
+        runOnJS(onSwipe)(type);
+      }
     });
   };
 
