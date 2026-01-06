@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -17,6 +17,7 @@ import {
 import { useRouter } from 'expo-router';
 import { Bell, Inbox, Filter, Home, Users, UserPlus2, UserPlus, Sparkles, MessageCircle } from 'lucide-react-native';
 import WhatsAppSvg from '@/components/icons/WhatsAppSvg';
+import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/authStore';
 import { Apartment, Notification, User } from '@/types/database';
@@ -311,7 +312,8 @@ export default function RequestsScreen() {
 
       if (opts?.markRead) {
         try {
-          await supabase.from('notifications').update({ is_read: true }).eq('recipient_id', user.id);
+          // Mark read for ALL recipients that are part of the unified inbox (supports merged profiles).
+          await supabase.from('notifications').update({ is_read: true }).in('recipient_id', recipientIds as any);
           // Do not force-set the badge to 0 here; the bell badge is a combined count
           // (unread notifications + pending requests) and is refreshed by the button itself.
         } catch {}
@@ -379,12 +381,29 @@ export default function RequestsScreen() {
     fetchAll();
   }, [user?.id]);
 
-  // When opening this screen (also used for /notifications), mark notifications as read.
-  useEffect(() => {
-    // Reset the bell badge (requests/matches/invites are tracked via lastSeenAt).
-    markSeenNow();
-    fetchNotifications({ markRead: true });
-  }, [user?.id]);
+  // When opening this screen (also used for /notifications), clear the unified bell badge.
+  // Needs to run on focus (tab switches don't always remount the component).
+  useFocusEffect(
+    useCallback(() => {
+      let cancelled = false;
+      const run = async () => {
+        if (!user?.id) return;
+
+        // 1) Hide immediately (optimistic)
+        markSeenNow();
+
+        // 2) Mark notifications read in DB (including merged-profile recipients)
+        await fetchNotifications({ markRead: true });
+
+        // 3) Re-assert after DB update to avoid a race where the bell refetches before the update finishes
+        if (!cancelled) markSeenNow();
+      };
+      run();
+      return () => {
+        cancelled = true;
+      };
+    }, [user?.id])
+  );
 
   const fetchAll = async () => {
     if (!user?.id) { setLoading(false); return; }

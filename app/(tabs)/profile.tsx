@@ -38,6 +38,7 @@ import {
   Image as ImageIcon,
   Instagram,
   Eye,
+  Heart,
 } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
@@ -1828,6 +1829,32 @@ export default function ProfileScreen() {
           </View>
         </View>
 
+        {/* Likes Card */}
+        <View style={styles.sectionDark}>
+          <TouchableOpacity
+            style={styles.likesCard}
+            activeOpacity={0.95}
+            onPress={() => router.push('/likes' as any)}
+            accessibilityRole="button"
+            accessibilityLabel="דירות שאהבתי"
+          >
+            <View style={styles.likesCardContent}>
+              <View style={styles.likesTextWrap}>
+                <Text style={styles.likesTitle}>דירות שאהבתי</Text>
+                <Text style={styles.likesSubtitle}>כל הדירות שסימנת בלב</Text>
+              </View>
+              <LinearGradient
+                colors={['#EC4899', '#F43F5E']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.likesIconGradient}
+              >
+                <Heart size={24} color="#FFFFFF" fill="#FFFFFF" />
+              </LinearGradient>
+            </View>
+          </TouchableOpacity>
+        </View>
+
         <View style={styles.sectionDark}>
           <View style={styles.surveyCTA}>
             {profile ? (
@@ -3508,6 +3535,58 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 16,
     includeFontPadding: false,
+  },
+  likesCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    shadowColor: '#000000',
+    shadowOpacity: 0.08,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 4,
+    overflow: 'hidden',
+    ...(Platform.OS === 'web' ? ({ boxShadow: '0 10px 28px rgba(0,0,0,0.10)' } as any) : null),
+  },
+  likesCardContent: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 18,
+    paddingVertical: 16,
+  },
+  likesTextWrap: {
+    flex: 1,
+    alignItems: 'flex-end',
+    gap: 4,
+  },
+  likesTitle: {
+    color: '#111827',
+    fontSize: 17,
+    fontWeight: '900',
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    letterSpacing: -0.3,
+  },
+  likesSubtitle: {
+    color: '#6B7280',
+    fontSize: 13,
+    fontWeight: '600',
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
+  likesIconGradient: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#EC4899',
+    shadowOpacity: 0.35,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 6,
   },
   sharedAvatarsRow: {
     flexDirection: 'row-reverse',

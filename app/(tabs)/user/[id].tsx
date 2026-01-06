@@ -1290,12 +1290,24 @@ export default function UserProfileScreen() {
       } catch (e) {
         // If verification failed, continue with local state fallback (handled by button handler too)
       }
-      // Prefer an existing ACTIVE group that I'm a member of; if none, fallback to a group I created; else create new
-      const [{ data: myActiveMembership }, { data: createdByMeGroup, error: gErr }] = await Promise.all([
+      // Determine ACTIVE group ids for both sides.
+      // Key rule: if the viewed user is already in an ACTIVE shared profile and I'm not in any,
+      // we should send the invite to THEIR group so they can approve and add me in.
+      const [
+        { data: myActiveMembership },
+        { data: profileActiveMembership },
+        { data: createdByMeGroup, error: gErr },
+      ] = await Promise.all([
         supabase
           .from('profile_group_members')
           .select('group_id')
           .eq('user_id', me.id)
+          .eq('status', 'ACTIVE')
+          .maybeSingle(),
+        supabase
+          .from('profile_group_members')
+          .select('group_id')
+          .eq('user_id', profile.id)
           .eq('status', 'ACTIVE')
           .maybeSingle(),
         supabase
@@ -1309,8 +1321,18 @@ export default function UserProfileScreen() {
       ]);
       if (gErr) throw gErr;
 
-      let groupId = (myActiveMembership as any)?.group_id as string | undefined;
-      if (!groupId) {
+      const myActiveGroupId = (myActiveMembership as any)?.group_id as string | undefined;
+      const profileActiveGroupId = (profileActiveMembership as any)?.group_id as string | undefined;
+
+      let groupId: string | undefined;
+      // If I have an active group, invite them into mine (or merge later if they have their own).
+      if (myActiveGroupId) {
+        groupId = myActiveGroupId;
+      } else if (profileActiveGroupId) {
+        // I am "solo" and they are already in a shared profile → invite to THEIR group.
+        groupId = profileActiveGroupId;
+      } else {
+        // Neither side has an active group → reuse the latest group I created (if any), else create.
         groupId = (createdByMeGroup as any)?.id as string | undefined;
       }
       // Create group if none found
@@ -1373,28 +1395,32 @@ export default function UserProfileScreen() {
       } catch {}
 
       // Ensure I (the inviter) am ACTIVE in this group before inviting anyone
-      try {
-        // Prefer SECURITY DEFINER RPC to bypass RLS safely
-        const { error: rpcErr } = await supabase.rpc('add_self_to_group', { p_group_id: groupId });
-        if (rpcErr) {
-          // Fallback to client-side upsert if RPC not available
-          const insertMe = await supabase
-            .from('profile_group_members')
-            .insert([{ group_id: groupId, user_id: me.id, status: 'ACTIVE' } as any], {
-              onConflict: 'group_id,user_id',
-              ignoreDuplicates: true,
-            } as any);
-          // If the row already exists (or insert ignored), force status to ACTIVE (best-effort)
-          if ((insertMe as any)?.error || (insertMe as any)?.status === 409) {
-            await supabase
+      // BUT: if we're inviting into the viewed user's existing group (I'm solo), we intentionally
+      // do NOT add myself yet — they'll approve, and the approval flow will add/merge correctly.
+      if (!profileActiveGroupId || groupId !== profileActiveGroupId) {
+        try {
+          // Prefer SECURITY DEFINER RPC to bypass RLS safely
+          const { error: rpcErr } = await supabase.rpc('add_self_to_group', { p_group_id: groupId });
+          if (rpcErr) {
+            // Fallback to client-side upsert if RPC not available
+            const insertMe = await supabase
               .from('profile_group_members')
-              .update({ status: 'ACTIVE' })
-              .eq('group_id', groupId as string)
-              .eq('user_id', me.id);
+              .insert([{ group_id: groupId, user_id: me.id, status: 'ACTIVE' } as any], {
+                onConflict: 'group_id,user_id',
+                ignoreDuplicates: true,
+              } as any);
+            // If the row already exists (or insert ignored), force status to ACTIVE (best-effort)
+            if ((insertMe as any)?.error || (insertMe as any)?.status === 409) {
+              await supabase
+                .from('profile_group_members')
+                .update({ status: 'ACTIVE' })
+                .eq('group_id', groupId as string)
+                .eq('user_id', me.id);
+            }
           }
+        } catch {
+          // ignore; worst case the invite still gets created and approver will join
         }
-      } catch {
-        // ignore; worst case the invite still gets created and approver will join
       }
 
       // Prevent duplicate pending invite for same user in same group
