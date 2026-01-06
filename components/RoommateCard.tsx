@@ -1,5 +1,5 @@
 import React, { memo, useEffect, useMemo, useState } from 'react';
-import { View, Text, StyleSheet, Image, ViewStyle } from 'react-native';
+import { View, Text, StyleSheet, Image, ViewStyle, TouchableOpacity } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import {
   MapPin,
@@ -43,6 +43,7 @@ type RoommateCardProps = {
   style?: ViewStyle;
   matchPercent?: number | null;
   mediaHeight?: number;
+  strongTextOverlay?: boolean;
 };
 
 function RoommateCardBase({
@@ -57,6 +58,7 @@ function RoommateCardBase({
   style,
   matchPercent,
   mediaHeight,
+  strongTextOverlay = false,
 }: RoommateCardProps) {
   const DEFAULT_AVATAR = 'https://cdn-icons-png.flaticon.com/512/847/847969.png';
   const resolvedMediaHeight = typeof mediaHeight === 'number' && Number.isFinite(mediaHeight) ? mediaHeight : 520;
@@ -217,6 +219,7 @@ function RoommateCardBase({
   const panStartProgress = useSharedValue(0);
   const panStartY = useSharedValue(0);
   const allowPan = useSharedValue(0); // 0/1
+  const [isDetailsOpen, setIsDetailsOpen] = useState(false);
 
   useEffect(() => {
     // Reset when switching users
@@ -232,6 +235,7 @@ function RoommateCardBase({
     () => openProgress.value >= 0.85,
     (opened, prev) => {
       if (opened === prev) return;
+      runOnJS(setIsDetailsOpen)(opened);
       if (onDetailsOpenChange) runOnJS(onDetailsOpenChange)(opened);
     },
     [onDetailsOpenChange],
@@ -327,13 +331,23 @@ function RoommateCardBase({
     ? Gesture.Exclusive(pan, flingUp, flingDown, longPress, tap)
     : Gesture.Exclusive(longPress, tap);
 
+  const bottomOverlayColors = useMemo(() => {
+    if (strongTextOverlay) {
+      return ['rgba(0,0,0,0)', 'rgba(0,0,0,0.25)', 'rgba(0,0,0,0.82)'];
+    }
+    return ['rgba(0,0,0,0)', 'rgba(0,0,0,0.6)'];
+  }, [strongTextOverlay]);
+
   return (
     <View style={[styles.card, style]}>
       <GestureDetector gesture={pressGesture}>
         <View style={[styles.imageWrap, { height: resolvedMediaHeight }]}>
           {/* Details panel (slides from bottom like the demo) */}
           {enableParallaxDetails ? (
-            <Animated.View style={[styles.detailsPanelWrap, detailsPanelStyle]} pointerEvents="none">
+            <Animated.View
+              style={[styles.detailsPanelWrap, detailsPanelStyle]}
+              pointerEvents={isDetailsOpen ? 'auto' : 'none'}
+            >
               <Animated.View
                 ref={detailsRef}
                 style={[styles.detailsPanelInner, { minHeight: detailsMinHeight }]}
@@ -353,9 +367,17 @@ function RoommateCardBase({
                     <Text style={[styles.detailsTitle, { color: palette.text }]}>מה חשוב לי</Text>
                     <Text style={[styles.detailsSubtitle, { color: palette.textMuted }]}>פרטים מהשאלון</Text>
                   </View>
-                  <View style={[styles.detailsHintPill, { backgroundColor: palette.accentLight }]}>
+                  <TouchableOpacity
+                    activeOpacity={0.85}
+                    onPress={() => {
+                      openProgress.value = withSpring(0, { damping: 18, stiffness: 220 });
+                    }}
+                    style={[styles.detailsHintPill, { backgroundColor: palette.accentLight }]}
+                    accessibilityRole="button"
+                    accessibilityLabel="סגור"
+                  >
                     <Text style={[styles.detailsHint, { color: palette.accent }]}>↓ סגור</Text>
-                  </View>
+                  </TouchableOpacity>
                 </View>
 
                 {/* Content */}
@@ -411,12 +433,13 @@ function RoommateCardBase({
               </View>
             )}
             <MatchPercentBadge value={matchPercent} triggerKey={user?.id || null} size={74} style={styles.matchBadge} />
-            <View style={styles.bottomOverlayWrap}>
+            <View style={[styles.bottomOverlayWrap, strongTextOverlay ? styles.bottomOverlayWrapStrong : null]}>
               <LinearGradient
-                colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.6)']}
+                colors={bottomOverlayColors as any}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 0, y: 1 }}
                 style={styles.bottomOverlayGradient}
+                locations={strongTextOverlay ? [0, 0.55, 1] : undefined}
               />
               <View style={styles.bottomOverlayContent}>
                 {!!user.full_name ? (
@@ -510,6 +533,9 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     height: 128,
+  },
+  bottomOverlayWrapStrong: {
+    height: 170,
   },
   bottomOverlayGradient: {
     ...StyleSheet.absoluteFillObject,

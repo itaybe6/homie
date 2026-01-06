@@ -960,6 +960,7 @@ export default function PartnersScreen() {
           style={{ marginBottom: 0 }}
           mediaHeight={swipeCardHeight}
           enableParallaxDetails
+          strongTextOverlay
           onDetailsOpenChange={setIsDetailsOpen}
           onOpen={(u) =>
             router.push({
@@ -980,6 +981,7 @@ export default function PartnersScreen() {
         onLike={(groupId, users) => handleGroupLike(groupId, users)}
         onPass={(groupId, users) => handleGroupPass(groupId, users)}
         mediaHeight={swipeCardHeight}
+        strongTextOverlay
         onDetailsOpenChange={setIsDetailsOpen}
         onOpen={(userId: string) =>
           router.push({
@@ -1048,6 +1050,7 @@ export default function PartnersScreen() {
       </View>
 
       <ScrollView
+        scrollEnabled={!isDetailsOpen}
         contentContainerStyle={[
           styles.listContent,
           {
