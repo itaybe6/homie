@@ -2101,6 +2101,21 @@ export default function ProfileScreen() {
               <Text style={styles.surveyEmptyText}>
                 {surveyResponse ? 'אין נתונים להצגה.' : 'עדיין לא מילאת את השאלון.'}
               </Text>
+              {!surveyResponse ? (
+                <TouchableOpacity
+                  style={styles.surveyEmptyCtaBtn}
+                  activeOpacity={0.9}
+                  onPress={() => {
+                    setIsSurveyOpen(false);
+                    router.push({ pathname: '/(tabs)/onboarding/survey', params: { mode: 'edit' } } as any);
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel="מלא את השאלון"
+                >
+                  <ClipboardList size={18} color="#FFFFFF" />
+                  <Text style={styles.surveyEmptyCtaText}>מלא/י את השאלון</Text>
+                </TouchableOpacity>
+              ) : null}
             </View>
           )}
         </ScrollView>
@@ -3160,6 +3175,27 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
     textAlign: 'right',
+  },
+  surveyEmptyCtaBtn: {
+    marginTop: 8,
+    height: 46,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#5e3f2d',
+    flexDirection: 'row-reverse',
+    gap: 8,
+    paddingHorizontal: 14,
+    alignSelf: 'flex-end',
+  },
+  surveyEmptyCtaText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '900',
+    includeFontPadding: false,
+    lineHeight: 18,
+    textAlign: 'center',
+    writingDirection: 'rtl',
   },
   surveyCTA: {
     flexDirection: 'row-reverse',

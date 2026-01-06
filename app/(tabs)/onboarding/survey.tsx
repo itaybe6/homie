@@ -255,6 +255,7 @@ const PART_3_KEYS = [
 ] as const;
 
 export default function SurveyScreen() {
+  const __debugRunId = 'resume-debug-1';
   const params = useLocalSearchParams<{ mode?: string }>();
   const isEditModeRequested = String(params?.mode || '') === 'edit';
   const router = useRouter();
@@ -339,6 +340,30 @@ export default function SurveyScreen() {
             localDraftKey = null;
           }
           const preferredDraftKey = (existing as any).draft_step_key ?? localDraftKey ?? null;
+          // #region agent log
+          fetch('http://127.0.0.1:7242/ingest/1e8b170c-0b87-47bb-bc4f-bb72ea5d43b8', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              sessionId: 'debug-session',
+              runId: __debugRunId,
+              hypothesisId: 'H1',
+              location: 'app/(tabs)/onboarding/survey.tsx:loadSurvey',
+              message: 'loaded survey row',
+              data: {
+                userId: user.id,
+                rowId: (existing as any)?.id ?? null,
+                updatedAt: (existing as any)?.updated_at ?? null,
+                isCompleted: (existing as any)?.is_completed ?? null,
+                serverDraftKey: (existing as any)?.draft_step_key ?? null,
+                localDraftKey,
+                preferredDraftKey,
+                modeParam: String(params?.mode || ''),
+              },
+              timestamp: Date.now(),
+            }),
+          }).catch(() => {});
+          // #endregion
           // If we have a draft pointer (especially for edit sessions), always keep it so we can resume.
           // Only clear local storage when the survey is completed AND there's no draft pointer.
           setResumeStepKey(preferredDraftKey);
@@ -1287,6 +1312,26 @@ function PartCarouselPagination({
   // Track the user's current question so "exit & save" can resume next time.
   useEffect(() => {
     latestStepKeyRef.current = activeQuestionKey ?? null;
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/1e8b170c-0b87-47bb-bc4f-bb72ea5d43b8', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sessionId: 'debug-session',
+        runId: __debugRunId,
+        hypothesisId: 'H3',
+        location: 'app/(tabs)/onboarding/survey.tsx:latestStepKeyRef',
+        message: 'activeQuestionKey changed',
+        data: {
+          activeQuestionKey: activeQuestionKey ?? null,
+          isEditModeRequested,
+          isEditMode,
+          editSelectedPart,
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
   }, [activeQuestionKey]);
 
   // Resume draft at the last seen question (once per screen mount).
@@ -1311,6 +1356,28 @@ function PartCarouselPagination({
     }
 
     const directIdx = items.findIndex((it) => it.type === 'question' && it.question.key === key);
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/1e8b170c-0b87-47bb-bc4f-bb72ea5d43b8', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sessionId: 'debug-session',
+        runId: __debugRunId,
+        hypothesisId: 'H4',
+        location: 'app/(tabs)/onboarding/survey.tsx:resumeEffect',
+        message: 'resume attempt',
+        data: {
+          resumeStepKey: key,
+          directIdx,
+          totalItems: items.length,
+          isEditModeRequested,
+          isEditMode,
+          editSelectedPart,
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
     if (directIdx >= 0) {
       setCurrentStep(directIdx);
       return;
@@ -1439,6 +1506,29 @@ function PartCarouselPagination({
 
   const saveDraft = async (): Promise<void> => {
     if (!user?.id) return;
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/1e8b170c-0b87-47bb-bc4f-bb72ea5d43b8', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sessionId: 'debug-session',
+        runId: __debugRunId,
+        hypothesisId: 'H2',
+        location: 'app/(tabs)/onboarding/survey.tsx:saveDraft',
+        message: 'saveDraft called',
+        data: {
+          userId: user.id,
+          latestStepKeyRef: latestStepKeyRef.current,
+          resumeStepKey,
+          currentStep,
+          isEditModeRequested,
+          isEditMode,
+          editSelectedPart,
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
     const payload = normalizePayload(user.id, latestStateRef.current, {
       isCompleted: false,
       draftStepKey: latestStepKeyRef.current,
@@ -1456,6 +1546,29 @@ function PartCarouselPagination({
 
   const saveEdit = async (): Promise<void> => {
     if (!user?.id) return;
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/1e8b170c-0b87-47bb-bc4f-bb72ea5d43b8', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sessionId: 'debug-session',
+        runId: __debugRunId,
+        hypothesisId: 'H2',
+        location: 'app/(tabs)/onboarding/survey.tsx:saveEdit',
+        message: 'saveEdit called',
+        data: {
+          userId: user.id,
+          latestStepKeyRef: latestStepKeyRef.current,
+          resumeStepKey,
+          currentStep,
+          isEditModeRequested,
+          isEditMode,
+          editSelectedPart,
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
     // In edit mode we keep is_completed=true but DO NOT coerce missing booleans to false.
     const payload = normalizePayload(user.id, latestStateRef.current, {
       isCompleted: true,

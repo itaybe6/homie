@@ -117,7 +117,9 @@ export default function ProfileSettingsScreen() {
         Animated.timing(sheetTranslateY, { toValue: 600, duration: 220, easing: Easing.in(Easing.cubic), useNativeDriver: true }),
         Animated.timing(backdropOpacity, { toValue: 0, duration: 180, easing: Easing.in(Easing.quad), useNativeDriver: true }),
       ]).start(({ finished }) => {
-        if (finished && onDone) onDone();
+        // On web (and when animations get interrupted), `finished` can be false.
+        // We still must close the Modal, otherwise an invisible backdrop can block all clicks.
+        if (onDone) onDone();
       });
     } catch {
       if (onDone) onDone();
@@ -137,7 +139,7 @@ export default function ProfileSettingsScreen() {
         Animated.timing(termsTranslateY, { toValue: 600, duration: 220, easing: Easing.in(Easing.cubic), useNativeDriver: true }),
         Animated.timing(termsBackdropOpacity, { toValue: 0, duration: 180, easing: Easing.in(Easing.quad), useNativeDriver: true }),
       ]).start(({ finished }) => {
-        if (finished && onDone) onDone();
+        if (onDone) onDone();
       });
     } catch {
       if (onDone) onDone();
@@ -159,7 +161,7 @@ export default function ProfileSettingsScreen() {
         Animated.timing(surveyTranslateY, { toValue: 600, duration: 220, easing: Easing.in(Easing.cubic), useNativeDriver: true }),
         Animated.timing(surveyBackdropOpacity, { toValue: 0, duration: 180, easing: Easing.in(Easing.quad), useNativeDriver: true }),
       ]).start(({ finished }) => {
-        if (finished && onDone) onDone();
+        if (onDone) onDone();
       });
     } catch {
       if (onDone) onDone();
@@ -1678,7 +1680,7 @@ export default function ProfileSettingsScreen() {
                 <View style={styles.editActionsRow}>
                   <TouchableOpacity
                     style={[styles.clearBtn]}
-                    onPress={() => setShowEditModal(false)}
+                    onPress={() => closeEditAnimations(() => setShowEditModal(false))}
                     disabled={editSaving}
                     activeOpacity={0.9}
                   >
@@ -1713,7 +1715,7 @@ export default function ProfileSettingsScreen() {
                           const { data } = await supabase.from('users').select('*').eq('id', user.id).maybeSingle();
                           setProfile((data as any) || null);
                         } catch {}
-                        setShowEditModal(false);
+                        closeEditAnimations(() => setShowEditModal(false));
                       } catch (e: any) {
                         Alert.alert('שגיאה', e?.message || 'לא ניתן לשמור');
                       } finally {
