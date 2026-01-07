@@ -116,9 +116,15 @@ export function buildCompatSurvey(
   if (Number.isFinite((survey as any)?.price_max as number)) compat.price_max = Number((survey as any).price_max);
   if (Number.isFinite(survey?.price_range as number)) compat.price_range = Number(survey?.price_range);
   if (survey?.floor_preference) compat.floor_preference = survey.floor_preference;
-  if (typeof survey?.has_balcony === 'boolean') compat.has_balcony = survey.has_balcony;
+  // tri-state: true/false/null (null = "לא משנה לי"). If missing -> keep undefined.
+  if (survey && 'has_balcony' in survey) compat.has_balcony = (survey as any).has_balcony;
   if (typeof survey?.pets_allowed === 'boolean') compat.pets_allowed = survey.pets_allowed;
   if (typeof survey?.preferred_roommates === 'number') compat.preferred_roommates = survey.preferred_roommates;
+  if (Number.isFinite((survey as any)?.preferred_roommates_min as number))
+    compat.preferred_roommates_min = Number((survey as any).preferred_roommates_min);
+  if (Number.isFinite((survey as any)?.preferred_roommates_max as number))
+    compat.preferred_roommates_max = Number((survey as any).preferred_roommates_max);
+  if (typeof survey?.student_year === 'number') compat.student_year = survey.student_year;
   if ((survey as any)?.move_in_month_from) compat.move_in_month_from = (survey as any).move_in_month_from;
   if ((survey as any)?.move_in_month_to) compat.move_in_month_to = (survey as any).move_in_month_to;
   if (typeof (survey as any)?.move_in_is_flexible === 'boolean')

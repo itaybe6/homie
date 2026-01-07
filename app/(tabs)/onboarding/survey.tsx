@@ -597,6 +597,7 @@ export default function SurveyScreen() {
     key: string;
     title: string;
     subtitle?: string;
+    explanation?: string;
     isVisible?: () => boolean;
     render: () => React.ReactNode;
   };
@@ -701,6 +702,7 @@ function PartCarouselPagination({
         key: 'occupation',
         title: 'מה אני עושה ביומיום?',
         subtitle: 'זה עוזר לנו להבין את הלו״ז והוייב שלך.',
+        explanation: 'בחר/י האם את/ה סטודנט/ית או עובד/ת',
         render: () => (
           <ChipSelect
             options={['סטודנט', 'עובד']}
@@ -718,6 +720,7 @@ function PartCarouselPagination({
       {
         key: 'student_year',
         title: 'באיזו שנה בתואר?',
+        explanation: 'בחר/י את שנת הלימודים הנוכחית שלך',
         isVisible: () => state.occupation === 'סטודנט',
         render: () => (
           <ChipSelect
@@ -739,11 +742,12 @@ function PartCarouselPagination({
         ),
       },
       // Title is already displayed in the card header; avoid repeating it inside the toggle row.
-      { key: 'shabbat', title: 'שומר/ת שבת?', render: () => <ToggleRow value={state.is_shomer_shabbat} onToggle={(v) => setField('is_shomer_shabbat', v)} centerOptions showYesIcon={false} /> },
-      { key: 'diet', title: 'מה התזונה שלי?', render: () => <ChipSelect options={dietOptions} value={state.diet_type || null} onChange={(v) => setField('diet_type', v || null)} /> },
+      { key: 'shabbat', title: 'שומר/ת שבת?', explanation: 'האם את/ה שומר/ת שבת לפי ההלכה', render: () => <ToggleRow value={state.is_shomer_shabbat} onToggle={(v) => setField('is_shomer_shabbat', v)} centerOptions showYesIcon={false} /> },
+      { key: 'diet', title: 'מה התזונה שלי?', explanation: 'בחר/י את סוג התזונה שלך - ללא הגבלה, צמחוני או טבעוני', render: () => <ChipSelect options={dietOptions} value={state.diet_type || null} onChange={(v) => setField('diet_type', v || null)} /> },
       {
         key: 'kosher',
         title: 'אוכל כשר?',
+        explanation: 'האם את/ה שומר/ת על כשרות במטבח',
         render: () => (
           <ChipSelect
             options={['כשר', 'לא כשר']}
@@ -759,15 +763,16 @@ function PartCarouselPagination({
         ),
       },
       // Title is already displayed in the card header; avoid repeating it inside the toggle row.
-      { key: 'smoker', title: 'מעשן/ת?', render: () => <ToggleRow value={state.is_smoker} onToggle={(v) => setField('is_smoker', v)} centerOptions showYesIcon={false} /> },
-      { key: 'relationship', title: 'מצב זוגי', render: () => <ChipSelect options={relationOptions} value={state.relationship_status || null} onChange={(v) => setField('relationship_status', v || null)} /> },
+      { key: 'smoker', title: 'מעשן/ת?', explanation: 'האם את/ה מעשן/ת סיגריות או מוצרי טבק', render: () => <ToggleRow value={state.is_smoker} onToggle={(v) => setField('is_smoker', v)} centerOptions showYesIcon={false} /> },
+      { key: 'relationship', title: 'מצב זוגי', explanation: 'האם את/ה רווק/ה או בזוגיות', render: () => <ChipSelect options={relationOptions} value={state.relationship_status || null} onChange={(v) => setField('relationship_status', v || null)} /> },
       // Title is already displayed in the card header; avoid repeating it inside the toggle row.
-      { key: 'pet', title: 'מגיע/ה עם בעל חיים?', render: () => <ToggleRow value={state.has_pet} onToggle={(v) => setField('has_pet', v)} centerOptions showYesIcon={false} /> },
-      { key: 'home_lifestyle', title: 'מה אני רוצה שיהיה בבית?', render: () => <ChipSelect options={homeLifestyleOptions} value={state.home_lifestyle || null} onChange={(v) => setField('home_lifestyle', v || null)} /> },
+      { key: 'pet', title: 'מגיע/ה עם בעל חיים?', explanation: 'האם יש לך בעל חיים שתביא/י איתך לדירה', render: () => <ToggleRow value={state.has_pet} onToggle={(v) => setField('has_pet', v)} centerOptions showYesIcon={false} /> },
+      { key: 'home_lifestyle', title: 'מה אני רוצה שיהיה בבית?', explanation: 'איך את/ה רוצה שהאווירה בבית תהיה - שקט, חברתי, מאוזן וכו\'', render: () => <ChipSelect options={homeLifestyleOptions} value={state.home_lifestyle || null} onChange={(v) => setField('home_lifestyle', v || null)} /> },
       {
         key: 'cleanliness',
         title: 'כמה חשוב לי ניקיון?',
         subtitle: 'בחר/י ערך בין 1 ל-5',
+        explanation: '1 = לא חשוב לי, 5 = מאוד חשוב לי',
         render: () => (
           <View style={{ gap: 10 }}>
             <BalloonSlider5
@@ -777,14 +782,15 @@ function PartCarouselPagination({
           </View>
         ),
       },
-      { key: 'cleaning_frequency', title: 'תדירות ניקיון', render: () => <ChipSelect options={cleaningFrequencyOptions} value={state.cleaning_frequency || null} onChange={(v) => setField('cleaning_frequency', v || null)} /> },
-      { key: 'hosting', title: 'אוהבים לארח?', render: () => <ChipSelect options={hostingOptions} value={state.hosting_preference || null} onChange={(v) => setField('hosting_preference', v || null)} /> },
-      { key: 'cooking', title: 'קניות', render: () => <ChipSelect options={cookingOptions} value={state.cooking_style || null} onChange={(v) => setField('cooking_style', v || null)} /> },
+      { key: 'cleaning_frequency', title: 'תדירות ניקיון', explanation: 'כמה פעמים את/ה רוצה לנקות את הבית', render: () => <ChipSelect options={cleaningFrequencyOptions} value={state.cleaning_frequency || null} onChange={(v) => setField('cleaning_frequency', v || null)} /> },
+      { key: 'hosting', title: 'אוהבים לארח?', explanation: 'כמה פעמים את/ה רוצה לארח חברים בבית', render: () => <ChipSelect options={hostingOptions} value={state.hosting_preference || null} onChange={(v) => setField('hosting_preference', v || null)} /> },
+      { key: 'cooking', title: 'קניות', explanation: 'איך את/ה רוצה לנהל קניות מזון - משותף או כל אחד לעצמו', render: () => <ChipSelect options={cookingOptions} value={state.cooking_style || null} onChange={(v) => setField('cooking_style', v || null)} /> },
 
       // Apartment you want
       {
         key: 'price',
         title: 'תקציב שכירות (₪)',
+        explanation: 'הכנס/י את טווח התקציב החודשי שלך לשכר דירה',
         render: () => (
           <View style={{ gap: 8 }}>
             <View style={{ flexDirection: 'row-reverse', gap: 12 }}>
@@ -860,6 +866,7 @@ function PartCarouselPagination({
       {
         key: 'preferred_city',
         title: 'עיר',
+        explanation: 'הכנס/י את שם העיר שבה את/ה מחפש/ת דירה',
         render: () => (
           <View style={{ gap: 10 }}>
             <TextInput
@@ -900,6 +907,7 @@ function PartCarouselPagination({
       {
         key: 'preferred_neighborhoods',
         title: 'שכונות מועדפות',
+        explanation: 'בחר/י את השכונות המועדפות עלייך בעיר שבחרת',
         isVisible: () => !!state.preferred_city,
         render: () => (
           <View style={{ gap: 10 }}>
@@ -951,10 +959,11 @@ function PartCarouselPagination({
           </View>
         ),
       },
-      { key: 'floor', title: 'קומה מועדפת', render: () => <ChipSelect options={floorOptions} value={state.floor_preference || null} onChange={(v) => setField('floor_preference', v || null)} /> },
+      { key: 'floor', title: 'קומה מועדפת', explanation: 'איזו קומה את/ה מעדיף/ה - קרקע, נמוכה, ביניים, גבוהה', render: () => <ChipSelect options={floorOptions} value={state.floor_preference || null} onChange={(v) => setField('floor_preference', v || null)} /> },
       {
         key: 'balcony',
         title: 'עם מרפסת/גינה?',
+        explanation: 'האם חשוב לך שתהיה מרפסת או גינה בדירה',
         render: () => (
           <TriChoiceRow
             value={state.has_balcony ?? null}
@@ -968,6 +977,7 @@ function PartCarouselPagination({
       {
         key: 'is_sublet',
         title: 'האם מדובר בסאבלט?',
+        explanation: 'האם את/ה מחפש/ת דירה לסאבלט (שכירות זמנית) או שכירות קבועה',
         render: () => (
           <ToggleRow
             value={state.is_sublet}
@@ -989,6 +999,7 @@ function PartCarouselPagination({
       {
         key: 'sublet_period',
         title: 'בחרו את טווח הסאבלט',
+        explanation: 'בחר/י את תאריך הכניסה והסיום של הסאבלט',
         isVisible: () => !!state.is_sublet,
         render: () => (
           <View style={{ gap: 12 }}>
@@ -1014,6 +1025,7 @@ function PartCarouselPagination({
       {
         key: 'move_in_month',
         title: 'תאריך כניסה',
+        explanation: 'מתי את/ה רוצה להיכנס לדירה - חודש ספציפי או טווח חודשים',
         isVisible: () => !state.is_sublet,
         render: () => (
           <View style={{ gap: 12 }}>
@@ -1057,6 +1069,7 @@ function PartCarouselPagination({
         key: 'roommates_range',
         title: 'טווח שותפים',
         subtitle: 'בחר/י מינימום ומקסימום (1–5)',
+        explanation: 'כמה שותפים את/ה רוצה לגור איתם - בחר/י טווח מינימום ומקסימום',
         render: () => (
           <View style={{ gap: 10 }}>
             <Text style={styles.helperText}>{`מינימום: ${Math.max(1, Math.min(5, (state as any).preferred_roommates_min ?? 1))}`}</Text>
@@ -1092,6 +1105,7 @@ function PartCarouselPagination({
       {
         key: 'pets_allowed',
         title: 'אפשר להביא חיות לדירה?',
+        explanation: 'האם את/ה מוכן/ה שגם שותפים אחרים יביאו בעלי חיים לדירה',
         render: () => (
           <ToggleRow
             value={state.pets_allowed}
@@ -1106,6 +1120,7 @@ function PartCarouselPagination({
       {
         key: 'age_range',
         title: 'טווח גילאים לשותפ/ה',
+        explanation: 'בחר/י את טווח הגילאים המועדף עלייך לשותפים',
         render: () => (
           <View style={{ gap: 10 }}>
             <View>
@@ -1143,12 +1158,12 @@ function PartCarouselPagination({
           </View>
         ),
       },
-      { key: 'pref_gender', title: 'מגדר מועדף של השותפ/ה?', render: () => <ChipSelect options={genderPrefOptions} value={state.preferred_gender || null} onChange={(v) => setField('preferred_gender', v || null)} /> },
-      { key: 'pref_occ', title: 'עיסוק מועדף של השותפ/ה?', render: () => <ChipSelect options={occupationPrefOptions} value={state.preferred_occupation || null} onChange={(v) => setField('preferred_occupation', v || null)} /> },
-      { key: 'partner_shabbat', title: 'שותפים שומרי שבת?', render: () => <ChipSelect options={partnerShabbatPrefOptions} value={state.partner_shabbat_preference || null} onChange={(v) => setField('partner_shabbat_preference', v || null)} /> },
-      { key: 'partner_diet', title: 'שותפים עם תזונה מתאימה?', render: () => <ChipSelect options={partnerDietPrefOptions} value={state.partner_diet_preference || null} onChange={(v) => setField('partner_diet_preference', v || null)} /> },
-      { key: 'partner_smoking', title: 'שותפים שמעשנים?', render: () => <ChipSelect options={partnerSmokingPrefOptions} value={state.partner_smoking_preference || null} onChange={(v) => setField('partner_smoking_preference', v || null)} /> },
-      { key: 'partner_pets', title: 'שותפים שמגיעים עם בעלי חיים?', render: () => <ChipSelect options={['אין בעיה', 'מעדיפ/ה שלא']} value={state.partner_pets_preference || null} onChange={(v) => setField('partner_pets_preference', v || null)} /> },
+      { key: 'pref_gender', title: 'מגדר מועדף של השותפ/ה?', explanation: 'האם יש לך העדפה למגדר מסוים של השותפים', render: () => <ChipSelect options={genderPrefOptions} value={state.preferred_gender || null} onChange={(v) => setField('preferred_gender', v || null)} /> },
+      { key: 'pref_occ', title: 'עיסוק מועדף של השותפ/ה?', explanation: 'האם את/ה מעדיף/ה שותפים שהם סטודנטים או עובדים', render: () => <ChipSelect options={occupationPrefOptions} value={state.preferred_occupation || null} onChange={(v) => setField('preferred_occupation', v || null)} /> },
+      { key: 'partner_shabbat', title: 'שותפים שומרי שבת?', explanation: 'האם חשוב לך שהשותפים יהיו שומרי שבת או לא', render: () => <ChipSelect options={partnerShabbatPrefOptions} value={state.partner_shabbat_preference || null} onChange={(v) => setField('partner_shabbat_preference', v || null)} /> },
+      { key: 'partner_diet', title: 'שותפים עם תזונה מתאימה?', explanation: 'האם יש לך העדפה לגבי התזונה של השותפים - כשר, לא טבעוני וכו\'', render: () => <ChipSelect options={partnerDietPrefOptions} value={state.partner_diet_preference || null} onChange={(v) => setField('partner_diet_preference', v || null)} /> },
+      { key: 'partner_smoking', title: 'שותפים שמעשנים?', explanation: 'האם את/ה מוכן/ה לגור עם שותפים שמעשנים', render: () => <ChipSelect options={partnerSmokingPrefOptions} value={state.partner_smoking_preference || null} onChange={(v) => setField('partner_smoking_preference', v || null)} /> },
+      { key: 'partner_pets', title: 'שותפים שמגיעים עם בעלי חיים?', explanation: 'האם את/ה מוכן/ה שגם שותפים אחרים יגיעו עם בעלי חיים', render: () => <ChipSelect options={['אין בעיה', 'מעדיפ/ה שלא']} value={state.partner_pets_preference || null} onChange={(v) => setField('partner_pets_preference', v || null)} /> },
     ];
 
     return q.filter((item) => (item.isVisible ? item.isVisible() : true));
@@ -1805,6 +1820,9 @@ function PartCarouselPagination({
                     </View>
                     {!!activeItem.question.subtitle && (
                       <Text style={styles.popupSubtitle}>{activeItem.question.subtitle}</Text>
+                    )}
+                    {!!activeItem.question.explanation && (
+                      <Text style={styles.popupExplanation}>{activeItem.question.explanation}</Text>
                     )}
                   </Animated.View>
 
@@ -3273,6 +3291,14 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     textAlign: 'center',
     lineHeight: 18,
+  },
+  popupExplanation: {
+    marginTop: 4,
+    color: '#9CA3AF',
+    fontSize: 11,
+    fontWeight: '500',
+    textAlign: 'center',
+    lineHeight: 16,
   },
   popupBody: {
     marginTop: 8,

@@ -179,17 +179,17 @@ export default function TabLayout() {
         tabBarLabelStyle: { fontSize: 12, fontWeight: '600' },
       }}>
       <Tabs.Screen
-        name="home"
-        options={{
-          tabBarLabel: 'דירות',
-          tabBarIcon: ({ color }) => <Home size={24} color={color} />,
-        }}
-      />
-      <Tabs.Screen
         name="partners"
         options={{
           tabBarLabel: 'שותפים',
           tabBarIcon: ({ color }) => <Users size={24} color={color} />,
+        }}
+      />
+      <Tabs.Screen
+        name="home"
+        options={{
+          tabBarLabel: 'דירות',
+          tabBarIcon: ({ color }) => <Home size={24} color={color} />,
         }}
       />
       <Tabs.Screen

@@ -152,35 +152,108 @@ export function buildMapboxHtml(params: {
             zoom: zoom,
           });
 
-          // Set Hebrew language for Mapbox Standard style (official API for v3+)
-          map.on('style.load', function() {
+          function __getUserLang() {
             try {
-              // For Mapbox Standard style - use config property
+              var raw = (typeof navigator !== 'undefined' && navigator && navigator.language) ? String(navigator.language) : '';
+              var short = raw.toLowerCase().split('-')[0];
+              return short || 'he';
+            } catch (_) {
+              return 'he';
+            }
+          }
+
+          function __applyLabelLanguage(targetLang) {
+            // Primary target for this task: Hebrew
+            var userLang = __getUserLang();
+            var fallbackLang = (userLang && userLang !== targetLang) ? userLang : null;
+
+            // Build a "coalesce" expression with strong Hebrew preference + safe fallbacks.
+            var coalesce = ['coalesce',
+              ['get', 'name_' + targetLang],
+              ['get', 'name:' + targetLang],
+              // Many Mapbox tilesets store local script in nonlatin fields.
+              ['get', 'name_nonlatin'],
+              ['get', 'name:nonlatin']
+            ];
+            if (fallbackLang) {
+              coalesce.push(['get', 'name_' + fallbackLang]);
+              coalesce.push(['get', 'name:' + fallbackLang]);
+            }
+            coalesce.push(['get', 'name']);
+            coalesce.push(['get', 'name_en']);
+            coalesce.push(['get', 'name:en']);
+            coalesce.push(['get', 'name_local']);
+            coalesce.push(['get', 'name:latin']);
+            coalesce.push(['get', 'name_int']);
+
+            try {
+              // For Mapbox Standard style (v3+), this is the preferred API if present.
               if (map.setConfigProperty) {
-                map.setConfigProperty('basemap', 'language', 'he');
+                map.setConfigProperty('basemap', 'language', targetLang);
               }
             } catch (_) {}
-            
-            // Fallback: manually update all symbol layers to use Hebrew names
+
             try {
-              var style = map.getStyle();
-              if (style && style.layers) {
-                for (var i = 0; i < style.layers.length; i++) {
-                  var layer = style.layers[i];
-                  if (layer.type === 'symbol') {
-                    try {
-                      map.setLayoutProperty(layer.id, 'text-field', [
-                        'coalesce',
-                        ['get', 'name_he'],
-                        ['get', 'name:he'],
-                        ['get', 'name']
-                      ]);
-                    } catch (_) {}
-                  }
+              var style = map.getStyle && map.getStyle();
+              var layers = style && style.layers;
+              if (!layers || !layers.length) return;
+
+              var changed = 0;
+              for (var i = 0; i < layers.length; i++) {
+                var layer = layers[i];
+                // Only target label layers: symbol layers that actually define a text-field.
+                if (!layer || layer.type !== 'symbol') continue;
+                var layout = layer.layout || {};
+                if (layout['text-field'] == null) continue;
+                try {
+                  map.setLayoutProperty(layer.id, 'text-field', coalesce);
+                  changed++;
+                } catch (_) {}
+              }
+
+              // Don't "lock" after first run — some styles (and iOS WebView) may surface
+              // more layers progressively; we'll keep trying on idle/style events (throttled).
+            } catch (_) {}
+          }
+
+          var __langApplyScheduled = false;
+          var __langLastAppliedAt = 0;
+
+          function __applyHebrewLabelsNow() {
+            __langApplyScheduled = false;
+            __langLastAppliedAt = Date.now();
+            __applyLabelLanguage('he');
+
+            // Debug: how many label layers did we actually touch?
+            try {
+              var style = map.getStyle && map.getStyle();
+              var layers = style && style.layers;
+              var count = 0;
+              if (layers && layers.length) {
+                for (var i = 0; i < layers.length; i++) {
+                  var l = layers[i];
+                  if (l && l.type === 'symbol' && l.layout && l.layout['text-field'] != null) count++;
                 }
               }
+              var payload = JSON.stringify({ type: 'MAP_DEBUG_LABEL_LAYER_COUNT', count: count });
+              if (window.ReactNativeWebView) window.ReactNativeWebView.postMessage(payload);
+              if (window.parent && window.parent.postMessage) window.parent.postMessage(payload, '*');
             } catch (_) {}
-          });
+          }
+
+          function __scheduleHebrewLabels() {
+            if (__langApplyScheduled) return;
+            // throttle: max once per ~250ms
+            try {
+              if (__langLastAppliedAt && (Date.now() - __langLastAppliedAt) < 250) return;
+            } catch (_) {}
+            __langApplyScheduled = true;
+            try {
+              requestAnimationFrame(__applyHebrewLabelsNow);
+            } catch (_) {
+              setTimeout(__applyHebrewLabelsNow, 0);
+            }
+          }
 
           var __labelsApplied = false;
           var __applyScheduled = false;
@@ -219,8 +292,16 @@ export function buildMapboxHtml(params: {
           map.on('styledata', function () { __labelsApplied = false; scheduleApply(); });
           map.on('idle', function () { scheduleApply(); });
 
+          // Re-apply language because Mapbox Standard may add/update layers after initial load.
+          map.on('style.load', function () { __scheduleHebrewLabels(); });
+          map.on('styledata', function () { __scheduleHebrewLabels(); });
+          map.on('idle', function () { __scheduleHebrewLabels(); });
+
           map.on('load', function () {
             try {
+              // Language: wait for initial load, then rewrite label layers.
+              __scheduleHebrewLabels();
+
               scheduleApply();
               if (userLocation && Array.isArray(userLocation) && userLocation.length === 2) {
                 map.addSource('user-location', {

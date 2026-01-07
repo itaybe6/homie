@@ -39,6 +39,7 @@ export type CompatUserSurvey = {
   age?: number | null;
   gender?: 'male' | 'female' | null;
   occupation?: 'student' | 'worker' | string | null;
+  student_year?: number | null; // if occupation === 'student', 1–8
   relationship_status?: string | null;
   city?: string | null;
   // Budget range (₪) - new fields
@@ -60,6 +61,8 @@ export type CompatUserSurvey = {
   sublet_month_from?: string | null;
   sublet_month_to?: string | null;
   preferred_roommates?: number | null;
+  preferred_roommates_min?: number | null;
+  preferred_roommates_max?: number | null;
   pets_allowed?: boolean | null;
   // Acceptance/preferences for partner
   partner_smoking_preference?: PartnerSmokingPref;
@@ -78,29 +81,28 @@ export type CompatUserSurvey = {
 };
 
 export const weights = {
-  smoking: 5,
-  pets: 5,
+  // Weights per your table (1–5)
+  occupation: 5,
+  studentYear: 2,
   shabbat: 5,
   kosher: 5,
-  partnerOver: 3,
-  noise: 4,
-  lifestyle: 3,
-  cleanliness: 3,
-  cooking: 2,
-  social: 2,
-  ageRange: 3,
-  genderPref: 4,
-  occupationPref: 2,
-  wfh: 1,
-  location: 4,
-  budget: 4,
-  moveIn: 3,
-  roommates: 2,
-  bills: 2,
-  amenities: 2,
-  petsPolicy: 3,
-  hobbies: 1,
-  personality: 1,
+  diet: 2,
+  smoking: 3,
+  relationshipStatus: 2,
+  pets: 5,
+  cleanliness: 5,
+  cleaningFrequency: 3,
+  hosting: 4,
+  cooking: 4,
+  homeVibe: 5,
+  budget: 5,
+  neighborhood: 5,
+  balconyGarden: 3,
+  roommateCount: 3,
+  gender: 5,
+  moveIn: 5,
+  floor: 3,
+  age: 5,
 } as const;
 
 function average(values: number[]): number {
@@ -154,6 +156,11 @@ export function calculateRangeMatch(
   return Math.max(0, Math.min(1, sim));
 }
 
+function oneToFiveScaleMatch(a?: number | null, b?: number | null): number {
+  // values are 1–5 => max diff is 4
+  return calculateRangeMatch(a, b, 4);
+}
+
 function mapSmokingTolerance(pref: PartnerSmokingPref): BinaryPreference {
   if (!pref || pref === 'אין בעיה') return 'allow';
   return 'preferNo';
@@ -168,14 +175,40 @@ function mapShabbatTolerance(pref: PartnerShabbatPref, targetIsShomer: boolean |
   // 'מעדיפ/ה שלא' → מעדיף/ה שלא שומר/ת שבת
   return targetIsShomer ? 0.5 : 1;
 }
-function dietCompatibilityScore(pref: PartnerDietPref, target: { diet_type?: DietType | null; keeps_kosher?: boolean | null }): number {
+
+function dietToleranceScore(pref: PartnerDietPref, targetDiet?: DietType | null): number {
   if (!pref || pref === 'אין בעיה') return 1;
-  if (pref === 'כשר בלבד') {
-    return target.keeps_kosher ? 1 : 0;
-  }
+  // 'כשר בלבד' נספר במשקל "כשרות", כדי לא לספור פעמיים
+  if (pref === 'כשר בלבד') return 1;
   // 'מעדיפ/ה שלא טבעוני'
-  if ((target.diet_type || null) === 'טבעוני') return 0.5;
+  if ((targetDiet || null) === 'טבעוני') return 0.5;
   return 1;
+}
+
+function dietTypeMatch(a?: DietType | null, b?: DietType | null): number {
+  if (!a || !b) return 0.5;
+  if (a === b) return 1;
+  // "ללא הגבלה" = לא מגביל
+  if (a === 'ללא הגבלה' || b === 'ללא הגבלה') return 1;
+  // צמחוני/טבעוני דומים חלקית
+  if ((a === 'צמחוני' && b === 'טבעוני') || (a === 'טבעוני' && b === 'צמחוני')) return 0.7;
+  // כל שאר המקרים: אי התאמה חלקית (משקל נמוך יחסית)
+  return 0.3;
+}
+
+function kosherScoreFromPerspective(me: Partial<CompatUserSurvey>, them: Partial<CompatUserSurvey>): number {
+  // דרישה מפורשת: "כשר בלבד"
+  if ((me.partner_diet_preference || null) === 'כשר בלבד') {
+    if (them.keeps_kosher === null || them.keeps_kosher === undefined) return 0.5;
+    return them.keeps_kosher ? 1 : 0;
+  }
+  // אם אני שומר/ת כשרות בפועל, זה קריטי (מטבח משותף)
+  if (me.keeps_kosher === true) {
+    if (them.keeps_kosher === null || them.keeps_kosher === undefined) return 0.5;
+    return them.keeps_kosher ? 1 : 0;
+  }
+  // אחרת – התאמה בסיסית: הסכמה/אי־הסכמה
+  return booleanAgreement(me.keeps_kosher, them.keeps_kosher, { mismatchScore: 0 });
 }
 
 function homeLifestyleToNoiseLevel(style: HomeLifestyle | null | undefined): number | null {
@@ -186,6 +219,23 @@ function homeLifestyleToNoiseLevel(style: HomeLifestyle | null | undefined): num
   if (loudSet.has(style)) return 4;
   if (style === 'מאוזן') return 3;
   return null;
+}
+
+function cleaningFrequencyToLevel(value?: CleaningFrequency | null): number | null {
+  if (!value) return null;
+  if (value === 'פעמיים בשבוע') return 4;
+  if (value === 'פעם בשבוע') return 3;
+  if (value === 'פעם בשבועיים') return 2;
+  if (value === 'כאשר צריך') return 1;
+  return null;
+}
+
+function relationshipStatusMatch(a?: string | null, b?: string | null): number {
+  const na = normalizeText(a);
+  const nb = normalizeText(b);
+  if (!na || !nb) return 0.5;
+  if (na === nb) return 1;
+  return 0.3;
 }
 
 function jaccardSimilarity(a?: string[] | null, b?: string[] | null): number {
@@ -270,8 +320,8 @@ function softBooleanPreferenceMatch(a?: boolean | null, b?: boolean | null): num
 function floorPreferenceMatch(a?: string | null, b?: string | null): number {
   const normA = normalizeText(a);
   const normB = normalizeText(b);
-  if (!normA || neutralPreferenceTerms.has(normA)) return 1;
-  if (!normB || neutralPreferenceTerms.has(normB)) return 1;
+  if (!normA || !normB) return 0.5;
+  if (neutralPreferenceTerms.has(normA) || neutralPreferenceTerms.has(normB)) return 1;
   return normA === normB ? 1 : 0.5;
 }
 
@@ -323,12 +373,32 @@ function calculateBudgetCompatibility(me: Partial<CompatUserSurvey>, them: Parti
   return Math.max(0, 1 - gap / scale);
 }
 
-function calculateRoommateCountMatch(a?: number | null, b?: number | null): number {
-  if (!Number.isFinite(a as number) || !Number.isFinite(b as number)) return 0.5;
-  const diff = Math.abs((a as number) - (b as number));
-  if (diff === 0) return 1;
-  if (diff === 1) return 0.7;
-  return Math.max(0, 1 - diff / 3);
+function coerceRoommateRange(s: Partial<CompatUserSurvey>): { min: number; max: number } | null {
+  const min = s.preferred_roommates_min;
+  const max = s.preferred_roommates_max;
+  if (Number.isFinite(min as number) && Number.isFinite(max as number) && (max as number) >= (min as number)) {
+    return { min: Number(min), max: Number(max) };
+  }
+  if (Number.isFinite(s.preferred_roommates as number)) {
+    const v = Number(s.preferred_roommates);
+    return { min: v, max: v };
+  }
+  return null;
+}
+
+function calculateRoommateRangeCompatibility(me: Partial<CompatUserSurvey>, them: Partial<CompatUserSurvey>): number {
+  const a = coerceRoommateRange(me);
+  const b = coerceRoommateRange(them);
+  if (!a || !b) return 0.5;
+
+  const overlap = Math.max(0, Math.min(a.max, b.max) - Math.max(a.min, b.min));
+  const union = Math.max(a.max, b.max) - Math.min(a.min, b.min);
+  if (union <= 0) return 0.5;
+  if (overlap > 0) return Math.min(1, 0.7 + 0.3 * (overlap / union));
+
+  const gap = Math.max(a.min, b.min) - Math.min(a.max, b.max);
+  const scale = Math.max(a.max, b.max, 1);
+  return Math.max(0, 1 - gap / scale);
 }
 
 function parseYearMonth(value?: string | null): number | null {
@@ -467,7 +537,7 @@ export function calculateMatchScore(
     totalPossible += 1 * weight;
   };
 
-  // Critical: smoking
+  // עישון (משקל 3)
   {
     const s1 = calculateBinaryMatch(
       myAnswers.is_smoker,
@@ -482,7 +552,7 @@ export function calculateMatchScore(
     add(weights.smoking, [s1, s2]);
   }
 
-  // Critical: pets (arriving with pet)
+  // בע"ח (משקל 5)
   {
     const s1 = calculateBinaryMatch(
       myAnswers.has_pet,
@@ -497,79 +567,63 @@ export function calculateMatchScore(
     add(weights.pets, [s1, s2]);
   }
 
-  // Critical: shabbat
+  // שמירת שבת (משקל 5)
   {
-    const s1 = mapShabbatTolerance(myAnswers.partner_shabbat_preference as PartnerShabbatPref, theirAnswers.is_shomer_shabbat);
-    const s2 = mapShabbatTolerance(theirAnswers.partner_shabbat_preference as PartnerShabbatPref, myAnswers.is_shomer_shabbat);
+    const s1 = mapShabbatTolerance(
+      myAnswers.partner_shabbat_preference as PartnerShabbatPref,
+      theirAnswers.is_shomer_shabbat,
+    );
+    const s2 = mapShabbatTolerance(
+      theirAnswers.partner_shabbat_preference as PartnerShabbatPref,
+      myAnswers.is_shomer_shabbat,
+    );
     add(weights.shabbat, [s1, s2]);
   }
 
-  // Critical: kosher (diet)
+  // כשרות (משקל 5)
   {
-    const s1 = dietCompatibilityScore(myAnswers.partner_diet_preference as PartnerDietPref, {
-      diet_type: theirAnswers.diet_type as DietType,
-      keeps_kosher: theirAnswers.keeps_kosher ?? null,
-    });
-    const s2 = dietCompatibilityScore(theirAnswers.partner_diet_preference as PartnerDietPref, {
-      diet_type: myAnswers.diet_type as DietType,
-      keeps_kosher: myAnswers.keeps_kosher ?? null,
-    });
+    const s1 = kosherScoreFromPerspective(myAnswers, theirAnswers);
+    const s2 = kosherScoreFromPerspective(theirAnswers, myAnswers);
     add(weights.kosher, [s1, s2]);
   }
 
-  // Critical: partner over (not modeled, optional)
+  // תזונה (משקל 2)
   {
-    // If either side provided a strong stance, consider it; else skip.
-    const pref1 = myAnswers.partnerOver || null;
-    const pref2 = theirAnswers.partnerOver || null;
-    let s1: number | null = null;
-    let s2: number | null = null;
-    if (pref1) {
-      // No behavior flag available → treat 'אין בעיה' as 1, 'מעדיפ/ה שלא' as 0.5, 'אסור' as 0.5 (neutral without behavior data)
-      s1 = pref1 === 'אין בעיה' ? 1 : 0.5;
-    }
-    if (pref2) {
-      s2 = pref2 === 'אין בעיה' ? 1 : 0.5;
-    }
-    add(weights.partnerOver, [s1 ?? undefined, s2 ?? undefined]);
+    const s1 = dietToleranceScore(myAnswers.partner_diet_preference as PartnerDietPref, theirAnswers.diet_type as DietType);
+    const s2 = dietToleranceScore(theirAnswers.partner_diet_preference as PartnerDietPref, myAnswers.diet_type as DietType);
+    const s3 = dietTypeMatch(myAnswers.diet_type as DietType, theirAnswers.diet_type as DietType);
+    add(weights.diet, [s1, s2, s3]);
   }
 
-  // Critical: home lifestyle compatibility
+  // אווירה בבית (משקל 5)
   {
-    const myLevel = homeLifestyleToNoiseLevel(myAnswers.home_lifestyle ?? null);
-    const theirLevel = homeLifestyleToNoiseLevel(theirAnswers.home_lifestyle ?? null);
-
-    const s = calculateRangeMatch(myLevel ?? undefined, theirLevel ?? undefined, 5);
-    add(weights.noise, [s]);
-    
-    // Direct similarity check
     const directMatch = calculateCategoryMatch(myAnswers.home_lifestyle || null, theirAnswers.home_lifestyle || null, {
       similarGroups: [
         new Set(['שקט וביתי', 'רגוע ולימודי']),
         new Set(['חברתי ופעיל', 'זורם וספונטני']),
       ],
     });
-    add(weights.lifestyle, [directMatch]);
+    const myLevel = homeLifestyleToNoiseLevel(myAnswers.home_lifestyle ?? null);
+    const theirLevel = homeLifestyleToNoiseLevel(theirAnswers.home_lifestyle ?? null);
+    const noiseMatch =
+      myLevel === null || theirLevel === null ? 0.5 : Math.max(0, 1 - Math.abs(myLevel - theirLevel) / 2);
+    add(weights.homeVibe, [directMatch, noiseMatch]);
   }
 
-  // Important: cleanliness (importance 1-5)
+  // ניקיון (משקל 5)
   {
-    const s1 = calculateRangeMatch(myAnswers.cleanliness_importance ?? null, theirAnswers.cleanliness_importance ?? null, 5);
-    add(weights.cleanliness, [s1]);
+    add(weights.cleanliness, [oneToFiveScaleMatch(myAnswers.cleanliness_importance ?? null, theirAnswers.cleanliness_importance ?? null)]);
   }
 
-  // Important: cooking
+  // תדירות ניקיון (משקל 3)
   {
-    const s = calculateCategoryMatch(myAnswers.cooking_style || null, theirAnswers.cooking_style || null, {
-      similarGroups: [
-        new Set(['כל אחד לעצמו', 'לפעמים מתחלקים']),
-        new Set(['לפעמים מתחלקים', 'מבשלים יחד']),
-      ],
-    });
-    add(weights.cooking, [s]);
+    const a = cleaningFrequencyToLevel(myAnswers.cleaning_frequency ?? null);
+    const b = cleaningFrequencyToLevel(theirAnswers.cleaning_frequency ?? null);
+    const s = calculateRangeMatch(a ?? undefined, b ?? undefined, 3);
+    add(weights.cleaningFrequency, [s]);
   }
 
-  // Important: social/hosting
+  // אירוחים (משקל 4)
   {
     const s = calculateCategoryMatch(myAnswers.hosting_preference || null, theirAnswers.hosting_preference || null, {
       similarGroups: [
@@ -577,81 +631,97 @@ export function calculateMatchScore(
         new Set(['לפעמים', 'כמה שיותר']),
       ],
     });
-    add(weights.social, [s]);
+    add(weights.hosting, [s]);
   }
 
-  // Important: age range (mutual)
+  // אוכל ובישולים (משקל 4)
+  {
+    const s = calculateCategoryMatch(myAnswers.cooking_style || null, theirAnswers.cooking_style || null, {
+      neutral: new Set(['לא משנה', 'לא משנה לי']),
+    });
+    add(weights.cooking, [s]);
+  }
+
+  // מצב זוגי (משקל 2)
+  {
+    add(weights.relationshipStatus, [relationshipStatusMatch(myAnswers.relationship_status, theirAnswers.relationship_status)]);
+  }
+
+  // גיל (משקל 5) - התאמה דו־כיוונית לפי טווח מועדף
   {
     const s1 = ageWithinPreferred(theirAnswers.age ?? null, myAnswers.preferred_age_min ?? null, myAnswers.preferred_age_max ?? null);
     const s2 = ageWithinPreferred(myAnswers.age ?? null, theirAnswers.preferred_age_min ?? null, theirAnswers.preferred_age_max ?? null);
-    add(weights.ageRange, [s1, s2]);
+    add(weights.age, [s1, s2]);
   }
 
-  // Preferences: gender
+  // מין (משקל 5) - התאמה דו־כיוונית לפי העדפה
   {
     const s1 = preferenceMatch(myAnswers.preferred_gender, theirAnswers.gender, { neutralValues: neutralPreferenceTerms });
     const s2 = preferenceMatch(theirAnswers.preferred_gender, myAnswers.gender, { neutralValues: neutralPreferenceTerms });
-    add(weights.genderPref, [s1, s2]);
+    add(weights.gender, [s1, s2]);
   }
 
-  // Preferences: occupation & lifestyle overlap
+  // עיסוק (סטודנט/עובד) (משקל 5)
   {
     const pref1 = preferenceMatch(myAnswers.preferred_occupation, theirAnswers.occupation, { neutralValues: neutralPreferenceTerms });
     const pref2 = preferenceMatch(theirAnswers.preferred_occupation, myAnswers.occupation, { neutralValues: neutralPreferenceTerms });
     const occSimilarity = calculateCategoryMatch(myAnswers.occupation || null, theirAnswers.occupation || null);
-    add(weights.occupationPref, [pref1, pref2, occSimilarity]);
+    add(weights.occupation, [pref1, pref2, occSimilarity]);
   }
 
-  // Location expectations
+  // שנת לימודים (משקל 2) - רק אם שני הצדדים סטודנטים ויש נתון
+  {
+    const bothStudent = (myAnswers.occupation || null) === 'student' && (theirAnswers.occupation || null) === 'student';
+    if (bothStudent && Number.isFinite(myAnswers.student_year as number) && Number.isFinite(theirAnswers.student_year as number)) {
+      const diff = Math.abs(Number(myAnswers.student_year) - Number(theirAnswers.student_year));
+      const MAX_DIFF = 7; // 1–8
+      const s = Math.max(0, 1 - diff / MAX_DIFF);
+      add(weights.studentYear, [s]);
+    }
+  }
+
+  // שכונה (משקל 5)
   {
     const locationScore = calculateLocationCompatibility(myAnswers, theirAnswers);
-    add(weights.location, [locationScore]);
+    add(weights.neighborhood, [locationScore]);
   }
 
-  // Budget alignment & policies
+  // תקציב (משקל 5)
   {
     const budgetScore = calculateBudgetCompatibility(myAnswers, theirAnswers);
     add(weights.budget, [budgetScore]);
   }
 
-  // Move-in timing
+  // חודש כניסה (משקל 5)
   {
     const moveInScore = calculateMoveInCompatibility(myAnswers, theirAnswers);
     add(weights.moveIn, [moveInScore]);
   }
 
-  // Preferred roommates count
+  // מס' שותפים (משקל 3)
   {
-    const roommatesScore = calculateRoommateCountMatch(myAnswers.preferred_roommates, theirAnswers.preferred_roommates);
-    add(weights.roommates, [roommatesScore]);
+    const roommatesScore = calculateRoommateRangeCompatibility(myAnswers, theirAnswers);
+    add(weights.roommateCount, [roommatesScore]);
   }
 
-  // Amenities alignment
+  // מרפסת/גינה (משקל 3) - tri-state (null = "לא משנה לי")
   {
-    const amenityScores = [
-      softBooleanPreferenceMatch(myAnswers.has_balcony, theirAnswers.has_balcony),
-      floorPreferenceMatch(myAnswers.floor_preference, theirAnswers.floor_preference),
-    ];
-    add(weights.amenities, amenityScores);
+    const a = myAnswers.has_balcony;
+    const b = theirAnswers.has_balcony;
+    const s =
+      a === null || b === null
+        ? 1
+        : a === undefined || b === undefined
+          ? 0.5
+          : a === b
+            ? 1
+            : 0;
+    add(weights.balconyGarden, [s]);
   }
 
-  // Pets allowed policy (apartment constraints)
+  // קומה (משקל 3)
   {
-    const s1 = petsPolicyCompatibility(myAnswers.pets_allowed, theirAnswers.has_pet);
-    const s2 = petsPolicyCompatibility(theirAnswers.pets_allowed, myAnswers.has_pet);
-    add(weights.petsPolicy, [s1, s2]);
-  }
-
-  // Soft: hobbies
-  {
-    const s = jaccardSimilarity(myAnswers.hobbies || null, theirAnswers.hobbies || null);
-    add(weights.hobbies, [s]);
-  }
-
-  // Soft: personality
-  {
-    const s = jaccardSimilarity(myAnswers.personality || null, theirAnswers.personality || null);
-    add(weights.personality, [s]);
+    add(weights.floor, [floorPreferenceMatch(myAnswers.floor_preference, theirAnswers.floor_preference)]);
   }
 
   if (totalPossible === 0) return 0;
