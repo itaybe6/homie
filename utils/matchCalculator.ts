@@ -41,11 +41,20 @@ export type CompatUserSurvey = {
   occupation?: 'student' | 'worker' | string | null;
   relationship_status?: string | null;
   city?: string | null;
+  // Budget range (₪) - new fields
+  price_min?: number | null;
+  price_max?: number | null;
+  // Legacy single-value budget
   price_range?: number | null;
   preferred_city?: string | null;
   preferred_neighborhoods?: string[] | null;
   floor_preference?: string | null;
   has_balcony?: boolean | null;
+  // Move-in range (YYYY-MM)
+  move_in_month_from?: string | null;
+  move_in_month_to?: string | null;
+  move_in_is_flexible?: boolean | null;
+  // Legacy
   move_in_month?: string | null;
   is_sublet?: boolean | null;
   sublet_month_from?: string | null;
@@ -282,15 +291,36 @@ function calculateLocationCompatibility(
   return average(valid);
 }
 
-function calculateBudgetCompatibility(a?: number | null, b?: number | null): number {
-  if (!Number.isFinite(a as number) || !Number.isFinite(b as number)) return 0.5;
-  const v1 = a as number;
-  const v2 = b as number;
-  if (v1 <= 0 || v2 <= 0) return 0.5;
-  const diff = Math.abs(v1 - v2);
-  const scale = Math.max(v1, v2, 1);
-  const ratio = diff / scale;
-  return Math.max(0, 1 - ratio);
+function coerceBudgetRange(s: Partial<CompatUserSurvey>): { min: number; max: number } | null {
+  const min = s.price_min;
+  const max = s.price_max;
+  if (Number.isFinite(min as number) && Number.isFinite(max as number) && (max as number) >= (min as number)) {
+    return { min: Number(min), max: Number(max) };
+  }
+  if (Number.isFinite(s.price_range as number)) {
+    const v = Number(s.price_range);
+    if (v > 0) return { min: v, max: v + 400 };
+  }
+  return null;
+}
+
+function calculateBudgetCompatibility(me: Partial<CompatUserSurvey>, them: Partial<CompatUserSurvey>): number {
+  const a = coerceBudgetRange(me);
+  const b = coerceBudgetRange(them);
+  if (!a || !b) return 0.5;
+
+  const overlap = Math.max(0, Math.min(a.max, b.max) - Math.max(a.min, b.min));
+  const union = Math.max(a.max, b.max) - Math.min(a.min, b.min);
+  if (union <= 0) return 0.5;
+  if (overlap > 0) {
+    // ranges overlap: reward overlap ratio
+    return Math.min(1, 0.7 + 0.3 * (overlap / union));
+  }
+
+  // no overlap: penalize by gap size relative to scale
+  const gap = Math.max(a.min, b.min) - Math.min(a.max, b.max);
+  const scale = Math.max(a.max, b.max, 1);
+  return Math.max(0, 1 - gap / scale);
 }
 
 function calculateRoommateCountMatch(a?: number | null, b?: number | null): number {
@@ -356,6 +386,17 @@ function calculateMoveInCompatibility(
   me: Partial<CompatUserSurvey>,
   them: Partial<CompatUserSurvey>,
 ): number {
+  const coerceMoveInRange = (s: Partial<CompatUserSurvey>): { from: string; to: string } | null => {
+    const from = (s as any).move_in_month_from ?? null;
+    const to = (s as any).move_in_month_to ?? null;
+    if (typeof from === 'string' && from) {
+      if (typeof to === 'string' && to) return { from, to };
+      return { from, to: from };
+    }
+    if (typeof s.move_in_month === 'string' && s.move_in_month) return { from: s.move_in_month, to: s.move_in_month };
+    return null;
+  };
+
   const meSublet = !!me.is_sublet;
   const themSublet = !!them.is_sublet;
   if (meSublet && themSublet) {
@@ -369,17 +410,37 @@ function calculateMoveInCompatibility(
   if (meSublet || themSublet) {
     const subletUser = meSublet ? me : them;
     const regularUser = meSublet ? them : me;
-    const start = parseYearMonth(subletUser.sublet_month_from || subletUser.move_in_month);
-    const end = parseYearMonth(subletUser.sublet_month_to || subletUser.sublet_month_from);
-    const regular = parseYearMonth(regularUser.move_in_month);
-    if (start !== null && end !== null && regular !== null) {
-      if (regular >= start && regular <= end) return 0.6;
-      const diff = Math.min(Math.abs(regular - start), Math.abs(regular - end));
-      return Math.max(0, 0.6 - diff * 0.1);
+    const subletStart = subletUser.sublet_month_from || null;
+    const subletEnd = subletUser.sublet_month_to || subletUser.sublet_month_from || null;
+    const regularRange = coerceMoveInRange(regularUser);
+    if (regularRange) {
+      const overlap = calculateSubletWindowOverlap(subletStart, subletEnd, regularRange.from, regularRange.to);
+      return 0.4 + 0.6 * overlap;
     }
     return 0.4;
   }
-  return calculateMonthDistance(me.move_in_month, them.move_in_month);
+  const a = coerceMoveInRange(me);
+  const b = coerceMoveInRange(them);
+  if (!a || !b) return 0.5;
+  const aS = parseYearMonth(a.from);
+  const aE = parseYearMonth(a.to);
+  const bS = parseYearMonth(b.from);
+  const bE = parseYearMonth(b.to);
+  if (aS === null || aE === null || bS === null || bE === null) return 0.5;
+  const startA = Math.min(aS, aE);
+  const endA = Math.max(aS, aE);
+  const startB = Math.min(bS, bE);
+  const endB = Math.max(bS, bE);
+  const overlapStart = Math.max(startA, startB);
+  const overlapEnd = Math.min(endA, endB);
+  if (overlapEnd >= overlapStart) {
+    const overlap = overlapEnd - overlapStart + 1;
+    const span = Math.max(endA, endB) - Math.min(startA, startB) + 1;
+    return Math.min(1, 0.7 + 0.3 * (span > 0 ? overlap / span : 0));
+  }
+  const gap = Math.max(startA, startB) - Math.min(endA, endB);
+  const MAX_DIFF = 6;
+  return Math.max(0, 1 - gap / MAX_DIFF);
 }
 
 function petsPolicyCompatibility(
@@ -549,7 +610,7 @@ export function calculateMatchScore(
 
   // Budget alignment & policies
   {
-    const budgetScore = calculateBudgetCompatibility(myAnswers.price_range ?? null, theirAnswers.price_range ?? null);
+    const budgetScore = calculateBudgetCompatibility(myAnswers, theirAnswers);
     add(weights.budget, [budgetScore]);
   }
 

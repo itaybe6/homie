@@ -23,8 +23,23 @@ function buildDetailsItems(survey?: UserSurveyResponse | null): DetailItem[] {
   };
 
   push(MapPin, 'עיר מועדפת', survey.preferred_city || '');
-  if (typeof survey.price_range === 'number') push(Wallet, 'תקציב חודשי', formatCurrencyILS(survey.price_range));
-  push(CalendarDays, 'כניסה מתוכננת', formatMonthLabel(survey.move_in_month));
+  const min = (survey as any).price_min;
+  const max = (survey as any).price_max;
+  if (typeof min === 'number' && typeof max === 'number') {
+    push(Wallet, 'תקציב חודשי', `${formatCurrencyILS(min)} - ${formatCurrencyILS(max)}`);
+  } else if (typeof survey.price_range === 'number') {
+    push(Wallet, 'תקציב חודשי', formatCurrencyILS(survey.price_range));
+  }
+  {
+    const from = (survey as any).move_in_month_from || survey.move_in_month;
+    const to = (survey as any).move_in_month_to || from;
+    const flexible = !!(survey as any).move_in_is_flexible;
+    const label =
+      flexible && from && to && to !== from
+        ? `${formatMonthLabel(from)} - ${formatMonthLabel(to)}`
+        : formatMonthLabel(from);
+    push(CalendarDays, 'כניסה מתוכננת', label);
+  }
   push(Sparkles, 'וייב', ((survey as any).home_lifestyle || '') as string);
 
   if (typeof survey.is_smoker === 'boolean') push(Cigarette, 'מעשן/ת', survey.is_smoker ? 'כן' : 'לא');

@@ -1144,11 +1144,25 @@ export default function ProfileScreen() {
     };
 
     push('עיר מועדפת', surveyResponse.preferred_city || undefined);
-    if (typeof surveyResponse.price_range === 'number') {
-      const formatted = formatCurrency(surveyResponse.price_range);
-      push('תקציב חודשי', formatted);
+    {
+      const min = (surveyResponse as any).price_min;
+      const max = (surveyResponse as any).price_max;
+      if (typeof min === 'number' && typeof max === 'number') {
+        push('תקציב חודשי', `${formatCurrency(min)} - ${formatCurrency(max)}`);
+      } else if (typeof surveyResponse.price_range === 'number') {
+        const formatted = formatCurrency(surveyResponse.price_range);
+        push('תקציב חודשי', formatted);
+      }
     }
-    push('כניסה מתוכננת', formatMonthLabel(surveyResponse.move_in_month));
+    {
+      const from = (surveyResponse as any).move_in_month_from || surveyResponse.move_in_month;
+      const to = (surveyResponse as any).move_in_month_to || from;
+      const flexible = !!(surveyResponse as any).move_in_is_flexible;
+      const label = flexible && from && to && to !== from
+        ? `${formatMonthLabel(from)} - ${formatMonthLabel(to)}`
+        : formatMonthLabel(from);
+      push('כניסה מתוכננת', label);
+    }
     push('וייב יומיומי', (surveyResponse as any).home_lifestyle || undefined);
     if (surveyResponse.is_sublet) {
       highlights.push({ label: 'סאבלט', value: 'כן' });
@@ -1208,8 +1222,14 @@ export default function ProfileScreen() {
         .join(' → ');
       add('apartment', 'טווח סאבלט', period);
     }
-    if (typeof surveyResponse.price_range === 'number') {
-      add('apartment', 'תקציב שכירות', formatCurrency(surveyResponse.price_range));
+    {
+      const min = (surveyResponse as any).price_min;
+      const max = (surveyResponse as any).price_max;
+      if (typeof min === 'number' && typeof max === 'number') {
+        add('apartment', 'תקציב שכירות', `${formatCurrency(min)} - ${formatCurrency(max)}`);
+      } else if (typeof surveyResponse.price_range === 'number') {
+        add('apartment', 'תקציב שכירות', formatCurrency(surveyResponse.price_range));
+      }
     }
     add('apartment', 'עיר מועדפת', surveyResponse.preferred_city);
     const neighborhoodsJoined = normalizeNeighborhoods((surveyResponse.preferred_neighborhoods as unknown) ?? null);
@@ -1218,7 +1238,15 @@ export default function ProfileScreen() {
     }
     add('apartment', 'קומה מועדפת', surveyResponse.floor_preference);
     addBool('apartment', 'מרפסת', surveyResponse.has_balcony);
-    add('apartment', 'חודש כניסה', formatMonthLabel(surveyResponse.move_in_month));
+    {
+      const from = (surveyResponse as any).move_in_month_from || surveyResponse.move_in_month;
+      const to = (surveyResponse as any).move_in_month_to || from;
+      const flexible = !!(surveyResponse as any).move_in_is_flexible;
+      const label = flexible && from && to && to !== from
+        ? `${formatMonthLabel(from)} - ${formatMonthLabel(to)}`
+        : formatMonthLabel(from);
+      add('apartment', 'חודש כניסה', label);
+    }
     if (typeof surveyResponse.preferred_roommates === 'number') {
       add('apartment', 'מספר שותפים מועדף', `${surveyResponse.preferred_roommates}`);
     }

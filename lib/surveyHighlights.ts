@@ -71,11 +71,24 @@ export function computeSurveyHighlights(survey?: UserSurveyResponse | null): Sur
   const neighborhoods = normalizeNeighborhoods((survey as any).preferred_neighborhoods);
   if (neighborhoods) push('שכונות מועדפות', neighborhoods);
 
-  if (typeof survey.price_range === 'number') {
+  const min = (survey as any).price_min;
+  const max = (survey as any).price_max;
+  if (typeof min === 'number' && typeof max === 'number') {
+    push('תקציב חודשי', `${formatCurrencyILS(min)} - ${formatCurrencyILS(max)}`);
+  } else if (typeof survey.price_range === 'number') {
     const formatted = formatCurrencyILS(survey.price_range);
     push('תקציב חודשי', formatted);
   }
-  push('כניסה מתוכננת', formatMonthLabel(survey.move_in_month));
+  {
+    const from = (survey as any).move_in_month_from || survey.move_in_month;
+    const to = (survey as any).move_in_month_to || from;
+    const flexible = !!(survey as any).move_in_is_flexible;
+    const label =
+      flexible && from && to && to !== from
+        ? `${formatMonthLabel(from)} - ${formatMonthLabel(to)}`
+        : formatMonthLabel(from);
+    push('כניסה מתוכננת', label);
+  }
   push('וייב יומיומי', (survey as any).home_lifestyle || undefined);
   if (survey.is_sublet) highlights.push({ label: 'סאבלט', value: 'כן' });
 

@@ -116,7 +116,11 @@ function isQuestionAnswered(questionKey: string, s: SurveyState): boolean {
 
     // Apartment you want
     case 'price':
-      return hasFiniteNumber(s.price_range);
+      return (
+        hasFiniteNumber((s as any).price_min) &&
+        hasFiniteNumber((s as any).price_max) &&
+        Number((s as any).price_max) >= Number((s as any).price_min) + 400
+      );
     case 'preferred_city':
       return hasNonEmptyText(s.preferred_city);
     case 'preferred_neighborhoods':
@@ -130,19 +134,23 @@ function isQuestionAnswered(questionKey: string, s: SurveyState): boolean {
     case 'sublet_period':
       return hasNonEmptyText(s.sublet_month_from) && hasNonEmptyText(s.sublet_month_to);
     case 'move_in_month':
-      return hasNonEmptyText(s.move_in_month);
-    case 'roommates_min':
-      return hasFiniteNumber((s as any).preferred_roommates_min);
-    case 'roommates_max':
-      return hasFiniteNumber((s as any).preferred_roommates_max);
+      // legacy key kept in flow; validate new fields
+      return hasNonEmptyText((s as any).move_in_month_from) &&
+        (!!(s as any).move_in_is_flexible ? hasNonEmptyText((s as any).move_in_month_to) : true);
+    case 'roommates_range': {
+      const min = (s as any).preferred_roommates_min;
+      const max = (s as any).preferred_roommates_max;
+      return hasFiniteNumber(min) && hasFiniteNumber(max) && Number(max) >= Number(min);
+    }
     case 'pets_allowed':
       return typeof s.pets_allowed === 'boolean';
 
     // Partner you want
-    case 'age_min':
-      return hasFiniteNumber((s as any).preferred_age_min);
-    case 'age_max':
-      return hasFiniteNumber((s as any).preferred_age_max);
+    case 'age_range': {
+      const min = (s as any).preferred_age_min;
+      const max = (s as any).preferred_age_max;
+      return hasFiniteNumber(min) && hasFiniteNumber(max) && Number(max) >= Number(min);
+    }
     case 'pref_gender':
       return hasNonEmptyText(s.preferred_gender);
     case 'pref_occ':
@@ -213,23 +221,18 @@ const PART_1_KEYS = [
 ] as const;
 const PART_2_KEYS = [
   'price',
-  'bills',
   'preferred_city',
   'preferred_neighborhoods',
   'floor',
   'balcony',
-  'elevator',
   'is_sublet',
   'sublet_period',
   'move_in_month',
-  'roommates_min',
-  'roommates_max',
+  'roommates_range',
   'pets_allowed',
-  'broker',
 ] as const;
 const PART_3_KEYS = [
-  'age_min',
-  'age_max',
+  'age_range',
   'pref_gender',
   'pref_occ',
   'partner_shabbat',
@@ -265,9 +268,13 @@ export default function SurveyScreen() {
   const [editConfirmOpen, setEditConfirmOpen] = useState(false);
 
   // Month picker (shared KeyFabPanel) — must live outside the clipped card.
-  type MonthPickerTarget = 'sublet_month_from' | 'sublet_month_to' | 'move_in_month';
+  type MonthPickerTarget =
+    | 'sublet_month_from'
+    | 'sublet_month_to'
+    | 'move_in_month_from'
+    | 'move_in_month_to';
   const [monthPickerOpen, setMonthPickerOpen] = useState(false);
-  const [monthPickerTarget, setMonthPickerTarget] = useState<MonthPickerTarget>('move_in_month');
+  const [monthPickerTarget, setMonthPickerTarget] = useState<MonthPickerTarget>('move_in_month_from');
   const [monthPickerTitle, setMonthPickerTitle] = useState<string>('בחר חודש');
   const [monthPickerTempDate, setMonthPickerTempDate] = useState<Date>(() => new Date());
 
@@ -519,8 +526,28 @@ export default function SurveyScreen() {
   const commitMonthPicker = (picked: Date) => {
     const yyyymm = formatDateToYYYYMM(new Date(picked.getFullYear(), picked.getMonth(), 1));
 
-    if (monthPickerTarget === 'move_in_month') {
-      setField('move_in_month', yyyymm);
+    if (monthPickerTarget === 'move_in_month_from') {
+      setState((prev) => {
+        const next: SurveyState = { ...(prev as any), move_in_month_from: yyyymm } as any;
+        const flexible = !!(prev as any).move_in_is_flexible;
+        if (!flexible) (next as any).move_in_month_to = yyyymm;
+        const from = parseYYYYMM(yyyymm);
+        const to = parseYYYYMM((next as any).move_in_month_to);
+        if (from && to && to < from) (next as any).move_in_month_to = yyyymm;
+        return next;
+      });
+      setMonthPickerOpen(false);
+      return;
+    }
+
+    if (monthPickerTarget === 'move_in_month_to') {
+      setState((prev) => {
+        const next: SurveyState = { ...(prev as any), move_in_month_to: yyyymm } as any;
+        const from = parseYYYYMM((next as any).move_in_month_from);
+        const to = parseYYYYMM(yyyymm);
+        if (from && to && to < from) (next as any).move_in_month_from = yyyymm;
+        return next;
+      });
       setMonthPickerOpen(false);
       return;
     }
@@ -559,7 +586,8 @@ export default function SurveyScreen() {
   };
 
   const clearMonthPicker = () => {
-    if (monthPickerTarget === 'move_in_month') setField('move_in_month', undefined);
+    if (monthPickerTarget === 'move_in_month_from') setField('move_in_month_from' as any, undefined);
+    if (monthPickerTarget === 'move_in_month_to') setField('move_in_month_to' as any, undefined);
     if (monthPickerTarget === 'sublet_month_from') setField('sublet_month_from', undefined as any);
     if (monthPickerTarget === 'sublet_month_to') setField('sublet_month_to', undefined as any);
     setMonthPickerOpen(false);
@@ -759,25 +787,79 @@ function PartCarouselPagination({
         title: 'תקציב שכירות (₪)',
         render: () => (
           <View style={{ gap: 8 }}>
-            <View style={styles.currencyInputWrap}>
-              <View style={styles.currencySymbolWrap}>
-                <Text style={styles.currencySymbol}>₪</Text>
+            <View style={{ flexDirection: 'row-reverse', gap: 12 }}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.helperText}>מינימום</Text>
+                <View style={styles.currencyInputWrap}>
+                  <View style={styles.currencySymbolWrap}>
+                    <Text style={styles.currencySymbol}>₪</Text>
+                  </View>
+                  <TextInput
+                    value={((state as any).price_min ?? '').toString()}
+                    onChangeText={(txt) => {
+                      const v = toNumberOrNull(txt);
+                      setState((prev) => {
+                        const next: SurveyState = { ...prev, price_min: v as any };
+                        const minVal = typeof v === 'number' ? v : null;
+                        const curMax = (prev as any).price_max;
+                        if (typeof minVal === 'number') {
+                          const minAllowedMax = minVal + 400;
+                          if (typeof curMax !== 'number' || curMax < minAllowedMax) {
+                            next.price_max = minAllowedMax as any;
+                          }
+                        } else {
+                          next.price_max = (prev as any).price_max;
+                        }
+                        return next;
+                      });
+                    }}
+                    placeholder="לדוגמה: 1000"
+                    placeholderTextColor="#6B7280"
+                    keyboardType="numeric"
+                    style={[styles.input, styles.currencyInput]}
+                  />
+                </View>
               </View>
-              <TextInput
-                value={state.price_range?.toString() || ''}
-                onChangeText={(txt) => setField('price_range', toNumberOrNull(txt))}
-                placeholder="לדוגמה: 3500"
-                placeholderTextColor="#6B7280"
-                keyboardType="numeric"
-                style={[styles.input, styles.currencyInput]}
-              />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.helperText}>מקסימום</Text>
+                <View style={styles.currencyInputWrap}>
+                  <View style={styles.currencySymbolWrap}>
+                    <Text style={styles.currencySymbol}>₪</Text>
+                  </View>
+                  <TextInput
+                    value={((state as any).price_max ?? '').toString()}
+                    onChangeText={(txt) => {
+                      const v = toNumberOrNull(txt);
+                      setField('price_max' as any, v as any);
+                    }}
+                    onEndEditing={() => {
+                      setState((prev) => {
+                        const minVal = (prev as any).price_min;
+                        const maxVal = (prev as any).price_max;
+                        if (typeof minVal === 'number') {
+                          const minAllowedMax = minVal + 400;
+                          if (typeof maxVal === 'number' && maxVal < minAllowedMax) {
+                            return { ...prev, price_max: minAllowedMax as any };
+                          }
+                        }
+                        return prev;
+                      });
+                    }}
+                    placeholder="לדוגמה: 1400"
+                    placeholderTextColor="#6B7280"
+                    keyboardType="numeric"
+                    style={[styles.input, styles.currencyInput]}
+                  />
+                </View>
+              </View>
             </View>
+            <Text style={styles.helperText}>המקסימום חייב להיות לפחות ₪400 מעל המינימום.</Text>
           </View>
         ),
       },
       {
         key: 'preferred_city',
-        title: 'עיר מועדפת',
+        title: 'עיר',
         render: () => (
           <View style={{ gap: 10 }}>
             <TextInput
@@ -934,36 +1016,75 @@ function PartCarouselPagination({
         title: 'תאריך כניסה',
         isVisible: () => !state.is_sublet,
         render: () => (
-          <MonthPickerInput
-            placeholder="בחר/י תאריך"
-            value={state.move_in_month || null}
-            accessibilityLabel="תאריך כניסה"
-            onPress={() => openMonthPicker('move_in_month', 'בחר תאריך כניסה', state.move_in_month || null)}
-          />
-        ),
-      },
-      {
-        key: 'roommates_min',
-        title: 'מינימום שותפים',
-        subtitle: 'בחר/י בין 1 ל-5',
-        render: () => (
-          <View style={{ gap: 10 }}>
-            <BalloonSlider5
-              value={Math.max(1, Math.min(5, (state as any).preferred_roommates_min ?? 1))}
-              onChange={(v) => setField('preferred_roommates_min' as any, v)}
+          <View style={{ gap: 12 }}>
+            <ChipSelect
+              options={['לא גמיש', 'טווח חודשים']}
+              value={((state as any).move_in_is_flexible ? 'טווח חודשים' : 'לא גמיש') as any}
+              onChange={(v) => {
+                const isFlexible = v === 'טווח חודשים';
+                setState((prev) => {
+                  const next: SurveyState = { ...(prev as any), move_in_is_flexible: isFlexible } as any;
+                  const from = (prev as any).move_in_month_from ?? null;
+                  if (!isFlexible && from) (next as any).move_in_month_to = from;
+                  return next;
+                });
+              }}
             />
+            <MonthPickerInput
+              label={(state as any).move_in_is_flexible ? 'מחודש' : 'חודש כניסה'}
+              placeholder="בחר/י תאריך"
+              value={(state as any).move_in_month_from || null}
+              accessibilityLabel="תאריך כניסה"
+              onPress={() =>
+                openMonthPicker('move_in_month_from', 'בחר תאריך כניסה', (state as any).move_in_month_from || null)
+              }
+            />
+            {!!(state as any).move_in_is_flexible && (
+              <MonthPickerInput
+                label="עד חודש"
+                placeholder="בחר/י תאריך"
+                value={(state as any).move_in_month_to || null}
+                accessibilityLabel="טווח תאריך כניסה"
+                onPress={() =>
+                  openMonthPicker('move_in_month_to', 'בחר תאריך סיום', (state as any).move_in_month_to || null)
+                }
+              />
+            )}
           </View>
         ),
       },
       {
-        key: 'roommates_max',
-        title: 'מקסימום שותפים',
-        subtitle: 'בחר/י בין 1 ל-5',
+        key: 'roommates_range',
+        title: 'טווח שותפים',
+        subtitle: 'בחר/י מינימום ומקסימום (1–5)',
         render: () => (
           <View style={{ gap: 10 }}>
+            <Text style={styles.helperText}>{`מינימום: ${Math.max(1, Math.min(5, (state as any).preferred_roommates_min ?? 1))}`}</Text>
             <BalloonSlider5
-              value={Math.max(1, Math.min(5, (state as any).preferred_roommates_max ?? Math.max(1, Math.min(5, (state as any).preferred_roommates_min ?? 1))))}
-              onChange={(v) => setField('preferred_roommates_max' as any, v)}
+              value={Math.max(1, Math.min(5, (state as any).preferred_roommates_min ?? 1))}
+              onChange={(v) => {
+                setState((prev) => {
+                  const next: SurveyState = { ...(prev as any), preferred_roommates_min: v } as any;
+                  const curMax = (prev as any).preferred_roommates_max;
+                  if (typeof curMax !== 'number' || curMax < v) (next as any).preferred_roommates_max = v;
+                  return next;
+                });
+              }}
+            />
+            <Text style={styles.helperText}>{`מקסימום: ${Math.max(1, Math.min(5, (state as any).preferred_roommates_max ?? Math.max(1, Math.min(5, (state as any).preferred_roommates_min ?? 1))))}`}</Text>
+            <BalloonSlider5
+              value={Math.max(
+                1,
+                Math.min(
+                  5,
+                  (state as any).preferred_roommates_max ??
+                    Math.max(1, Math.min(5, (state as any).preferred_roommates_min ?? 1)),
+                ),
+              )}
+              onChange={(v) => {
+                const min = Math.max(1, Math.min(5, (state as any).preferred_roommates_min ?? 1));
+                setField('preferred_roommates_max' as any, Math.max(v, min));
+              }}
             />
           </View>
         ),
@@ -983,44 +1104,42 @@ function PartCarouselPagination({
 
       // Partner you want
       {
-        key: 'age_min',
-        title: 'גיל מינימלי לשותפ/ה',
+        key: 'age_range',
+        title: 'טווח גילאים לשותפ/ה',
         render: () => (
           <View style={{ gap: 10 }}>
-            <TouchableOpacity
-              style={styles.input}
-              activeOpacity={0.9}
-              onPress={() => openListPicker('preferred_age_min', 'בחר גיל מינימלי')}
-              accessibilityRole="button"
-              accessibilityLabel="בחר גיל מינימלי"
-            >
-              <Text
-                style={
-                  (state as any).preferred_age_min != null ? styles.selectText : styles.selectPlaceholder
-                }
+            <View>
+              <Text style={styles.helperText}>מינימום</Text>
+              <TouchableOpacity
+                style={styles.input}
+                activeOpacity={0.9}
+                onPress={() => openListPicker('preferred_age_min', 'בחר גיל מינימלי')}
+                accessibilityRole="button"
+                accessibilityLabel="בחר גיל מינימלי"
               >
-                {(state as any).preferred_age_min != null ? String((state as any).preferred_age_min) : 'בחר גיל'}
-              </Text>
-            </TouchableOpacity>
-          </View>
-        ),
-      },
-      {
-        key: 'age_max',
-        title: 'גיל מקסימלי לשותפ/ה',
-        render: () => (
-          <View style={{ gap: 10 }}>
-            <TouchableOpacity
-              style={styles.input}
-              activeOpacity={0.9}
-              onPress={() => openListPicker('preferred_age_max', 'בחר גיל מקסימלי')}
-              accessibilityRole="button"
-              accessibilityLabel="בחר גיל מקסימלי"
-            >
-              <Text style={(state as any).preferred_age_max != null ? styles.selectText : styles.selectPlaceholder}>
-                {(state as any).preferred_age_max != null ? String((state as any).preferred_age_max) : 'בחר גיל'}
-              </Text>
-            </TouchableOpacity>
+                <Text
+                  style={
+                    (state as any).preferred_age_min != null ? styles.selectText : styles.selectPlaceholder
+                  }
+                >
+                  {(state as any).preferred_age_min != null ? String((state as any).preferred_age_min) : 'בחר גיל'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+            <View>
+              <Text style={styles.helperText}>מקסימום</Text>
+              <TouchableOpacity
+                style={styles.input}
+                activeOpacity={0.9}
+                onPress={() => openListPicker('preferred_age_max', 'בחר גיל מקסימלי')}
+                accessibilityRole="button"
+                accessibilityLabel="בחר גיל מקסימלי"
+              >
+                <Text style={(state as any).preferred_age_max != null ? styles.selectText : styles.selectPlaceholder}>
+                  {(state as any).preferred_age_max != null ? String((state as any).preferred_age_max) : 'בחר גיל'}
+                </Text>
+              </TouchableOpacity>
+            </View>
           </View>
         ),
       },
@@ -1054,18 +1173,18 @@ function PartCarouselPagination({
 
   // Split questions into 3 parts based on the user's requested boundaries.
   // Part 1: "קצת עליי" - from first question up to (excluding) "תקציב שכירות" (price)
-  // Part 2: "מה שאני מחפש בדירה" - from "תקציב שכירות" (price) up to (excluding) "גיל מינימלי לשותפ/ה" (age_min)
-  // Part 3: "שותפים שאני מחפש" - from "גיל מינימלי לשותפ/ה" (age_min) to the end
+  // Part 2: "מה שאני מחפש בדירה" - from "תקציב שכירות" (price) up to (excluding) "טווח גילאים לשותפ/ה" (age_range)
+  // Part 3: "שותפים שאני מחפש" - from "טווח גילאים לשותפ/ה" (age_range) to the end
   const items: SurveyItem[] = useMemo(() => {
     const idxPrice = questions.findIndex((q) => q.key === 'price');
-    const idxAgeMin = questions.findIndex((q) => q.key === 'age_min');
+    const idxAgeRange = questions.findIndex((q) => q.key === 'age_range');
 
     const part1Questions = idxPrice > 0 ? questions.slice(0, idxPrice) : questions.slice(0, Math.max(0, idxPrice));
     const part2Questions =
-      idxPrice >= 0 && (idxAgeMin < 0 || idxAgeMin > idxPrice)
-        ? questions.slice(idxPrice, idxAgeMin < 0 ? undefined : idxAgeMin)
+      idxPrice >= 0 && (idxAgeRange < 0 || idxAgeRange > idxPrice)
+        ? questions.slice(idxPrice, idxAgeRange < 0 ? undefined : idxAgeRange)
         : [];
-    const part3Questions = idxAgeMin >= 0 ? questions.slice(idxAgeMin) : [];
+    const part3Questions = idxAgeRange >= 0 ? questions.slice(idxAgeRange) : [];
 
     const out: SurveyItem[] = [];
     if (part1Questions.length) {
@@ -1143,19 +1262,13 @@ function PartCarouselPagination({
         }
       }
 
-      if (activeRenderedQuestionKey === 'roommates_min') {
-        const min = (prev as any).preferred_roommates_min;
-        if (!hasFiniteNumber(min)) {
-          next = { ...(next ?? prev), preferred_roommates_min: 1 } as any;
-        }
-      }
-
-      if (activeRenderedQuestionKey === 'roommates_max') {
+      if (activeRenderedQuestionKey === 'roommates_range') {
         const minRaw = (prev as any).preferred_roommates_min;
         const maxRaw = (prev as any).preferred_roommates_max;
         const min = hasFiniteNumber(minRaw) ? minRaw : 1;
-        if (!hasFiniteNumber(minRaw) || !hasFiniteNumber(maxRaw)) {
-          next = { ...(next ?? prev), preferred_roommates_min: min, preferred_roommates_max: min } as any;
+        const max = hasFiniteNumber(maxRaw) ? maxRaw : min;
+        if (!hasFiniteNumber(minRaw) || !hasFiniteNumber(maxRaw) || max < min) {
+          next = { ...(next ?? prev), preferred_roommates_min: min, preferred_roommates_max: Math.max(max, min) } as any;
         }
       }
 
@@ -1700,10 +1813,8 @@ function PartCarouselPagination({
                   activeItem.question.key === 'floor' ||
                   activeItem.question.key === 'sublet_period' ||
                   activeItem.question.key === 'move_in_month' ||
-                  activeItem.question.key === 'roommates_min' ||
-                  activeItem.question.key === 'roommates_max' ||
-                  activeItem.question.key === 'age_min' ||
-                  activeItem.question.key === 'age_max' ||
+                  activeItem.question.key === 'roommates_range' ||
+                  activeItem.question.key === 'age_range' ||
                   activeItem.question.key === 'cooking' ||
                   activeItem.question.key === 'home_lifestyle' ? (
                     // Render without ScrollView so horizontal pan gestures are never stolen.
@@ -1930,8 +2041,10 @@ function PartCarouselPagination({
         >
           {buildMonthOptions({ baseDate: monthPickerTempDate, monthsBack: 3, monthsForward: 24 }).map((opt) => {
             const currentValue =
-              monthPickerTarget === 'move_in_month'
-                ? state.move_in_month ?? null
+              monthPickerTarget === 'move_in_month_from'
+                ? ((state as any).move_in_month_from ?? null)
+                : monthPickerTarget === 'move_in_month_to'
+                  ? ((state as any).move_in_month_to ?? null)
                 : monthPickerTarget === 'sublet_month_from'
                   ? state.sublet_month_from ?? null
                   : monthPickerTarget === 'sublet_month_to'
@@ -2088,13 +2201,20 @@ function normalizePayload(
     cleaning_frequency: s.cleaning_frequency ?? null,
     hosting_preference: s.hosting_preference ?? null,
     cooking_style: s.cooking_style ?? null,
+    price_min: (s as any).price_min ?? null,
+    price_max: (s as any).price_max ?? null,
+    // keep legacy field for older rows/environments
     price_range: s.price_range ?? null,
     preferred_city: s.preferred_city ?? null,
     preferred_neighborhoods:
       s.preferred_neighborhoods && s.preferred_neighborhoods.length > 0 ? s.preferred_neighborhoods : null,
     floor_preference: s.floor_preference ?? null,
     has_balcony: s.has_balcony ?? null,
-    move_in_month: s.move_in_month ?? null,
+    move_in_month_from: (s as any).move_in_month_from ?? null,
+    move_in_month_to: (s as any).move_in_month_to ?? null,
+    move_in_is_flexible: (s as any).move_in_is_flexible ?? false,
+    // legacy
+    move_in_month: (s as any).move_in_month ?? null,
     preferred_roommates_min: (s as any).preferred_roommates_min ?? null,
     preferred_roommates_max: (s as any).preferred_roommates_max ?? null,
     preferred_roommates:
@@ -2221,6 +2341,29 @@ function generateNumberRange(start: number, end: number): string[] {
 
 function hydrateSurvey(existing: UserSurveyResponse): SurveyState {
   const next: SurveyState = { ...existing };
+
+  // Budget: if only legacy price_range exists, derive a range.
+  if ((existing as any).price_min == null && (existing as any).price_max == null && typeof (existing as any).price_range === 'number') {
+    const v = (existing as any).price_range;
+    if (Number.isFinite(v) && v > 0) {
+      (next as any).price_min = v;
+      (next as any).price_max = v + 400;
+    }
+  }
+
+  // Move-in: if only legacy move_in_month exists, derive exact range (non-flexible).
+  if (
+    (existing as any).move_in_month_from == null &&
+    (existing as any).move_in_month_to == null &&
+    typeof (existing as any).move_in_month === 'string'
+  ) {
+    const v = (existing as any).move_in_month;
+    if (v) {
+      (next as any).move_in_month_from = v;
+      (next as any).move_in_month_to = v;
+      (next as any).move_in_is_flexible = false;
+    }
+  }
 
   if (existing.occupation) {
     if (existing.occupation.startsWith('סטודנט')) {

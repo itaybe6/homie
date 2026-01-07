@@ -305,12 +305,18 @@ export default function PartnersScreen() {
     if (survey?.cooking_style) compat.cooking_style = survey.cooking_style as CookingStyle;
     if (survey?.preferred_city) compat.preferred_city = survey.preferred_city;
     if (Array.isArray(survey?.preferred_neighborhoods)) compat.preferred_neighborhoods = survey.preferred_neighborhoods;
-    if (Number.isFinite(survey?.price_range as number)) compat.price_range = Number(survey?.price_range);
+    if (Number.isFinite((survey as any)?.price_min as number)) compat.price_min = Number((survey as any).price_min);
+    if (Number.isFinite((survey as any)?.price_max as number)) compat.price_max = Number((survey as any).price_max);
+    if (Number.isFinite(survey?.price_range as number)) compat.price_range = Number((survey as any).price_range);
     if (survey?.floor_preference) compat.floor_preference = survey.floor_preference;
     if (typeof survey?.has_balcony === 'boolean') compat.has_balcony = survey.has_balcony;
     if (typeof survey?.pets_allowed === 'boolean') compat.pets_allowed = survey.pets_allowed;
     if (typeof survey?.preferred_roommates === 'number') compat.preferred_roommates = survey.preferred_roommates;
-    if (survey?.move_in_month) compat.move_in_month = survey.move_in_month;
+    if ((survey as any)?.move_in_month_from) compat.move_in_month_from = (survey as any).move_in_month_from;
+    if ((survey as any)?.move_in_month_to) compat.move_in_month_to = (survey as any).move_in_month_to;
+    if (typeof (survey as any)?.move_in_is_flexible === 'boolean')
+      compat.move_in_is_flexible = (survey as any).move_in_is_flexible;
+    if (survey?.move_in_month) compat.move_in_month = survey.move_in_month; // legacy
     if (typeof survey?.is_sublet === 'boolean') compat.is_sublet = survey.is_sublet;
     if (survey?.sublet_month_from) compat.sublet_month_from = survey.sublet_month_from;
     if (survey?.sublet_month_to) compat.sublet_month_to = survey.sublet_month_to;

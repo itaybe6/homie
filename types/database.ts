@@ -181,12 +181,22 @@ export interface UserSurveyResponse {
   cleaning_frequency?: string;
   hosting_preference?: string;
   cooking_style?: string;
+  // Budget range (₪) - new fields
+  price_min?: number | null;
+  price_max?: number | null;
+  // Legacy single-value budget
   price_range?: number;
   // Tri-state preferences: true/false/null (null = "לא משנה לי")
   preferred_city?: string;
   preferred_neighborhoods?: string[];
   floor_preference?: string;
   has_balcony?: boolean | null;
+  // Move-in range (YYYY-MM)
+  move_in_month_from?: string | null;
+  move_in_month_to?: string | null;
+  // When false => exact month (to == from). When true => flexible range.
+  move_in_is_flexible?: boolean | null;
+  // Legacy single month (deprecated)
   move_in_month?: string;
   preferred_roommates?: number; // legacy single value (kept for backwards compat)
   preferred_roommates_min?: number | null;

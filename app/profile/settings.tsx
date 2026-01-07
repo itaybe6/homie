@@ -74,8 +74,11 @@ export default function ProfileSettingsScreen() {
   const surveyTranslateY = useRef(new Animated.Value(600)).current;
   const surveyBackdropOpacity = useRef(new Animated.Value(0)).current;
   const [surveyCity, setSurveyCity] = useState('');
-  const [surveyPrice, setSurveyPrice] = useState('');
-  const [surveyMoveIn, setSurveyMoveIn] = useState(''); // YYYY-MM
+  const [surveyPriceMin, setSurveyPriceMin] = useState('');
+  const [surveyPriceMax, setSurveyPriceMax] = useState('');
+  const [surveyMoveInFrom, setSurveyMoveInFrom] = useState(''); // YYYY-MM
+  const [surveyMoveInTo, setSurveyMoveInTo] = useState(''); // YYYY-MM
+  const [surveyMoveInFlexible, setSurveyMoveInFlexible] = useState(false);
   const [surveyIsSublet, setSurveyIsSublet] = useState(false);
   const [surveySaving, setSurveySaving] = useState(false);
   // Extra survey fields
@@ -1065,25 +1068,85 @@ export default function ProfileSettingsScreen() {
                       <Hash size={16} color={ICON_COLOR} />
                       <Text style={styles.fieldLabel}>תקציב חודשי (₪)</Text>
                     </View>
-                    <TextInput
-                      style={styles.fieldInput}
-                      value={surveyPrice}
-                      onChangeText={(t) => setSurveyPrice(t.replace(/[^0-9]/g, ''))}
-                      keyboardType="number-pad"
-                      placeholder="ללא"
-                    />
+                    <View style={{ flexDirection: 'row-reverse', gap: 10 }}>
+                      <TextInput
+                        style={[styles.fieldInput, { flex: 1 }]}
+                        value={surveyPriceMin}
+                        onChangeText={(t) => {
+                          const cleaned = t.replace(/[^0-9]/g, '');
+                          setSurveyPriceMin(cleaned);
+                          const min = cleaned ? parseInt(cleaned, 10) : null;
+                          const curMax = surveyPriceMax ? parseInt(surveyPriceMax, 10) : null;
+                          if (typeof min === 'number' && Number.isFinite(min)) {
+                            const minAllowedMax = min + 400;
+                            if (!curMax || curMax < minAllowedMax) setSurveyPriceMax(String(minAllowedMax));
+                          }
+                        }}
+                        keyboardType="number-pad"
+                        placeholder="מינימום"
+                      />
+                      <TextInput
+                        style={[styles.fieldInput, { flex: 1 }]}
+                        value={surveyPriceMax}
+                        onChangeText={(t) => setSurveyPriceMax(t.replace(/[^0-9]/g, ''))}
+                        keyboardType="number-pad"
+                        placeholder="מקסימום"
+                        onEndEditing={() => {
+                          const min = surveyPriceMin ? parseInt(surveyPriceMin, 10) : null;
+                          const max = surveyPriceMax ? parseInt(surveyPriceMax, 10) : null;
+                          if (typeof min === 'number' && Number.isFinite(min)) {
+                            const minAllowedMax = min + 400;
+                            if (typeof max === 'number' && Number.isFinite(max) && max < minAllowedMax) {
+                              setSurveyPriceMax(String(minAllowedMax));
+                            }
+                          }
+                        }}
+                      />
+                    </View>
+                    <Text style={styles.helperText}>המקסימום חייב להיות לפחות ₪400 מעל המינימום.</Text>
                   </View>
                   <View style={styles.fieldGroup}>
                     <View style={styles.labelRow}>
                       <Calendar size={16} color={ICON_COLOR} />
-                      <Text style={styles.fieldLabel}>חודש כניסה (YYYY-MM)</Text>
+                      <Text style={styles.fieldLabel}>חודש כניסה</Text>
                     </View>
-                    <TextInput
-                      style={styles.fieldInput}
-                      value={surveyMoveIn}
-                      onChangeText={setSurveyMoveIn}
-                      placeholder="2026-01"
-                    />
+                    <View style={{ flexDirection: 'row-reverse', gap: 10, flexWrap: 'wrap' }}>
+                      <TouchableOpacity
+                        style={[styles.chipToggle, !surveyMoveInFlexible && styles.chipToggleActive]}
+                        onPress={() => {
+                          setSurveyMoveInFlexible(false);
+                          if (surveyMoveInFrom) setSurveyMoveInTo(surveyMoveInFrom);
+                        }}
+                        activeOpacity={0.9}
+                      >
+                        <Text style={[styles.chipToggleText, !surveyMoveInFlexible && styles.chipToggleTextActive]}>לא גמיש</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[styles.chipToggle, surveyMoveInFlexible && styles.chipToggleActive]}
+                        onPress={() => setSurveyMoveInFlexible(true)}
+                        activeOpacity={0.9}
+                      >
+                        <Text style={[styles.chipToggleText, surveyMoveInFlexible && styles.chipToggleTextActive]}>טווח חודשים</Text>
+                      </TouchableOpacity>
+                    </View>
+                    <View style={{ flexDirection: 'row-reverse', gap: 10 }}>
+                      <TextInput
+                        style={[styles.fieldInput, { flex: 1 }]}
+                        value={surveyMoveInFrom}
+                        onChangeText={(t) => {
+                          setSurveyMoveInFrom(t);
+                          if (!surveyMoveInFlexible && t) setSurveyMoveInTo(t);
+                        }}
+                        placeholder="מחודש (YYYY-MM)"
+                      />
+                      <TextInput
+                        style={[styles.fieldInput, { flex: 1 }]}
+                        value={surveyMoveInTo}
+                        onChangeText={setSurveyMoveInTo}
+                        placeholder="עד חודש (YYYY-MM)"
+                        editable={surveyMoveInFlexible}
+                      />
+                    </View>
                   </View>
                   <View style={styles.fieldGroup}>
                     <View style={styles.labelRow}>
@@ -1311,12 +1374,18 @@ export default function ProfileSettingsScreen() {
                         try {
                           if (!user?.id) return;
                           setSurveySaving(true);
-                          const priceNum = surveyPrice ? parseInt(surveyPrice) : null;
+                          const priceMinNum = surveyPriceMin ? parseInt(surveyPriceMin, 10) : null;
+                          const priceMaxNum = surveyPriceMax ? parseInt(surveyPriceMax, 10) : null;
                           await upsertUserSurvey({
                             user_id: user.id,
                             preferred_city: surveyCity || null,
-                            price_range: (priceNum as any) || null,
-                            move_in_month: surveyMoveIn || null,
+                            price_min: (priceMinNum as any) || null,
+                            price_max: (priceMaxNum as any) || null,
+                            // keep legacy field for older clients
+                            price_range: (priceMinNum as any) || null,
+                            move_in_month_from: surveyMoveInFrom || null,
+                            move_in_month_to: (surveyMoveInFlexible ? (surveyMoveInTo || null) : (surveyMoveInFrom || null)),
+                            move_in_is_flexible: surveyMoveInFlexible,
                             is_sublet: surveyIsSublet || false,
                             preferred_neighborhoods: (() => {
                               const raw = (surveyNeighborhoods || '').trim();
