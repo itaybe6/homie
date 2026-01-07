@@ -52,10 +52,6 @@ export default function MapboxMap(props: {
           if (msg?.type === 'OPEN_APARTMENT' && msg?.id) {
             props.onApartmentPress?.(String(msg.id));
           }
-          if (msg?.type === 'MAP_DEBUG_LABEL_LAYER_COUNT') {
-            // eslint-disable-next-line no-console
-            console.log('[Mapbox] label layer count', msg?.count);
-          }
         } catch {
           // ignore
         }

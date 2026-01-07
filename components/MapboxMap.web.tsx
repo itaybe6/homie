@@ -29,10 +29,6 @@ export default function MapboxMap(props: {
           // eslint-disable-next-line no-console
           console.log('[Mapbox] label keys sample', data);
         }
-        if (data?.type === 'MAP_DEBUG_LABEL_LAYER_COUNT') {
-          // eslint-disable-next-line no-console
-          console.log('[Mapbox] label layer count', data?.count);
-        }
       } catch {
         // ignore
       }

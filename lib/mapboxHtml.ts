@@ -223,22 +223,6 @@ export function buildMapboxHtml(params: {
             __langApplyScheduled = false;
             __langLastAppliedAt = Date.now();
             __applyLabelLanguage('he');
-
-            // Debug: how many label layers did we actually touch?
-            try {
-              var style = map.getStyle && map.getStyle();
-              var layers = style && style.layers;
-              var count = 0;
-              if (layers && layers.length) {
-                for (var i = 0; i < layers.length; i++) {
-                  var l = layers[i];
-                  if (l && l.type === 'symbol' && l.layout && l.layout['text-field'] != null) count++;
-                }
-              }
-              var payload = JSON.stringify({ type: 'MAP_DEBUG_LABEL_LAYER_COUNT', count: count });
-              if (window.ReactNativeWebView) window.ReactNativeWebView.postMessage(payload);
-              if (window.parent && window.parent.postMessage) window.parent.postMessage(payload, '*');
-            } catch (_) {}
           }
 
           function __scheduleHebrewLabels() {
