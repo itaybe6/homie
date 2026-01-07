@@ -8,6 +8,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/authStore';
+import { colors } from '@/lib/theme';
 
 const { width, height } = Dimensions.get('window');
 
@@ -21,7 +22,7 @@ const _keySize = Math.min(width / 3.2, Math.max(width / 4, height / 7.2), 140);
 const _passcodeSpacing = (width - 3 * _keySize) / 2;
 const _passCodeSize = Math.min(width / (passcodeLength + 1.6), 62);
 const _brandBrown = '#5e3f2d';
-const _brandGreen = '#22C55E';
+const _brandGreen = colors.success;
 const _successDuration = 650;
 
 const AnimatedDelete = Animated.createAnimatedComponent(Delete);

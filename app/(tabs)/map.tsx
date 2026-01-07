@@ -62,7 +62,8 @@ function transformSupabaseImageUrl(value: string): string {
 export default function MapTabScreen() {
   const router = useRouter();
   const token = process.env.EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN as string | undefined;
-  const styleUrl = process.env.EXPO_PUBLIC_MAPBOX_STYLE_URL as string | undefined;
+  // Force Mapbox Standard style for Hebrew language support (ignore EXPO_PUBLIC_MAPBOX_STYLE_URL)
+  const styleUrl = 'mapbox://styles/mapbox/standard';
   const insets = useSafeAreaInsets();
   const pointBrown = '#5e3f2d';
 

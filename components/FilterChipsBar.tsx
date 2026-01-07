@@ -23,6 +23,7 @@ import {
   Sparkles,
   DoorOpen,
 } from 'lucide-react-native';
+import { alpha, colors } from '@/lib/theme';
 
 export type FilterChipType = 'toggle' | 'dropdown';
 
@@ -95,14 +96,14 @@ export default function FilterChipsBar({
   const [internalSelected, setInternalSelected] = useState<string[]>([]);
   const active = selectedIds ?? internalSelected;
   const inactiveBg = inactiveBackgroundColor ?? '#FFFFFF';
-  const activeBg = activeBackgroundColor ?? '#FFFFFF';
+  const activeBg = activeBackgroundColor ?? alpha(colors.successMuted, 0.72);
   const inactiveBd = inactiveBorderColor ?? 'transparent';
-  const activeBd = activeBorderColor ?? 'transparent';
+  const activeBd = activeBorderColor ?? alpha(colors.success, 0.55);
   const inactiveTxt = inactiveTextColor ?? '#6B7280';
-  const activeTxt = activeTextColor ?? '#5e3f2d';
+  const activeTxt = activeTextColor ?? colors.white;
   const inactiveIc = inactiveIconColor ?? '#6B7280';
-  const activeIc = activeIconColor ?? '#5e3f2d';
-  const borderW = typeof chipBorderWidth === 'number' ? chipBorderWidth : 0;
+  const activeIc = activeIconColor ?? colors.white;
+  const borderW = typeof chipBorderWidth === 'number' ? chipBorderWidth : 1;
 
   // Preserve horizontal scroll offset when toggling chips to avoid jump-to-start
   const scrollRef = useRef<ScrollView | null>(null);
@@ -288,8 +289,8 @@ const styles = StyleSheet.create({
   },
   chipActive: {
     // Default active bg; can be overridden via props.
-    backgroundColor: 'rgba(94,63,45,0.10)',
-    borderColor: 'transparent',
+    backgroundColor: alpha(colors.successMuted, 0.72),
+    borderColor: alpha(colors.success, 0.55),
   },
   chipInnerRow: {
     flexDirection: 'row-reverse',

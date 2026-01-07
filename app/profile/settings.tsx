@@ -27,9 +27,10 @@ import { upsertUserSurvey } from '@/lib/survey';
 import { getNeighborhoodsForCityName } from '@/lib/neighborhoods';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
+import { alpha, colors } from '@/lib/theme';
 
 export default function ProfileSettingsScreen() {
-  const ICON_COLOR = '#5e3f2d';
+  const ICON_COLOR = colors.primary;
   const router = useRouter();
   const { user, setUser } = useAuthStore();
   const [isSigningOut, setIsSigningOut] = useState(false);
@@ -1474,7 +1475,7 @@ export default function ProfileSettingsScreen() {
 
               {sharedLoading ? (
                 <View style={{ paddingVertical: 24, alignItems: 'center' }}>
-                  <ActivityIndicator size="large" color="#5e3f2d" />
+                  <ActivityIndicator size="large" color={colors.primary} />
                 </View>
               ) : sharedGroups.length === 0 ? (
                 <Text style={styles.sharedEmptyText}>אין לך פרופילים משותפים פעילים.</Text>
@@ -1993,7 +1994,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#5e3f2d',
+    backgroundColor: colors.success,
   },
   applyText: {
     color: '#FFFFFF',
@@ -2568,8 +2569,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
   },
   chipToggleActive: {
-    borderColor: '#5e3f2d',
-    backgroundColor: 'rgba(94,63,45,0.10)',
+    borderColor: alpha(colors.success, 0.65),
+    backgroundColor: alpha(colors.successMuted, 0.72),
   },
   chipToggleText: {
     color: '#6B7280',
@@ -2577,7 +2578,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
   chipToggleTextActive: {
-    color: '#5e3f2d',
+    color: colors.white,
   },
 });
 

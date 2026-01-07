@@ -52,6 +52,7 @@ import { useAuthStore } from '@/stores/authStore';
 import { useApartmentStore } from '@/stores/apartmentStore';
 import { User, Apartment, UserSurveyResponse } from '@/types/database';
 import { KeyFabPanel } from '@/components/KeyFabPanel';
+import { alpha, colors } from '@/lib/theme';
 
 
 type AvatarFabItem = {
@@ -189,7 +190,7 @@ function AvatarPhotoFab({
           justifyContent: 'center',
         }}
       >
-        <X size={iconSize} color="#5e3f2d" />
+        <X size={iconSize} color={colors.primary} />
       </MotiPressable>
     </View>
   );
@@ -1276,7 +1277,7 @@ export default function ProfileScreen() {
   if (isLoading) {
     return (
       <View style={styles.centerContainer}>
-        <ActivityIndicator size="large" color="#5e3f2d" />
+        <ActivityIndicator size="large" color={colors.primary} />
       </View>
     );
   }
@@ -1377,7 +1378,7 @@ export default function ProfileScreen() {
                 <View style={styles.metaChipsRow}>
                   {(profile?.address || profile?.city) ? (
                     <View style={styles.metaChip}>
-                      <MapPin size={14} color="#5e3f2d" />
+                      <MapPin size={14} color={colors.primary} />
                       <Text style={styles.metaChipText} numberOfLines={1}>
                         {profile?.address || profile?.city}
                       </Text>
@@ -1385,7 +1386,7 @@ export default function ProfileScreen() {
                   ) : null}
                   {profile?.age ? (
                     <View style={styles.metaChip}>
-                      <Calendar size={14} color="#5e3f2d" />
+                      <Calendar size={14} color={colors.primary} />
                       <Text style={styles.metaChipText}>גיל {profile.age}</Text>
                     </View>
                   ) : null}
@@ -1458,7 +1459,7 @@ export default function ProfileScreen() {
           <View style={styles.surveyCTA}>
             {profile ? (
               <LinearGradient
-                colors={['#4ADE80', '#16A34A']}
+                colors={[colors.successMuted, colors.success]}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
                 style={styles.surveyCTAAvatarRing}
@@ -1498,7 +1499,7 @@ export default function ProfileScreen() {
                   accessibilityRole="button"
                   accessibilityLabel="צפייה בשאלון"
                 >
-                  <Eye size={18} color="#5e3f2d" />
+                  <Eye size={18} color={colors.primary} />
                 </TouchableOpacity>
               ) : null}
               <TouchableOpacity
@@ -1595,7 +1596,7 @@ export default function ProfileScreen() {
               </View>
               <View style={styles.sectionEmptyWrap}>
                 <View style={styles.sectionEmptyIconPill}>
-                  <Inbox size={18} color="#5e3f2d" />
+                <Inbox size={18} color={colors.primary} />
                 </View>
                 <Text style={styles.sectionEmptyTitle}>כרגע אין שותפים</Text>
                 <Text style={styles.sectionEmptyText}>כשתצטרף/י לקבוצה או תזמין/י שותפים, הם יופיעו כאן.</Text>
@@ -1830,7 +1831,7 @@ export default function ProfileScreen() {
               ) : (
                 <View style={styles.sectionEmptyWrap}>
                   <View style={styles.sectionEmptyIconPill}>
-                    <Building2 size={18} color="#5e3f2d" />
+                    <Building2 size={18} color={colors.primary} />
                   </View>
                   <Text style={styles.sectionEmptyTitle}>עדיין אין דירה</Text>
                   <Text style={styles.sectionEmptyText}>עדיין לא בחרת דירה להצגה בפרופיל.</Text>
@@ -1871,7 +1872,7 @@ export default function ProfileScreen() {
                         accessibilityRole="button"
                         accessibilityLabel="העתק קוד דירה"
                       >
-                        <Copy size={16} color="#5e3f2d" />
+                        <Copy size={16} color={colors.primary} />
                         <Text style={styles.aptPasscodeCopyText}>העתק</Text>
                       </TouchableOpacity>
                     </View>
@@ -1955,7 +1956,7 @@ export default function ProfileScreen() {
                     onPress={isAddingImage ? undefined : addGalleryImage}
                     activeOpacity={0.9}
                   >
-                    <Plus size={18} color="#5e3f2d" />
+                    <Plus size={18} color={colors.primary} />
                     <Text style={styles.galleryAddTileText}>הוסף</Text>
                   </TouchableOpacity>
                 )}
@@ -1967,7 +1968,7 @@ export default function ProfileScreen() {
                   onPress={isAddingImage ? undefined : addGalleryImage}
                   activeOpacity={0.9}
                 >
-                  <Plus size={18} color="#5e3f2d" />
+                  <Plus size={18} color={colors.primary} />
                   <Text style={styles.galleryAddTileText}>הוסף</Text>
                 </TouchableOpacity>
               </View>
@@ -2263,7 +2264,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(94,63,45,0.16)',
+    borderColor: alpha(colors.primary, 0.16),
     shadowColor: '#000000',
     shadowOpacity: 0.18,
     shadowRadius: 8,
@@ -2367,9 +2368,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 999,
-    backgroundColor: 'rgba(94,63,45,0.06)',
+    backgroundColor: colors.white,
     borderWidth: 1,
-    borderColor: 'rgba(94,63,45,0.12)',
+    borderColor: alpha(colors.primary, 0.12),
     maxWidth: '100%',
   },
   metaChipText: {
@@ -2386,7 +2387,7 @@ const styles = StyleSheet.create({
     borderColor: 'transparent',
   },
   bioTitle: {
-    color: '#5e3f2d',
+    color: colors.primary,
     fontSize: 13,
     fontWeight: '900',
     textAlign: 'right',
@@ -2602,7 +2603,7 @@ const styles = StyleSheet.create({
     padding: 8,
   },
   saveButton: {
-    backgroundColor: '#5e3f2d',
+    backgroundColor: colors.success,
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 10,
@@ -3002,13 +3003,13 @@ const styles = StyleSheet.create({
     borderColor: '#E5E7EB',
   },
   surveyBadgeText: {
-    color: '#5e3f2d',
+    color: colors.primary,
     fontSize: 12,
     fontWeight: '800',
   },
   surveyBadgeSuccess: {
-    backgroundColor: 'rgba(34,197,94,0.12)',
-    borderColor: 'rgba(34,197,94,0.25)',
+    backgroundColor: alpha(colors.success, 0.12),
+    borderColor: alpha(colors.success, 0.25),
   },
   surveyBadgePending: {
     backgroundColor: 'rgba(250,204,21,0.12)',
@@ -3040,7 +3041,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   surveySectionTitle: {
-    color: '#5e3f2d',
+    color: colors.primary,
     fontSize: 14,
     fontWeight: '900',
     textAlign: 'right',
@@ -3124,7 +3125,7 @@ const styles = StyleSheet.create({
     writingDirection: 'rtl',
   },
   surveySegTextActive: {
-    color: '#5e3f2d',
+    color: colors.primary,
   },
   surveyPanelScroll: {
     // maxHeight is set dynamically based on screen size
@@ -3239,9 +3240,9 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: 'rgba(94,63,45,0.06)',
+    backgroundColor: colors.white,
     borderWidth: 1,
-    borderColor: 'rgba(94,63,45,0.16)',
+    borderColor: alpha(colors.primary, 0.16),
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -3265,14 +3266,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 999,
-    backgroundColor: 'rgba(22,163,74,0.10)',
+    backgroundColor: alpha(colors.success, 0.12),
     borderWidth: 1,
-    borderColor: 'rgba(22,163,74,0.20)',
+    borderColor: alpha(colors.success, 0.22),
     alignItems: 'center',
     justifyContent: 'center',
   },
   surveyCTACtaPillText: {
-    color: '#16A34A',
+    color: colors.success,
     fontSize: 12,
     fontWeight: '900',
     textAlign: 'center',
@@ -3654,15 +3655,15 @@ const styles = StyleSheet.create({
   },
   aptPricePill: {
     alignSelf: 'flex-end',
-    backgroundColor: 'rgba(34,197,94,0.15)',
+    backgroundColor: alpha(colors.success, 0.15),
     borderWidth: 1,
-    borderColor: 'rgba(34,197,94,0.25)',
+    borderColor: alpha(colors.success, 0.25),
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 999,
   },
   aptPriceText: {
-    color: '#22C55E',
+    color: colors.success,
     fontWeight: '900',
     fontSize: 13,
   },

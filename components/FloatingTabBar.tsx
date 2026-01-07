@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, Dimensions, Platform } from '
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, usePathname } from 'expo-router';
 import { Home, Users, User, Plus } from 'lucide-react-native';
+import { alpha, colors } from '@/lib/theme';
 
 type TabKey = 'home' | 'partners' | 'profile';
 
@@ -224,7 +225,7 @@ const styles = StyleSheet.create({
     width: 56,
     height: 56,
     borderRadius: 28,
-    backgroundColor: '#5e3f2d',
+    backgroundColor: colors.success,
     alignItems: 'center',
     justifyContent: 'center',
     ...(Platform.OS === 'ios'
@@ -242,11 +243,11 @@ const styles = StyleSheet.create({
   },
   activeTrack: {
     position: 'absolute',
-    backgroundColor: '#5e3f2d',
+    backgroundColor: colors.primary,
     zIndex: 0,
     ...(Platform.OS === 'ios'
       ? {
-          shadowColor: '#5e3f2d',
+          shadowColor: alpha(colors.primary, 0.95),
           shadowOpacity: 0.25,
           shadowRadius: 16,
           shadowOffset: { width: 0, height: 6 },

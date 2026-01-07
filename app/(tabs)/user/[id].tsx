@@ -28,6 +28,7 @@ import Ticker from '@/components/Ticker';
 import { KeyFabPanel } from '@/components/KeyFabPanel';
 import Animated, { FadeIn, FadeOut, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import DonutChart from '@/components/DonutChart';
+import { alpha, colors } from '@/lib/theme';
 import MaskedView from '@react-native-masked-view/masked-view';
 import {
   calculateMatchScore,
@@ -1963,8 +1964,8 @@ export default function UserProfileScreen() {
                           size={54}
                           strokeWidth={5}
                           durationMs={850}
-                          color="#16A34A"
-                          trackColor="rgba(22,163,74,0.14)"
+                          color={colors.success}
+                          trackColor={alpha(colors.success, 0.14)}
                           textColor="transparent"
                           textStyle={{ fontSize: 0 } as any}
                           accessibilityLabel="אחוזי התאמה"
@@ -2480,7 +2481,7 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   matchPercentText: {
-    color: '#16A34A',
+    color: colors.success,
     fontSize: 18,
     fontWeight: '900',
     includeFontPadding: false,
@@ -2630,7 +2631,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   surveyCTAMatchValue: {
-    color: '#16A34A',
+    color: colors.success,
     fontSize: 11,
     fontWeight: '900',
     includeFontPadding: false,
@@ -2669,7 +2670,7 @@ const styles = StyleSheet.create({
   },
   matchDonutLabel: {
     marginTop: 6,
-    color: '#16A34A',
+    color: colors.success,
     fontSize: 11,
     fontWeight: '900',
     textAlign: 'center',
@@ -2686,7 +2687,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   surveyCTACtaPillText: {
-    color: '#16A34A',
+    color: colors.success,
     fontSize: 12,
     fontWeight: '900',
     textAlign: 'center',

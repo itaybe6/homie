@@ -23,6 +23,7 @@ import { useAuthStore } from '@/stores/authStore';
 import { useApartmentStore } from '@/stores/apartmentStore';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
+import { alpha, colors } from '@/lib/theme';
 import MapboxMap from '@/components/MapboxMap';
 import type { MapboxFeatureCollection } from '@/lib/mapboxHtml';
 import { autocompleteMapbox, reverseGeocodeMapbox, type MapboxGeocodingFeature } from '@/lib/mapboxAutocomplete';
@@ -78,7 +79,7 @@ const HEB_MONTH_NAMES = [
 ];
 
 const { width: _screenW, height: _screenH } = Dimensions.get('window');
-const _brandGreen = '#22C55E';
+const _brandGreen = colors.success;
 const _successDuration = 650;
 const _successNavDelayMs = 2800;
 
@@ -93,7 +94,8 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
   const addApartment = useApartmentStore((state) => state.addApartment);
   const updateApartment = useApartmentStore((state) => state.updateApartment);
   const mapboxToken = process.env.EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN as string | undefined;
-  const mapboxStyleUrl = process.env.EXPO_PUBLIC_MAPBOX_STYLE_URL as string | undefined;
+  // Force Mapbox Standard style for Hebrew language support
+  const mapboxStyleUrl = 'mapbox://styles/mapbox/standard';
   const insets = useSafeAreaInsets();
   const datePickerBottomOffset = useMemo(() => 92 + (insets.bottom || 0) + 14, [insets.bottom]);
   const moveInMonthOptions = useMemo(() => {
@@ -2942,7 +2944,7 @@ const styles = StyleSheet.create({
     elevation: 10,
   },
   footerCtaBtnPublish: {
-    backgroundColor: '#16A34A',
+    backgroundColor: colors.success,
   },
   footerCtaText: {
     color: '#FFFFFF',
@@ -3004,7 +3006,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   monthPickerOptionActive: {
-    backgroundColor: '#5e3f2d',
+    backgroundColor: alpha(colors.successMuted, 0.72),
   },
   monthPickerOptionText: {
     fontSize: 14,
@@ -3013,7 +3015,7 @@ const styles = StyleSheet.create({
     textAlign: 'right',
   },
   monthPickerOptionTextActive: {
-    color: '#FFFFFF',
+    color: colors.white,
   },
 
   successBgCircle: {
@@ -3036,7 +3038,7 @@ const styles = StyleSheet.create({
     borderRadius: (_screenW * 0.42) / 2,
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: 'rgba(94,63,45,0.18)',
+    borderColor: alpha(colors.primary, 0.18),
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -3276,8 +3278,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   chipActive: {
-    backgroundColor: 'rgba(94,63,45,0.10)',
-    borderColor: '#5e3f2d',
+    backgroundColor: alpha(colors.successMuted, 0.65),
+    borderColor: alpha(colors.success, 0.7),
   },
   chipText: {
     fontSize: 14,
@@ -3307,8 +3309,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
   },
   featureCardActive: {
-    backgroundColor: 'rgba(94,63,45,0.10)',
-    borderColor: 'rgba(94,63,45,0.40)',
+    backgroundColor: alpha(colors.successMuted, 0.55),
+    borderColor: alpha(colors.success, 0.55),
   },
   previewHeader: {
     marginTop: 4,

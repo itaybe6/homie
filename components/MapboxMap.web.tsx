@@ -23,6 +23,12 @@ export default function MapboxMap(props: {
         if (data?.type === 'OPEN_APARTMENT' && data?.id) {
           props.onApartmentPress?.(String(data.id));
         }
+        if (data?.type === 'MAP_DEBUG_LABEL_KEYS') {
+          // Helpful during development: shows which "name*" properties exist on rendered features.
+          // This helps diagnose why labels stay in English for a given Mapbox style/tileset.
+          // eslint-disable-next-line no-console
+          console.log('[Mapbox] label keys sample', data);
+        }
       } catch {
         // ignore
       }

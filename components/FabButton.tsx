@@ -11,6 +11,7 @@ import Animated, {
   useAnimatedKeyboard,
   useAnimatedStyle,
 } from 'react-native-reanimated';
+import { colors } from '@/lib/theme';
 
 const AnimatedEntypo = Animated.createAnimatedComponent(Entypo);
 
@@ -138,7 +139,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     bottom: 80,
     right: 16,
-    backgroundColor: '#5e3f2d',
+    backgroundColor: colors.primary,
     zIndex: 9999,
   },
   content: { flex: 1, paddingTop: 0 },

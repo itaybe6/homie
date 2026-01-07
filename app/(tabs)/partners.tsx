@@ -31,6 +31,7 @@ import { SlidersHorizontal, ChevronLeft, ChevronRight, Heart, X, MapPin, Share2,
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
+import { colors } from '@/lib/theme';
 import { useAuthStore } from '@/stores/authStore';
 import { User, UserSurveyResponse } from '@/types/database';
 import { computeGroupAwareLabel } from '@/lib/group';
@@ -1848,7 +1849,7 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   applyBtn: {
-    backgroundColor: '#22C55E',
+    backgroundColor: colors.success,
     marginLeft: 8,
   },
   resetText: {
@@ -1857,7 +1858,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   applyText: {
-    color: '#0F0F14',
+    color: '#FFFFFF',
     fontWeight: '900',
     textAlign: 'center',
   },
@@ -2237,7 +2238,7 @@ const groupStyles = StyleSheet.create({
     alignItems: 'baseline',
   },
   apartmentPriceAmount: {
-    color: '#22C55E',
+    color: colors.success,
     fontSize: 16,
     fontWeight: '800',
     textAlign: 'right',

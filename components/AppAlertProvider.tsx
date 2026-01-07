@@ -9,6 +9,7 @@ import {
   Platform,
 } from 'react-native';
 import { subscribeAlerts, type NativeAlertButton, type NativeAlertPayload } from '@/lib/alertBus';
+import { colors } from '@/lib/theme';
 
 type AlertButtonStyle = 'default' | 'cancel' | 'destructive';
 
@@ -297,9 +298,9 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     fontSize: 16,
     textAlign: 'center',
-    color: '#007AFF', // iOS default action color
+    color: colors.primary,
   },
-  btnTextCancel: { color: '#007AFF', fontWeight: '900' },
+  btnTextCancel: { color: colors.primaryMuted, fontWeight: '900' },
   btnTextDestructive: { color: '#FF3B30' },
 });
 

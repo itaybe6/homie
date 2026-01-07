@@ -3,6 +3,7 @@ import { Platform, StyleProp, StyleSheet, Text, TextStyle, TouchableOpacity, Vie
 import Animated, { Easing, useAnimatedProps, useSharedValue, withTiming } from 'react-native-reanimated';
 import Svg, { Circle, G } from 'react-native-svg';
 import { TextInput } from 'react-native';
+import { alpha, colors } from '@/lib/theme';
 
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 const AnimatedTextInput = Animated.createAnimatedComponent(TextInput);
@@ -32,8 +33,8 @@ export default function DonutChart({
   size = 64,
   strokeWidth = 10,
   durationMs = 900,
-  color = '#16A34A',
-  trackColor = 'rgba(22,163,74,0.16)',
+  color = colors.success,
+  trackColor = alpha(colors.success, 0.16),
   textColor,
   style,
   textStyle,

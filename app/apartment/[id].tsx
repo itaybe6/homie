@@ -75,6 +75,7 @@ import FavoriteHeartButton from '@/components/FavoriteHeartButton';
 import { ShareMenuFab } from '@/components/ShareMenuFab';
 import { KeyFabPanel } from '@/components/KeyFabPanel';
 import WhatsAppSvg from '@/components/icons/WhatsAppSvg';
+import { colors } from '@/lib/theme';
 import * as Clipboard from 'expo-clipboard';
 
 export default function ApartmentDetailsScreen() {
@@ -82,7 +83,7 @@ export default function ApartmentDetailsScreen() {
   const navigation = useNavigation();
   const { id, returnTo, openAdd } = useLocalSearchParams();
   const { user } = useAuthStore();
-  const removeApartment = useApartmentStore((state) => state.removeApartment);
+  const removeApartment = useApartmentStore((state: any) => state.removeApartment);
 
   const openUserProfile = (targetUserId: string) => {
     const myId = String((user as any)?.id || '').trim();
@@ -146,7 +147,8 @@ export default function ApartmentDetailsScreen() {
   const [isViewerOpen, setViewerOpen] = useState(false);
   const [viewerIndex, setViewerIndex] = useState(0);
   const mapboxToken = process.env.EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN as string | undefined;
-  const mapboxStyleUrl = process.env.EXPO_PUBLIC_MAPBOX_STYLE_URL as string | undefined;
+  // Force Mapbox Standard style for Hebrew language support
+  const mapboxStyleUrl = 'mapbox://styles/mapbox/standard';
   const [aptGeo, setAptGeo] = useState<{ lng: number; lat: number } | null>(null);
   const [isGeocoding, setIsGeocoding] = useState(false);
   const [geoError, setGeoError] = useState<string>('');
@@ -1550,7 +1552,7 @@ export default function ApartmentDetailsScreen() {
 
           {moveInTagLabel ? (
             <View style={styles.moveInDateBadge}>
-              <Calendar size={16} color="#16A34A" />
+              <Calendar size={16} color={colors.success} />
               <Text style={styles.moveInDateText}>{moveInTagLabel}</Text>
             </View>
           ) : null}
@@ -1714,7 +1716,7 @@ export default function ApartmentDetailsScreen() {
           {!isOwner ? (
             <View style={styles.hostCard}>
               <LinearGradient
-                colors={typeof ownerMatchPercent === 'number' ? ['#4ADE80', '#16A34A'] : ['#D1D5DB', '#9CA3AF']}
+                colors={typeof ownerMatchPercent === 'number' ? [colors.successMuted, colors.success] : ['#D1D5DB', '#9CA3AF']}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 0, y: 1 }}
                 style={styles.hostMatchTab}
@@ -1871,8 +1873,14 @@ export default function ApartmentDetailsScreen() {
 
           {/* Household section */}
           {(() => {
+            const ownerId = String((apartment as any)?.owner_id || '');
+            const ownerIsAlsoPartner =
+              !!ownerId &&
+              currentPartnerIds.some(
+                (pid) => String(pid || '').toLowerCase() === ownerId.toLowerCase()
+              );
             const rawPeople = [
-              owner
+              owner && ownerIsAlsoPartner
                 ? {
                     id: (owner as any).id,
                     name: (owner as any).full_name || 'בעל הדירה',
@@ -2740,15 +2748,15 @@ const styles = StyleSheet.create({
     gap: 6,
     paddingHorizontal: 12,
     paddingVertical: 8,
-    backgroundColor: '#F0FDF4',
+    backgroundColor: 'rgba(255,255,255,0.92)',
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: '#86EFAC',
+    borderColor: 'rgba(64,97,84,0.30)',
   },
   moveInDateText: {
     fontSize: 15,
     fontWeight: '700',
-    color: '#16A34A',
+    color: colors.success,
     writingDirection: 'rtl',
   },
   ownerPasscodeCard: {
@@ -3220,7 +3228,7 @@ const styles = StyleSheet.create({
     flexShrink: 1,
   },
   statusChipTextGreen: {
-    color: '#16A34A',
+    color: colors.success,
   },
   statusChipTextPending: {
     color: '#374151',
@@ -3304,7 +3312,7 @@ const styles = StyleSheet.create({
     writingDirection: 'ltr',
   },
   navPill: {
-    backgroundColor: '#16A34A',
+    backgroundColor: colors.success,
     borderRadius: 12,
     paddingHorizontal: 12,
     paddingVertical: 8,
@@ -3313,7 +3321,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     ...(Platform.OS === 'ios'
       ? {
-          shadowColor: '#16A34A',
+          shadowColor: colors.success,
           shadowOpacity: 0.22,
           shadowRadius: 8,
           shadowOffset: { width: 0, height: 5 },
@@ -3583,7 +3591,7 @@ const styles = StyleSheet.create({
     writingDirection: 'rtl',
   },
   mapNavPill: {
-    backgroundColor: '#16A34A',
+    backgroundColor: colors.success,
     borderRadius: 12,
     paddingHorizontal: 10,
     paddingVertical: 8,
@@ -4133,8 +4141,8 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
   confirmApprovePrimary: {
-    backgroundColor: '#5e3f2d',
-    borderColor: '#5e3f2d',
+    backgroundColor: colors.success,
+    borderColor: colors.success,
   },
   confirmApprovePrimaryText: {
     color: '#FFFFFF',

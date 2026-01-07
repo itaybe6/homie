@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Platform, StyleProp, StyleSheet, Text, View, ViewStyle } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import Ticker from '@/components/Ticker';
+import { colors as themeColors } from '@/lib/theme';
 
 type MatchPercentBadgeProps = {
   value?: number | null;
@@ -52,10 +53,10 @@ export default function MatchPercentBadge({
   }, [normalized, triggerKey]);
 
   const isDisabled = typeof normalized !== 'number';
-  const colors =
+  const gradientColors =
     isDisabled
       ? (['rgba(17,24,39,0.55)', 'rgba(17,24,39,0.35)'] as const)
-      : (['#4ADE80', '#16A34A'] as const);
+      : ([themeColors.successMuted, themeColors.success] as const);
   // White outline to pop on top of photos (especially the green "match" badge)
   const borderColor = isDisabled ? 'rgba(255,255,255,0.22)' : 'rgba(255,255,255,0.90)';
   const borderWidth = isDisabled ? 1 : 2;
@@ -67,7 +68,7 @@ export default function MatchPercentBadge({
   return (
     <View style={[styles.shadowWrap, { width: size, height: size, borderRadius: size / 2 }, style]}>
       <LinearGradient
-        colors={colors as any}
+        colors={gradientColors as any}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
         style={[

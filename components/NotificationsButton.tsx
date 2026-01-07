@@ -6,6 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/authStore';
 import { useNotificationsStore } from '@/stores/notificationsStore';
+import { alpha, colors } from '@/lib/theme';
 
 type Props = {
   style?: ViewStyle;
@@ -21,7 +22,7 @@ function NotificationsButtonBase({ style, badgeCount }: Props) {
   const lastSeenAt = useNotificationsStore((s) => s.lastSeenAt);
 
   // Keep consistent with Home screen action icons (map/filter/search).
-  const ICON_COLOR = '#5e3f2d';
+  const ICON_COLOR = colors.primary;
 
   useEffect(() => {
     let isMounted = true;
@@ -247,7 +248,7 @@ const styles = StyleSheet.create({
     height: 18,
     paddingHorizontal: 4,
     borderRadius: 9,
-    backgroundColor: 'rgba(94,63,45,0.85)',
+    backgroundColor: alpha(colors.success, 0.92),
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 0,

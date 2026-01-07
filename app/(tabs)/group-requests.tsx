@@ -18,6 +18,7 @@ import { useAuthStore } from '@/stores/authStore';
 import { User } from '@/types/database';
 import { computeGroupAwareLabel } from '@/lib/group';
 import { insertNotificationOnce } from '@/lib/notifications';
+import { alpha, colors } from '@/lib/theme';
 
 type StatusFilterValue = 'ALL' | 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED' | 'NOT_RELEVANT';
 
@@ -482,7 +483,7 @@ export default function GroupRequestsScreen() {
   const StatusPill = ({ status }: { status: UnifiedItem['status'] }) => {
     const config: Record<UnifiedItem['status'], { bg: string; color: string; text: string }> = {
       PENDING: { bg: '#363649', color: '#E5E7EB', text: 'ממתין' },
-      APPROVED: { bg: 'rgba(34,197,94,0.18)', color: '#22C55E', text: 'אושר' },
+      APPROVED: { bg: alpha(colors.success, 0.18), color: colors.success, text: 'אושר' },
       REJECTED: { bg: 'rgba(248,113,113,0.18)', color: '#F87171', text: 'נדחה' },
       CANCELLED: { bg: 'rgba(148,163,184,0.18)', color: '#94A3B8', text: 'בוטל' },
       NOT_RELEVANT: { bg: 'rgba(148,163,184,0.18)', color: '#94A3B8', text: 'לא רלוונטי' },
@@ -928,13 +929,13 @@ const styles = StyleSheet.create({
   approveBtn: {
     backgroundColor: 'transparent',
     borderWidth: 1,
-    borderColor: 'rgba(34,197,94,0.6)',
+    borderColor: alpha(colors.success, 0.6),
     paddingHorizontal: 12,
     paddingVertical: 10,
     borderRadius: 10,
   },
   approveBtnText: {
-    color: '#22C55E',
+    color: colors.success,
     fontSize: 14,
     fontWeight: '800',
   },

@@ -11,6 +11,8 @@ export type MapboxFeatureCollection = {
   features: MapboxPointFeature[];
 };
 
+import { palette } from '@/lib/theme';
+
 export function buildMapboxHtml(params: {
   accessToken: string;
   styleUrl?: string;
@@ -27,13 +29,14 @@ export function buildMapboxHtml(params: {
   const center = params.center ?? [34.7818, 32.0853];
   const zoom = typeof params.zoom === 'number' ? params.zoom : 11;
   const token = params.accessToken;
-  const styleUrl = params.styleUrl || 'mapbox://styles/mapbox/streets-v12';
+  // Use Mapbox Standard style which has built-in Hebrew language support
+  const styleUrl = params.styleUrl || 'mapbox://styles/mapbox/standard';
   const points = params.points ?? { type: 'FeatureCollection', features: [] };
   const pointColor = (params.pointColor || '').trim() || '#8B5CF6'; // default: purple
   const labelColor = '#6D28D9'; // purple (Tailwind violet-700)
   const pulsePoints = !!params.pulsePoints;
   const userLocation = params.userLocation;
-  const userDotColor = '#22C55E';
+  const userDotColor = palette.successGreen;
 
   // NOTE: This HTML is used inside WebView (native) and iframe srcDoc (web).
   return `<!doctype html>
@@ -108,7 +111,6 @@ export function buildMapboxHtml(params: {
       .aptTitle { font-weight: 900; font-size: 16px; color: #111827; margin: 0 0 6px; }
       .aptMeta { font-size: 12px; color: #374151; margin: 0 0 10px; }
       .aptMetaMuted { color: #6B7280; }
-      /* (removed) avatars section */
     </style>
   </head>
   <body>
@@ -125,8 +127,6 @@ export function buildMapboxHtml(params: {
           }
           mapboxgl.accessToken = token;
 
-          // Enable proper RTL shaping/ordering for Hebrew (and other RTL scripts).
-          // Without this, Hebrew labels can appear left-to-right or with broken glyph ordering.
           try {
             if (mapboxgl && typeof mapboxgl.setRTLTextPlugin === 'function') {
               mapboxgl.setRTLTextPlugin(
@@ -144,51 +144,46 @@ export function buildMapboxHtml(params: {
           var hasExplicitCenter = ${JSON.stringify(hasExplicitCenter)};
           var pulsePoints = ${JSON.stringify(pulsePoints)};
           var userLocation = ${JSON.stringify(userLocation ?? null)};
+
           var map = new mapboxgl.Map({
             container: 'map',
             style: styleUrl,
             center: center,
             zoom: zoom,
           });
-          // Intentionally no built-in UI controls (zoom +/- / compass / scale).
-          // We keep the map clean and rely on gestures (pinch/drag) and the app UI.
 
-          // Make base-map place/road/POI labels purple (instead of default gray).
-          // Some styles keep mutating layers after load, so we also retry on idle/styledata.
+          // Set Hebrew language for Mapbox Standard style (official API for v3+)
+          map.on('style.load', function() {
+            try {
+              // For Mapbox Standard style - use config property
+              if (map.setConfigProperty) {
+                map.setConfigProperty('basemap', 'language', 'he');
+              }
+            } catch (_) {}
+            
+            // Fallback: manually update all symbol layers to use Hebrew names
+            try {
+              var style = map.getStyle();
+              if (style && style.layers) {
+                for (var i = 0; i < style.layers.length; i++) {
+                  var layer = style.layers[i];
+                  if (layer.type === 'symbol') {
+                    try {
+                      map.setLayoutProperty(layer.id, 'text-field', [
+                        'coalesce',
+                        ['get', 'name_he'],
+                        ['get', 'name:he'],
+                        ['get', 'name']
+                      ]);
+                    } catch (_) {}
+                  }
+                }
+              }
+            } catch (_) {}
+          });
+
           var __labelsApplied = false;
           var __applyScheduled = false;
-          var __heApplied = false;
-
-          function applyHebrewLabels() {
-            try {
-              var style = map.getStyle && map.getStyle();
-              if (!style || !style.layers) return;
-              var changed = 0;
-              for (var i = 0; i < style.layers.length; i++) {
-                var layer = style.layers[i];
-                if (!layer || layer.type !== 'symbol') continue;
-                var layout = layer.layout || {};
-                // Only touch layers that actually render text.
-                if (!layout || typeof layout !== 'object') continue;
-                if (!('text-field' in layout)) continue;
-                var tf = layout['text-field'];
-                // Avoid clobbering complex formatted expressions (icons+text etc.)
-                if (Array.isArray(tf) && tf.length > 0 && tf[0] === 'format') continue;
-
-                try {
-                  map.setLayoutProperty(layer.id, 'text-field', [
-                    'coalesce',
-                    ['get', 'name_he'],
-                    ['get', 'name:he'],
-                    ['get', 'name'],
-                    ['get', 'name_en'],
-                  ]);
-                  changed++;
-                } catch (_) {}
-              }
-              if (changed > 0) __heApplied = true;
-            } catch (_) {}
-          }
 
           function applyPurpleLabels() {
             __applyScheduled = false;
@@ -199,265 +194,160 @@ export function buildMapboxHtml(params: {
               for (var i = 0; i < style.layers.length; i++) {
                 var layer = style.layers[i];
                 if (!layer || layer.type !== 'symbol') continue;
-                // Try regardless of whether text-field exists; errors are caught.
-                try { map.setPaintProperty(layer.id, 'text-color', ${JSON.stringify(labelColor)}); changed++; } catch (_) {}
-                // Keep labels readable on a light basemap
-                try { map.setPaintProperty(layer.id, 'text-halo-color', '#FFFFFF'); } catch (_) {}
-                try { map.setPaintProperty(layer.id, 'text-halo-width', 1.2); } catch (_) {}
+                try {
+                  map.setPaintProperty(layer.id, 'text-color', ${JSON.stringify(labelColor)});
+                  map.setPaintProperty(layer.id, 'text-halo-color', '#FFFFFF');
+                  map.setPaintProperty(layer.id, 'text-halo-width', 1.2);
+                  changed++;
+                } catch (_) {}
               }
               if (changed > 0) __labelsApplied = true;
             } catch (_) {}
           }
+
           function scheduleApply() {
-            if ((__labelsApplied && __heApplied) || __applyScheduled) return;
+            if (__labelsApplied || __applyScheduled) return;
             __applyScheduled = true;
             try {
-              requestAnimationFrame(function () {
-                applyHebrewLabels();
-                applyPurpleLabels();
-              });
+              requestAnimationFrame(applyPurpleLabels);
             } catch (_) {
-              setTimeout(function () {
-                applyHebrewLabels();
-                applyPurpleLabels();
-              }, 0);
+              setTimeout(applyPurpleLabels, 0);
             }
           }
-          map.on('style.load', function () { __labelsApplied = false; __heApplied = false; scheduleApply(); });
-          map.on('styledata', function () { __labelsApplied = false; __heApplied = false; scheduleApply(); });
+
+          map.on('style.load', function () { __labelsApplied = false; scheduleApply(); });
+          map.on('styledata', function () { __labelsApplied = false; scheduleApply(); });
           map.on('idle', function () { scheduleApply(); });
 
           map.on('load', function () {
             try {
               scheduleApply();
-              // User location (green dot)
               if (userLocation && Array.isArray(userLocation) && userLocation.length === 2) {
-                try {
-                  map.addSource('user-location', {
-                    type: 'geojson',
-                    data: {
-                      type: 'FeatureCollection',
-                      features: [
-                        { type: 'Feature', geometry: { type: 'Point', coordinates: userLocation }, properties: {} }
-                      ]
-                    }
-                  });
-                  map.addLayer({
-                    id: 'user-location-dot',
-                    type: 'circle',
-                    source: 'user-location',
-                    paint: {
-                      'circle-radius': 7,
-                      'circle-color': ${JSON.stringify(userDotColor)},
-                      'circle-opacity': 1,
-                      'circle-stroke-width': 2,
-                      'circle-stroke-color': '#FFFFFF'
-                    }
-                  });
-                } catch (_) {}
+                map.addSource('user-location', {
+                  type: 'geojson',
+                  data: {
+                    type: 'FeatureCollection',
+                    features: [{ type: 'Feature', geometry: { type: 'Point', coordinates: userLocation }, properties: {} }]
+                  }
+                });
+                map.addLayer({
+                  id: 'user-location-dot',
+                  type: 'circle',
+                  source: 'user-location',
+                  paint: {
+                    'circle-radius': 7,
+                    'circle-color': ${JSON.stringify(userDotColor)},
+                    'circle-opacity': 1,
+                    'circle-stroke-width': 2,
+                    'circle-stroke-color': '#FFFFFF'
+                  }
+                });
               }
 
               var hasApts = !!(points && points.features && points.features.length);
-              if (!hasApts) return;
+              if (hasApts) {
+                map.addSource('apartments', { type: 'geojson', data: points });
+                map.addLayer({
+                  id: 'apt-circles',
+                  type: 'circle',
+                  source: 'apartments',
+                  paint: {
+                    'circle-radius': 8,
+                    'circle-color': ${JSON.stringify(pointColor)},
+                    'circle-opacity': 0.9,
+                    'circle-stroke-width': 2,
+                    'circle-stroke-color': '#FFFFFF'
+                  }
+                });
 
-              map.addSource('apartments', {
-                type: 'geojson',
-                data: points,
-              });
-
-              map.addLayer({
-                id: 'apt-circles',
-                type: 'circle',
-                source: 'apartments',
-                paint: {
-                  'circle-radius': 8,
-                  'circle-color': ${JSON.stringify(pointColor)},
-                  'circle-opacity': 0.9,
-                  'circle-stroke-width': 2,
-                  'circle-stroke-color': '#FFFFFF'
-                }
-              });
-
-              // Optional slow pulsing ring (behind the main point)
-              if (pulsePoints) {
-                try {
-                  map.addLayer(
-                    {
-                      id: 'apt-pulse',
-                      type: 'circle',
-                      source: 'apartments',
-                      paint: {
-                        'circle-radius': 12,
-                        'circle-color': ${JSON.stringify(pointColor)},
-                        'circle-opacity': 0.28,
-                        'circle-stroke-width': 0,
-                      },
+                if (pulsePoints) {
+                  map.addLayer({
+                    id: 'apt-pulse',
+                    type: 'circle',
+                    source: 'apartments',
+                    paint: {
+                      'circle-radius': 12,
+                      'circle-color': ${JSON.stringify(pointColor)},
+                      'circle-opacity': 0.28,
+                      'circle-stroke-width': 0,
                     },
-                    'apt-circles'
-                  );
+                  }, 'apt-circles');
 
-                  // Animate radius + opacity in a loop (slow pulse)
-                  var __pulseStart = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
-                  var __pulseDuration = 2600; // ms
+                  var __pulseStart = Date.now();
+                  var __pulseDuration = 2600;
                   function __tickPulse() {
-                    try {
-                      if (!map || !map.isStyleLoaded || !map.isStyleLoaded()) {
-                        requestAnimationFrame(__tickPulse);
-                        return;
-                      }
-                      // If layer was removed (style change), stop trying.
-                      if (!map.getLayer || !map.getLayer('apt-pulse')) return;
-                      var now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
-                      var t = ((now - __pulseStart) % __pulseDuration) / __pulseDuration; // 0..1
-                      // Ease-out-ish curve
-                      var ease = 1 - Math.pow(1 - t, 2);
-                      var radius = 10 + ease * 16; // 10..26
-                      var opacity = (1 - ease) * 0.28; // 0.28..0
-                      map.setPaintProperty('apt-pulse', 'circle-radius', radius);
-                      map.setPaintProperty('apt-pulse', 'circle-opacity', opacity);
-                      requestAnimationFrame(__tickPulse);
-                    } catch (_) {
-                      // swallow errors so the map never crashes
-                    }
+                    if (!map || !map.getLayer('apt-pulse')) return;
+                    var t = ((Date.now() - __pulseStart) % __pulseDuration) / __pulseDuration;
+                    var ease = 1 - Math.pow(1 - t, 2);
+                    map.setPaintProperty('apt-pulse', 'circle-radius', 10 + ease * 16);
+                    map.setPaintProperty('apt-pulse', 'circle-opacity', (1 - ease) * 0.28);
+                    requestAnimationFrame(__tickPulse);
                   }
                   requestAnimationFrame(__tickPulse);
-                } catch (_) {}
-              }
+                }
 
-              // Fit bounds to points (only when center isn't explicitly provided)
-              if (!hasExplicitCenter) {
-                var bounds = new mapboxgl.LngLatBounds();
-                points.features.forEach(function (f) {
-                  var c = f && f.geometry && f.geometry.coordinates;
-                  if (!c || c.length < 2) return;
-                  bounds.extend(c);
-                });
-                if (typeof bounds.isEmpty === 'function' ? !bounds.isEmpty() : true) {
-                  map.fitBounds(bounds, { padding: 60, duration: 0, maxZoom: 14 });
+                if (!hasExplicitCenter) {
+                  var bounds = new mapboxgl.LngLatBounds();
+                  points.features.forEach(function (f) {
+                    var c = f && f.geometry && f.geometry.coordinates;
+                    if (c && c.length >= 2) bounds.extend(c);
+                  });
+                  if (!bounds.isEmpty()) map.fitBounds(bounds, { padding: 60, duration: 0, maxZoom: 14 });
                 }
               }
 
-              // Popup on click
               map.on('click', 'apt-circles', function (e) {
-                var f = e && e.features && e.features[0];
-                if (!f) return;
+                var f = e.features[0];
                 var props = f.properties || {};
-                var title = props.title || 'דירה';
-                var address = props.address || '';
-                var city = props.city || '';
-                var imageUrl = props.image_url || '';
-                var imageUrlsJson = props.image_urls_json || '[]';
-                var aptId = props.id || '';
                 var imageUrls = [];
-                try { imageUrls = JSON.parse(String(imageUrlsJson) || '[]') || []; } catch (_) { imageUrls = []; }
-                if (!Array.isArray(imageUrls)) imageUrls = [];
-                // Ensure at least one image
-                if (imageUrls.length === 0 && imageUrl) imageUrls = [String(imageUrl)];
+                try { imageUrls = JSON.parse(props.image_urls_json || '[]'); } catch (_) {}
+                if (imageUrls.length === 0 && props.image_url) imageUrls = [props.image_url];
                 if (imageUrls.length === 0) imageUrls = ['https://images.pexels.com/photos/1457842/pexels-photo-1457842.jpeg'];
 
-                // Build popup DOM safely (no innerHTML injection)
                 var root = document.createElement('div');
                 root.className = 'aptCard';
-                root.style.cursor = 'pointer';
-
                 var body = document.createElement('div');
                 body.className = 'aptBody';
-
-                // Image carousel (swipe)
                 var carousel = document.createElement('div');
                 carousel.className = 'carousel';
-                carousel.style.cursor = 'default';
                 imageUrls.slice(0, 10).forEach(function (u) {
-                  var slide = document.createElement('div');
-                  slide.className = 'slide';
-                  var inner = document.createElement('div');
-                  inner.className = 'slideInner';
-                  var im = document.createElement('img');
-                  im.className = 'slideImg';
-                  im.alt = String(title || 'דירה');
-                  im.loading = 'lazy';
-                  im.src = String(u);
-                  im.onerror = function () {
-                    im.src = 'https://images.pexels.com/photos/1457842/pexels-photo-1457842.jpeg';
-                  };
-                  inner.appendChild(im);
-                  slide.appendChild(inner);
-                  carousel.appendChild(slide);
+                  var slide = document.createElement('div'); slide.className = 'slide';
+                  var inner = document.createElement('div'); inner.className = 'slideInner';
+                  var im = document.createElement('img'); im.className = 'slideImg'; im.src = u;
+                  im.onerror = function() { im.src='https://images.pexels.com/photos/1457842/pexels-photo-1457842.jpeg'; };
+                  inner.appendChild(im); slide.appendChild(inner); carousel.appendChild(slide);
                 });
                 body.appendChild(carousel);
-
-                var h = document.createElement('div');
-                h.className = 'aptTitle';
-                h.textContent = String(title || 'דירה');
-                body.appendChild(h);
-
-                var meta = document.createElement('div');
-                meta.className = 'aptMeta';
-                var addrText = String(address || '').trim();
-                var cityText = String(city || '').trim();
-                meta.textContent = addrText;
-                if (cityText) {
-                  var span = document.createElement('span');
-                  span.className = 'aptMetaMuted';
-                  span.textContent = (addrText ? ' • ' : '') + cityText;
-                  meta.appendChild(span);
-                }
+                var h = document.createElement('div'); h.className = 'aptTitle'; h.textContent = props.title || 'דירה'; body.appendChild(h);
+                var meta = document.createElement('div'); meta.className = 'aptMeta'; meta.textContent = props.address || '';
+                if (props.city) { var s = document.createElement('span'); s.className = 'aptMetaMuted'; s.textContent = (props.address ? ' • ' : '') + props.city; meta.appendChild(s); }
                 body.appendChild(meta);
-
-                // Tap popup to open apartment details (but don't trigger on swipe)
-                var startX = 0, startY = 0, startT = 0;
-                function sendOpen() {
-                  var idStr = String(aptId || '').trim();
-                  if (!idStr) return;
-                  var payload = JSON.stringify({ type: 'OPEN_APARTMENT', id: idStr });
-                  try {
-                    if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) {
-                      window.ReactNativeWebView.postMessage(payload);
-                    }
-                  } catch (_) {}
-                  try {
-                    if (window.parent && window.parent !== window && window.parent.postMessage) {
-                      window.parent.postMessage(payload, '*');
-                    }
-                  } catch (_) {}
-                }
-                function onStart(x, y) { startX = x; startY = y; startT = Date.now(); }
-                function onEnd(x, y) {
-                  var dx = Math.abs(x - startX);
-                  var dy = Math.abs(y - startY);
-                  var dt = Date.now() - startT;
-                  if (dx <= 8 && dy <= 8 && dt <= 450) sendOpen();
-                }
-                root.addEventListener('touchstart', function (ev) {
-                  if (!ev || !ev.touches || !ev.touches[0]) return;
-                  onStart(ev.touches[0].clientX, ev.touches[0].clientY);
-                }, { passive: true });
-                root.addEventListener('touchend', function (ev) {
-                  if (!ev || !ev.changedTouches || !ev.changedTouches[0]) return;
-                  onEnd(ev.changedTouches[0].clientX, ev.changedTouches[0].clientY);
-                }, { passive: true });
-                root.addEventListener('mousedown', function (ev) { onStart(ev.clientX, ev.clientY); });
-                root.addEventListener('mouseup', function (ev) { onEnd(ev.clientX, ev.clientY); });
                 root.appendChild(body);
 
-                new mapboxgl.Popup({ closeButton: true, closeOnClick: true })
-                  .setLngLat(e.lngLat)
-                  .setDOMContent(root)
-                  .addTo(map);
-              });
+                var startX, startY, startT;
+                function onEnd(x, y) {
+                  if (Math.abs(x-startX) <= 8 && Math.abs(y-startY) <= 8 && (Date.now()-startT) <= 450) {
+                    var payload = JSON.stringify({ type: 'OPEN_APARTMENT', id: props.id });
+                    if (window.ReactNativeWebView) window.ReactNativeWebView.postMessage(payload);
+                    if (window.parent && window.parent.postMessage) window.parent.postMessage(payload, '*');
+                  }
+                }
+                root.onmousedown = function(e) { startX=e.clientX; startY=e.clientY; startT=Date.now(); };
+                root.onmouseup = function(e) { onEnd(e.clientX, e.clientY); };
+                root.ontouchstart = function(e) { startX=e.touches[0].clientX; startY=e.touches[0].clientY; startT=Date.now(); };
+                root.ontouchend = function(e) { onEnd(e.changedTouches[0].clientX, e.changedTouches[0].clientY); };
 
+                new mapboxgl.Popup({ closeButton: true }).setLngLat(e.lngLat).setDOMContent(root).addTo(map);
+              });
               map.on('mouseenter', 'apt-circles', function () { map.getCanvas().style.cursor = 'pointer'; });
               map.on('mouseleave', 'apt-circles', function () { map.getCanvas().style.cursor = ''; });
             } catch (_) {}
           });
         } catch (e) {
-          document.getElementById('map').outerHTML =
-            '<div class="error">שגיאה בטעינת המפה</div>';
+          document.getElementById('map').outerHTML = '<div class="error">שגיאה בטעינת המפה</div>';
         }
       })();
     </script>
   </body>
 </html>`;
 }
-
-
