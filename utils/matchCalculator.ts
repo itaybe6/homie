@@ -3,12 +3,12 @@
 export type BinaryPreference = 'allow' | 'preferNo' | 'forbid';
 
 export type DietType = 'ללא הגבלה' | 'צמחוני' | 'טבעוני' | 'כשר';
-export type Lifestyle =
-  | 'רגוע'
-  | 'פעיל'
-  | 'ספונטני'
-  | 'ביתי'
-  | 'חברתי'
+export type HomeLifestyle =
+  | 'שקט וביתי'
+  | 'רגוע ולימודי'
+  | 'מאוזן'
+  | 'חברתי ופעיל'
+  | 'זורם וספונטני'
   | string;
 export type CleaningFrequency =
   | 'פעם בשבוע'
@@ -17,8 +17,7 @@ export type CleaningFrequency =
   | 'כאשר צריך'
   | string;
 export type HostingPreference = 'פעם בשבוע' | 'לפעמים' | 'כמה שיותר' | string;
-export type CookingStyle = 'כל אחד לעצמו' | 'לפעמים מתחלקים' | 'מבשלים יחד' | string;
-export type HomeVibe = 'שקטה ולימודית' | 'זורמת וחברתית' | 'לא משנה לי' | string;
+export type CookingStyle = 'קניות משותפות' | 'כל אחד לעצמו' | 'לא משנה לי' | string;
 
 export type PartnerSmokingPref = 'אין בעיה' | 'מעדיפ/ה שלא' | null;
 export type PartnerShabbatPref = 'אין בעיה' | 'מעדיפ/ה שלא' | null;
@@ -32,33 +31,27 @@ export type CompatUserSurvey = {
   is_shomer_shabbat?: boolean | null;
   keeps_kosher?: boolean | null;
   diet_type?: DietType | null;
-  lifestyle?: Lifestyle | null;
+  home_lifestyle?: HomeLifestyle | null;
   cleanliness_importance?: number | null; // 1-5
   cleaning_frequency?: CleaningFrequency | null;
   hosting_preference?: HostingPreference | null;
   cooking_style?: CookingStyle | null;
-  home_vibe?: HomeVibe | null; // expectation for vibe/noise
   age?: number | null;
   gender?: 'male' | 'female' | null;
   occupation?: 'student' | 'worker' | string | null;
-  works_from_home?: boolean | null;
   relationship_status?: string | null;
   city?: string | null;
   price_range?: number | null;
-  bills_included?: boolean | null;
   preferred_city?: string | null;
   preferred_neighborhoods?: string[] | null;
   floor_preference?: string | null;
   has_balcony?: boolean | null;
-  has_elevator?: boolean | null;
-  wants_master_room?: boolean | null;
   move_in_month?: string | null;
   is_sublet?: boolean | null;
   sublet_month_from?: string | null;
   sublet_month_to?: string | null;
   preferred_roommates?: number | null;
   pets_allowed?: boolean | null;
-  with_broker?: boolean | null;
   // Acceptance/preferences for partner
   partner_smoking_preference?: PartnerSmokingPref;
   partner_shabbat_preference?: PartnerShabbatPref;
@@ -176,19 +169,13 @@ function dietCompatibilityScore(pref: PartnerDietPref, target: { diet_type?: Die
   return 1;
 }
 
-function vibeToNoiseLevel(vibe: HomeVibe | null | undefined): number | null {
-  if (!vibe) return null;
-  if (vibe === 'לא משנה לי') return null;
-  if (vibe === 'שקטה ולימודית') return 1;
-  if (vibe === 'זורמת וחברתית') return 5;
-  return null;
-}
-function lifestyleToNoiseLevel(style: Lifestyle | null | undefined): number | null {
+function homeLifestyleToNoiseLevel(style: HomeLifestyle | null | undefined): number | null {
   if (!style) return null;
-  const quietSet = new Set<Lifestyle>(['רגוע', 'ביתי']);
-  const louderSet = new Set<Lifestyle>(['חברתי', 'פעיל', 'ספונטני']);
+  const quietSet = new Set<HomeLifestyle>(['שקט וביתי', 'רגוע ולימודי']);
+  const loudSet = new Set<HomeLifestyle>(['חברתי ופעיל', 'זורם וספונטני']);
   if (quietSet.has(style)) return 2;
-  if (louderSet.has(style)) return 4;
+  if (loudSet.has(style)) return 4;
+  if (style === 'מאוזן') return 3;
   return null;
 }
 
@@ -486,35 +473,22 @@ export function calculateMatchScore(
     add(weights.partnerOver, [s1 ?? undefined, s2 ?? undefined]);
   }
 
-  // Critical: noise (expectation vs lifestyle)
+  // Critical: home lifestyle compatibility
   {
-    const myExpect = vibeToNoiseLevel(myAnswers.home_vibe ?? null);
-    const theirStyle = lifestyleToNoiseLevel(theirAnswers.lifestyle ?? null);
-    const theirExpect = vibeToNoiseLevel(theirAnswers.home_vibe ?? null);
-    const myStyle = lifestyleToNoiseLevel(myAnswers.lifestyle ?? null);
+    const myLevel = homeLifestyleToNoiseLevel(myAnswers.home_lifestyle ?? null);
+    const theirLevel = homeLifestyleToNoiseLevel(theirAnswers.home_lifestyle ?? null);
 
-    const s1 = calculateRangeMatch(
-      myExpect === null ? undefined : myExpect,
-      theirStyle === null ? undefined : theirStyle,
-      5,
-    );
-    const s2 = calculateRangeMatch(
-      theirExpect === null ? undefined : theirExpect,
-      myStyle === null ? undefined : myStyle,
-      5,
-    );
-    add(weights.noise, [s1, s2]);
-  }
-
-  // Important: lifestyle (direct similarity)
-  {
-    const s = calculateCategoryMatch(myAnswers.lifestyle || null, theirAnswers.lifestyle || null, {
+    const s = calculateRangeMatch(myLevel ?? undefined, theirLevel ?? undefined, 5);
+    add(weights.noise, [s]);
+    
+    // Direct similarity check
+    const directMatch = calculateCategoryMatch(myAnswers.home_lifestyle || null, theirAnswers.home_lifestyle || null, {
       similarGroups: [
-        new Set(['רגוע', 'ביתי']),
-        new Set(['פעיל', 'חברתי', 'ספונטני']),
+        new Set(['שקט וביתי', 'רגוע ולימודי']),
+        new Set(['חברתי ופעיל', 'זורם וספונטני']),
       ],
     });
-    add(weights.lifestyle, [s]);
+    add(weights.lifestyle, [directMatch]);
   }
 
   // Important: cleanliness (importance 1-5)
@@ -567,12 +541,6 @@ export function calculateMatchScore(
     add(weights.occupationPref, [pref1, pref2, occSimilarity]);
   }
 
-  // Work style (WFH)
-  {
-    const s = booleanAgreement(myAnswers.works_from_home, theirAnswers.works_from_home, { mismatchScore: 0.6 });
-    add(weights.wfh, [s]);
-  }
-
   // Location expectations
   {
     const locationScore = calculateLocationCompatibility(myAnswers, theirAnswers);
@@ -583,13 +551,6 @@ export function calculateMatchScore(
   {
     const budgetScore = calculateBudgetCompatibility(myAnswers.price_range ?? null, theirAnswers.price_range ?? null);
     add(weights.budget, [budgetScore]);
-  }
-
-  // Bills & broker preferences
-  {
-    const billsScore = booleanAgreement(myAnswers.bills_included, theirAnswers.bills_included);
-    const brokerScore = booleanAgreement(myAnswers.with_broker, theirAnswers.with_broker);
-    add(weights.bills, [billsScore, brokerScore]);
   }
 
   // Move-in timing
@@ -608,8 +569,6 @@ export function calculateMatchScore(
   {
     const amenityScores = [
       softBooleanPreferenceMatch(myAnswers.has_balcony, theirAnswers.has_balcony),
-      softBooleanPreferenceMatch(myAnswers.has_elevator, theirAnswers.has_elevator),
-      softBooleanPreferenceMatch(myAnswers.wants_master_room, theirAnswers.wants_master_room),
       floorPreferenceMatch(myAnswers.floor_preference, theirAnswers.floor_preference),
     ];
     add(weights.amenities, amenityScores);

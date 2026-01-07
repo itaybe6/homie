@@ -25,7 +25,7 @@ function buildDetailsItems(survey?: UserSurveyResponse | null): DetailItem[] {
   push(MapPin, 'עיר מועדפת', survey.preferred_city || '');
   if (typeof survey.price_range === 'number') push(Wallet, 'תקציב חודשי', formatCurrencyILS(survey.price_range));
   push(CalendarDays, 'כניסה מתוכננת', formatMonthLabel(survey.move_in_month));
-  push(Sparkles, 'וייב', ((survey as any).lifestyle || survey.home_vibe || '') as string);
+  push(Sparkles, 'וייב', ((survey as any).home_lifestyle || '') as string);
 
   if (typeof survey.is_smoker === 'boolean') push(Cigarette, 'מעשן/ת', survey.is_smoker ? 'כן' : 'לא');
   if (typeof survey.keeps_kosher === 'boolean') push(UtensilsCrossed, 'כשרות', survey.keeps_kosher ? 'כן' : 'לא');

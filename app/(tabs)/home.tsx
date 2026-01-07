@@ -364,7 +364,7 @@ export default function HomeScreen() {
           inactiveTextColor={colors.primary}
           inactiveIconColor={colors.primary}
           // Active chips: soft green highlight (less brown repetition)
-          activeBackgroundColor={alpha(colors.successMuted, 0.85)}
+          activeBackgroundColor={alpha(colors.success, 0.86)}
           activeBorderColor={alpha(colors.success, 0.6)}
           activeTextColor={colors.white}
           activeIconColor={colors.white}

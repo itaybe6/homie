@@ -14,8 +14,7 @@ import {
   useWindowDimensions,
   Linking,
 } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useFocusEffect } from '@react-navigation/native';
+import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { User } from '@/types/database';
 import { ArrowLeft, MapPin, UserPlus2, Cigarette, PawPrint, Utensils, Moon, Users, Home, Calendar, User as UserIcon, Building2, Bed, Heart, Briefcase, ClipboardList, Images, X, Instagram } from 'lucide-react-native';
@@ -34,11 +33,10 @@ import {
   calculateMatchScore,
   CompatUserSurvey,
   DietType,
-  Lifestyle,
+  HomeLifestyle,
   CleaningFrequency,
   HostingPreference,
   CookingStyle,
-  HomeVibe,
   PartnerSmokingPref,
   PartnerShabbatPref,
   PartnerDietPref,
@@ -159,23 +157,18 @@ function buildCompatSurvey(
   if (typeof survey?.is_shomer_shabbat === 'boolean') compat.is_shomer_shabbat = survey.is_shomer_shabbat;
   if (typeof survey?.keeps_kosher === 'boolean') compat.keeps_kosher = survey.keeps_kosher;
   if (survey?.diet_type) compat.diet_type = survey.diet_type as DietType;
-  if (survey?.lifestyle) compat.lifestyle = survey.lifestyle as Lifestyle;
+  if ((survey as any)?.home_lifestyle) compat.home_lifestyle = (survey as any).home_lifestyle as HomeLifestyle;
   if (typeof survey?.cleanliness_importance === 'number') compat.cleanliness_importance = survey.cleanliness_importance;
   if (survey?.cleaning_frequency) compat.cleaning_frequency = survey.cleaning_frequency as CleaningFrequency;
   if (survey?.hosting_preference) compat.hosting_preference = survey.hosting_preference as HostingPreference;
   if (survey?.cooking_style) compat.cooking_style = survey.cooking_style as CookingStyle;
-  if (survey?.home_vibe) compat.home_vibe = survey.home_vibe as HomeVibe;
   if (survey?.preferred_city) compat.preferred_city = survey.preferred_city;
   if (Array.isArray((survey as any)?.preferred_neighborhoods))
     compat.preferred_neighborhoods = (survey as any).preferred_neighborhoods;
   if (Number.isFinite(survey?.price_range as number)) compat.price_range = Number(survey?.price_range);
-  if (typeof survey?.bills_included === 'boolean') compat.bills_included = survey.bills_included;
   if (survey?.floor_preference) compat.floor_preference = survey.floor_preference;
   if (typeof survey?.has_balcony === 'boolean') compat.has_balcony = survey.has_balcony;
-  if (typeof survey?.has_elevator === 'boolean') compat.has_elevator = survey.has_elevator;
-  if (typeof survey?.wants_master_room === 'boolean') compat.wants_master_room = survey.wants_master_room;
   if (typeof survey?.pets_allowed === 'boolean') compat.pets_allowed = survey.pets_allowed;
-  if (typeof survey?.with_broker === 'boolean') compat.with_broker = survey.with_broker;
   if (typeof survey?.preferred_roommates === 'number') compat.preferred_roommates = survey.preferred_roommates;
   if (survey?.move_in_month) compat.move_in_month = survey.move_in_month;
   if (typeof survey?.is_sublet === 'boolean') compat.is_sublet = survey.is_sublet;
@@ -184,7 +177,6 @@ function buildCompatSurvey(
   if (survey?.relationship_status) compat.relationship_status = survey.relationship_status;
   const occupationValue = normalizeOccupationValue(survey?.occupation);
   if (occupationValue) compat.occupation = occupationValue;
-  if (typeof survey?.works_from_home === 'boolean') compat.works_from_home = survey.works_from_home;
 
   if (survey?.partner_smoking_preference)
     compat.partner_smoking_preference = survey.partner_smoking_preference as PartnerSmokingPref;
@@ -758,7 +750,7 @@ export default function UserProfileScreen() {
       push('תקציב חודשי', formatted);
     }
     push('כניסה מתוכננת', formatMonthLabel(survey.move_in_month));
-    push('וייב יומיומי', survey.lifestyle || survey.home_vibe || undefined);
+    push('וייב יומיומי', (survey as any).home_lifestyle || undefined);
     if (survey.is_sublet) highlights.push({ label: 'סאבלט', value: 'כן' });
     return highlights;
   }, [survey]);
@@ -812,7 +804,6 @@ export default function UserProfileScreen() {
     if (typeof survey.student_year === 'number' && survey.student_year > 0) {
       add('about', 'שנת לימודים', `שנה ${formatHebrewYear(survey.student_year)}`);
     }
-    addBool('about', 'עבודה מהבית', survey.works_from_home);
     addBool('about', 'שומר/ת כשרות', survey.keeps_kosher);
     addBool('about', 'שומר/ת שבת', survey.is_shomer_shabbat);
     add('about', 'תזונה', survey.diet_type);
@@ -822,9 +813,8 @@ export default function UserProfileScreen() {
     if (typeof survey.cleanliness_importance === 'number') add('about', 'חשיבות ניקיון', `${survey.cleanliness_importance}/5`);
     add('about', 'תדירות ניקיון', survey.cleaning_frequency);
     add('about', 'העדפת אירוח', survey.hosting_preference);
-    add('about', 'סטייל בישול', survey.cooking_style);
-    add('about', 'וייב בבית', survey.home_vibe);
-    add('about', 'סגנון חיים', (survey as any).lifestyle);
+    add('about', 'קניות', survey.cooking_style);
+    add('about', 'סגנון הבית', (survey as any).home_lifestyle);
 
     // הדירה שאני מחפש/ת
     addBool('apartment', 'האם מדובר בסאבלט?', survey.is_sublet);
@@ -835,18 +825,14 @@ export default function UserProfileScreen() {
       add('apartment', 'טווח סאבלט', period);
     }
     if (typeof survey.price_range === 'number') add('apartment', 'תקציב שכירות', formatCurrency(survey.price_range));
-    addTriBool('apartment', 'חשבונות כלולים?', survey.bills_included);
     add('apartment', 'עיר מועדפת', survey.preferred_city);
     const neighborhoodsJoined = normalizeNeighborhoods((survey.preferred_neighborhoods as unknown) ?? null);
     if (neighborhoodsJoined) add('apartment', 'שכונות מועדפות', neighborhoodsJoined);
     add('apartment', 'קומה מועדפת', survey.floor_preference);
     addTriBool('apartment', 'עם מרפסת/גינה?', survey.has_balcony);
-    addTriBool('apartment', 'חשוב שתהיה מעלית?', survey.has_elevator);
-    addTriBool('apartment', 'חדר מאסטר?', survey.wants_master_room);
     add('apartment', 'תאריך כניסה', formatMonthLabel(survey.move_in_month));
     if (typeof survey.preferred_roommates === 'number') add('apartment', 'מספר שותפים מועדף', `${survey.preferred_roommates}`);
     addBool('apartment', 'חיות מורשות', survey.pets_allowed);
-    addTriBool('apartment', 'משנה לך תיווך?', survey.with_broker);
 
     // השותפ/ה שאני מחפש/ת
     const minAge = (survey as any).preferred_age_min;

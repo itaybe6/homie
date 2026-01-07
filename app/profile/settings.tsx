@@ -82,12 +82,8 @@ export default function ProfileSettingsScreen() {
   const [surveyNeighborhoods, setSurveyNeighborhoods] = useState('');
   const [surveyRoommatesMin, setSurveyRoommatesMin] = useState<string>('');
   const [surveyRoommatesMax, setSurveyRoommatesMax] = useState<string>('');
-  const [surveyBillsIncluded, setSurveyBillsIncluded] = useState<boolean | null>(null);
   const [surveyHasBalcony, setSurveyHasBalcony] = useState<boolean | null>(null);
-  const [surveyHasElevator, setSurveyHasElevator] = useState<boolean | null>(null);
   const [surveyWantsMasterRoom, setSurveyWantsMasterRoom] = useState<boolean | null>(null);
-  const [surveyWithBroker, setSurveyWithBroker] = useState<boolean | null>(null);
-  const [surveyWorksFromHome, setSurveyWorksFromHome] = useState(false);
   const [surveyKeepsKosher, setSurveyKeepsKosher] = useState(false);
   const [surveyIsShomerShabbat, setSurveyIsShomerShabbat] = useState(false);
   const [surveyIsSmoker, setSurveyIsSmoker] = useState(false);
@@ -1129,17 +1125,6 @@ export default function ProfileSettingsScreen() {
                         <TouchableOpacity style={[styles.chipToggle, surveyHasBalcony === null && styles.chipToggleActive]} onPress={() => setSurveyHasBalcony(null)}><Text style={[styles.chipToggleText, surveyHasBalcony === null && styles.chipToggleTextActive]}>לא משנה לי</Text></TouchableOpacity>
                       </View>
                     </View>
-                    <View style={styles.fieldHalf}>
-                      <View style={styles.labelRow}>
-                        <FileText size={16} color={ICON_COLOR} />
-                        <Text style={styles.fieldLabel}>מעלית</Text>
-                      </View>
-                      <View style={{ flexDirection: 'row-reverse', gap: 10, flexWrap: 'wrap' }}>
-                        <TouchableOpacity style={[styles.chipToggle, surveyHasElevator === true && styles.chipToggleActive]} onPress={() => setSurveyHasElevator(true)}><Text style={[styles.chipToggleText, surveyHasElevator === true && styles.chipToggleTextActive]}>כן</Text></TouchableOpacity>
-                        <TouchableOpacity style={[styles.chipToggle, surveyHasElevator === false && styles.chipToggleActive]} onPress={() => setSurveyHasElevator(false)}><Text style={[styles.chipToggleText, surveyHasElevator === false && styles.chipToggleTextActive]}>לא</Text></TouchableOpacity>
-                        <TouchableOpacity style={[styles.chipToggle, surveyHasElevator === null && styles.chipToggleActive]} onPress={() => setSurveyHasElevator(null)}><Text style={[styles.chipToggleText, surveyHasElevator === null && styles.chipToggleTextActive]}>לא משנה לי</Text></TouchableOpacity>
-                      </View>
-                    </View>
                   </View>
                   <View style={styles.fieldRow}>
                     <View style={styles.fieldHalf}>
@@ -1153,43 +1138,11 @@ export default function ProfileSettingsScreen() {
                         <TouchableOpacity style={[styles.chipToggle, surveyWantsMasterRoom === null && styles.chipToggleActive]} onPress={() => setSurveyWantsMasterRoom(null)}><Text style={[styles.chipToggleText, surveyWantsMasterRoom === null && styles.chipToggleTextActive]}>לא משנה לי</Text></TouchableOpacity>
                       </View>
                     </View>
-                    <View style={styles.fieldHalf}>
-                      <View style={styles.labelRow}>
-                        <FileText size={16} color={ICON_COLOR} />
-                        <Text style={styles.fieldLabel}>חשבונות כלולים</Text>
-                      </View>
-                      <View style={{ flexDirection: 'row-reverse', gap: 10, flexWrap: 'wrap' }}>
-                        <TouchableOpacity style={[styles.chipToggle, surveyBillsIncluded === true && styles.chipToggleActive]} onPress={() => setSurveyBillsIncluded(true)}><Text style={[styles.chipToggleText, surveyBillsIncluded === true && styles.chipToggleTextActive]}>כן</Text></TouchableOpacity>
-                        <TouchableOpacity style={[styles.chipToggle, surveyBillsIncluded === false && styles.chipToggleActive]} onPress={() => setSurveyBillsIncluded(false)}><Text style={[styles.chipToggleText, surveyBillsIncluded === false && styles.chipToggleTextActive]}>לא</Text></TouchableOpacity>
-                        <TouchableOpacity style={[styles.chipToggle, surveyBillsIncluded === null && styles.chipToggleActive]} onPress={() => setSurveyBillsIncluded(null)}><Text style={[styles.chipToggleText, surveyBillsIncluded === null && styles.chipToggleTextActive]}>לא משנה לי</Text></TouchableOpacity>
-                      </View>
-                    </View>
-                  </View>
-                  <View style={styles.fieldGroup}>
-                    <View style={styles.labelRow}>
-                      <FileText size={16} color={ICON_COLOR} />
-                      <Text style={styles.fieldLabel}>תיווך</Text>
-                    </View>
-                    <View style={{ flexDirection: 'row-reverse', gap: 10, flexWrap: 'wrap' }}>
-                      <TouchableOpacity style={[styles.chipToggle, surveyWithBroker === true && styles.chipToggleActive]} onPress={() => setSurveyWithBroker(true)}><Text style={[styles.chipToggleText, surveyWithBroker === true && styles.chipToggleTextActive]}>עם תיווך</Text></TouchableOpacity>
-                      <TouchableOpacity style={[styles.chipToggle, surveyWithBroker === false && styles.chipToggleActive]} onPress={() => setSurveyWithBroker(false)}><Text style={[styles.chipToggleText, surveyWithBroker === false && styles.chipToggleTextActive]}>בלי תיווך</Text></TouchableOpacity>
-                      <TouchableOpacity style={[styles.chipToggle, surveyWithBroker === null && styles.chipToggleActive]} onPress={() => setSurveyWithBroker(null)}><Text style={[styles.chipToggleText, surveyWithBroker === null && styles.chipToggleTextActive]}>לא משנה לי</Text></TouchableOpacity>
-                    </View>
                   </View>
                   <View style={styles.sectionDivider} />
                   {/* Section: חיים בבית */}
                   <Text style={styles.subsectionTitle}>חיים בבית</Text>
                   <View style={styles.fieldRow}>
-                    <View style={styles.fieldHalf}>
-                      <View style={styles.labelRow}>
-                        <FileText size={16} color={ICON_COLOR} />
-                        <Text style={styles.fieldLabel}>עבודה מהבית</Text>
-                      </View>
-                      <View style={{ flexDirection: 'row-reverse', gap: 10 }}>
-                        <TouchableOpacity style={[styles.chipToggle, surveyWorksFromHome && styles.chipToggleActive]} onPress={() => setSurveyWorksFromHome(true)}><Text style={[styles.chipToggleText, surveyWorksFromHome && styles.chipToggleTextActive]}>כן</Text></TouchableOpacity>
-                        <TouchableOpacity style={[styles.chipToggle, !surveyWorksFromHome && styles.chipToggleActive]} onPress={() => setSurveyWorksFromHome(false)}><Text style={[styles.chipToggleText, !surveyWorksFromHome && styles.chipToggleTextActive]}>לא</Text></TouchableOpacity>
-                      </View>
-                    </View>
                     <View style={styles.fieldHalf}>
                       <View style={styles.labelRow}>
                         <FileText size={16} color={ICON_COLOR} />
@@ -1273,9 +1226,9 @@ export default function ProfileSettingsScreen() {
                     <View style={styles.fieldHalf}>
                       <View style={styles.labelRow}>
                         <FileText size={16} color={ICON_COLOR} />
-                        <Text style={styles.fieldLabel}>סטייל בישול</Text>
+                        <Text style={styles.fieldLabel}>קניות</Text>
                       </View>
-                      <TextInput style={styles.fieldInput} value={surveyCookingStyle} onChangeText={setSurveyCookingStyle} placeholder="ביתי/פשוט/גורמה..." />
+                      <TextInput style={styles.fieldInput} value={surveyCookingStyle} onChangeText={setSurveyCookingStyle} placeholder="קניות משותפות/כל אחד לעצמו/לא משנה לי" />
                     </View>
                   </View>
                   <View style={styles.sectionDivider} />
@@ -1379,17 +1332,12 @@ export default function ProfileSettingsScreen() {
                             preferred_roommates:
                               (surveyRoommatesMax ? parseInt(surveyRoommatesMax) : null) ??
                               (surveyRoommatesMin ? parseInt(surveyRoommatesMin) : null),
-                            bills_included: surveyBillsIncluded,
                             has_balcony: surveyHasBalcony,
-                            has_elevator: surveyHasElevator,
-                            wants_master_room: surveyWantsMasterRoom,
-                            works_from_home: surveyWorksFromHome || false,
                             keeps_kosher: surveyKeepsKosher || false,
                             is_shomer_shabbat: surveyIsShomerShabbat || false,
                             is_smoker: surveyIsSmoker || false,
                             has_pet: surveyHasPet || false,
-                            with_broker: surveyWithBroker,
-                            home_vibe: surveyHomeVibe || null,
+                            home_lifestyle: surveyHomeVibe || null,
                             occupation: surveyOccupation || null,
                             relationship_status: surveyRelationshipStatus || null,
                             cleanliness_importance: surveyCleanlinessImportance as any,

@@ -51,11 +51,10 @@ import {
   PartnerDietPref,
   PartnerPetsPref,
   DietType,
-  Lifestyle,
+  HomeLifestyle,
   CleaningFrequency,
   HostingPreference,
   CookingStyle,
-  HomeVibe,
 } from '@/utils/matchCalculator';
 
 // Keep swipe cards visually consistent (prevents the next card peeking below the current one)
@@ -298,23 +297,18 @@ export default function PartnersScreen() {
     if (typeof survey?.is_shomer_shabbat === 'boolean') compat.is_shomer_shabbat = survey.is_shomer_shabbat;
     if (typeof survey?.keeps_kosher === 'boolean') compat.keeps_kosher = survey.keeps_kosher;
     if (survey?.diet_type) compat.diet_type = survey.diet_type as DietType;
-    if (survey?.lifestyle) compat.lifestyle = survey.lifestyle as Lifestyle;
+    if ((survey as any)?.home_lifestyle) compat.home_lifestyle = (survey as any).home_lifestyle as HomeLifestyle;
     if (typeof survey?.cleanliness_importance === 'number')
       compat.cleanliness_importance = survey.cleanliness_importance;
     if (survey?.cleaning_frequency) compat.cleaning_frequency = survey.cleaning_frequency as CleaningFrequency;
     if (survey?.hosting_preference) compat.hosting_preference = survey.hosting_preference as HostingPreference;
     if (survey?.cooking_style) compat.cooking_style = survey.cooking_style as CookingStyle;
-    if (survey?.home_vibe) compat.home_vibe = survey.home_vibe as HomeVibe;
     if (survey?.preferred_city) compat.preferred_city = survey.preferred_city;
     if (Array.isArray(survey?.preferred_neighborhoods)) compat.preferred_neighborhoods = survey.preferred_neighborhoods;
     if (Number.isFinite(survey?.price_range as number)) compat.price_range = Number(survey?.price_range);
-    if (typeof survey?.bills_included === 'boolean') compat.bills_included = survey.bills_included;
     if (survey?.floor_preference) compat.floor_preference = survey.floor_preference;
     if (typeof survey?.has_balcony === 'boolean') compat.has_balcony = survey.has_balcony;
-    if (typeof survey?.has_elevator === 'boolean') compat.has_elevator = survey.has_elevator;
-    if (typeof survey?.wants_master_room === 'boolean') compat.wants_master_room = survey.wants_master_room;
     if (typeof survey?.pets_allowed === 'boolean') compat.pets_allowed = survey.pets_allowed;
-    if (typeof survey?.with_broker === 'boolean') compat.with_broker = survey.with_broker;
     if (typeof survey?.preferred_roommates === 'number') compat.preferred_roommates = survey.preferred_roommates;
     if (survey?.move_in_month) compat.move_in_month = survey.move_in_month;
     if (typeof survey?.is_sublet === 'boolean') compat.is_sublet = survey.is_sublet;
@@ -323,7 +317,6 @@ export default function PartnersScreen() {
     if (survey?.relationship_status) compat.relationship_status = survey.relationship_status;
     const occupationValue = normalizeOccupationValue(survey?.occupation);
     if (occupationValue) compat.occupation = occupationValue;
-    if (typeof survey?.works_from_home === 'boolean') compat.works_from_home = survey.works_from_home;
 
     if (survey?.partner_smoking_preference)
       compat.partner_smoking_preference = survey.partner_smoking_preference as PartnerSmokingPref;

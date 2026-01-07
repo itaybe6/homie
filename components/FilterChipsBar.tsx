@@ -96,9 +96,9 @@ export default function FilterChipsBar({
   const [internalSelected, setInternalSelected] = useState<string[]>([]);
   const active = selectedIds ?? internalSelected;
   const inactiveBg = inactiveBackgroundColor ?? '#FFFFFF';
-  const activeBg = activeBackgroundColor ?? alpha(colors.successMuted, 0.72);
+  const activeBg = activeBackgroundColor ?? alpha(colors.success, 0.86);
   const inactiveBd = inactiveBorderColor ?? 'transparent';
-  const activeBd = activeBorderColor ?? alpha(colors.success, 0.55);
+  const activeBd = activeBorderColor ?? alpha(colors.success, 0.6);
   const inactiveTxt = inactiveTextColor ?? '#6B7280';
   const activeTxt = activeTextColor ?? colors.white;
   const inactiveIc = inactiveIconColor ?? '#6B7280';
@@ -289,8 +289,8 @@ const styles = StyleSheet.create({
   },
   chipActive: {
     // Default active bg; can be overridden via props.
-    backgroundColor: alpha(colors.successMuted, 0.72),
-    borderColor: alpha(colors.success, 0.55),
+    backgroundColor: alpha(colors.success, 0.86),
+    borderColor: alpha(colors.success, 0.6),
   },
   chipInnerRow: {
     flexDirection: 'row-reverse',

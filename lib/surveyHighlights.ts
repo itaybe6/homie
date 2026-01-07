@@ -76,7 +76,7 @@ export function computeSurveyHighlights(survey?: UserSurveyResponse | null): Sur
     push('תקציב חודשי', formatted);
   }
   push('כניסה מתוכננת', formatMonthLabel(survey.move_in_month));
-  push('וייב יומיומי', (survey as any).lifestyle || survey.home_vibe || undefined);
+  push('וייב יומיומי', (survey as any).home_lifestyle || undefined);
   if (survey.is_sublet) highlights.push({ label: 'סאבלט', value: 'כן' });
 
   // Keep it concise for a peek sheet

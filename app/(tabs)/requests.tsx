@@ -17,11 +17,10 @@ import {
   Modal,
   Pressable,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { Bell, Inbox, Filter, Home, Users, UserPlus2, UserPlus, Sparkles, MessageCircle, X } from 'lucide-react-native';
 import WhatsAppSvg from '@/components/icons/WhatsAppSvg';
 import { FabButton } from '@/components/FabButton';
-import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/authStore';
 import { Apartment, Notification, User } from '@/types/database';

@@ -91,8 +91,6 @@ function isQuestionAnswered(questionKey: string, s: SurveyState): boolean {
       return hasNonEmptyText(s.occupation);
     case 'student_year':
       return hasFiniteNumber(s.student_year);
-    case 'works_from_home':
-      return typeof s.works_from_home === 'boolean';
     case 'shabbat':
       return typeof s.is_shomer_shabbat === 'boolean';
     case 'diet':
@@ -105,8 +103,8 @@ function isQuestionAnswered(questionKey: string, s: SurveyState): boolean {
       return hasNonEmptyText(s.relationship_status);
     case 'pet':
       return typeof s.has_pet === 'boolean';
-    case 'lifestyle':
-      return hasNonEmptyText(s.lifestyle);
+    case 'home_lifestyle':
+      return hasNonEmptyText(s.home_lifestyle);
     case 'cleanliness':
       return hasFiniteNumber(s.cleanliness_importance);
     case 'cleaning_frequency':
@@ -115,14 +113,10 @@ function isQuestionAnswered(questionKey: string, s: SurveyState): boolean {
       return hasNonEmptyText(s.hosting_preference);
     case 'cooking':
       return hasNonEmptyText(s.cooking_style);
-    case 'home_vibe':
-      return hasNonEmptyText(s.home_vibe);
 
     // Apartment you want
     case 'price':
       return hasFiniteNumber(s.price_range);
-    case 'bills':
-      return s.bills_included === true || s.bills_included === false || s.bills_included === null;
     case 'preferred_city':
       return hasNonEmptyText(s.preferred_city);
     case 'preferred_neighborhoods':
@@ -131,10 +125,6 @@ function isQuestionAnswered(questionKey: string, s: SurveyState): boolean {
       return hasNonEmptyText(s.floor_preference);
     case 'balcony':
       return s.has_balcony === true || s.has_balcony === false || s.has_balcony === null;
-    case 'elevator':
-      return s.has_elevator === true || s.has_elevator === false || s.has_elevator === null;
-    case 'master':
-      return s.wants_master_room === true || s.wants_master_room === false || s.wants_master_room === null;
     case 'is_sublet':
       return typeof s.is_sublet === 'boolean';
     case 'sublet_period':
@@ -147,8 +137,6 @@ function isQuestionAnswered(questionKey: string, s: SurveyState): boolean {
       return hasFiniteNumber((s as any).preferred_roommates_max);
     case 'pets_allowed':
       return typeof s.pets_allowed === 'boolean';
-    case 'broker':
-      return s.with_broker === true || s.with_broker === false || s.with_broker === null;
 
     // Partner you want
     case 'age_min':
@@ -174,13 +162,12 @@ function isQuestionAnswered(questionKey: string, s: SurveyState): boolean {
   }
 }
 
-const lifestyleOptions = ['רגוע', 'פעיל', 'ספונטני', 'ביתי', 'חברתי'];
+const homeLifestyleOptions = ['שקט וביתי', 'רגוע ולימודי', 'מאוזן', 'חברתי ופעיל', 'זורם וספונטני'];
 const dietOptions = ['ללא הגבלה', 'צמחוני', 'טבעוני'];
 const relationOptions = ['רווק/ה', 'בזוגיות'];
 const cleaningFrequencyOptions = ['פעם בשבוע', 'פעמיים בשבוע', 'פעם בשבועיים', 'כאשר צריך'];
 const hostingOptions = ['פעם בשבוע', 'לפעמים', 'כמה שיותר'];
-const cookingOptions = ['כל אחד לעצמו', 'לפעמים מתחלקים', 'מבשלים יחד'];
-const vibesOptions = ['שקטה ולימודית', 'זורמת וחברתית', 'לא משנה לי'];
+const cookingOptions = ['קניות משותפות', 'כל אחד לעצמו', 'לא משנה לי'];
 const floorOptions = ['קרקע', 'נמוכה', 'ביניים', 'גבוהה', 'לא משנה לי'];
 const genderPrefOptions = ['זכר', 'נקבה', 'לא משנה'];
 const occupationPrefOptions = ['סטודנט', 'עובד', 'לא משנה'];
@@ -212,19 +199,17 @@ function draftStepStorageKey(userId: string) {
 const PART_1_KEYS = [
   'occupation',
   'student_year',
-  'works_from_home',
   'shabbat',
   'diet',
   'kosher',
   'smoker',
   'relationship',
   'pet',
-  'lifestyle',
+  'home_lifestyle',
   'cleanliness',
   'cleaning_frequency',
   'hosting',
   'cooking',
-  'home_vibe',
 ] as const;
 const PART_2_KEYS = [
   'price',
@@ -234,7 +219,6 @@ const PART_2_KEYS = [
   'floor',
   'balcony',
   'elevator',
-  'master',
   'is_sublet',
   'sublet_period',
   'move_in_month',
@@ -697,7 +681,6 @@ function PartCarouselPagination({
               setState((prev) => {
                 const next: SurveyState = { ...prev, occupation: v || undefined };
                 if (v !== 'סטודנט') next.student_year = undefined;
-                if (v !== 'עובד') next.works_from_home = undefined;
                 return next;
               });
             }}
@@ -727,30 +710,6 @@ function PartCarouselPagination({
           />
         ),
       },
-      {
-        key: 'works_from_home',
-        title: 'עובד/ת מהבית?',
-        isVisible: () => state.occupation === 'עובד',
-        render: () => (
-          <ChipSelect
-            options={['כן', 'לא']}
-            value={
-              state.works_from_home === undefined
-                ? null
-                : state.works_from_home
-                ? 'כן'
-                : 'לא'
-            }
-            onChange={(v) => {
-              if (!v) {
-                setField('works_from_home', undefined);
-                return;
-              }
-              setField('works_from_home', v === 'כן');
-            }}
-          />
-        ),
-      },
       // Title is already displayed in the card header; avoid repeating it inside the toggle row.
       { key: 'shabbat', title: 'שומר/ת שבת?', render: () => <ToggleRow value={state.is_shomer_shabbat} onToggle={(v) => setField('is_shomer_shabbat', v)} centerOptions showYesIcon={false} /> },
       { key: 'diet', title: 'מה התזונה שלי?', render: () => <ChipSelect options={dietOptions} value={state.diet_type || null} onChange={(v) => setField('diet_type', v || null)} /> },
@@ -776,7 +735,7 @@ function PartCarouselPagination({
       { key: 'relationship', title: 'מצב זוגי', render: () => <ChipSelect options={relationOptions} value={state.relationship_status || null} onChange={(v) => setField('relationship_status', v || null)} /> },
       // Title is already displayed in the card header; avoid repeating it inside the toggle row.
       { key: 'pet', title: 'מגיע/ה עם בעל חיים?', render: () => <ToggleRow value={state.has_pet} onToggle={(v) => setField('has_pet', v)} centerOptions showYesIcon={false} /> },
-      { key: 'lifestyle', title: 'האופי היומיומי שלי', render: () => <ChipSelect options={lifestyleOptions} value={state.lifestyle || null} onChange={(v) => setField('lifestyle', v || null)} /> },
+      { key: 'home_lifestyle', title: 'מה אני רוצה שיהיה בבית?', render: () => <ChipSelect options={homeLifestyleOptions} value={state.home_lifestyle || null} onChange={(v) => setField('home_lifestyle', v || null)} /> },
       {
         key: 'cleanliness',
         title: 'כמה חשוב לי ניקיון?',
@@ -792,8 +751,7 @@ function PartCarouselPagination({
       },
       { key: 'cleaning_frequency', title: 'תדירות ניקיון', render: () => <ChipSelect options={cleaningFrequencyOptions} value={state.cleaning_frequency || null} onChange={(v) => setField('cleaning_frequency', v || null)} /> },
       { key: 'hosting', title: 'אוהבים לארח?', render: () => <ChipSelect options={hostingOptions} value={state.hosting_preference || null} onChange={(v) => setField('hosting_preference', v || null)} /> },
-      { key: 'cooking', title: 'אוכל ובישולים', render: () => <ChipSelect options={cookingOptions} value={state.cooking_style || null} onChange={(v) => setField('cooking_style', v || null)} /> },
-      { key: 'home_vibe', title: 'אווירה בבית', render: () => <ChipSelect options={vibesOptions} value={state.home_vibe || null} onChange={(v) => setField('home_vibe', v || null)} /> },
+      { key: 'cooking', title: 'קניות', render: () => <ChipSelect options={cookingOptions} value={state.cooking_style || null} onChange={(v) => setField('cooking_style', v || null)} /> },
 
       // Apartment you want
       {
@@ -815,22 +773,6 @@ function PartCarouselPagination({
               />
             </View>
           </View>
-        ),
-      },
-      {
-        key: 'bills',
-        title: 'חשבונות כלולים?',
-        render: () => (
-          <TriChoiceRow
-            // Title is already displayed in the card header; avoid repeating it inside the row.
-            value={state.bills_included ?? null}
-            yesLabel="כלולים"
-            noLabel="לא כלולים"
-            anyLabel="לא משנה לי"
-            centerOptions
-            showYesIcon={false}
-            onChange={(v) => setField('bills_included', v)}
-          />
         ),
       },
       {
@@ -942,32 +884,6 @@ function PartCarouselPagination({
         ),
       },
       {
-        key: 'elevator',
-        title: 'חשוב שתהיה מעלית?',
-        render: () => (
-          <TriChoiceRow
-            value={state.has_elevator ?? null}
-            anyLabel="לא משנה לי"
-            centerOptions
-            showYesIcon={false}
-            onChange={(v) => setField('has_elevator', v)}
-          />
-        ),
-      },
-      {
-        key: 'master',
-        title: 'חדר מאסטר?',
-        render: () => (
-          <TriChoiceRow
-            value={state.wants_master_room ?? null}
-            anyLabel="לא משנה לי"
-            centerOptions
-            showYesIcon={false}
-            onChange={(v) => setField('wants_master_room', v)}
-          />
-        ),
-      },
-      {
         key: 'is_sublet',
         title: 'האם מדובר בסאבלט?',
         render: () => (
@@ -1061,21 +977,6 @@ function PartCarouselPagination({
             centerOptions
             showYesIcon={false}
             onToggle={(v) => setField('pets_allowed', v)}
-          />
-        ),
-      },
-      {
-        key: 'broker',
-        title: 'משנה לך תיווך?',
-        render: () => (
-          <TriChoiceRow
-            value={state.with_broker ?? null}
-            yesLabel="עם תיווך"
-            noLabel="בלי תיווך"
-            anyLabel="לא משנה לי"
-            centerOptions
-            showYesIcon={false}
-            onChange={(v) => setField('with_broker', v)}
           />
         ),
       },
@@ -1804,7 +1705,7 @@ function PartCarouselPagination({
                   activeItem.question.key === 'age_min' ||
                   activeItem.question.key === 'age_max' ||
                   activeItem.question.key === 'cooking' ||
-                  activeItem.question.key === 'home_vibe' ? (
+                  activeItem.question.key === 'home_lifestyle' ? (
                     // Render without ScrollView so horizontal pan gestures are never stolen.
                     <View style={[styles.popupBody, { maxHeight: bodyMaxHeight }]}>
                       <View style={styles.questionContentWrap}>{activeItem.question.render?.()}</View>
@@ -2176,33 +2077,23 @@ function normalizePayload(
     is_sublet: coerce ? (s.is_sublet ?? false) : (s.is_sublet ?? null),
     occupation: s.occupation ?? null,
     student_year: s.student_year ?? null,
-    works_from_home:
-      s.occupation === 'עובד'
-        ? coerce
-          ? (s.works_from_home ?? false)
-          : (s.works_from_home ?? null)
-        : null,
     keeps_kosher: coerce ? (s.keeps_kosher ?? false) : (s.keeps_kosher ?? null),
     is_shomer_shabbat: coerce ? (s.is_shomer_shabbat ?? false) : (s.is_shomer_shabbat ?? null),
     diet_type: s.diet_type ?? null,
     is_smoker: coerce ? (s.is_smoker ?? false) : (s.is_smoker ?? null),
     relationship_status: s.relationship_status ?? null,
     has_pet: coerce ? (s.has_pet ?? false) : (s.has_pet ?? null),
-    lifestyle: s.lifestyle ?? null,
+    home_lifestyle: s.home_lifestyle ?? null,
     cleanliness_importance: s.cleanliness_importance ?? null,
     cleaning_frequency: s.cleaning_frequency ?? null,
     hosting_preference: s.hosting_preference ?? null,
     cooking_style: s.cooking_style ?? null,
-    home_vibe: s.home_vibe ?? null,
     price_range: s.price_range ?? null,
-    bills_included: s.bills_included ?? null,
     preferred_city: s.preferred_city ?? null,
     preferred_neighborhoods:
       s.preferred_neighborhoods && s.preferred_neighborhoods.length > 0 ? s.preferred_neighborhoods : null,
     floor_preference: s.floor_preference ?? null,
     has_balcony: s.has_balcony ?? null,
-    has_elevator: s.has_elevator ?? null,
-    wants_master_room: s.wants_master_room ?? null,
     move_in_month: s.move_in_month ?? null,
     preferred_roommates_min: (s as any).preferred_roommates_min ?? null,
     preferred_roommates_max: (s as any).preferred_roommates_max ?? null,
@@ -2212,7 +2103,6 @@ function normalizePayload(
       s.preferred_roommates ??
       null,
     pets_allowed: coerce ? (s.pets_allowed ?? false) : (s.pets_allowed ?? null),
-    with_broker: s.with_broker ?? null,
     sublet_month_from: s.is_sublet ? (s.sublet_month_from ?? null) : null,
     sublet_month_to: s.is_sublet ? (s.sublet_month_to ?? null) : null,
     preferred_age_min:
@@ -2346,13 +2236,9 @@ function hydrateSurvey(existing: UserSurveyResponse): SurveyState {
       }
     } else if (existing.occupation === 'עובד - מהבית') {
       next.occupation = 'עובד';
-      next.works_from_home = true;
     }
   }
 
-  if (existing.works_from_home !== undefined) {
-    next.works_from_home = existing.works_from_home;
-  }
   if (existing.keeps_kosher !== undefined) {
     next.keeps_kosher = existing.keeps_kosher;
   } else if (existing.diet_type === 'כשר') {

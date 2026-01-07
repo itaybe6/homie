@@ -15,8 +15,7 @@ import {
   useWindowDimensions,
   Linking,
 } from 'react-native';
-import { useRouter } from 'expo-router';
-import { useFocusEffect } from '@react-navigation/native';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   LogOut,
@@ -1150,7 +1149,7 @@ export default function ProfileScreen() {
       push('תקציב חודשי', formatted);
     }
     push('כניסה מתוכננת', formatMonthLabel(surveyResponse.move_in_month));
-    push('וייב יומיומי', surveyResponse.lifestyle || surveyResponse.home_vibe || undefined);
+    push('וייב יומיומי', (surveyResponse as any).home_lifestyle || undefined);
     if (surveyResponse.is_sublet) {
       highlights.push({ label: 'סאבלט', value: 'כן' });
     }
@@ -1187,7 +1186,6 @@ export default function ProfileScreen() {
     if (typeof surveyResponse.student_year === 'number' && surveyResponse.student_year > 0) {
       add('about', 'שנת לימודים', `שנה ${surveyResponse.student_year}`);
     }
-    addBool('about', 'עבודה מהבית', surveyResponse.works_from_home);
     addBool('about', 'שומר/ת כשרות', surveyResponse.keeps_kosher);
     addBool('about', 'שומר/ת שבת', surveyResponse.is_shomer_shabbat);
     add('about', 'תזונה', surveyResponse.diet_type);
@@ -1199,9 +1197,8 @@ export default function ProfileScreen() {
     }
     add('about', 'תדירות ניקיון', surveyResponse.cleaning_frequency);
     add('about', 'העדפת אירוח', surveyResponse.hosting_preference);
-    add('about', 'סטייל בישול', surveyResponse.cooking_style);
-    add('about', 'וייב בבית', surveyResponse.home_vibe);
-    add('about', 'סגנון חיים', (surveyResponse as any).lifestyle);
+    add('about', 'קניות', surveyResponse.cooking_style);
+    add('about', 'סגנון הבית', (surveyResponse as any).home_lifestyle);
 
     // הדירה שאני מחפש/ת
     addBool('apartment', 'תת-השכרה', surveyResponse.is_sublet);
@@ -1214,7 +1211,6 @@ export default function ProfileScreen() {
     if (typeof surveyResponse.price_range === 'number') {
       add('apartment', 'תקציב שכירות', formatCurrency(surveyResponse.price_range));
     }
-    addBool('apartment', 'חשבונות כלולים', surveyResponse.bills_included);
     add('apartment', 'עיר מועדפת', surveyResponse.preferred_city);
     const neighborhoodsJoined = normalizeNeighborhoods((surveyResponse.preferred_neighborhoods as unknown) ?? null);
     if (neighborhoodsJoined) {
@@ -1222,14 +1218,11 @@ export default function ProfileScreen() {
     }
     add('apartment', 'קומה מועדפת', surveyResponse.floor_preference);
     addBool('apartment', 'מרפסת', surveyResponse.has_balcony);
-    addBool('apartment', 'מעלית', surveyResponse.has_elevator);
-    addBool('apartment', 'חדר מאסטר', surveyResponse.wants_master_room);
     add('apartment', 'חודש כניסה', formatMonthLabel(surveyResponse.move_in_month));
     if (typeof surveyResponse.preferred_roommates === 'number') {
       add('apartment', 'מספר שותפים מועדף', `${surveyResponse.preferred_roommates}`);
     }
     addBool('apartment', 'חיות מורשות', surveyResponse.pets_allowed);
-    addBool('apartment', 'עם מתווך', surveyResponse.with_broker);
     // Some schemas store min/max instead of preferred_age_range; derive when missing.
     const minAge = (surveyResponse as any).preferred_age_min;
     const maxAge = (surveyResponse as any).preferred_age_max;
