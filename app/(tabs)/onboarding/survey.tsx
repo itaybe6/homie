@@ -176,7 +176,7 @@ const relationOptions = ['רווק/ה', 'בזוגיות'];
 const cleaningFrequencyOptions = ['פעם בשבוע', 'פעמיים בשבוע', 'פעם בשבועיים', 'כאשר צריך'];
 const hostingOptions = ['פעם בשבוע', 'לפעמים', 'כמה שיותר'];
 const cookingOptions = ['קניות משותפות', 'כל אחד לעצמו', 'לא משנה לי'];
-const floorOptions = ['קרקע', 'נמוכה', 'ביניים', 'גבוהה', 'לא משנה לי'];
+const floorOptions = ['קרקע', 'בניין', 'לא משנה לי'];
 const genderPrefOptions = ['זכר', 'נקבה', 'לא משנה'];
 const occupationPrefOptions = ['סטודנט', 'עובד', 'לא משנה'];
 const partnerShabbatPrefOptions = ['אין בעיה', 'מעדיפ/ה שלא'];
@@ -959,7 +959,7 @@ function PartCarouselPagination({
           </View>
         ),
       },
-      { key: 'floor', title: 'קומה מועדפת', explanation: 'איזו קומה את/ה מעדיף/ה - קרקע, נמוכה, ביניים, גבוהה', render: () => <ChipSelect options={floorOptions} value={state.floor_preference || null} onChange={(v) => setField('floor_preference', v || null)} /> },
+      { key: 'floor', title: 'קומה מועדפת', explanation: 'איזו קומה את/ה מעדיף/ה - קרקע, בניין או לא משנה לי', render: () => <ChipSelect options={floorOptions} value={state.floor_preference || null} onChange={(v) => setField('floor_preference', v || null)} /> },
       {
         key: 'balcony',
         title: 'עם מרפסת/גינה?',
@@ -1726,7 +1726,7 @@ function PartCarouselPagination({
                   width: popupCardWidth,
                   maxHeight: cardMaxHeight,
                   // Prevent collapse on section cards (no header/scroll measuring).
-                  minHeight: 200,
+                  ...(isEditMode && !editSelectedPart ? { minHeight: 200 } : activeItem?.type !== 'question' ? { minHeight: 200 } : {}),
                 },
               ]}
             >
@@ -2231,8 +2231,6 @@ function normalizePayload(
     move_in_month_from: (s as any).move_in_month_from ?? null,
     move_in_month_to: (s as any).move_in_month_to ?? null,
     move_in_is_flexible: (s as any).move_in_is_flexible ?? false,
-    // legacy
-    move_in_month: (s as any).move_in_month ?? null,
     preferred_roommates_min: (s as any).preferred_roommates_min ?? null,
     preferred_roommates_max: (s as any).preferred_roommates_max ?? null,
     preferred_roommates:
@@ -2408,6 +2406,14 @@ function hydrateSurvey(existing: UserSurveyResponse): SurveyState {
   }
   if (existing.preferred_neighborhoods) {
     next.preferred_neighborhoods = [...existing.preferred_neighborhoods];
+  }
+
+  // Floor preference: migrate legacy values (נמוכה/ביניים/גבוהה) to "בניין"
+  if (typeof (next as any).floor_preference === 'string' && (next as any).floor_preference) {
+    const v = String((next as any).floor_preference).trim();
+    if (v && !floorOptions.includes(v)) {
+      (next as any).floor_preference = v === 'קרקע' ? 'קרקע' : v === 'לא משנה לי' ? 'לא משנה לי' : 'בניין';
+    }
   }
 
   return next;
@@ -3301,14 +3307,14 @@ const styles = StyleSheet.create({
     lineHeight: 16,
   },
   popupBody: {
-    marginTop: 8,
+    marginTop: 4,
   },
   popupBodyContent: {
     // Give the last row of chips some breathing room so taps near the bottom edge don't get cancelled.
-    paddingBottom: 44,
+    paddingBottom: 22,
   },
   questionContentWrap: {
-    paddingTop: 4,
+    paddingTop: 0,
   },
   sheet: {
     backgroundColor: 'rgba(255,255,255,0.96)',
