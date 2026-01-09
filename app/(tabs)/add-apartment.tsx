@@ -95,7 +95,7 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
   const updateApartment = useApartmentStore((state) => state.updateApartment);
   const mapboxToken = process.env.EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN as string | undefined;
   // Force Mapbox Standard style for Hebrew language support
-  const mapboxStyleUrl = 'mapbox://styles/mapbox/standard';
+  const mapboxStyleUrl = 'mapbox://styles/mapbox/streets-v12';
   const insets = useSafeAreaInsets();
   const datePickerBottomOffset = useMemo(() => 92 + (insets.bottom || 0) + 14, [insets.bottom]);
   const moveInMonthOptions = useMemo(() => {
@@ -2149,6 +2149,7 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
                               <MapboxMap
                                 accessToken={mapboxToken}
                                 styleUrl={mapboxStyleUrl}
+                                language="he"
                                 center={selectedGeo ? ([selectedGeo.lng, selectedGeo.lat] as const) : undefined}
                                 zoom={selectedGeo ? 15 : 11}
                                 points={selectedGeo ? previewPoints : { type: 'FeatureCollection', features: [] }}

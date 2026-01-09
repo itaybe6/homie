@@ -104,6 +104,9 @@ export default function ApartmentDetailsScreen() {
   const [isMembersOpen, setIsMembersOpen] = useState(false);
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [isJoinRequestsOpen, setIsJoinRequestsOpen] = useState(false);
+  const [isJoinRequestConfirmOpen, setIsJoinRequestConfirmOpen] = useState(false);
+  const [isJoinRequestConfirmArmed, setIsJoinRequestConfirmArmed] = useState(false);
+  const joinRequestConfirmArmTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [joinRequests, setJoinRequests] = useState<
     Array<{
       reqId: string;
@@ -148,7 +151,7 @@ export default function ApartmentDetailsScreen() {
   const [viewerIndex, setViewerIndex] = useState(0);
   const mapboxToken = process.env.EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN as string | undefined;
   // Force Mapbox Standard style for Hebrew language support
-  const mapboxStyleUrl = 'mapbox://styles/mapbox/standard';
+  const mapboxStyleUrl = 'mapbox://styles/mapbox/streets-v12';
   const [aptGeo, setAptGeo] = useState<{ lng: number; lat: number } | null>(null);
   const [isGeocoding, setIsGeocoding] = useState(false);
   const [geoError, setGeoError] = useState<string>('');
@@ -918,6 +921,7 @@ export default function ApartmentDetailsScreen() {
 
   const handleRequestJoin = async () => {
     try {
+      if (isRequestingJoin) return;
       if (!user?.id) {
         Alert.alert('שגיאה', 'יש להתחבר כדי לבצע פעולה זו');
         return;
@@ -1824,6 +1828,7 @@ export default function ApartmentDetailsScreen() {
                       <MapboxMap
                         accessToken={mapboxToken}
                         styleUrl={mapboxStyleUrl}
+                        language="he"
                         center={aptGeo ? ([aptGeo.lng, aptGeo.lat] as const) : undefined}
                         zoom={aptGeo ? 16.5 : 11}
                         points={aptGeo ? aptMapPoints : { type: 'FeatureCollection', features: [] }}
@@ -2028,7 +2033,16 @@ export default function ApartmentDetailsScreen() {
                   }
                   return;
                 }
-                handleRequestJoin();
+                // Open confirm popup only (actual submission happens inside the popup).
+                setIsJoinRequestConfirmOpen(true);
+                setIsJoinRequestConfirmArmed(false);
+                if (joinRequestConfirmArmTimeoutRef.current) {
+                  clearTimeout(joinRequestConfirmArmTimeoutRef.current);
+                }
+                // Prevent accidental "double tap" immediately triggering the submit button on some platforms.
+                joinRequestConfirmArmTimeoutRef.current = setTimeout(() => {
+                  setIsJoinRequestConfirmArmed(true);
+                }, 450);
               }}
               disabled={
                 isOwner
@@ -2070,6 +2084,36 @@ export default function ApartmentDetailsScreen() {
           onEnterPassword={() => {
             setIsKeyPanelOpen(false);
             router.push({ pathname: '/apartment/join-passcode', params: { apartmentId: String(id || '') } });
+          }}
+          bottomOffset={ctaHeight + 14}
+        />
+      ) : null}
+
+      {/* "Submit join request" confirm popup (reuses KeyFabPanel animation) */}
+      {!isOwner ? (
+        <KeyFabPanel
+          isOpen={isJoinRequestConfirmOpen}
+          onClose={() => {
+            setIsJoinRequestConfirmOpen(false);
+            setIsJoinRequestConfirmArmed(false);
+            if (joinRequestConfirmArmTimeoutRef.current) {
+              clearTimeout(joinRequestConfirmArmTimeoutRef.current);
+              joinRequestConfirmArmTimeoutRef.current = null;
+            }
+          }}
+          title="רוצים להגיש בקשה להצטרפות?"
+          subtitle="נשלח בקשה לבעל/ת הדירה. לאחר אישור, מספר הוואטסאפ ייחשף ותוכלו להמשיך לדבר שם כדי לקבל סיסמה ולהצטרף כשותפים."
+          bodyText="אפשר לבטל את הבקשה כל עוד היא לא אושרה."
+          primaryActionLabel={isRequestingJoin ? 'שולח...' : 'הגש בקשה'}
+          onPrimaryAction={() => {
+            if (!isJoinRequestConfirmArmed || isRequestingJoin) return;
+            setIsJoinRequestConfirmOpen(false);
+            setIsJoinRequestConfirmArmed(false);
+            if (joinRequestConfirmArmTimeoutRef.current) {
+              clearTimeout(joinRequestConfirmArmTimeoutRef.current);
+              joinRequestConfirmArmTimeoutRef.current = null;
+            }
+            handleRequestJoin();
           }}
           bottomOffset={ctaHeight + 14}
         />
