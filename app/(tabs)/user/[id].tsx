@@ -965,10 +965,26 @@ export default function UserProfileScreen() {
     tabIdx.value = withTiming(activeTabIndex, { duration: 220 });
   }, [activeTabIndex, tabIdx]);
 
+  const isWeb = Platform.OS === 'web';
+
   const indicatorStyle = useAnimatedStyle(() => {
     // Buttons are laid out row-reverse visually: index 0 is rightmost.
     const x = (2 - tabIdx.value) * segW.value;
+    // Reanimated-web can crash if `style` is provided as an array (it may try to set style[0]).
+    // On web we return a full style object so the element can use `style={indicatorStyle}`.
+    const webBase = isWeb
+      ? {
+          position: 'absolute' as const,
+          top: 6,
+          bottom: 6,
+          left: 6,
+          borderRadius: 999,
+          backgroundColor: '#FFFFFF',
+        }
+      : {};
+
     return {
+      ...(webBase as any),
       width: segW.value,
       transform: [{ translateX: x }],
     };
@@ -2151,7 +2167,7 @@ export default function UserProfileScreen() {
             segW.value = Math.max(1, (w - 12) / 3);
           }}
         >
-          <Animated.View style={[styles.surveySegIndicator, indicatorStyle]} />
+          <Animated.View style={isWeb ? indicatorStyle : [styles.surveySegIndicator, indicatorStyle]} />
           <View style={styles.surveySegRow}>
             <TouchableOpacity
               style={styles.surveySegBtn}

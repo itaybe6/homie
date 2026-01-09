@@ -947,6 +947,7 @@ export default function ApartmentDetailsScreen() {
       }
 
       // Also create request rows so user can track status
+      let requestRowsInserted = false;
       try {
         const requestRows = recipients.map((rid) => ({
           sender_id: user.id!,
@@ -963,13 +964,19 @@ export default function ApartmentDetailsScreen() {
         if (reqErr) {
           throw reqErr;
         }
+        requestRowsInserted = true;
       } catch (e: any) {
         console.error('requests insert failed', e);
         Alert.alert('אזהרה', e?.message || 'לא ניתן ליצור שורת בקשה כרגע');
       }
 
-      setHasRequestedJoin(true);
-      Alert.alert('נשלח', 'נוצרה בקשה חדשה');
+      if (requestRowsInserted) {
+        setHasRequestedJoin(true);
+        Alert.alert('נשלח', 'נוצרה בקשה חדשה');
+      } else {
+        // Don't claim success if we couldn't persist the request in DB.
+        setHasRequestedJoin(false);
+      }
     } catch (e: any) {
       console.error('request join failed', e);
       Alert.alert('שגיאה', e?.message || 'לא ניתן לשלוח בקשה כעת');
@@ -987,6 +994,22 @@ export default function ApartmentDetailsScreen() {
       if (!apartment?.id) return;
 
       setIsRequestingJoin(true);
+
+      const refreshHasRequestedJoin = async () => {
+        try {
+          const { count, error } = await supabase
+            .from('apartments_request')
+            .select('id', { count: 'exact', head: true })
+            .eq('sender_id', user.id)
+            .eq('apartment_id', apartment.id)
+            .eq('type', 'JOIN_APT')
+            .in('status', ['PENDING', 'APPROVED'] as any);
+          if (error) throw error;
+          setHasRequestedJoin((count || 0) > 0);
+        } catch {
+          // if refresh fails, fall back to optimistic state set elsewhere
+        }
+      };
 
       // If already approved, do not allow cancelling via this button.
       // (We treat APPROVED as "already requested" for UI purposes.)
@@ -1008,6 +1031,28 @@ export default function ApartmentDetailsScreen() {
         }
       } catch {
         // ignore
+      }
+
+      // Fetch pending request rows first so we can verify we actually removed something.
+      const { data: pendingRows, error: pendingErr } = await supabase
+        .from('apartments_request')
+        .select('id, status, recipient_id')
+        .eq('sender_id', user.id)
+        .eq('apartment_id', apartment.id)
+        .eq('type', 'JOIN_APT')
+        .eq('status', 'PENDING')
+        .limit(50);
+      if (pendingErr) throw pendingErr;
+
+      const pendingIds = (pendingRows || [])
+        .map((r: any) => String(r?.id || '').trim())
+        .filter(Boolean);
+
+      if (!pendingIds.length) {
+        // Nothing to cancel in DB; refresh local flag from DB and exit quietly.
+        await refreshHasRequestedJoin();
+        Alert.alert('אין בקשה', 'לא נמצאה בקשה פעילה לביטול.');
+        return;
       }
 
       // Best-effort: delete the notifications created for this JOIN_APT request.
@@ -1044,29 +1089,27 @@ export default function ApartmentDetailsScreen() {
         // ignore (non-blocking)
       }
 
-      // Cancel ALL pending JOIN_APT rows for this apartment (there may be multiple recipients)
-      // Prefer DELETE so the request disappears from "Requests" and the UI returns to "הגש בקשה".
-      const { error: delErr } = await supabase
+      // Prefer DELETE so the request disappears from recipients' "Requests".
+      // IMPORTANT: verify affected rows; Supabase returns no error even if 0 rows matched.
+      const { data: deletedRows, error: delErr } = await supabase
         .from('apartments_request')
         .delete()
-        .eq('sender_id', user.id)
-        .eq('apartment_id', apartment.id)
-        .eq('type', 'JOIN_APT')
-        .eq('status', 'PENDING');
+        .in('id', pendingIds as any)
+        .select('id');
 
-      if (delErr) {
-        // Fallback: if DELETE is not allowed by RLS, mark as CANCELLED.
-        const { error: updErr } = await supabase
+      if (delErr || !(deletedRows || []).length) {
+        // Fallback: if DELETE isn't allowed by RLS (or matched 0), mark as NOT_RELEVANT.
+        const { data: updatedRows, error: updErr } = await supabase
           .from('apartments_request')
-          .update({ status: 'CANCELLED', updated_at: new Date().toISOString() } as any)
-          .eq('sender_id', user.id)
-          .eq('apartment_id', apartment.id)
-          .eq('type', 'JOIN_APT')
-          .eq('status', 'PENDING');
-        if (updErr) throw updErr;
+          .update({ status: 'NOT_RELEVANT', updated_at: new Date().toISOString() } as any)
+          .in('id', pendingIds as any)
+          .select('id');
+        if (updErr || !(updatedRows || []).length) {
+          throw updErr || new Error('לא נמחקה/עודכנה אף בקשה (ייתכן חסימת הרשאות RLS)');
+        }
       }
 
-      setHasRequestedJoin(false);
+      await refreshHasRequestedJoin();
       Alert.alert('בוטל', 'הבקשה בוטלה בהצלחה');
     } catch (e: any) {
       console.error('cancel join request failed', e);

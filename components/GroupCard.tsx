@@ -169,6 +169,11 @@ export default function GroupCard({
   }, [detailsActivated, users]);
 
   // Clamp details panel height
+  const activeUser = useMemo(() => {
+    const u = displayUsers.find((x) => x.id === activeUserId);
+    return u || displayUsers[0] || (users?.[0] as User | undefined);
+  }, [activeUserId, displayUsers, users]);
+
   const detailsMinHeight = useMemo(() => {
     const selectedId = activeUser?.id || displayUsers[0]?.id || users?.[0]?.id;
     const selectedDetailsCount = selectedId ? buildDetailsItems(surveysByUserId[selectedId]).length : 0;
@@ -241,11 +246,6 @@ export default function GroupCard({
     });
 
   const gesture = Gesture.Simultaneous(pan, flingUp, flingDown);
-
-  const activeUser = useMemo(() => {
-    const u = displayUsers.find((x) => x.id === activeUserId);
-    return u || displayUsers[0] || (users?.[0] as User | undefined);
-  }, [activeUserId, displayUsers, users]);
 
   const activeMatchPercent = useMemo(() => {
     if (!activeUser?.id) return null;
