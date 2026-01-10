@@ -977,7 +977,7 @@ function PartCarouselPagination({
       {
         key: 'is_sublet',
         title: 'האם מדובר בסאבלט?',
-        explanation: 'האם את/ה מחפש/ת דירה לסאבלט (שכירות זמנית) או שכירות קבועה',
+        explanation: 'סאבלט = שכירות זמנית לתקופה מוגדרת (לרוב כמה חודשים). אם את/ה מחפש/ת שכירות רגילה/קבועה — בחר/י "לא".',
         render: () => (
           <ToggleRow
             value={state.is_sublet}
@@ -999,7 +999,7 @@ function PartCarouselPagination({
       {
         key: 'sublet_period',
         title: 'בחרו את טווח הסאבלט',
-        explanation: 'בחר/י את תאריך הכניסה והסיום של הסאבלט',
+        explanation: 'בחר/י חודש כניסה וחודש סיום לסאבלט.',
         isVisible: () => !!state.is_sublet,
         render: () => (
           <View style={{ gap: 12 }}>
@@ -2902,6 +2902,10 @@ function BalloonSlider5({ value, onChange }: { value: number; onChange: (v: numb
   const BALLOON_W = 44;
   const trackWidth = useSharedValue(1);
   const x = useSharedValue(0);
+  const isInteractingRef = useRef(false);
+  const setIsInteracting = (v: boolean) => {
+    isInteractingRef.current = v;
+  };
 
   // RTL slider: 1 is on the RIGHT, 5 is on the LEFT.
   // Derived 1..5 value from position.
@@ -2922,6 +2926,8 @@ function BalloonSlider5({ value, onChange }: { value: number; onChange: (v: numb
 
   // Keep slider in sync when value changes externally.
   useEffect(() => {
+    // Avoid fighting the gesture while dragging (causes jitter/stuck feeling on web).
+    if (isInteractingRef.current) return;
     const vv = clamp(Math.round(value || 1), 1, 5);
     const w = trackWidth.value;
     if (w > 1) {
@@ -2938,6 +2944,9 @@ function BalloonSlider5({ value, onChange }: { value: number; onChange: (v: numb
     .failOffsetY([-12, 12])
     .shouldCancelWhenOutside(false)
     .hitSlop({ left: 25, right: 25, top: 25, bottom: 25 })
+    .onBegin(() => {
+      runOnJS(setIsInteracting)(true);
+    })
     .onChange((ev) => {
       const w = trackWidth.value;
       if (w <= 1) return;
@@ -2949,6 +2958,9 @@ function BalloonSlider5({ value, onChange }: { value: number; onChange: (v: numb
       const step = w / 4;
       const snapped = Math.round(x.value / step) * step;
       x.value = withSpring(snapped, { damping: 16, stiffness: 180 });
+    })
+    .onFinalize(() => {
+      runOnJS(setIsInteracting)(false);
     });
 
   const progressStyle = useAnimatedStyle(() => {
@@ -2963,7 +2975,8 @@ function BalloonSlider5({ value, onChange }: { value: number; onChange: (v: numb
     };
   });
 
-  const balloonX = useDerivedValue(() => withSpring(x.value));
+  // Follow finger directly while dragging (spring here causes jitter).
+  const balloonX = useDerivedValue(() => x.value);
   const balloonStyle = useAnimatedStyle(() => {
     return {
       transform: [{ translateX: balloonX.value - BALLOON_W / 2 }],
@@ -2987,8 +3000,13 @@ function BalloonSlider5({ value, onChange }: { value: number; onChange: (v: numb
           onLayout={(e) => {
             const w = Math.max(1, e.nativeEvent.layout.width);
             trackWidth.value = w;
-            const vv = clamp(Math.round(value || 1), 1, 5);
-            x.value = ((5 - vv) / 4) * w;
+            // Don't reset position mid-drag (layout can happen during rerenders on web)
+            if (!isInteractingRef.current) {
+              const vv = clamp(Math.round(value || 1), 1, 5);
+              x.value = ((5 - vv) / 4) * w;
+            } else {
+              x.value = clamp(x.value, 0, w);
+            }
           }}
         >
           <Animated.View style={[styles.sliderProgress, progressStyle]} />

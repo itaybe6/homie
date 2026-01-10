@@ -66,7 +66,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import MapboxMap from '@/components/MapboxMap';
 import type { MapboxFeatureCollection } from '@/lib/mapboxHtml';
 import { geocodeApartmentAddress } from '@/lib/mapboxGeocoding';
-import Ticker from '@/components/Ticker';
 import { fetchUserSurvey } from '@/lib/survey';
 import { calculateMatchScore } from '@/utils/matchCalculator';
 import { buildCompatSurvey } from '@/lib/compatSurvey';
@@ -125,8 +124,7 @@ export default function ApartmentDetailsScreen() {
   const [isRequestingJoin, setIsRequestingJoin] = useState(false);
   const [hasRequestedJoin, setHasRequestedJoin] = useState(false);
   const [isAssignedAnywhere, setIsAssignedAnywhere] = useState<boolean | null>(null);
-  const [ownerMatchPercent, setOwnerMatchPercent] = useState<number | null>(null);
-  const [ownerMatchDisplay, setOwnerMatchDisplay] = useState<string>('--%');
+  const [matchByUserId, setMatchByUserId] = useState<Record<string, number | null>>({});
   const [isNavOpen, setIsNavOpen] = useState(false);
   const [navDestination, setNavDestination] = useState<string>('');
   const [confirmState, setConfirmState] = useState<{
@@ -184,57 +182,77 @@ export default function ApartmentDetailsScreen() {
     fetchApartmentDetails();
   }, [id]);
 
-  // Compute match percent between current user and apartment owner (if surveys exist)
+  // Compute match percent between current user and apartment people (if surveys exist)
   useEffect(() => {
     let cancelled = false;
     const run = async () => {
       const myId = String((user as any)?.id || '').trim();
-      const ownerId = String((owner as any)?.id || '').trim();
-      if (!myId || !ownerId || myId === ownerId) {
-        setOwnerMatchPercent(null);
+      if (!myId) {
+        setMatchByUserId({});
         return;
       }
       try {
-        const [mySurvey, ownerSurvey] = await Promise.all([fetchUserSurvey(myId), fetchUserSurvey(ownerId)]);
+        const mySurvey = await fetchUserSurvey(myId);
         if (cancelled) return;
-        if (!mySurvey || !ownerSurvey) {
-          setOwnerMatchPercent(null);
+        if (!mySurvey) {
+          setMatchByUserId({});
           return;
         }
         const myCompat = buildCompatSurvey(user as any, mySurvey as any);
-        const ownerCompat = buildCompatSurvey(owner as any, ownerSurvey as any);
-        const score = calculateMatchScore(myCompat, ownerCompat);
-        const rounded =
-          Number.isFinite(score) && !Number.isNaN(score) ? Math.max(0, Math.min(100, Math.round(score))) : null;
-        setOwnerMatchPercent(rounded);
+
+        const targetsRaw: Array<{ id: string; u: any }> = [
+          owner && (owner as any)?.id ? { id: String((owner as any).id), u: owner as any } : null,
+          ...((members || []).map((m) => ((m as any)?.id ? { id: String((m as any).id), u: m as any } : null)) as any),
+        ].filter(Boolean) as any;
+
+        const seen = new Set<string>();
+        const targets = targetsRaw
+          .map((t) => ({ id: String(t.id || '').trim(), u: t.u }))
+          .filter((t) => t.id && t.id !== myId)
+          .filter((t) => {
+            if (seen.has(t.id)) return false;
+            seen.add(t.id);
+            return true;
+          });
+
+        if (!targets.length) {
+          setMatchByUserId({});
+          return;
+        }
+
+        const results = await Promise.all(
+          targets.map(async ({ id: tid, u }) => {
+            try {
+              const theirSurvey = await fetchUserSurvey(tid);
+              if (!theirSurvey) return [tid, null] as const;
+              const theirCompat = buildCompatSurvey(u as any, theirSurvey as any);
+              const score = calculateMatchScore(myCompat, theirCompat);
+              const rounded =
+                Number.isFinite(score) && !Number.isNaN(score)
+                  ? Math.max(0, Math.min(100, Math.round(score)))
+                  : null;
+              return [tid, rounded] as const;
+            } catch {
+              return [tid, null] as const;
+            }
+          })
+        );
+
+        if (cancelled) return;
+        const next: Record<string, number | null> = {};
+        results.forEach(([tid, v]) => {
+          next[tid] = v;
+        });
+        setMatchByUserId(next);
       } catch {
-        if (!cancelled) setOwnerMatchPercent(null);
+        if (!cancelled) setMatchByUserId({});
       }
     };
     run();
     return () => {
       cancelled = true;
     };
-  }, [user?.id, owner?.id]);
-
-  // Animate match % display like the user profile "match tab"
-  useEffect(() => {
-    let t: any;
-    if (typeof ownerMatchPercent !== 'number' || !Number.isFinite(ownerMatchPercent)) {
-      setOwnerMatchDisplay('--%');
-      return () => {};
-    }
-    const digitsLen = String(ownerMatchPercent).length;
-    const start = `${'0'.repeat(digitsLen)}%`;
-    const end = `${ownerMatchPercent}%`;
-    setOwnerMatchDisplay(start);
-    t = setTimeout(() => setOwnerMatchDisplay(end), 120);
-    return () => {
-      try {
-        clearTimeout(t);
-      } catch {}
-    };
-  }, [ownerMatchPercent]);
+  }, [user?.id, owner?.id, members.map((m) => m.id).join('|')]);
 
   // Geocode apartment address -> show on Mapbox map (bottom map card)
   useEffect(() => {
@@ -1762,15 +1780,6 @@ export default function ApartmentDetailsScreen() {
           {/* host card */}
           {!isOwner ? (
             <View style={styles.hostCard}>
-              <LinearGradient
-                colors={typeof ownerMatchPercent === 'number' ? [colors.successMuted, colors.success] : ['#D1D5DB', '#9CA3AF']}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 0, y: 1 }}
-                style={styles.hostMatchTab}
-              >
-                <Ticker value={ownerMatchDisplay} fontSize={15} staggerDuration={55} style={styles.hostMatchTabValue} />
-                <Text style={styles.hostMatchTabLabel}>התאמה</Text>
-              </LinearGradient>
               {/* Right: avatar */}
               <View style={styles.hostAvatarWrap}>
                 <Image
@@ -1797,28 +1806,26 @@ export default function ApartmentDetailsScreen() {
               <Text style={styles.sectionTitle}>מה יש בדירה?</Text>
               <View style={styles.featuresGrid}>
                 {(() => {
+                  const aptType = String((apartment as any)?.apartment_type || '').toUpperCase();
+                  const gardenSqmRaw = (apartment as any)?.garden_square_meters;
+                  const gardenSqm =
+                    typeof gardenSqmRaw === 'number' && Number.isFinite(gardenSqmRaw) ? (gardenSqmRaw as number) : null;
+                  const hasGarden = aptType === 'GARDEN' || (gardenSqm !== null && gardenSqm > 0);
+
                   const balcony = typeof (apartment as any)?.balcony_count === 'number'
                     ? ((apartment as any).balcony_count as number)
                     : 0;
                   const items: Array<{ key: string; label: string; Icon: any }> = [];
 
-                  if (balcony > 0) {
-                    items.push({
-                      key: 'balcony_count',
-                      label: 'מרפסת',
-                      Icon: Home,
-                    });
-                  }
-                  if ((apartment as any)?.wheelchair_accessible) items.push({ key: 'wheelchair_accessible', label: 'גישה לנכים', Icon: Accessibility });
-                  if ((apartment as any)?.has_air_conditioning) items.push({ key: 'has_air_conditioning', label: 'מיזוג', Icon: Snowflake });
-                  if ((apartment as any)?.has_bars) items.push({ key: 'has_bars', label: 'סורגים', Icon: Fence });
-                  if ((apartment as any)?.has_solar_heater) items.push({ key: 'has_solar_heater', label: 'דוד שמש', Icon: Sun });
-                  if ((apartment as any)?.is_furnished) items.push({ key: 'is_furnished', label: 'ריהוט', Icon: Sofa });
-                  if ((apartment as any)?.has_safe_room) items.push({ key: 'has_safe_room', label: 'ממ״ד', Icon: Shield });
-                  if ((apartment as any)?.is_renovated) items.push({ key: 'is_renovated', label: 'משופצת', Icon: Hammer });
+                  // Keep this list EXACTLY as requested + order:
+                  // ממד, חיות מחמד, מרוהט, גישה לנכים, גינה, מרפסת
+                  if ((apartment as any)?.has_safe_room) items.push({ key: 'has_safe_room', label: 'ממד', Icon: Shield });
                   if ((apartment as any)?.pets_allowed) items.push({ key: 'pets_allowed', label: 'חיות מחמד', Icon: PawPrint });
-                  if ((apartment as any)?.has_elevator) items.push({ key: 'has_elevator', label: 'מעלית', Icon: ArrowUpDown });
-                  if ((apartment as any)?.kosher_kitchen) items.push({ key: 'kosher_kitchen', label: 'מטבח כשר', Icon: Utensils });
+                  if ((apartment as any)?.is_furnished) items.push({ key: 'is_furnished', label: 'מרוהט', Icon: Sofa });
+                  if ((apartment as any)?.wheelchair_accessible)
+                    items.push({ key: 'wheelchair_accessible', label: 'גישה לנכים', Icon: Accessibility });
+                  if (hasGarden) items.push({ key: 'garden', label: 'גינה', Icon: Trees });
+                  if (balcony > 0) items.push({ key: 'balcony_count', label: 'מרפסת', Icon: Home });
 
                   if (!items.length) {
                     return (
@@ -1976,6 +1983,12 @@ export default function ApartmentDetailsScreen() {
                     <View style={styles.peopleGrid}>
                       {people.map((p, idx) => {
                         const meta = typeof p.age === 'number' ? `${p.role} • ${p.age}` : p.role;
+                        const match = matchByUserId[p.id];
+                        const matchLabel = typeof match === 'number' ? `${match}%` : '--%';
+                        const ringColors =
+                          typeof match === 'number'
+                            ? ([colors.successMuted, colors.success] as const)
+                            : (['#E5E7EB', '#D1D5DB'] as const);
                         return (
                           <TouchableOpacity
                             key={`person-${p.id}-${idx}`}
@@ -1986,10 +1999,35 @@ export default function ApartmentDetailsScreen() {
                             }}
                           >
                             <View style={styles.personAvatarWrap}>
-                              <Image
-                                source={{ uri: p.avatar || 'https://cdn-icons-png.flaticon.com/512/847/847969.png' }}
-                                style={styles.personAvatar}
-                              />
+                              <LinearGradient
+                                colors={ringColors as any}
+                                start={{ x: 0, y: 0 }}
+                                end={{ x: 1, y: 1 }}
+                                style={styles.personAvatarRing}
+                              >
+                                <View style={styles.personAvatarInner}>
+                                  <Image
+                                    source={{ uri: p.avatar || 'https://cdn-icons-png.flaticon.com/512/847/847969.png' }}
+                                    style={styles.personAvatar}
+                                  />
+                                </View>
+                              </LinearGradient>
+                              <View
+                                style={[
+                                  styles.personMatchPill,
+                                  typeof match === 'number' ? styles.personMatchPillActive : styles.personMatchPillDisabled,
+                                ]}
+                              >
+                                <Text
+                                  style={[
+                                    styles.personMatchText,
+                                    typeof match === 'number' ? styles.personMatchTextActive : styles.personMatchTextDisabled,
+                                  ]}
+                                  numberOfLines={1}
+                                >
+                                  {matchLabel}
+                                </Text>
+                              </View>
                             </View>
                             <Text style={styles.personName} numberOfLines={1}>
                               {p.name}
@@ -2303,10 +2341,49 @@ export default function ApartmentDetailsScreen() {
                       }}
                       style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 }}
                     >
-                      <Image
-                        source={{ uri: (m as any).avatar_url || 'https://cdn-icons-png.flaticon.com/512/847/847969.png' }}
-                        style={styles.avatarLarge}
-                      />
+                      {(() => {
+                        const match = matchByUserId[String(m.id)];
+                        const matchLabel = typeof match === 'number' ? `${match}%` : '--%';
+                        const ringColors =
+                          typeof match === 'number'
+                            ? ([colors.successMuted, colors.success] as const)
+                            : (['#E5E7EB', '#D1D5DB'] as const);
+                        return (
+                          <View style={styles.memberAvatarWrap}>
+                            <LinearGradient
+                              colors={ringColors as any}
+                              start={{ x: 0, y: 0 }}
+                              end={{ x: 1, y: 1 }}
+                              style={styles.memberAvatarRing}
+                            >
+                              <View style={styles.memberAvatarInner}>
+                                <Image
+                                  source={{
+                                    uri:
+                                      (m as any).avatar_url || 'https://cdn-icons-png.flaticon.com/512/847/847969.png',
+                                  }}
+                                  style={styles.avatarLarge}
+                                />
+                              </View>
+                            </LinearGradient>
+                            <View
+                              style={[
+                                styles.memberMatchPill,
+                                typeof match === 'number' ? styles.memberMatchPillActive : styles.memberMatchPillDisabled,
+                              ]}
+                            >
+                              <Text
+                                style={[
+                                  styles.memberMatchText,
+                                  typeof match === 'number' ? styles.memberMatchTextActive : styles.memberMatchTextDisabled,
+                                ]}
+                              >
+                                {matchLabel}
+                              </Text>
+                            </View>
+                          </View>
+                        );
+                      })()}
                       <View style={{ flex: 1 }}>
                         <Text style={styles.memberName}>{m.full_name}</Text>
                       </View>
@@ -3173,9 +3250,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderRadius: 14,
     paddingVertical: 12,
-    paddingRight: 12,
-    // Reserve space for the match tab on the left side
-    paddingLeft: 12 + 78,
+    paddingHorizontal: 12,
     marginBottom: 12,
     ...(Platform.OS === 'ios'
       ? {
@@ -3185,38 +3260,6 @@ const styles = StyleSheet.create({
           shadowOffset: { width: 0, height: 4 },
         }
       : { elevation: 4 }),
-  },
-  hostMatchTab: {
-    position: 'absolute',
-    left: 0,
-    top: 0,
-    bottom: 0,
-    width: 78,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderTopLeftRadius: 14,
-    borderBottomLeftRadius: 14,
-    // Inner edge stays straight (attached look)
-    borderTopRightRadius: 0,
-    borderBottomRightRadius: 0,
-  },
-  hostMatchTabValue: {
-    color: '#FFFFFF',
-    fontSize: 15,
-    fontWeight: '900',
-    lineHeight: 18,
-    includeFontPadding: false,
-    textAlign: 'center',
-    writingDirection: 'ltr',
-  },
-  hostMatchTabLabel: {
-    marginTop: 2,
-    color: 'rgba(255,255,255,0.92)',
-    fontSize: 10,
-    fontWeight: '800',
-    lineHeight: 12,
-    includeFontPadding: false,
-    textAlign: 'center',
   },
   hostIconCircle: {
     width: 28,
@@ -3739,14 +3782,55 @@ const styles = StyleSheet.create({
     borderWidth: 0,
   },
   personAvatarWrap: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+    width: 66,
+    height: 66,
+    borderRadius: 33,
+    marginBottom: 10,
+    position: 'relative',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  personAvatarRing: {
+    width: 66,
+    height: 66,
+    borderRadius: 33,
+    padding: 3,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  personAvatarInner: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
     overflow: 'hidden',
     backgroundColor: '#F3F4F6',
-    marginBottom: 8,
   },
   personAvatar: { width: '100%', height: '100%' },
+  personMatchPill: {
+    position: 'absolute',
+    bottom: -6,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 999,
+    borderWidth: 1,
+  },
+  personMatchPillActive: {
+    backgroundColor: '#FFFFFF',
+    borderColor: 'rgba(16,185,129,0.28)',
+  },
+  personMatchPillDisabled: {
+    backgroundColor: '#FFFFFF',
+    borderColor: 'rgba(17,24,39,0.12)',
+  },
+  personMatchText: {
+    fontSize: 11,
+    fontWeight: '900',
+    includeFontPadding: false,
+    textAlign: 'center',
+    writingDirection: 'ltr',
+  },
+  personMatchTextActive: { color: '#065F46' },
+  personMatchTextDisabled: { color: '#6B7280' },
   personName: {
     color: '#111827',
     fontSize: 14,
@@ -4126,6 +4210,49 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     backgroundColor: '#1F1F29',
   },
+  memberAvatarWrap: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    position: 'relative',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  memberAvatarRing: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    padding: 3,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  memberAvatarInner: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    overflow: 'hidden',
+    backgroundColor: '#F3F4F6',
+  },
+  memberMatchPill: {
+    position: 'absolute',
+    bottom: -6,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 999,
+    borderWidth: 1,
+    backgroundColor: '#FFFFFF',
+  },
+  memberMatchPillActive: { borderColor: 'rgba(16,185,129,0.28)' },
+  memberMatchPillDisabled: { borderColor: 'rgba(17,24,39,0.12)' },
+  memberMatchText: {
+    fontSize: 11,
+    fontWeight: '900',
+    includeFontPadding: false,
+    textAlign: 'center',
+    writingDirection: 'ltr',
+  },
+  memberMatchTextActive: { color: '#065F46' },
+  memberMatchTextDisabled: { color: '#6B7280' },
   memberName: {
     color: '#111827',
     fontSize: 15,

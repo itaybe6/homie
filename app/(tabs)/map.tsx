@@ -465,11 +465,14 @@ export default function MapTabScreen() {
       if (chipFilters.is_furnished && !props?.is_furnished) return false;
       if (chipFilters.wheelchair_accessible && !props?.wheelchair_accessible) return false;
       if (chipFilters.has_safe_room && !props?.has_safe_room) return false;
-      if (chipFilters.has_elevator && !props?.has_elevator) return false;
-      if (chipFilters.kosher_kitchen && !props?.kosher_kitchen) return false;
-      if (chipFilters.has_air_conditioning && !props?.has_air_conditioning) return false;
-      if (chipFilters.has_solar_heater && !props?.has_solar_heater) return false;
-      if (chipFilters.is_renovated && !props?.is_renovated) return false;
+      if (chipFilters.garden) {
+        const aptType = String(props?.apartment_type || '').toUpperCase();
+        const gardenSqmRaw = props?.garden_square_meters;
+        const gardenSqm =
+          typeof gardenSqmRaw === 'number' && Number.isFinite(gardenSqmRaw) ? (gardenSqmRaw as number) : null;
+        const hasGarden = aptType === 'GARDEN' || (gardenSqm !== null && gardenSqm > 0);
+        if (!hasGarden) return false;
+      }
       if (chipFilters.balcony) {
         const bc = typeof props?.balcony_count === 'number' ? (props.balcony_count as number) : 0;
         if (bc <= 0) return false;

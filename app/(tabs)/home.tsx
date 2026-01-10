@@ -502,11 +502,14 @@ export default function HomeScreen() {
       if (chipFilters.is_furnished && !anyApt?.is_furnished) return false;
       if (chipFilters.wheelchair_accessible && !anyApt?.wheelchair_accessible) return false;
       if (chipFilters.has_safe_room && !anyApt?.has_safe_room) return false;
-      if (chipFilters.has_elevator && !anyApt?.has_elevator) return false;
-      if (chipFilters.kosher_kitchen && !anyApt?.kosher_kitchen) return false;
-      if (chipFilters.has_air_conditioning && !anyApt?.has_air_conditioning) return false;
-      if (chipFilters.has_solar_heater && !anyApt?.has_solar_heater) return false;
-      if (chipFilters.is_renovated && !anyApt?.is_renovated) return false;
+      if (chipFilters.garden) {
+        const aptType = String(anyApt?.apartment_type || '').toUpperCase();
+        const gardenSqmRaw = anyApt?.garden_square_meters;
+        const gardenSqm =
+          typeof gardenSqmRaw === 'number' && Number.isFinite(gardenSqmRaw) ? (gardenSqmRaw as number) : null;
+        const hasGarden = aptType === 'GARDEN' || (gardenSqm !== null && gardenSqm > 0);
+        if (!hasGarden) return false;
+      }
       if (chipFilters.balcony) {
         const bc = typeof anyApt?.balcony_count === 'number' ? (anyApt.balcony_count as number) : 0;
         if (bc <= 0) return false;
