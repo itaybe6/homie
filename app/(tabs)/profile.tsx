@@ -198,6 +198,7 @@ function AvatarPhotoFab({
 export default function ProfileScreen() {
   const router = useRouter();
   const { user, setUser } = useAuthStore();
+  const isOwner = (user as any)?.role === 'owner';
   const apartments = useApartmentStore((state) => state.apartments);
   const removeApartmentFromStore = useApartmentStore((state) => state.removeApartment);
   const insets = useSafeAreaInsets();
@@ -225,6 +226,11 @@ export default function ProfileScreen() {
   >([]);
   const [surveyResponse, setSurveyResponse] = useState<UserSurveyResponse | null>(null);
   const ignoreNextGalleryPressRef = useRef(false);
+
+  useEffect(() => {
+    // Owners should not see the survey UI. Close it if it was opened somehow.
+    if (isOwner && isSurveyOpen) setIsSurveyOpen(false);
+  }, [isOwner, isSurveyOpen]);
 
   const ownedApartments = useMemo(() => {
     const uid = (user as any)?.id as string | undefined;
@@ -1491,70 +1497,72 @@ export default function ProfileScreen() {
           </View>
         )}
 
-        {/* Survey CTA */}
-        <View style={styles.sectionDark}>
-          <View style={styles.surveyCTA}>
-            {profile ? (
-              <LinearGradient
-                colors={[colors.successMuted, colors.success]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={styles.surveyCTAAvatarRing}
-              >
-                <View style={styles.surveyCTAAvatarInner}>
-                  <Image
-                    source={{ uri: profile.avatar_url || 'https://cdn-icons-png.flaticon.com/512/847/847969.png' }}
-                    style={styles.surveyCTAAvatar}
-                  />
-                </View>
-              </LinearGradient>
-            ) : null}
-
-            <TouchableOpacity
-              style={styles.surveyCTATexts}
-              activeOpacity={0.9}
-              onPress={() => {
-                router.push({ pathname: '/(tabs)/onboarding/survey', params: { mode: 'edit' } } as any);
-              }}
-              accessibilityRole="button"
-              accessibilityLabel="עריכת שאלון"
-            >
-              <Text style={styles.surveyCTATitle}>
-                {`השאלון של ${(profile?.full_name || '').split(' ')?.[0] || 'אני'}`}
-              </Text>
-              <Text style={styles.surveyCTASubtitle} numberOfLines={1}>
-                {surveyResponse ? 'לחצו כאן כדי לערוך את השאלון' : 'לחצו כאן כדי למלא את השאלון'}
-              </Text>
-            </TouchableOpacity>
-
-            <View style={styles.surveyCTAActions}>
-              {surveyResponse ? (
-                <TouchableOpacity
-                  style={styles.surveyEyeBtn}
-                  activeOpacity={0.9}
-                  onPress={() => setIsSurveyOpen(true)}
-                  accessibilityRole="button"
-                  accessibilityLabel="צפייה בשאלון"
+        {/* Survey CTA (not for owners) */}
+        {!isOwner ? (
+          <View style={styles.sectionDark}>
+            <View style={styles.surveyCTA}>
+              {profile ? (
+                <LinearGradient
+                  colors={[colors.successMuted, colors.success]}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={styles.surveyCTAAvatarRing}
                 >
-                  <Eye size={18} color={colors.primary} />
-                </TouchableOpacity>
+                  <View style={styles.surveyCTAAvatarInner}>
+                    <Image
+                      source={{ uri: profile.avatar_url || 'https://cdn-icons-png.flaticon.com/512/847/847969.png' }}
+                      style={styles.surveyCTAAvatar}
+                    />
+                  </View>
+                </LinearGradient>
               ) : null}
+
               <TouchableOpacity
-                style={[styles.surveyCTACtaPill, surveyResponse ? styles.surveyCTACtaPillBrown : null]}
+                style={styles.surveyCTATexts}
                 activeOpacity={0.9}
                 onPress={() => {
                   router.push({ pathname: '/(tabs)/onboarding/survey', params: { mode: 'edit' } } as any);
                 }}
                 accessibilityRole="button"
-                accessibilityLabel={surveyResponse ? 'עריכת שאלון' : 'מילוי שאלון'}
+                accessibilityLabel="עריכת שאלון"
               >
-                <Text style={[styles.surveyCTACtaPillText, surveyResponse ? styles.surveyCTACtaPillTextBrown : null]}>
-                  {surveyResponse ? 'עריכה' : 'מילוי'}
+                <Text style={styles.surveyCTATitle}>
+                  {`השאלון של ${(profile?.full_name || '').split(' ')?.[0] || 'אני'}`}
+                </Text>
+                <Text style={styles.surveyCTASubtitle} numberOfLines={1}>
+                  {surveyResponse ? 'לחצו כאן כדי לערוך את השאלון' : 'לחצו כאן כדי למלא את השאלון'}
                 </Text>
               </TouchableOpacity>
+
+              <View style={styles.surveyCTAActions}>
+                {surveyResponse ? (
+                  <TouchableOpacity
+                    style={styles.surveyEyeBtn}
+                    activeOpacity={0.9}
+                    onPress={() => setIsSurveyOpen(true)}
+                    accessibilityRole="button"
+                    accessibilityLabel="צפייה בשאלון"
+                  >
+                    <Eye size={18} color={colors.primary} />
+                  </TouchableOpacity>
+                ) : null}
+                <TouchableOpacity
+                  style={[styles.surveyCTACtaPill, surveyResponse ? styles.surveyCTACtaPillBrown : null]}
+                  activeOpacity={0.9}
+                  onPress={() => {
+                    router.push({ pathname: '/(tabs)/onboarding/survey', params: { mode: 'edit' } } as any);
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel={surveyResponse ? 'עריכת שאלון' : 'מילוי שאלון'}
+                >
+                  <Text style={[styles.surveyCTACtaPillText, surveyResponse ? styles.surveyCTACtaPillTextBrown : null]}>
+                    {surveyResponse ? 'עריכה' : 'מילוי'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
-        </View>
+        ) : null}
 
         {/* Shared profile (if any) */}
         <View style={styles.sectionDark}>
@@ -2056,129 +2064,131 @@ export default function ProfileScreen() {
           </View>
         </Modal>
       )}
-      <KeyFabPanel
-        isOpen={isSurveyOpen}
-        onClose={() => setIsSurveyOpen(false)}
-        title="סיכום ההעדפות"
-        subtitle=""
-        anchor="center"
-        topOffset={insets.top + 24}
-        bottomOffset={insets.bottom + 24}
-        openedWidth={surveyPanelWidth}
-        panelStyle={{ maxHeight: surveyPanelMaxHeight, borderRadius: 22, padding: 14 }}
-      >
-        <View
-          style={styles.surveySegWrap}
-          onLayout={(e) => {
-            const w = Math.max(1, e.nativeEvent.layout.width);
-            // account for horizontal padding inside the segmented control
-            segW.value = Math.max(1, (w - 12) / 3);
-          }}
+      {!isOwner ? (
+        <KeyFabPanel
+          isOpen={isSurveyOpen}
+          onClose={() => setIsSurveyOpen(false)}
+          title="סיכום ההעדפות"
+          subtitle=""
+          anchor="center"
+          topOffset={insets.top + 24}
+          bottomOffset={insets.bottom + 24}
+          openedWidth={surveyPanelWidth}
+          panelStyle={{ maxHeight: surveyPanelMaxHeight, borderRadius: 22, padding: 14 }}
         >
-          <Animated.View style={isWeb ? indicatorStyle : [styles.surveySegIndicator, indicatorStyle]} />
-          <View style={styles.surveySegRow}>
-            <TouchableOpacity
-              style={styles.surveySegBtn}
-              onPress={() => setSurveyActiveSection('about')}
-              activeOpacity={0.9}
-            >
-              <UserIcon size={16} color={surveyActiveSection === 'about' ? '#5e3f2d' : '#6B7280'} />
-              <Text style={[styles.surveySegText, surveyActiveSection === 'about' ? styles.surveySegTextActive : null]}>
-                קצת עליי
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.surveySegBtn}
-              onPress={() => setSurveyActiveSection('apartment')}
-              activeOpacity={0.9}
-            >
-              <Home size={16} color={surveyActiveSection === 'apartment' ? '#5e3f2d' : '#6B7280'} />
-              <Text
-                style={[
-                  styles.surveySegText,
-                  surveyActiveSection === 'apartment' ? styles.surveySegTextActive : null,
-                ]}
+          <View
+            style={styles.surveySegWrap}
+            onLayout={(e) => {
+              const w = Math.max(1, e.nativeEvent.layout.width);
+              // account for horizontal padding inside the segmented control
+              segW.value = Math.max(1, (w - 12) / 3);
+            }}
+          >
+            <Animated.View style={isWeb ? indicatorStyle : [styles.surveySegIndicator, indicatorStyle]} />
+            <View style={styles.surveySegRow}>
+              <TouchableOpacity
+                style={styles.surveySegBtn}
+                onPress={() => setSurveyActiveSection('about')}
+                activeOpacity={0.9}
               >
-                הדירה
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.surveySegBtn}
-              onPress={() => setSurveyActiveSection('partner')}
-              activeOpacity={0.9}
-            >
-              <Users size={16} color={surveyActiveSection === 'partner' ? '#5e3f2d' : '#6B7280'} />
-              <Text
-                style={[
-                  styles.surveySegText,
-                  surveyActiveSection === 'partner' ? styles.surveySegTextActive : null,
-                ]}
+                <UserIcon size={16} color={surveyActiveSection === 'about' ? '#5e3f2d' : '#6B7280'} />
+                <Text style={[styles.surveySegText, surveyActiveSection === 'about' ? styles.surveySegTextActive : null]}>
+                  קצת עליי
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.surveySegBtn}
+                onPress={() => setSurveyActiveSection('apartment')}
+                activeOpacity={0.9}
               >
-                השותפים
-              </Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        <ScrollView
-          style={[styles.surveyPanelScroll, { maxHeight: surveyPanelScrollMaxHeight }]}
-          contentContainerStyle={styles.surveyPanelContent}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="always"
-          nestedScrollEnabled
-        >
-          {surveyResponse && surveyItems.length ? (
-            <Animated.View
-              key={`survey-part-${surveyActiveSection}`}
-              entering={FadeIn.duration(160)}
-              exiting={FadeOut.duration(120)}
-              style={styles.surveySectionCard}
-            >
-              <Text style={styles.surveySectionTitle}>
-                {surveyActiveSection === 'about'
-                  ? 'קצת עליי'
-                  : surveyActiveSection === 'apartment'
-                    ? 'העדפות לדירה'
-                    : 'העדפות לשותפים'}
-              </Text>
-              {surveyItems
-                .filter((i) => i.section === surveyActiveSection)
-                .map((item, idx, arr) => (
-                  <View key={`${item.section}-${item.label}-${item.value}`}>
-                    <View style={styles.surveyRow}>
-                      <Text style={styles.surveyRowLabel}>{item.label}</Text>
-                      <View style={styles.surveyRowValuePill}>
-                        <Text style={styles.surveyRowValueText}>{item.value}</Text>
-                      </View>
-                    </View>
-                    {idx < arr.length - 1 ? <View style={styles.surveyRowDivider} /> : null}
-                  </View>
-                ))}
-            </Animated.View>
-          ) : (
-            <View style={styles.surveyEmptyState}>
-              <Text style={styles.surveyEmptyText}>
-                {surveyResponse ? 'אין נתונים להצגה.' : 'עדיין לא מילאת את השאלון.'}
-              </Text>
-              {!surveyResponse ? (
-                <TouchableOpacity
-                  style={styles.surveyEmptyCtaBtn}
-                  activeOpacity={0.9}
-                  onPress={() => {
-                    setIsSurveyOpen(false);
-                    router.push({ pathname: '/(tabs)/onboarding/survey', params: { mode: 'edit' } } as any);
-                  }}
-                  accessibilityRole="button"
-                  accessibilityLabel="מלא את השאלון"
+                <Home size={16} color={surveyActiveSection === 'apartment' ? '#5e3f2d' : '#6B7280'} />
+                <Text
+                  style={[
+                    styles.surveySegText,
+                    surveyActiveSection === 'apartment' ? styles.surveySegTextActive : null,
+                  ]}
                 >
-                  <ClipboardList size={18} color="#FFFFFF" />
-                  <Text style={styles.surveyEmptyCtaText}>מלא/י את השאלון</Text>
-                </TouchableOpacity>
-              ) : null}
+                  הדירה
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.surveySegBtn}
+                onPress={() => setSurveyActiveSection('partner')}
+                activeOpacity={0.9}
+              >
+                <Users size={16} color={surveyActiveSection === 'partner' ? '#5e3f2d' : '#6B7280'} />
+                <Text
+                  style={[
+                    styles.surveySegText,
+                    surveyActiveSection === 'partner' ? styles.surveySegTextActive : null,
+                  ]}
+                >
+                  השותפים
+                </Text>
+              </TouchableOpacity>
             </View>
-          )}
-        </ScrollView>
-      </KeyFabPanel>
+          </View>
+
+          <ScrollView
+            style={[styles.surveyPanelScroll, { maxHeight: surveyPanelScrollMaxHeight }]}
+            contentContainerStyle={styles.surveyPanelContent}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="always"
+            nestedScrollEnabled
+          >
+            {surveyResponse && surveyItems.length ? (
+              <Animated.View
+                key={`survey-part-${surveyActiveSection}`}
+                entering={FadeIn.duration(160)}
+                exiting={FadeOut.duration(120)}
+                style={styles.surveySectionCard}
+              >
+                <Text style={styles.surveySectionTitle}>
+                  {surveyActiveSection === 'about'
+                    ? 'קצת עליי'
+                    : surveyActiveSection === 'apartment'
+                      ? 'העדפות לדירה'
+                      : 'העדפות לשותפים'}
+                </Text>
+                {surveyItems
+                  .filter((i) => i.section === surveyActiveSection)
+                  .map((item, idx, arr) => (
+                    <View key={`${item.section}-${item.label}-${item.value}`}>
+                      <View style={styles.surveyRow}>
+                        <Text style={styles.surveyRowLabel}>{item.label}</Text>
+                        <View style={styles.surveyRowValuePill}>
+                          <Text style={styles.surveyRowValueText}>{item.value}</Text>
+                        </View>
+                      </View>
+                      {idx < arr.length - 1 ? <View style={styles.surveyRowDivider} /> : null}
+                    </View>
+                  ))}
+              </Animated.View>
+            ) : (
+              <View style={styles.surveyEmptyState}>
+                <Text style={styles.surveyEmptyText}>
+                  {surveyResponse ? 'אין נתונים להצגה.' : 'עדיין לא מילאת את השאלון.'}
+                </Text>
+                {!surveyResponse ? (
+                  <TouchableOpacity
+                    style={styles.surveyEmptyCtaBtn}
+                    activeOpacity={0.9}
+                    onPress={() => {
+                      setIsSurveyOpen(false);
+                      router.push({ pathname: '/(tabs)/onboarding/survey', params: { mode: 'edit' } } as any);
+                    }}
+                    accessibilityRole="button"
+                    accessibilityLabel="מלא את השאלון"
+                  >
+                    <ClipboardList size={18} color="#FFFFFF" />
+                    <Text style={styles.surveyEmptyCtaText}>מלא/י את השאלון</Text>
+                  </TouchableOpacity>
+                ) : null}
+              </View>
+            )}
+          </ScrollView>
+        </KeyFabPanel>
+      ) : null}
       {(isSaving || isAddingImage) && (
         <View style={styles.fullScreenLoader}>
           <ActivityIndicator size="large" color="#FFFFFF" />

@@ -29,7 +29,7 @@ import Animated, {
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { SlidersHorizontal, ChevronLeft, ChevronRight, Heart, X, MapPin, Share2, Users, RefreshCw, User as UserIcon } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useRouter } from 'expo-router';
+import { Redirect, useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { colors } from '@/lib/theme';
 import { useAuthStore } from '@/stores/authStore';
@@ -138,6 +138,12 @@ type BrowseItem =
 export default function PartnersScreen() {
   const router = useRouter();
   const currentUser = useAuthStore((s) => s.user);
+
+  // Owners should not have access to the partners screen.
+  if ((currentUser as any)?.role === 'owner') {
+    return <Redirect href="/(tabs)/home" />;
+  }
+
   const insets = useSafeAreaInsets();
   const [items, setItems] = useState<BrowseItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);

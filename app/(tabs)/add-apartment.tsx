@@ -81,7 +81,8 @@ const HEB_MONTH_NAMES = [
 const { width: _screenW, height: _screenH } = Dimensions.get('window');
 const _brandGreen = colors.success;
 const _successDuration = 650;
-const _successNavDelayMs = 2800;
+// Keep the success animation, but don't make navigation feel "stuck".
+const _successNavDelayMs = 1200;
 
 
 type UpsertMode = 'create' | 'edit';
@@ -91,6 +92,7 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
   const pathname = usePathname();
   const params = useLocalSearchParams();
   const { user } = useAuthStore();
+  const isOwner = (user as any)?.role === 'owner';
   const addApartment = useApartmentStore((state) => state.addApartment);
   const updateApartment = useApartmentStore((state) => state.updateApartment);
   const mapboxToken = process.env.EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN as string | undefined;
@@ -218,6 +220,11 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
   } | null>(null);
   const [includeAsPartner, setIncludeAsPartner] = useState(false);
   const [roommateCapacity, setRoommateCapacity] = useState<number | null>(null);
+
+  // Owners should never be treated as "partner" in their own apartment listing.
+  useEffect(() => {
+    if (isOwner && includeAsPartner) setIncludeAsPartner(false);
+  }, [isOwner, includeAsPartner]);
   const roommateCapacityOptions = [2, 3, 4, 5];
   const [existingPartnerIds, setExistingPartnerIds] = useState<string[]>([]);
 
@@ -919,6 +926,29 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
     return data.publicUrl;
   };
 
+  const mapWithConcurrency = async <T, R>(
+    items: T[],
+    concurrency: number,
+    mapper: (item: T, idx: number) => Promise<R>
+  ): Promise<R[]> => {
+    const safeConcurrency = Math.max(1, Math.floor(concurrency || 1));
+    const results = new Array<R>(items.length);
+    let next = 0;
+
+    const worker = async () => {
+      while (true) {
+        const idx = next;
+        next += 1;
+        if (idx >= items.length) return;
+        results[idx] = await mapper(items[idx], idx);
+      }
+    };
+
+    const workers = Array.from({ length: Math.min(safeConcurrency, items.length) }, () => worker());
+    await Promise.all(workers);
+    return results;
+  };
+
   const ensureUserProfileRow = async (userId: string, email: string | null) => {
     // Verify profile row exists to satisfy FK: apartments.owner_id -> users.id
     const { data: existing, error: selectErr } = await supabase
@@ -1044,11 +1074,11 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
       const existingRemote = mode === 'edit' ? images.filter((u) => isRemoteUrl(u)) : [];
       const localUris = mode === 'edit' ? images.filter((u) => !isRemoteUrl(u)) : images;
 
-      const uploadedUrls: string[] = [];
-      for (const uri of localUris) {
-        const url = await uploadImage(authUser.id, uri);
-        uploadedUrls.push(url);
-      }
+      // Upload images in parallel (small worker pool) to reduce publish time significantly.
+      const uploadedUrls: string[] =
+        localUris.length > 0
+          ? await mapWithConcurrency(localUris, 3, async (uri) => uploadImage(authUser.id, uri))
+          : [];
 
       const finalImageUrls = Array.from(new Set([...(existingRemote || []), ...uploadedUrls].filter(Boolean)));
       const moveInDateIso =
@@ -1058,10 +1088,12 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
       if (mode === 'edit') {
         if (!editingApartmentId) throw new Error('חסר מזהה דירה לעריכה');
 
-        // Preserve existing partner_ids; only toggle owner inclusion if user changed it
+        // Preserve existing partner_ids; only toggle owner inclusion if user changed it.
+        // Owners should never be included as a "partner" in their own listing.
         const base = normalizeIds(existingPartnerIds);
         const withoutOwner = base.filter((pid) => pid !== authUser.id);
-        const nextPartnerIds = includeAsPartner ? Array.from(new Set([...withoutOwner, authUser.id])) : withoutOwner;
+        const nextPartnerIds =
+          !isOwner && includeAsPartner ? Array.from(new Set([...withoutOwner, authUser.id])) : withoutOwner;
 
         const updatePayload = {
             partner_ids: nextPartnerIds,
@@ -1143,7 +1175,7 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
           const joinPasscode = generateJoinPasscode();
           const insertPayload = {
               owner_id: authUser.id,
-              partner_ids: includeAsPartner ? [authUser.id] : [],
+              partner_ids: !isOwner && includeAsPartner ? [authUser.id] : [],
               title,
               description: description || null,
               address,
@@ -1229,7 +1261,7 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
 
         // Ensure partner_ids contains the creator if user chose to be a partner (fallback if DB ignored the field)
         let apartmentRow = data;
-        if (includeAsPartner && (!apartmentRow.partner_ids || apartmentRow.partner_ids.length === 0)) {
+        if (!isOwner && includeAsPartner && (!apartmentRow.partner_ids || apartmentRow.partner_ids.length === 0)) {
           const { data: fixed, error: fixErr } = await supabase
             .from('apartments')
             .update({ partner_ids: [authUser.id] })
@@ -1931,17 +1963,19 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
                   </View>
                 </View>
 
-                <View style={[styles.inputGroup, styles.switchRow, { marginTop: 0 }]}>
-                  <Text style={[styles.label, styles.switchLabel]}>האם אתה שותף בדירה?</Text>
-                  <Switch
-                    value={includeAsPartner}
-                    onValueChange={setIncludeAsPartner}
-                    disabled={isLoading}
-                    trackColor={{ false: '#D1D5DB', true: '#5e3f2d' }}
-                    thumbColor="#FFFFFF"
-                    ios_backgroundColor="#D1D5DB"
-                  />
-                </View>
+                {!isOwner ? (
+                  <View style={[styles.inputGroup, styles.switchRow, { marginTop: 0 }]}>
+                    <Text style={[styles.label, styles.switchLabel]}>האם אתה שותף בדירה?</Text>
+                    <Switch
+                      value={includeAsPartner}
+                      onValueChange={setIncludeAsPartner}
+                      disabled={isLoading}
+                      trackColor={{ false: '#D1D5DB', true: '#5e3f2d' }}
+                      thumbColor="#FFFFFF"
+                      ios_backgroundColor="#D1D5DB"
+                    />
+                  </View>
+                ) : null}
               </>
             ) : null}
 

@@ -434,13 +434,13 @@ export default function RequestsScreen() {
         if (!user?.id) return;
 
         // 1) Hide immediately (optimistic)
-        markSeenNow();
+        markSeenNow(user.id);
 
         // 2) Mark notifications read in DB (including merged-profile recipients)
         await fetchNotifications({ markRead: true });
 
         // 3) Re-assert after DB update to avoid a race where the bell refetches before the update finishes
-        if (!cancelled) markSeenNow();
+        if (!cancelled) markSeenNow(user.id);
       };
       run();
       return () => {

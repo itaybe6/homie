@@ -19,7 +19,7 @@ function NotificationsButtonBase({ style, badgeCount }: Props) {
   const user = useAuthStore((s) => s.user);
   const unreadCount = useNotificationsStore((s) => s.unreadCount);
   const setUnreadCount = useNotificationsStore((s) => s.setUnreadCount);
-  const lastSeenAt = useNotificationsStore((s) => s.lastSeenAt);
+  const lastSeenAt = useNotificationsStore((s) => (user?.id ? s.lastSeenAtByUserId?.[user.id] ?? null : null));
 
   // Keep consistent with Home screen action icons (map/filter/search).
   const ICON_COLOR = colors.primary;
