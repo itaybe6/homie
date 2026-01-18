@@ -53,7 +53,12 @@ import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-g
 
 type SurveyState = Partial<UserSurveyResponse>;
 
-type CitySuggestion = { id: string; text: string };
+type CitySuggestion = { id: string; text: string; display?: string };
+
+// Approx bounding box for Israel to bias/place-filter Mapbox results a bit.
+// [minLng, minLat, maxLng, maxLat]
+// Keep it a bit generous to avoid accidentally clipping border-area localities.
+const IL_BBOX: [number, number, number, number] = [34.0, 29.0, 36.0, 33.8];
 
 const PRIMARY = '#5e3f2d';
 // Match the login screen dark background
@@ -229,6 +234,8 @@ const PART_2_KEYS = [
   'sublet_period',
   'move_in_month',
   'roommates_range',
+  // Legacy/deprecated: kept ONLY for draft-resume routing compatibility (older drafts may store this key).
+  // The actual question was removed from the survey UI.
   'pets_allowed',
 ] as const;
 const PART_3_KEYS = [
@@ -406,17 +413,41 @@ export default function SurveyScreen() {
 
       // Prefer Mapbox autocomplete (same UX as registration city picker). Fallback to local list if token missing.
       if (mapboxToken) {
-        const results = await autocompleteMapbox({
-          accessToken: mapboxToken,
-          query,
-          country: 'il',
-          language: 'he',
-          limit: 8,
-          types: 'place,locality',
-        });
+        // Try Mapbox first; if it returns nothing (or token fails), fallback to local list
+        // so the user still sees suggestions instead of an empty UI.
+        const runMapbox = async (opts: { types?: string; language?: string; bbox?: [number, number, number, number] }) =>
+          await autocompleteMapbox({
+            accessToken: mapboxToken,
+            query,
+            country: 'il',
+            language: opts.language ?? 'he',
+            limit: 15,
+            types: opts.types ?? 'place,locality,localadmin,neighborhood',
+            bbox: opts.bbox,
+          });
+
+        let results = await runMapbox({ language: 'he', bbox: IL_BBOX });
+        if (!results.length) {
+          // Relax filters progressively (some Mapbox configs can be picky)
+          results = await runMapbox({ language: 'he', types: 'place,locality', bbox: IL_BBOX });
+        }
+        if (!results.length) {
+          // Last resort: remove bbox/types entirely and let Mapbox decide
+          results = await autocompleteMapbox({
+            accessToken: mapboxToken,
+            query,
+            country: 'il',
+            language: 'he',
+            limit: 15,
+          });
+        }
+
         if (cancelled) return;
-        setCitySuggestions(results.map((f) => ({ id: f.id, text: f.text })));
-        return;
+        if (results.length) {
+          setCitySuggestions(results.map((f) => ({ id: f.id, text: f.text, display: f.place_name })));
+          return;
+        }
+        // Fall through to local list fallback (helps when token is missing/invalid in runtime).
       }
 
       const names = searchCitiesWithNeighborhoods(query, 8);
@@ -516,7 +547,14 @@ export default function SurveyScreen() {
   const openMonthPicker = (target: MonthPickerTarget, title: string, currentValue?: string | null) => {
     Keyboard.dismiss();
     const parsed = parseYYYYMM(currentValue ?? null);
-    const base = parsed ?? new Date();
+    const now = new Date();
+    const nowMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const isMoveInTarget = target === 'move_in_month_from' || target === 'move_in_month_to';
+    // For move-in, never start from a past month (we only allow current month -> future).
+    const base =
+      isMoveInTarget && parsed && parsed < nowMonthStart
+        ? nowMonthStart
+        : parsed ?? nowMonthStart;
     setMonthPickerTarget(target);
     setMonthPickerTitle(title);
     setMonthPickerTempDate(new Date(base.getFullYear(), base.getMonth(), 1));
@@ -700,19 +738,32 @@ function PartCarouselPagination({
       // About you
       {
         key: 'occupation',
-        title: 'מה אני עושה ביומיום?',
-        subtitle: 'זה עוזר לנו להבין את הלו״ז והוייב שלך.',
-        explanation: 'בחר/י האם את/ה סטודנט/ית או עובד/ת',
+        title: 'האם אתה סטודנט?',
+        subtitle: 'זה עוזר לנו להבין את הלוז והאווירה שאתה מייצר.',
         render: () => (
-          <ChipSelect
-            options={['סטודנט', 'עובד']}
-            value={normalizeToTextChoice(state.occupation, ['סטודנט', 'עובד'])}
-            onChange={(v) => {
+          <ToggleRow
+            value={
+              state.occupation === 'סטודנט' ? true : state.occupation === 'עובד' ? false : undefined
+            }
+            centerOptions
+            showYesIcon={false}
+            onToggle={(isStudent) => {
+              const wasAnswered = state.occupation === 'סטודנט' || state.occupation === 'עובד';
               setState((prev) => {
-                const next: SurveyState = { ...prev, occupation: v || undefined };
-                if (v !== 'סטודנט') next.student_year = undefined;
+                const next: SurveyState = {
+                  ...prev,
+                  occupation: isStudent ? 'סטודנט' : 'עובד',
+                };
+                if (!isStudent) next.student_year = undefined;
                 return next;
               });
+              // Auto-advance only on first answer (matches "like pressing סטודנט/עובד" behavior).
+              if (!wasAnswered) {
+                setTimeout(() => {
+                  setCurrentStep((s) => s + 1);
+                  scrollRef.current?.scrollTo?.({ y: 0, animated: false });
+                }, 0);
+              }
             }}
           />
         ),
@@ -746,18 +797,18 @@ function PartCarouselPagination({
       { key: 'diet', title: 'מה התזונה שלי?', explanation: 'בחר/י את סוג התזונה שלך - ללא הגבלה, צמחוני או טבעוני', render: () => <ChipSelect options={dietOptions} value={state.diet_type || null} onChange={(v) => setField('diet_type', v || null)} /> },
       {
         key: 'kosher',
-        title: 'אוכל כשר?',
-        explanation: 'האם את/ה שומר/ת על כשרות במטבח',
+        title: 'מטבח כשר?',
+        explanation: 'האם חשוב לך מטבח כשר בדירה',
         render: () => (
           <ChipSelect
-            options={['כשר', 'לא כשר']}
-            value={state.keeps_kosher === undefined ? null : state.keeps_kosher ? 'כשר' : 'לא כשר'}
+            options={['כן', 'לא מפריע לי']}
+            value={state.keeps_kosher === undefined ? null : state.keeps_kosher ? 'כן' : 'לא מפריע לי'}
             onChange={(v) => {
               if (!v) {
                 setField('keeps_kosher', undefined);
                 return;
               }
-              setField('keeps_kosher', v === 'כשר');
+              setField('keeps_kosher', v === 'כן');
             }}
           />
         ),
@@ -896,7 +947,7 @@ function PartCarouselPagination({
                       Keyboard.dismiss();
                     }}
                   >
-                    <Text style={styles.suggestionText}>{s.text}</Text>
+                    <Text style={styles.suggestionText}>{s.display || s.text}</Text>
                   </TouchableOpacity>
                 ))}
               </View>
@@ -908,7 +959,9 @@ function PartCarouselPagination({
         key: 'preferred_neighborhoods',
         title: 'שכונות מועדפות',
         explanation: 'בחר/י את השכונות המועדפות עלייך בעיר שבחרת',
-        isVisible: () => !!state.preferred_city,
+        // Only show when we actually have a neighborhood list for the selected city;
+        // otherwise the user can get stuck (this app currently ships neighborhoods for a subset of cities).
+        isVisible: () => !!state.preferred_city && neighborhoodOptions.length > 0,
         render: () => (
           <View style={{ gap: 10 }}>
             {neighborhoodOptions.length ? (
@@ -1100,19 +1153,6 @@ function PartCarouselPagination({
               }}
             />
           </View>
-        ),
-      },
-      {
-        key: 'pets_allowed',
-        title: 'אפשר להביא חיות לדירה?',
-        explanation: 'האם את/ה מוכן/ה שגם שותפים אחרים יביאו בעלי חיים לדירה',
-        render: () => (
-          <ToggleRow
-            value={state.pets_allowed}
-            centerOptions
-            showYesIcon={false}
-            onToggle={(v) => setField('pets_allowed', v)}
-          />
         ),
       },
 
@@ -2057,7 +2097,11 @@ function PartCarouselPagination({
           keyboardShouldPersistTaps="always"
           nestedScrollEnabled
         >
-          {buildMonthOptions({ baseDate: monthPickerTempDate, monthsBack: 3, monthsForward: 24 }).map((opt) => {
+          {buildMonthOptions({
+            baseDate: monthPickerTempDate,
+            monthsBack: monthPickerTarget === 'move_in_month_from' || monthPickerTarget === 'move_in_month_to' ? 0 : 3,
+            monthsForward: 24,
+          }).map((opt) => {
             const currentValue =
               monthPickerTarget === 'move_in_month_from'
                 ? ((state as any).move_in_month_from ?? null)
@@ -2238,7 +2282,8 @@ function normalizePayload(
       (s as any).preferred_roommates_min ??
       s.preferred_roommates ??
       null,
-    pets_allowed: coerce ? (s.pets_allowed ?? false) : (s.pets_allowed ?? null),
+    // Nullable column; keep null when unanswered so we don't accidentally force "false" after removing the question.
+    pets_allowed: s.pets_allowed ?? null,
     sublet_month_from: s.is_sublet ? (s.sublet_month_from ?? null) : null,
     sublet_month_to: s.is_sublet ? (s.sublet_month_to ?? null) : null,
     preferred_age_min:

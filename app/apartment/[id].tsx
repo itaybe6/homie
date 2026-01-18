@@ -754,6 +754,11 @@ export default function ApartmentDetailsScreen() {
     return `כניסה ${formatted}`;
   })();
 
+  const moveInDateLabel = (() => {
+    if (!moveInTagLabel) return null;
+    return moveInTagLabel.replace(/^כניסה\s+/, '');
+  })();
+
   const descriptionText = String((apartment as any)?.description || '').trim();
   const shouldShowReadMore = descriptionText.length > 260;
   
@@ -1615,11 +1620,11 @@ export default function ApartmentDetailsScreen() {
             {apartment.title}
           </Text>
 
-          {moveInTagLabel ? (
-            <View style={styles.moveInDateBadge}>
-              <Calendar size={16} color={colors.success} />
-              <Text style={styles.moveInDateText}>{moveInTagLabel}</Text>
-            </View>
+          {moveInDateLabel ? (
+            <Text style={styles.heroSubtitle} numberOfLines={1}>
+              <Text style={styles.heroSubtitleLabel}>תאריך כניסה: </Text>
+              <Text style={styles.heroSubtitleValue}>{moveInDateLabel}</Text>
+            </Text>
           ) : null}
         </View>
 
@@ -1777,27 +1782,27 @@ export default function ApartmentDetailsScreen() {
             </View>
           ) : null}
 
-          {/* host card */}
-          {!isOwner ? (
-            <View style={styles.hostCard}>
-              {/* Right: avatar */}
-              <View style={styles.hostAvatarWrap}>
-                <Image
-                  source={{
-                    uri:
-                      (owner as any)?.avatar_url ||
-                      'https://cdn-icons-png.flaticon.com/512/847/847969.png',
-                  }}
-                  style={styles.hostAvatar}
-                />
-              </View>
-              {/* Middle: labels */}
-              <View style={{ flex: 1, alignItems: 'flex-end' }}>
-                <Text style={styles.hostTitle}>בעל הדירה</Text>
-                <Text style={styles.hostSub} numberOfLines={1}>{owner?.full_name || 'בעל הדירה'}</Text>
-              </View>
+          {/* host/owner card */}
+          <View style={styles.hostCard}>
+            {/* Right: avatar */}
+            <View style={styles.hostAvatarWrap}>
+              <Image
+                source={{
+                  uri:
+                    (isOwner ? (user as any)?.avatar_url : (owner as any)?.avatar_url) ||
+                    'https://cdn-icons-png.flaticon.com/512/847/847969.png',
+                }}
+                style={styles.hostAvatar}
+              />
             </View>
-          ) : null}
+            {/* Middle: labels */}
+            <View style={{ flex: 1, alignItems: 'flex-end' }}>
+              <Text style={styles.hostTitle}>{isOwner ? 'זאת הדירה שלך' : 'בעל הדירה'}</Text>
+              <Text style={styles.hostSub} numberOfLines={1}>
+                {(isOwner ? user?.full_name : owner?.full_name) || 'בעל הדירה'}
+              </Text>
+            </View>
+          </View>
 
           {/* price card moved to floating overlay at bottom */}
 
@@ -2904,25 +2909,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 4,
   },
-  moveInDateBadge: {
-    marginTop: 12,
-    flexDirection: 'row-reverse',
-    alignItems: 'center',
-    alignSelf: 'flex-start',
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    backgroundColor: 'rgba(255,255,255,0.92)',
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: 'rgba(64,97,84,0.30)',
-  },
-  moveInDateText: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: colors.success,
-    writingDirection: 'rtl',
-  },
   ownerPasscodeCard: {
     marginBottom: 12,
     backgroundColor: '#F9FAFB',
@@ -3130,6 +3116,24 @@ const styles = StyleSheet.create({
     lineHeight: 26,
     textAlign: 'right',
     writingDirection: 'rtl',
+  },
+  heroSubtitle: {
+    marginTop: 6,
+    color: '#6B7280',
+    fontSize: 13,
+    fontWeight: '700',
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
+  heroSubtitleLabel: {
+    color: '#6B7280',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  heroSubtitleValue: {
+    color: '#111827',
+    fontSize: 13,
+    fontWeight: '800',
   },
   tagsRow: {
     flexDirection: 'row-reverse',
