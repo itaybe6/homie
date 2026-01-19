@@ -1337,12 +1337,18 @@ function PartCarouselPagination({
     return typeof idx === 'number' ? idx + 1 : 0;
   }, [activeQuestionKey, questionIndexByKey]);
 
+  const answeredQuestionsCount = useMemo(() => {
+    return questions.reduce((count, q) => count + (isQuestionAnswered(q.key, state) ? 1 : 0), 0);
+  }, [questions, state]);
+
   const progressPercent = useMemo(() => {
     if (!totalQuestions) return 0;
-    // "Reached" semantics: question 1 => 0%, then ramps up; final completion handled on submit.
-    const reached = Math.max(0, Math.min(totalQuestions, (activeQuestionNumber || 1) - 1));
-    return Math.round((reached / totalQuestions) * 100);
-  }, [activeQuestionNumber, totalQuestions]);
+    // Progress should reflect how many questions are answered, not where the user is located in the flow.
+    // If the survey is marked completed (e.g. returning in edit mode), always show 100%.
+    if (state.is_completed) return 100;
+    const answered = Math.max(0, Math.min(totalQuestions, answeredQuestionsCount));
+    return Math.round((answered / totalQuestions) * 100);
+  }, [answeredQuestionsCount, state.is_completed, totalQuestions]);
 
   const progressRingSize = useMemo(() => {
     // Bigger, hero-like ring (similar to the reference). Clamp for small/large screens.
@@ -2855,6 +2861,16 @@ const ProgressRingLine = memo(function ProgressRingLine({
   const step = 360 / PROGRESS_RING_LINES;
 
   const stylez = useAnimatedStyle(() => {
+    const p = progress.value;
+    // At ~100% the last couple of segments never fully reach the "white" stop in the interpolation
+    // (because their stop is beyond 100). Force a true full ring at the end.
+    if (p >= 99.6) {
+      return {
+        transform: [{ translateY: 0 }],
+        backgroundColor: '#FFFFFF',
+      };
+    }
+
     const inputRange = [
       ((index - 2) * 100) / PROGRESS_RING_LINES,
       (index * 100) / PROGRESS_RING_LINES,
@@ -2864,14 +2880,16 @@ const ProgressRingLine = memo(function ProgressRingLine({
     return {
       transform: [
         {
-          translateY: interpolate(progress.value, inputRange, [size * 0.06, size * 0.06, 0], Extrapolation.CLAMP),
+          translateY: interpolate(p, inputRange, [size * 0.06, size * 0.06, 0], Extrapolation.CLAMP),
         },
       ],
-      backgroundColor: interpolateColor(progress.value, inputRange, [
-        'rgba(255,255,255,0.18)',
-        'rgba(255,255,255,0.18)',
-        '#FFFFFF',
-      ]),
+      backgroundColor: interpolateColor(
+        p,
+        inputRange,
+        ['rgba(255,255,255,0.18)', 'rgba(255,255,255,0.18)', '#FFFFFF'],
+        'RGB',
+        Extrapolation.CLAMP
+      ),
     };
   });
 

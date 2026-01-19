@@ -1,6 +1,10 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { create } from 'zustand';
-import { createJSONStorage, persist } from 'zustand/middleware';
+// NOTE: On web, Metro may resolve `zustand/middleware` to the ESM build which contains `import.meta.env`
+// and can crash when bundled into a non-module script ("Cannot use 'import.meta' outside a module").
+// Using `require(...)` nudges the resolver toward the CJS build.
+const { createJSONStorage, persist } =
+  require('zustand/middleware') as typeof import('zustand/middleware');
 
 interface NotificationsState {
   unreadCount: number;
