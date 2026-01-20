@@ -1,12 +1,22 @@
 import { memo } from 'react';
-import { View, StyleSheet, Platform, Image } from 'react-native';
+import { View, StyleSheet, Platform, Image, TouchableOpacity } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import NotificationsButton from '@/components/NotificationsButton';
 import SettingsButton from '@/components/SettingsButton';
+import { usePathname } from 'expo-router';
+import { SlidersHorizontal } from 'lucide-react-native';
+import { colors } from '@/lib/theme';
+import { useUiStore } from '@/stores/uiStore';
+import { emitOpenPartnersFilters } from '@/lib/partnersFiltersBus';
 
 function GlobalTopBarBase({ backgroundColor = '#FFFFFF' }: { backgroundColor?: string }) {
   const insets = useSafeAreaInsets();
   const isWeb = Platform.OS === 'web';
+  const pathname = usePathname();
+  const isPartnersRoute = typeof pathname === 'string' && (pathname === '/partners' || pathname.endsWith('/partners'));
+  const openPartnersFilters = useUiStore((s) => s.openPartnersFilters);
+
+  const ICON_COLOR = colors.primary;
   return (
     <View
       {...(!isWeb ? { pointerEvents: 'box-none' as const } : {})}
@@ -52,6 +62,27 @@ function GlobalTopBarBase({ backgroundColor = '#FFFFFF' }: { backgroundColor?: s
           />
         </View>
         {/* Right: settings */}
+        {isPartnersRoute ? (
+          <View
+            pointerEvents="box-none"
+            style={[styles.actionWrap, { right: 16 + 44 + 10, marginTop: Math.max(6, insets.top + 2) }]}
+          >
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel="סינון"
+              activeOpacity={0.85}
+              onPress={() => {
+                // Open via store (preferred) + event bus (fallback for dev/HMR edge-cases)
+                openPartnersFilters();
+                emitOpenPartnersFilters();
+              }}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              style={styles.actionBtn}
+            >
+              <SlidersHorizontal size={22} color={ICON_COLOR} />
+            </TouchableOpacity>
+          </View>
+        ) : null}
         <SettingsButton style={{ right: 16 }} />
       </View>
     </View>
@@ -91,6 +122,26 @@ const styles = StyleSheet.create({
   logo: {
     width: 110,
     height: 34,
+  },
+  actionWrap: {
+    zIndex: 50,
+    position: 'absolute',
+    top: 0,
+  },
+  actionBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#EEF2F7',
+    shadowColor: '#000',
+    shadowOpacity: 0.06,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 2,
   },
 });
 
