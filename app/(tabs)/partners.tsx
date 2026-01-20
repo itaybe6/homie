@@ -353,6 +353,7 @@ export default function PartnersScreen() {
   const [isCityPickerOpen, setIsCityPickerOpen] = useState(false);
   const [matchScores, setMatchScores] = useState<Record<string, number | null>>({});
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
+  const [includePassed, setIncludePassed] = useState(false);
 
   const closePartnersFilters = useUiStore((s) => s.closePartnersFilters);
 
@@ -678,7 +679,8 @@ export default function PartnersScreen() {
     return true;
   };
 
-  const fetchUsersAndGroups = async () => {
+  const fetchUsersAndGroups = async (opts?: { includePassed?: boolean }) => {
+    const includePassedNow = typeof opts?.includePassed === 'boolean' ? opts.includePassed : includePassed;
     setIsLoading(true);
     setMatchScores({});
     try {
@@ -858,6 +860,8 @@ export default function PartnersScreen() {
 
         matchRows.forEach((row) => {
           const status = String(row.status || '').trim().toUpperCase();
+          const isNotRelevant = status === 'NOT_RELEVANT';
+          const shouldHideForOutgoing = !(includePassedNow && isNotRelevant);
 
           // APPROVED is a mutual "match": hide the other side regardless of direction.
           if (status === 'APPROVED') {
@@ -885,19 +889,21 @@ export default function PartnersScreen() {
           // If someone acted on me (incoming request / NOT_RELEVANT), I should still be able to see them here.
 
           // Outgoing: User -> User
-          if (row.sender_id === authId && row.receiver_id) {
+          if (row.sender_id === authId && row.receiver_id && shouldHideForOutgoing) {
             interacted.add(row.receiver_id);
           }
 
           // Outgoing: User -> Group
-          if (row.sender_id === authId && row.receiver_group_id) {
+          if (row.sender_id === authId && row.receiver_group_id && shouldHideForOutgoing) {
             interactedGroupIds.add(row.receiver_group_id);
           }
 
           // Outgoing: My Group -> User/Group
           if (row.sender_group_id && myGroupIds.has(row.sender_group_id)) {
-            if (row.receiver_id) interacted.add(row.receiver_id);
-            if (row.receiver_group_id) interactedGroupIds.add(row.receiver_group_id);
+            if (shouldHideForOutgoing) {
+              if (row.receiver_id) interacted.add(row.receiver_id);
+              if (row.receiver_group_id) interactedGroupIds.add(row.receiver_group_id);
+            }
           }
         });
       }
@@ -975,9 +981,16 @@ export default function PartnersScreen() {
     }
   };
 
-  const onRefresh = async () => {
+  const onRefresh = async (opts?: { resetIncludePassed?: boolean }) => {
     setIsRefreshing(true);
-    await fetchUsersAndGroups();
+    // "Refresh" on end/empty should look for new matches, not resurface NOT_RELEVANT.
+    const shouldReset =
+      typeof opts?.resetIncludePassed === 'boolean'
+        ? opts.resetIncludePassed
+        : includePassed && (isDeckExhausted || items.length === 0);
+
+    if (shouldReset) setIncludePassed(false);
+    await fetchUsersAndGroups({ includePassed: shouldReset ? false : includePassed });
     setIsRefreshing(false);
   };
 
@@ -1320,10 +1333,37 @@ export default function PartnersScreen() {
                 כרגע אין התאמות זמינות. אפשר לנסות שוב בעוד כמה דקות או לרענן.
               </Text>
               <View style={styles.emptyStateActions}>
+                {!includePassed ? (
+                  <TouchableOpacity
+                    activeOpacity={0.9}
+                    style={[styles.emptyStateBtn, styles.emptyStateBtnSecondary]}
+                    onPress={() => {
+                      const enable = () => {
+                        setIncludePassed(true);
+                        fetchUsersAndGroups({ includePassed: true });
+                      };
+                      if (Platform.OS === 'web') {
+                        enable();
+                        return;
+                      }
+                      Alert.alert(
+                        'להציג שותפים שסימנת כלא רלוונטיים?',
+                        'נוכל להציג שוב גם שותפים שסימנת בהחלקה שמאלה. תמיד אפשר לסמן שוב כלא רלוונטי.',
+                        [{ text: 'ביטול', style: 'cancel' }, { text: 'כן, הצג שוב', onPress: enable }],
+                      );
+                    }}
+                    accessibilityRole="button"
+                    accessibilityLabel="הצג שוב שותפים שסימנתי כלא רלוונטיים"
+                  >
+                    <Text style={[styles.emptyStateBtnText, styles.emptyStateBtnTextSecondary]}>
+                      הצג שוב “לא רלוונטי”
+                    </Text>
+                  </TouchableOpacity>
+                ) : null}
                 <TouchableOpacity
                   activeOpacity={0.9}
                   style={[styles.emptyStateBtn, styles.emptyStateBtnPrimary]}
-                  onPress={onRefresh}
+                  onPress={() => onRefresh({ resetIncludePassed: true })}
                   accessibilityRole="button"
                   accessibilityLabel="רענון שותפים"
                 >
@@ -1349,10 +1389,38 @@ export default function PartnersScreen() {
                 זה הכול לעכשיו — אפשר לרענן כדי לבדוק אם נוספו התאמות חדשות.
               </Text>
               <View style={styles.endOfDeckActions}>
+                {!includePassed ? (
+                  <TouchableOpacity
+                    activeOpacity={0.9}
+                    style={[styles.endOfDeckBtn, styles.endOfDeckBtnSecondary]}
+                    onPress={() => {
+                      const enable = () => {
+                        setIncludePassed(true);
+                        // Reload the deck including NOT_RELEVANT profiles
+                        fetchUsersAndGroups({ includePassed: true });
+                      };
+                      if (Platform.OS === 'web') {
+                        enable();
+                        return;
+                      }
+                      Alert.alert(
+                        'להציג שותפים שסימנת כלא רלוונטיים?',
+                        'נוכל להציג שוב גם שותפים שסימנת בהחלקה שמאלה. תמיד אפשר לסמן שוב כלא רלוונטי.',
+                        [{ text: 'ביטול', style: 'cancel' }, { text: 'כן, הצג שוב', onPress: enable }],
+                      );
+                    }}
+                    accessibilityRole="button"
+                    accessibilityLabel="הצג שוב שותפים שסימנתי כלא רלוונטיים"
+                  >
+                    <Text style={[styles.endOfDeckBtnText, styles.endOfDeckBtnTextSecondary]}>
+                      הצג שוב “לא רלוונטי”
+                    </Text>
+                  </TouchableOpacity>
+                ) : null}
                 <TouchableOpacity
                   activeOpacity={0.9}
                   style={[styles.endOfDeckBtn, styles.endOfDeckBtnPrimary]}
-                  onPress={onRefresh}
+                  onPress={() => onRefresh({ resetIncludePassed: true })}
                   accessibilityRole="button"
                   accessibilityLabel="רענון שותפים"
                 >
@@ -1710,6 +1778,7 @@ export default function PartnersScreen() {
                   setSelectedCities([]);
                   setCitySearch('');
                   setIsCityPickerOpen(false);
+                  setIncludePassed(false);
                 }}
               >
                 <Text style={styles.resetText}>איפוס</Text>
