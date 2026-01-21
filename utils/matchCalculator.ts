@@ -47,6 +47,7 @@ export type CompatUserSurvey = {
   price_max?: number | null;
   // Legacy single-value budget
   price_range?: number | null;
+  // Kept for backwards-compat scoring logic; derive it from preferred_cities at call sites.
   preferred_city?: string | null;
   preferred_neighborhoods?: string[] | null;
   floor_preference?: string | null;

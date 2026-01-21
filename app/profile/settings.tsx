@@ -1378,7 +1378,8 @@ export default function ProfileSettingsScreen() {
                           const priceMaxNum = surveyPriceMax ? parseInt(surveyPriceMax, 10) : null;
                           await upsertUserSurvey({
                             user_id: user.id,
-                            preferred_city: surveyCity || null,
+                            // preferred_city column removed; store as list (single value here)
+                            preferred_cities: surveyCity ? [surveyCity] : null,
                             price_min: (priceMinNum as any) || null,
                             price_max: (priceMaxNum as any) || null,
                             // keep legacy field for older clients

@@ -187,7 +187,8 @@ export interface UserSurveyResponse {
   // Legacy single-value budget
   price_range?: number;
   // Tri-state preferences: true/false/null (null = "לא משנה לי")
-  preferred_city?: string;
+  // New: allow selecting multiple cities. Keep preferred_city as the first/primary city for backwards compatibility.
+  preferred_cities?: string[];
   preferred_neighborhoods?: string[];
   floor_preference?: string;
   has_balcony?: boolean | null;

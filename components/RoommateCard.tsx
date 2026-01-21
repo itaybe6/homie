@@ -168,7 +168,11 @@ function RoommateCardBase({
     };
 
     // Apartment / plans
-    push(MapPin, 'עיר מועדפת', survey.preferred_city || '');
+    const cities = Array.isArray((survey as any).preferred_cities) ? (survey as any).preferred_cities : null;
+    const citiesText =
+      cities && cities.length ? cities.filter(Boolean).map((c: any) => String(c).trim()).filter(Boolean).join(', ') : '';
+    const cityLabel = citiesText || survey.preferred_city || '';
+    push(MapPin, cities && cities.length > 1 ? 'ערים מועדפות' : 'עיר מועדפת', cityLabel);
     const min = (survey as any).price_min;
     const max = (survey as any).price_max;
     if (typeof min === 'number' && typeof max === 'number') {

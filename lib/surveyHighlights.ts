@@ -67,7 +67,12 @@ export function computeSurveyHighlights(survey?: UserSurveyResponse | null): Sur
     highlights.push({ label, value: trimmed });
   };
 
-  push('עיר מועדפת', survey.preferred_city || undefined);
+  const cities = Array.isArray((survey as any).preferred_cities) ? (survey as any).preferred_cities : null;
+  const cityLabel =
+    cities && cities.length
+      ? String(cities.filter(Boolean).map((c: any) => String(c).trim()).filter(Boolean).join(', '))
+      : undefined;
+  push(cities && cities.length > 1 ? 'ערים מועדפות' : 'עיר מועדפת', cityLabel || undefined);
   const neighborhoods = normalizeNeighborhoods((survey as any).preferred_neighborhoods);
   if (neighborhoods) push('שכונות מועדפות', neighborhoods);
 

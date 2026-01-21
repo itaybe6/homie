@@ -291,7 +291,7 @@ export default function ProfileScreen() {
 
   const activeTabIndex = useMemo(() => {
     if (surveyActiveSection === 'about') return 0;
-    if (surveyActiveSection === 'apartment') return 1;
+    if (surveyActiveSection === 'partner') return 1;
     return 2;
   }, [surveyActiveSection]);
 
@@ -1165,7 +1165,14 @@ export default function ProfileScreen() {
       highlights.push({ label, value: trimmed });
     };
 
-    push('עיר מועדפת', surveyResponse.preferred_city || undefined);
+    {
+      const cities = Array.isArray((surveyResponse as any).preferred_cities) ? (surveyResponse as any).preferred_cities : null;
+      const cityLabel =
+        cities && cities.length
+          ? String(cities.filter(Boolean).map((c: any) => String(c).trim()).filter(Boolean).join(', '))
+          : undefined;
+      push(cities && cities.length > 1 ? 'ערים מועדפות' : 'עיר מועדפת', cityLabel);
+    }
     {
       const min = (surveyResponse as any).price_min;
       const max = (surveyResponse as any).price_max;
@@ -1194,6 +1201,15 @@ export default function ProfileScreen() {
   }, [surveyResponse]);
 
   type SurveySectionKey = 'about' | 'apartment' | 'partner';
+
+  const formatPreferredRoommatesLabel = (value: number) => {
+    // In the new survey UI this value represents "אני + עוד N שותפים" where N is 0..4.
+    if (!Number.isFinite(value)) return '';
+    const n = Math.max(0, Math.min(4, Math.round(value)));
+    if (n === 0) return 'אני לבד';
+    if (n === 1) return 'אני עם עוד שותף';
+    return `אני ועוד ${n} שותפים`;
+  };
 
   const surveyItems = useMemo(() => {
     if (!surveyResponse) return [];
@@ -1253,7 +1269,14 @@ export default function ProfileScreen() {
         add('apartment', 'תקציב שכירות', formatCurrency(surveyResponse.price_range));
       }
     }
-    add('apartment', 'עיר מועדפת', surveyResponse.preferred_city);
+    {
+      const cities = Array.isArray((surveyResponse as any).preferred_cities) ? (surveyResponse as any).preferred_cities : null;
+      const cityLabel =
+        cities && cities.length
+          ? String(cities.filter(Boolean).map((c: any) => String(c).trim()).filter(Boolean).join(', '))
+          : undefined;
+      add('apartment', cities && cities.length > 1 ? 'ערים מועדפות' : 'עיר מועדפת', cityLabel);
+    }
     const neighborhoodsJoined = normalizeNeighborhoods((surveyResponse.preferred_neighborhoods as unknown) ?? null);
     if (neighborhoodsJoined) {
       add('apartment', 'שכונות מועדפות', neighborhoodsJoined);
@@ -1269,8 +1292,18 @@ export default function ProfileScreen() {
         : formatMonthLabel(from);
       add('apartment', 'חודש כניסה', label);
     }
-    if (typeof surveyResponse.preferred_roommates === 'number') {
-      add('apartment', 'מספר שותפים מועדף', `${surveyResponse.preferred_roommates}`);
+    // Roommates (new UI stores 0..4 as preferred_roommates_min/max and also mirrors to preferred_roommates)
+    const rmMin = (surveyResponse as any).preferred_roommates_min;
+    const rmMax = (surveyResponse as any).preferred_roommates_max;
+    const rmSingle =
+      typeof rmMin === 'number' && typeof rmMax === 'number' && rmMin === rmMax
+        ? rmMin
+        : typeof surveyResponse.preferred_roommates === 'number'
+          ? surveyResponse.preferred_roommates
+          : null;
+    if (typeof rmSingle === 'number') {
+      const label = formatPreferredRoommatesLabel(rmSingle);
+      if (label) add('apartment', 'מספר שותפים מועדף', label);
     }
     addBool('apartment', 'חיות מורשות', surveyResponse.pets_allowed);
     // Some schemas store min/max instead of preferred_age_range; derive when missing.
@@ -2093,22 +2126,7 @@ export default function ProfileScreen() {
               >
                 <UserIcon size={16} color={surveyActiveSection === 'about' ? '#5e3f2d' : '#6B7280'} />
                 <Text style={[styles.surveySegText, surveyActiveSection === 'about' ? styles.surveySegTextActive : null]}>
-                  קצת עליי
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.surveySegBtn}
-                onPress={() => setSurveyActiveSection('apartment')}
-                activeOpacity={0.9}
-              >
-                <Home size={16} color={surveyActiveSection === 'apartment' ? '#5e3f2d' : '#6B7280'} />
-                <Text
-                  style={[
-                    styles.surveySegText,
-                    surveyActiveSection === 'apartment' ? styles.surveySegTextActive : null,
-                  ]}
-                >
-                  הדירה
+                  על עצמי
                 </Text>
               </TouchableOpacity>
               <TouchableOpacity
@@ -2124,6 +2142,21 @@ export default function ProfileScreen() {
                   ]}
                 >
                   השותפים
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.surveySegBtn}
+                onPress={() => setSurveyActiveSection('apartment')}
+                activeOpacity={0.9}
+              >
+                <Home size={16} color={surveyActiveSection === 'apartment' ? '#5e3f2d' : '#6B7280'} />
+                <Text
+                  style={[
+                    styles.surveySegText,
+                    surveyActiveSection === 'apartment' ? styles.surveySegTextActive : null,
+                  ]}
+                >
+                  הדירה
                 </Text>
               </TouchableOpacity>
             </View>
@@ -2145,10 +2178,10 @@ export default function ProfileScreen() {
               >
                 <Text style={styles.surveySectionTitle}>
                   {surveyActiveSection === 'about'
-                    ? 'קצת עליי'
-                    : surveyActiveSection === 'apartment'
-                      ? 'העדפות לדירה'
-                      : 'העדפות לשותפים'}
+                    ? 'על עצמי'
+                    : surveyActiveSection === 'partner'
+                      ? 'על השותפים'
+                      : 'על הדירה'}
                 </Text>
                 {surveyItems
                   .filter((i) => i.section === surveyActiveSection)

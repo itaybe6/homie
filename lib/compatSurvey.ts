@@ -76,6 +76,8 @@ function normalizeOccupationValue(value?: string | null): 'student' | 'worker' |
 function normalizeOccupationPreference(value?: string | null): 'student' | 'worker' | 'any' | null {
   const normalized = normalizeKey(value, occupationPrefAliasMap);
   if (normalized) return normalized;
+  // New UI uses "לא סטודנט" instead of "עובד"
+  if (value && value.includes('לא סטודנט')) return 'worker';
   if (value && value.includes('סטודנט')) return 'student';
   if (value && value.includes('עובד')) return 'worker';
   return null;
@@ -110,7 +112,11 @@ export function buildCompatSurvey(
   if (survey?.cleaning_frequency) compat.cleaning_frequency = survey.cleaning_frequency as CleaningFrequency;
   if (survey?.hosting_preference) compat.hosting_preference = survey.hosting_preference as HostingPreference;
   if (survey?.cooking_style) compat.cooking_style = survey.cooking_style as CookingStyle;
-  if (survey?.preferred_city) compat.preferred_city = survey.preferred_city;
+  {
+    const cities = Array.isArray((survey as any)?.preferred_cities) ? ((survey as any).preferred_cities as any[]) : [];
+    const primary = cities.length ? String(cities[0] ?? '').trim() : '';
+    if (primary) compat.preferred_city = primary as any;
+  }
   if (Array.isArray((survey as any)?.preferred_neighborhoods)) compat.preferred_neighborhoods = (survey as any).preferred_neighborhoods;
   if (Number.isFinite((survey as any)?.price_min as number)) compat.price_min = Number((survey as any).price_min);
   if (Number.isFinite((survey as any)?.price_max as number)) compat.price_max = Number((survey as any).price_max);

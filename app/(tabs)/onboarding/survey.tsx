@@ -89,6 +89,21 @@ function hasFiniteNumber(v: unknown): boolean {
   return typeof v === 'number' && Number.isFinite(v);
 }
 
+function normalizeCityList(input: unknown): string[] {
+  const arr = Array.isArray(input) ? input : [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of arr) {
+    const s = typeof raw === 'string' ? raw.trim() : '';
+    if (!s) continue;
+    const key = s.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(s);
+  }
+  return out;
+}
+
 function isQuestionAnswered(questionKey: string, s: SurveyState): boolean {
   switch (questionKey) {
     // About you
@@ -127,7 +142,8 @@ function isQuestionAnswered(questionKey: string, s: SurveyState): boolean {
         Number((s as any).price_max) >= Number((s as any).price_min) + 400
       );
     case 'preferred_city':
-      return hasNonEmptyText(s.preferred_city);
+      // Legacy question-key kept for flow; we now store multiple cities in preferred_cities
+      return normalizeCityList((s as any).preferred_cities).length > 0;
     case 'preferred_neighborhoods':
       return Array.isArray(s.preferred_neighborhoods) && s.preferred_neighborhoods.length > 0;
     case 'floor':
@@ -183,12 +199,12 @@ const hostingOptions = ['פעם בשבוע', 'לפעמים', 'כמה שיותר'
 const cookingOptions = ['קניות משותפות', 'כל אחד לעצמו', 'לא משנה לי'];
 const floorOptions = ['קרקע', 'בניין', 'לא משנה לי'];
 const genderPrefOptions = ['זכר', 'נקבה', 'לא משנה'];
-const occupationPrefOptions = ['סטודנט', 'עובד', 'לא משנה'];
+const occupationPrefOptions = ['סטודנט', 'עובד', 'לא משנה']; // legacy (kept for any older drafts)
 const partnerShabbatPrefOptions = ['אין בעיה', 'מעדיפ/ה שלא'];
 const partnerDietPrefOptions = ['אין בעיה', 'מעדיפ/ה שלא טבעוני', 'כשר בלבד'];
 const partnerSmokingPrefOptions = ['אין בעיה', 'מעדיפ/ה שלא'];
 const studentYearOptions = ['שנה א׳', 'שנה ב׳', 'שנה ג׳', 'שנה ד׳', 'שנה ה׳', 'שנה ו׳', 'שנה ז׳'];
-// Roommates are now selected via sliders (1–5) in two separate steps.
+// Roommates are selected via a single dropdown (0–4 roommates).
 const HEB_MONTH_NAMES = [
   'ינואר',
   'פברואר',
@@ -225,6 +241,15 @@ const PART_1_KEYS = [
   'cooking',
 ] as const;
 const PART_2_KEYS = [
+  'age_range',
+  'pref_gender',
+  'pref_occ',
+  'partner_shabbat',
+  'partner_diet',
+  'partner_smoking',
+  'partner_pets',
+] as const;
+const PART_3_KEYS = [
   'price',
   'preferred_city',
   'preferred_neighborhoods',
@@ -237,15 +262,6 @@ const PART_2_KEYS = [
   // Legacy/deprecated: kept ONLY for draft-resume routing compatibility (older drafts may store this key).
   // The actual question was removed from the survey UI.
   'pets_allowed',
-] as const;
-const PART_3_KEYS = [
-  'age_range',
-  'pref_gender',
-  'pref_occ',
-  'partner_shabbat',
-  'partner_diet',
-  'partner_smoking',
-  'partner_pets',
 ] as const;
 
 export default function SurveyScreen() {
@@ -328,7 +344,8 @@ export default function SurveyScreen() {
         if (existing) {
           const hydrated = hydrateSurvey(existing);
           setState(hydrated);
-          setCityQuery(hydrated.preferred_city || '');
+          // City selection is multi now; keep the input empty on load.
+          setCityQuery('');
           setNeighborhoodSearch('');
           // Prefer server draft_step_key, fallback to local storage (useful if the DB column is missing in some envs).
           let localDraftKey: string | null = null;
@@ -463,10 +480,21 @@ export default function SurveyScreen() {
     };
   }, [cityQuery, mapboxToken]);
 
+  const selectedCities = useMemo(() => {
+    return normalizeCityList((state as any).preferred_cities);
+  }, [(state as any).preferred_cities]);
+
+  const primaryCity = useMemo(() => (selectedCities.length ? selectedCities[0] : ''), [selectedCities]);
+
   useEffect(() => {
     let cancelled = false;
     const load = () => {
-      const name = (state.preferred_city || '').trim();
+      // Neighborhoods are only supported for a single city at a time.
+      if (selectedCities.length !== 1) {
+        if (!cancelled) setNeighborhoodOptions([]);
+        return;
+      }
+      const name = primaryCity.trim();
       if (!name) {
         if (!cancelled) setNeighborhoodOptions([]);
         return;
@@ -482,7 +510,7 @@ export default function SurveyScreen() {
     return () => {
       cancelled = true;
     };
-  }, [state.preferred_city]);
+  }, [primaryCity, selectedCities.length]);
 
   // Removed Google place id resolution (local-only cities)
 
@@ -817,7 +845,7 @@ function PartCarouselPagination({
       { key: 'smoker', title: 'מעשן/ת?', explanation: 'האם את/ה מעשן/ת סיגריות או מוצרי טבק', render: () => <ToggleRow value={state.is_smoker} onToggle={(v) => setField('is_smoker', v)} centerOptions showYesIcon={false} /> },
       { key: 'relationship', title: 'מצב זוגי', explanation: 'האם את/ה רווק/ה או בזוגיות', render: () => <ChipSelect options={relationOptions} value={state.relationship_status || null} onChange={(v) => setField('relationship_status', v || null)} /> },
       // Title is already displayed in the card header; avoid repeating it inside the toggle row.
-      { key: 'pet', title: 'מגיע/ה עם בעל חיים?', explanation: 'האם יש לך בעל חיים שתביא/י איתך לדירה', render: () => <ToggleRow value={state.has_pet} onToggle={(v) => setField('has_pet', v)} centerOptions showYesIcon={false} /> },
+      { key: 'pet', title: 'מגיע/ה עם בעל חיים?', explanation: 'האם את/ה מתכננ/ת לגור עם בעל חיים (למשל כלב/חתול)?', render: () => <ToggleRow value={state.has_pet} onToggle={(v) => setField('has_pet', v)} centerOptions showYesIcon={false} /> },
       { key: 'home_lifestyle', title: 'מה אני רוצה שיהיה בבית?', explanation: 'איך את/ה רוצה שהאווירה בבית תהיה - שקט, חברתי, מאוזן וכו\'', render: () => <ChipSelect options={homeLifestyleOptions} value={state.home_lifestyle || null} onChange={(v) => setField('home_lifestyle', v || null)} /> },
       {
         key: 'cleanliness',
@@ -826,9 +854,23 @@ function PartCarouselPagination({
         explanation: '1 = לא חשוב לי, 5 = מאוד חשוב לי',
         render: () => (
           <View style={{ gap: 10 }}>
-            <BalloonSlider5
-              value={state.cleanliness_importance || 3}
-              onChange={(v) => setField('cleanliness_importance', v)}
+            <SelectInput
+              label="חשיבות ניקיון"
+              options={['1', '2', '3', '4', '5']}
+              value={
+                typeof state.cleanliness_importance === 'number' && Number.isFinite(state.cleanliness_importance)
+                  ? String(state.cleanliness_importance)
+                  : null
+              }
+              placeholder="בחר/י"
+              onChange={(v) => {
+                if (!v) {
+                  setField('cleanliness_importance', undefined);
+                  return;
+                }
+                const n = parseInt(v, 10);
+                setField('cleanliness_importance', Number.isFinite(n) ? n : undefined);
+              }}
             />
           </View>
         ),
@@ -917,9 +959,35 @@ function PartCarouselPagination({
       {
         key: 'preferred_city',
         title: 'עיר',
-        explanation: 'הכנס/י את שם העיר שבה את/ה מחפש/ת דירה',
+        explanation: 'אפשר לבחור כמה ערים. התחילו להקליד ובחרו מהרשימה.',
         render: () => (
           <View style={{ gap: 10 }}>
+            {selectedCities.length ? (
+              <View style={{ flexDirection: 'row-reverse', flexWrap: 'wrap', gap: 8 }}>
+                {selectedCities.map((c) => (
+                  <TouchableOpacity
+                    key={`city-${c}`}
+                    style={[styles.chip, styles.chipActive]}
+                    activeOpacity={0.9}
+                    onPress={() => {
+                      const next = selectedCities.filter((x) => x !== c);
+                      setState((prev) => ({
+                        ...prev,
+                        preferred_cities: next.length ? next : undefined,
+                        // If the selected city list changes, neighborhoods may no longer be valid.
+                        preferred_neighborhoods: undefined,
+                      } as any));
+                      setNeighborhoodSearch('');
+                      Keyboard.dismiss();
+                    }}
+                    accessibilityRole="button"
+                    accessibilityLabel={`הסר עיר ${c}`}
+                  >
+                    <Text style={[styles.chipText, styles.chipTextActive]}>{c} ✕</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            ) : null}
             <TextInput
               style={styles.input}
               placeholder="לדוגמה: תל אביב"
@@ -928,8 +996,7 @@ function PartCarouselPagination({
               onChangeText={(txt) => {
                 setCityQuery(txt);
                 setNeighborhoodSearch('');
-                setField('preferred_city', txt ? txt : undefined);
-                setField('preferred_neighborhoods', undefined);
+                // Selection happens from suggestions; don't treat raw typing as a chosen city.
               }}
             />
             {citySuggestions.length > 0 ? (
@@ -939,11 +1006,16 @@ function PartCarouselPagination({
                     key={s.id}
                     style={[styles.suggestionItem, idx === citySuggestions.length - 1 ? styles.suggestionItemLast : null]}
                     onPress={() => {
-                      setCityQuery(s.text);
+                      const next = normalizeCityList([...selectedCities, s.text]);
+                      setState((prev) => ({
+                        ...prev,
+                        preferred_cities: next.length ? next : undefined,
+                        // If more than 1 city selected, neighborhoods are not supported.
+                        preferred_neighborhoods: next.length === 1 ? (prev.preferred_neighborhoods ?? []) : undefined,
+                      } as any));
+                      setCityQuery('');
                       setCitySuggestions([]);
                       setNeighborhoodSearch('');
-                      setField('preferred_city', s.text);
-                      setField('preferred_neighborhoods', []);
                       Keyboard.dismiss();
                     }}
                   >
@@ -961,7 +1033,7 @@ function PartCarouselPagination({
         explanation: 'בחר/י את השכונות המועדפות עלייך בעיר שבחרת',
         // Only show when we actually have a neighborhood list for the selected city;
         // otherwise the user can get stuck (this app currently ships neighborhoods for a subset of cities).
-        isVisible: () => !!state.preferred_city && neighborhoodOptions.length > 0,
+        isVisible: () => selectedCities.length === 1 && !!primaryCity && neighborhoodOptions.length > 0,
         render: () => (
           <View style={{ gap: 10 }}>
             {neighborhoodOptions.length ? (
@@ -1030,7 +1102,7 @@ function PartCarouselPagination({
       {
         key: 'is_sublet',
         title: 'האם מדובר בסאבלט?',
-        explanation: 'סאבלט = שכירות זמנית לתקופה מוגדרת (לרוב כמה חודשים). אם את/ה מחפש/ת שכירות רגילה/קבועה — בחר/י "לא".',
+        explanation: 'סאבלט = שכירות זמנית לתקופה מוגדרת (לרוב כמה שבועות). אם את/ה מחפש/ת שכירות רגילה/קבועה — בחר/י "לא".',
         render: () => (
           <ToggleRow
             value={state.is_sublet}
@@ -1121,37 +1193,45 @@ function PartCarouselPagination({
       {
         key: 'roommates_range',
         title: 'טווח שותפים',
-        subtitle: 'בחר/י מינימום ומקסימום (1–5)',
-        explanation: 'כמה שותפים את/ה רוצה לגור איתם - בחר/י טווח מינימום ומקסימום',
+        subtitle: 'בחר/י אופציה',
+        explanation: 'כמה שותפים את/ה רוצה לגור איתם',
         render: () => (
           <View style={{ gap: 10 }}>
-            <Text style={styles.helperText}>{`מינימום: ${Math.max(1, Math.min(5, (state as any).preferred_roommates_min ?? 1))}`}</Text>
-            <BalloonSlider5
-              value={Math.max(1, Math.min(5, (state as any).preferred_roommates_min ?? 1))}
-              onChange={(v) => {
-                setState((prev) => {
-                  const next: SurveyState = { ...(prev as any), preferred_roommates_min: v } as any;
-                  const curMax = (prev as any).preferred_roommates_max;
-                  if (typeof curMax !== 'number' || curMax < v) (next as any).preferred_roommates_max = v;
-                  return next;
-                });
-              }}
-            />
-            <Text style={styles.helperText}>{`מקסימום: ${Math.max(1, Math.min(5, (state as any).preferred_roommates_max ?? Math.max(1, Math.min(5, (state as any).preferred_roommates_min ?? 1))))}`}</Text>
-            <BalloonSlider5
-              value={Math.max(
-                1,
-                Math.min(
-                  5,
-                  (state as any).preferred_roommates_max ??
-                    Math.max(1, Math.min(5, (state as any).preferred_roommates_min ?? 1)),
-                ),
-              )}
-              onChange={(v) => {
-                const min = Math.max(1, Math.min(5, (state as any).preferred_roommates_min ?? 1));
-                setField('preferred_roommates_max' as any, Math.max(v, min));
-              }}
-            />
+            {(() => {
+              const options = [
+                'אני לבד',
+                'אני עם עוד שותף',
+                'אני ועוד 2 שותפים',
+                'אני ועוד 3 שותפים',
+                'אני ועוד 4 שותפים',
+              ];
+
+              const min = (state as any).preferred_roommates_min;
+              const max = (state as any).preferred_roommates_max;
+              const valueNum =
+                typeof min === 'number' && typeof max === 'number' && Number.isFinite(min) && Number.isFinite(max) && min === max
+                  ? min
+                  : null;
+              const currentValue =
+                typeof valueNum === 'number' && valueNum >= 0 && valueNum <= 4 ? options[valueNum] : null;
+
+              return (
+                <SelectInput
+                  label="כמה שותפים?"
+                  options={options}
+                  value={currentValue}
+                  placeholder="בחר/י"
+                  onChange={(label) => {
+                    const idx = label ? options.indexOf(label) : -1;
+                    if (idx < 0) {
+                      setState((prev) => ({ ...(prev as any), preferred_roommates_min: null, preferred_roommates_max: null } as any));
+                      return;
+                    }
+                    setState((prev) => ({ ...(prev as any), preferred_roommates_min: idx, preferred_roommates_max: idx } as any));
+                  }}
+                />
+              );
+            })()}
           </View>
         ),
       },
@@ -1199,11 +1279,22 @@ function PartCarouselPagination({
         ),
       },
       { key: 'pref_gender', title: 'מגדר מועדף של השותפ/ה?', explanation: 'האם יש לך העדפה למגדר מסוים של השותפים', render: () => <ChipSelect options={genderPrefOptions} value={state.preferred_gender || null} onChange={(v) => setField('preferred_gender', v || null)} /> },
-      { key: 'pref_occ', title: 'עיסוק מועדף של השותפ/ה?', explanation: 'האם את/ה מעדיף/ה שותפים שהם סטודנטים או עובדים', render: () => <ChipSelect options={occupationPrefOptions} value={state.preferred_occupation || null} onChange={(v) => setField('preferred_occupation', v || null)} /> },
+      {
+        key: 'pref_occ',
+        title: 'אני רוצה שותף בסטטוס כמו שלי ?',
+        explanation: '',
+        render: () => (
+          <ChipSelect
+            options={['סטודנט', 'לא סטודנט']}
+            value={state.preferred_occupation || null}
+            onChange={(v) => setField('preferred_occupation', v || null)}
+          />
+        ),
+      },
       { key: 'partner_shabbat', title: 'שותפים שומרי שבת?', explanation: 'האם חשוב לך שהשותפים יהיו שומרי שבת או לא', render: () => <ChipSelect options={partnerShabbatPrefOptions} value={state.partner_shabbat_preference || null} onChange={(v) => setField('partner_shabbat_preference', v || null)} /> },
       { key: 'partner_diet', title: 'שותפים עם תזונה מתאימה?', explanation: 'האם יש לך העדפה לגבי התזונה של השותפים - כשר, לא טבעוני וכו\'', render: () => <ChipSelect options={partnerDietPrefOptions} value={state.partner_diet_preference || null} onChange={(v) => setField('partner_diet_preference', v || null)} /> },
       { key: 'partner_smoking', title: 'שותפים שמעשנים?', explanation: 'האם את/ה מוכן/ה לגור עם שותפים שמעשנים', render: () => <ChipSelect options={partnerSmokingPrefOptions} value={state.partner_smoking_preference || null} onChange={(v) => setField('partner_smoking_preference', v || null)} /> },
-      { key: 'partner_pets', title: 'שותפים שמגיעים עם בעלי חיים?', explanation: 'האם את/ה מוכן/ה שגם שותפים אחרים יגיעו עם בעלי חיים', render: () => <ChipSelect options={['אין בעיה', 'מעדיפ/ה שלא']} value={state.partner_pets_preference || null} onChange={(v) => setField('partner_pets_preference', v || null)} /> },
+      { key: 'partner_pets', title: 'שותפים שמגיעים עם בעלי חיים?', explanation: 'האם זה מתאים לך ששותפ/ה יגיע/תגיע עם בעל חיים?', render: () => <ChipSelect options={['אין בעיה', 'מעדיפ/ה שלא']} value={state.partner_pets_preference || null} onChange={(v) => setField('partner_pets_preference', v || null)} /> },
     ];
 
     return q.filter((item) => (item.isVisible ? item.isVisible() : true));
@@ -1226,20 +1317,23 @@ function PartCarouselPagination({
     return map;
   }, [questions]);
 
-  // Split questions into 3 parts based on the user's requested boundaries.
-  // Part 1: "קצת עליי" - from first question up to (excluding) "תקציב שכירות" (price)
-  // Part 2: "מה שאני מחפש בדירה" - from "תקציב שכירות" (price) up to (excluding) "טווח גילאים לשותפ/ה" (age_range)
-  // Part 3: "שותפים שאני מחפש" - from "טווח גילאים לשותפ/ה" (age_range) to the end
+  // Split questions into 3 parts in the desired order:
+  // Part 1: על עצמי
+  // Part 2: על השותפ/ה
+  // Part 3: על הדירה
   const items: SurveyItem[] = useMemo(() => {
     const idxPrice = questions.findIndex((q) => q.key === 'price');
     const idxAgeRange = questions.findIndex((q) => q.key === 'age_range');
 
     const part1Questions = idxPrice > 0 ? questions.slice(0, idxPrice) : questions.slice(0, Math.max(0, idxPrice));
-    const part2Questions =
+
+    // NOTE: In the questions list, apartment questions appear before partner questions,
+    // but the requested flow is: about -> partner -> apartment.
+    const apartmentQuestions =
       idxPrice >= 0 && (idxAgeRange < 0 || idxAgeRange > idxPrice)
         ? questions.slice(idxPrice, idxAgeRange < 0 ? undefined : idxAgeRange)
         : [];
-    const part3Questions = idxAgeRange >= 0 ? questions.slice(idxAgeRange) : [];
+    const partnerQuestions = idxAgeRange >= 0 ? questions.slice(idxAgeRange) : [];
 
     const out: SurveyItem[] = [];
     if (part1Questions.length) {
@@ -1247,30 +1341,30 @@ function PartCarouselPagination({
         type: 'section',
         key: '__section_about',
         partNumber: 1,
-        title: 'קצת עליי',
+        title: 'על עצמי',
         subtitle: 'כמה שאלות קצרות כדי שנכיר אותך ונבין את הוייב שלך.',
       });
       for (const q of part1Questions) out.push({ type: 'question', key: q.key, partNumber: 1, question: q });
     }
-    if (part2Questions.length) {
+    if (partnerQuestions.length) {
       out.push({
         type: 'section',
-        key: '__section_apartment',
         partNumber: 2,
-        title: 'הדירה שאני מחפש/ת',
-        subtitle: 'בוא/י נבין מה חשוב לך בדירה – עיר, שכונה, תאריך כניסה ועוד.',
+        key: '__section_partners',
+        title: 'על השותפ/ה',
+        subtitle: 'בוא/י נבין מי השותפים שהכי יכולים להתאים לך – גיל, מגדר, הרגלים ועוד.',
       });
-      for (const q of part2Questions) out.push({ type: 'question', key: q.key, partNumber: 2, question: q });
+      for (const q of partnerQuestions) out.push({ type: 'question', key: q.key, partNumber: 2, question: q });
     }
-    if (part3Questions.length) {
+    if (apartmentQuestions.length) {
       out.push({
         type: 'section',
-        key: '__section_partners',
         partNumber: 3,
-        title: 'השותפים שאני מחפש/ת',
-        subtitle: 'ספרו לנו מי השותפים שהכי יכולים להתאים לכם – כדי שנוכל לדייק את ההתאמה.',
+        key: '__section_apartment',
+        title: 'על הדירה',
+        subtitle: 'בוא/י נבין מה חשוב לך בדירה – תקציב, עיר, שכונה, תאריך כניסה ועוד.',
       });
-      for (const q of part3Questions) out.push({ type: 'question', key: q.key, partNumber: 3, question: q });
+      for (const q of apartmentQuestions) out.push({ type: 'question', key: q.key, partNumber: 3, question: q });
     }
 
     return out;
@@ -1311,21 +1405,9 @@ function PartCarouselPagination({
     setState((prev) => {
       let next: SurveyState | null = null;
 
-      if (activeRenderedQuestionKey === 'cleanliness') {
-        if (!hasFiniteNumber(prev.cleanliness_importance)) {
-          next = { ...(next ?? prev), cleanliness_importance: 3 };
-        }
-      }
+      // No defaults for cleanliness dropdown; require an explicit choice.
 
-      if (activeRenderedQuestionKey === 'roommates_range') {
-        const minRaw = (prev as any).preferred_roommates_min;
-        const maxRaw = (prev as any).preferred_roommates_max;
-        const min = hasFiniteNumber(minRaw) ? minRaw : 1;
-        const max = hasFiniteNumber(maxRaw) ? maxRaw : min;
-        if (!hasFiniteNumber(minRaw) || !hasFiniteNumber(maxRaw) || max < min) {
-          next = { ...(next ?? prev), preferred_roommates_min: min, preferred_roommates_max: Math.max(max, min) } as any;
-        }
-      }
+      // No defaults for roommates dropdown; require an explicit choice.
 
       return next ?? prev;
     });
@@ -1793,18 +1875,18 @@ function PartCarouselPagination({
                   {[
                     {
                       partNumber: 1 as const,
-                      title: 'קצת עליי',
+                      title: 'על עצמי',
                       subtitle: 'עריכת שאלות עלייך וההרגלים שלך.',
                     },
                     {
                       partNumber: 2 as const,
-                      title: 'הדירה שאני מחפש/ת',
-                      subtitle: 'עריכת העדפות דירה – תקציב, עיר, כניסה ועוד.',
+                      title: 'על השותפ/ה',
+                      subtitle: 'עריכת העדפות השותפים – גיל, מגדר ועוד.',
                     },
                     {
                       partNumber: 3 as const,
-                      title: 'השותפים שאני מחפש/ת',
-                      subtitle: 'עריכת העדפות השותפים – גיל, מגדר ועוד.',
+                      title: 'על הדירה',
+                      subtitle: 'עריכת העדפות דירה – תקציב, עיר, כניסה ועוד.',
                     },
                   ].map((p) => (
                     <TouchableOpacity
@@ -2248,6 +2330,7 @@ function normalizePayload(
   s: SurveyState,
   opts: { isCompleted: boolean; draftStepKey: string | null; coerceBooleans?: boolean }
 ) {
+  const preferredCities = normalizeCityList((s as any).preferred_cities);
   const coerce = typeof opts.coerceBooleans === 'boolean' ? opts.coerceBooleans : opts.isCompleted; // default legacy behavior
   const payload: any = {
     user_id: userId,
@@ -2273,7 +2356,8 @@ function normalizePayload(
     price_max: (s as any).price_max ?? null,
     // keep legacy field for older rows/environments
     price_range: s.price_range ?? null,
-    preferred_city: s.preferred_city ?? null,
+    // Multi-city
+    preferred_cities: preferredCities.length ? preferredCities : null,
     preferred_neighborhoods:
       s.preferred_neighborhoods && s.preferred_neighborhoods.length > 0 ? s.preferred_neighborhoods : null,
     floor_preference: s.floor_preference ?? null,
@@ -2408,6 +2492,12 @@ function generateNumberRange(start: number, end: number): string[] {
 
 function hydrateSurvey(existing: UserSurveyResponse): SurveyState {
   const next: SurveyState = { ...existing };
+
+  // Cities: ensure multi-city field is hydrated.
+  const hydratedCities = normalizeCityList((existing as any).preferred_cities);
+  if (hydratedCities.length) {
+    (next as any).preferred_cities = hydratedCities;
+  }
 
   // Budget: if only legacy price_range exists, derive a range.
   if ((existing as any).price_min == null && (existing as any).price_max == null && typeof (existing as any).price_range === 'number') {

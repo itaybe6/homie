@@ -108,6 +108,7 @@ function normalizeOccupationValue(value?: string | null): 'student' | 'worker' |
 function normalizeOccupationPreference(value?: string | null): 'student' | 'worker' | 'any' | null {
   const normalized = normalizeKey(value, occupationPrefAliasMap);
   if (normalized) return normalized;
+  if (value && value.includes('לא סטודנט')) return 'worker';
   if (value && value.includes('סטודנט')) return 'student';
   if (value && value.includes('עובד')) return 'worker';
   return null;
@@ -162,7 +163,11 @@ function buildCompatSurvey(
   if (survey?.cleaning_frequency) compat.cleaning_frequency = survey.cleaning_frequency as CleaningFrequency;
   if (survey?.hosting_preference) compat.hosting_preference = survey.hosting_preference as HostingPreference;
   if (survey?.cooking_style) compat.cooking_style = survey.cooking_style as CookingStyle;
-  if (survey?.preferred_city) compat.preferred_city = survey.preferred_city;
+  {
+    const cities = Array.isArray((survey as any)?.preferred_cities) ? ((survey as any).preferred_cities as any[]) : [];
+    const primary = cities.length ? String(cities[0] ?? '').trim() : '';
+    if (primary) compat.preferred_city = primary as any;
+  }
   if (Array.isArray((survey as any)?.preferred_neighborhoods))
     compat.preferred_neighborhoods = (survey as any).preferred_neighborhoods;
   if (Number.isFinite((survey as any)?.price_min as number)) compat.price_min = Number((survey as any).price_min);
@@ -750,7 +755,14 @@ export default function UserProfileScreen() {
       highlights.push({ label, value: trimmed });
     };
 
-    push('עיר מועדפת', survey.preferred_city || undefined);
+    {
+      const cities = Array.isArray((survey as any)?.preferred_cities) ? (survey as any).preferred_cities : null;
+      const cityLabel =
+        cities && cities.length
+          ? String(cities.filter(Boolean).map((c: any) => String(c).trim()).filter(Boolean).join(', '))
+          : undefined;
+      push(cities && cities.length > 1 ? 'ערים מועדפות' : 'עיר מועדפת', cityLabel);
+    }
     {
       const min = (survey as any).price_min;
       const max = (survey as any).price_max;
@@ -776,6 +788,14 @@ export default function UserProfileScreen() {
   }, [survey]);
 
   type SurveySectionKey = 'about' | 'apartment' | 'partner';
+
+  const formatPreferredRoommatesLabel = (value: number) => {
+    if (!Number.isFinite(value)) return '';
+    const n = Math.max(0, Math.min(4, Math.round(value)));
+    if (n === 0) return 'אני לבד';
+    if (n === 1) return 'אני עם עוד שותף';
+    return `אני ועוד ${n} שותפים`;
+  };
 
   const surveyItems = useMemo(() => {
     if (!survey) return [];
@@ -853,7 +873,14 @@ export default function UserProfileScreen() {
         add('apartment', 'תקציב שכירות', formatCurrency(survey.price_range));
       }
     }
-    add('apartment', 'עיר מועדפת', survey.preferred_city);
+    {
+      const cities = Array.isArray((survey as any)?.preferred_cities) ? (survey as any).preferred_cities : null;
+      const cityLabel =
+        cities && cities.length
+          ? String(cities.filter(Boolean).map((c: any) => String(c).trim()).filter(Boolean).join(', '))
+          : undefined;
+      add('apartment', cities && cities.length > 1 ? 'ערים מועדפות' : 'עיר מועדפת', cityLabel);
+    }
     const neighborhoodsJoined = normalizeNeighborhoods((survey.preferred_neighborhoods as unknown) ?? null);
     if (neighborhoodsJoined) add('apartment', 'שכונות מועדפות', neighborhoodsJoined);
     add('apartment', 'קומה מועדפת', survey.floor_preference);
@@ -867,7 +894,20 @@ export default function UserProfileScreen() {
         : formatMonthLabel(from);
       add('apartment', 'תאריך כניסה', label);
     }
-    if (typeof survey.preferred_roommates === 'number') add('apartment', 'מספר שותפים מועדף', `${survey.preferred_roommates}`);
+    {
+      const rmMin = (survey as any).preferred_roommates_min;
+      const rmMax = (survey as any).preferred_roommates_max;
+      const rmSingle =
+        typeof rmMin === 'number' && typeof rmMax === 'number' && rmMin === rmMax
+          ? rmMin
+          : typeof survey.preferred_roommates === 'number'
+            ? survey.preferred_roommates
+            : null;
+      if (typeof rmSingle === 'number') {
+        const label = formatPreferredRoommatesLabel(rmSingle);
+        if (label) add('apartment', 'מספר שותפים מועדף', label);
+      }
+    }
     addBool('apartment', 'חיות מורשות', survey.pets_allowed);
 
     // השותפ/ה שאני מחפש/ת
