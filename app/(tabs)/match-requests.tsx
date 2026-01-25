@@ -52,26 +52,23 @@ export default function MatchRequestsScreen() {
   const DEFAULT_AVATAR = 'https://cdn-icons-png.flaticon.com/512/847/847969.png';
 
   const mapMatchStatus = (status: string | null | undefined): MatchStatus => {
-    const normalized = (status || '').trim();
-    switch (normalized) {
-      case 'APPROVED':
-      case 'אושר':
-        return 'APPROVED';
-      case 'REJECTED':
-      case 'נדחה':
-        return 'REJECTED';
-      case 'NOT_RELEVANT':
-      case 'IRRELEVANT':
-      case 'לא רלוונטי':
-        return 'NOT_RELEVANT';
-      case 'CANCELLED':
-      case 'בוטל':
-        return 'CANCELLED';
-      case 'PENDING':
-      case 'ממתין':
-      default:
-        return 'PENDING';
-    }
+    const raw = String(status || '').trim();
+    const upper = raw.toUpperCase();
+    // Hebrew variants (keep as-is)
+    if (raw === 'אושר') return 'APPROVED';
+    if (raw === 'נדחה') return 'REJECTED';
+    if (raw === 'ממתין') return 'PENDING';
+    if (raw === 'בוטל') return 'CANCELLED';
+    if (raw === 'לא רלוונטי') return 'NOT_RELEVANT';
+
+    // English variants (case-insensitive)
+    if (upper === 'APPROVED' || upper === 'ACCEPTED') return 'APPROVED';
+    if (upper === 'REJECTED' || upper === 'DECLINED' || upper === 'DENIED') return 'REJECTED';
+    if (upper === 'PENDING' || upper === 'WAITING') return 'PENDING';
+    if (upper === 'CANCELLED' || upper === 'CANCELED') return 'CANCELLED';
+    if (upper === 'IRRELEVANT' || upper === 'NOT_RELEVANT') return 'NOT_RELEVANT';
+
+    return 'PENDING';
   };
 
   useEffect(() => {
@@ -259,7 +256,18 @@ export default function MatchRequestsScreen() {
       }
 
       const sentUnified = [...matchSent].sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
-      const recvUnifiedRaw = [...matchRecv, ...matchRecvFromGroups].sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
+      // Merge and de-dupe by id (a group-targeted match might later get receiver_id set on approval
+      // and therefore appear in BOTH receiver_id and receiver_group_id queries).
+      const recvUnifiedRaw = (() => {
+        const merged = [...matchRecv, ...matchRecvFromGroups];
+        const byId = new Map<string, any>();
+        merged.forEach((it: any) => {
+          const id = String(it?.id || '').trim();
+          if (!id) return;
+          if (!byId.has(id)) byId.set(id, it);
+        });
+        return Array.from(byId.values()).sort((a: any, b: any) => (a.created_at < b.created_at ? 1 : -1));
+      })();
 
       // Normalize display user for group-targeted matches by selecting a representative member
       const groupIdsForDisplay = Array.from(
@@ -395,7 +403,18 @@ export default function MatchRequestsScreen() {
     if (!user?.id) return;
     try {
       setActionId(match.id);
-      await supabase.from('matches').update({ status: 'APPROVED', updated_at: new Date().toISOString() }).eq('id', match.id);
+      // Persist who approved (important for group-targeted matches where receiver_id may be null).
+      const { error: updErr } = await supabase
+        .from('matches')
+        // IMPORTANT: matches table has a constraint (matches_receiver_oneof_chk) that prevents
+        // setting receiver_id when receiver_group_id is already set. For group-targeted matches,
+        // we only update status/updated_at.
+        .update({ status: 'APPROVED', updated_at: new Date().toISOString() } as any)
+        .eq('id', match.id);
+      if (updErr) throw updErr;
+
+      // Optimistic UI: immediately reflect approval in the list
+      setReceived((prev) => prev.map((r) => (r.id === match.id ? ({ ...(r as any), status: 'APPROVED' } as any) : r)));
       const approverLabel = await computeGroupAwareLabel(user.id);
       await insertNotificationOnce({
         sender_id: user.id,
@@ -421,7 +440,14 @@ export default function MatchRequestsScreen() {
     if (!user?.id) return;
     try {
       setActionId(match.id);
-      await supabase.from('matches').update({ status: 'REJECTED', updated_at: new Date().toISOString() }).eq('id', match.id);
+      const { error: updErr } = await supabase
+        .from('matches')
+        .update({ status: 'REJECTED', updated_at: new Date().toISOString() })
+        .eq('id', match.id);
+      if (updErr) throw updErr;
+
+      // Optimistic UI: immediately reflect rejection in the list
+      setReceived((prev) => prev.map((r) => (r.id === match.id ? ({ ...(r as any), status: 'REJECTED' } as any) : r)));
       const rejecterLabel = await computeGroupAwareLabel(user.id);
       await insertNotificationOnce({
         sender_id: user.id,
@@ -489,6 +515,75 @@ export default function MatchRequestsScreen() {
                     ) : null}
                     <View style={{ marginTop: 10, flexDirection: 'row-reverse', gap: 8 as any }}>
                       <StatusPill status={item.status} />
+                      {!incoming && item.status === 'APPROVED' && !isGroupMatch && (
+                        <View style={{ marginTop: 10, alignItems: 'flex-end', gap: 10 as any, width: '100%' }}>
+                          <View
+                            style={{
+                              width: '100%',
+                              backgroundColor: 'rgba(124,92,255,0.08)',
+                              borderRadius: 12,
+                              borderWidth: 1,
+                              borderColor: 'rgba(124,92,255,0.2)',
+                              padding: 12,
+                              gap: 10 as any,
+                            }}
+                          >
+                            <View style={{ flexDirection: 'row-reverse', alignItems: 'center', gap: 10 as any }}>
+                              <Image
+                                source={{ uri: otherUser?.avatar_url || DEFAULT_AVATAR }}
+                                style={{
+                                  width: 44,
+                                  height: 44,
+                                  borderRadius: 22,
+                                  backgroundColor: '#1F1F29',
+                                  borderWidth: 2,
+                                  borderColor: 'rgba(124,92,255,0.3)',
+                                }}
+                              />
+                              <View style={{ flex: 1, alignItems: 'flex-end' }}>
+                                <Text style={{ color: '#FFFFFF', fontSize: 15, fontWeight: '800' }}>
+                                  {otherUser?.full_name || 'משתמש'}
+                                </Text>
+                                <Text style={{ color: '#C9CDD6', fontSize: 13, marginTop: 2 }}>
+                                  {otherUser?.phone || 'מספר לא זמין'}
+                                </Text>
+                              </View>
+                            </View>
+                            {otherUser?.phone ? (
+                              <TouchableOpacity
+                                style={{
+                                  flexDirection: 'row-reverse',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  gap: 8 as any,
+                                  backgroundColor: '#25D366',
+                                  paddingVertical: 11,
+                                  paddingHorizontal: 16,
+                                  borderRadius: 10,
+                                }}
+                                activeOpacity={0.85}
+                                onPress={() =>
+                                  openWhatsApp(
+                                    otherUser.phone as string,
+                                    `היי${otherUser?.full_name ? ` ${otherUser.full_name.split(' ')[0]}` : ''}, בקשת ההתאמה שלנו ב-Homie אושרה. בוא/י נדבר ונראה אם יש התאמה!`
+                                  )
+                                }
+                              >
+                                <Text style={{ color: '#FFFFFF', fontSize: 14, fontWeight: '800' }}>
+                                  שלח הודעה בוואטסאפ
+                                </Text>
+                              </TouchableOpacity>
+                            ) : null}
+                          </View>
+                        </View>
+                      )}
+                      {!incoming && item.status === 'APPROVED' && isGroupMatch && (
+                        <View style={{ marginTop: 10, alignItems: 'flex-end' }}>
+                          <Text style={{ color: '#C9CDD6', fontSize: 13, fontWeight: '800', textAlign: 'right' }}>
+                            הבקשה אושרה על-ידי אחד מחברי הפרופיל המשותף. פרטי הקשר יופיעו בהתראה נפרדת.
+                          </Text>
+                        </View>
+                      )}
                       {incoming && item.status === 'PENDING' && (
                         <View style={{ flexDirection: 'row-reverse', gap: 8 as any }}>
                           <TouchableOpacity
@@ -510,114 +605,11 @@ export default function MatchRequestsScreen() {
                         </View>
                       )}
                       {incoming && item.status === 'APPROVED' && (
-                        isGroupMatch && groupMembers.length ? (
-                          <View style={{ marginTop: 12, alignItems: 'flex-end', gap: 6 as any }}>
-                            <View style={{ width: '100%', flexDirection: 'row-reverse', flexWrap: 'wrap', gap: 12 as any, justifyContent: 'flex-end' }}>
-                              {groupMembers.map((m, idx) => {
-                                const firstName = (m.full_name || '').split(' ')[0] || '';
-                                return (
-                                  <View
-                                    key={idx}
-                                    style={{
-                                      flexBasis: '48%',
-                                      flexGrow: 0,
-                                      minWidth: 240,
-                                      maxWidth: 360,
-                                      backgroundColor: 'rgba(124,92,255,0.08)',
-                                      borderRadius: 12,
-                                      borderWidth: 1,
-                                      borderColor: 'rgba(124,92,255,0.2)',
-                                      padding: 12,
-                                      gap: 10 as any,
-                                    }}
-                                  >
-                                    <View style={{ flexDirection: 'row-reverse', alignItems: 'center', gap: 10 as any }}>
-                                      <Image
-                                        source={{ uri: m.avatar_url || DEFAULT_AVATAR }}
-                                        style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: '#1F1F29', borderWidth: 2, borderColor: 'rgba(124,92,255,0.3)' }}
-                                      />
-                                      <View style={{ flex: 1, alignItems: 'flex-end' }}>
-                                        <Text style={{ color: '#FFFFFF', fontSize: 15, fontWeight: '800' }}>{m.full_name}</Text>
-                                        <Text style={{ color: '#C9CDD6', fontSize: 13, marginTop: 2 }}>{m.phone || 'מספר לא זמין'}</Text>
-                                      </View>
-                                    </View>
-                                    {m.phone ? (
-                                      <TouchableOpacity
-                                        style={{
-                                          flexDirection: 'row-reverse',
-                                          alignItems: 'center',
-                                          justifyContent: 'center',
-                                          gap: 8 as any,
-                                          backgroundColor: '#25D366',
-                                          paddingVertical: 11,
-                                          paddingHorizontal: 16,
-                                          borderRadius: 10,
-                                        }}
-                                        activeOpacity={0.85}
-                                        onPress={() =>
-                                          openWhatsApp(
-                                            m.phone as string,
-                                            `היי${firstName ? ` ${firstName}` : ''}, אישרתי את בקשת ההתאמה ב-Homie. בוא/י נדבר ונראה אם יש התאמה!`
-                                          )
-                                        }
-                                      >
-                                        <Text style={{ color: '#FFFFFF', fontSize: 14, fontWeight: '800' }}>שלח הודעה בוואטסאפ</Text>
-                                      </TouchableOpacity>
-                                    ) : null}
-                                  </View>
-                                );
-                              })}
-                            </View>
-                          </View>
-                        ) : (
-                          <View style={{ marginTop: 10, alignItems: 'flex-end', gap: 10 as any }}>
-                            <View
-                              style={{
-                                width: '100%',
-                                backgroundColor: 'rgba(124,92,255,0.08)',
-                                borderRadius: 12,
-                                borderWidth: 1,
-                                borderColor: 'rgba(124,92,255,0.2)',
-                                padding: 12,
-                                gap: 10 as any,
-                              }}
-                            >
-                              <View style={{ flexDirection: 'row-reverse', alignItems: 'center', gap: 10 as any }}>
-                                <Image
-                                  source={{ uri: otherUser?.avatar_url || DEFAULT_AVATAR }}
-                                  style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: '#1F1F29', borderWidth: 2, borderColor: 'rgba(124,92,255,0.3)' }}
-                                />
-                                <View style={{ flex: 1, alignItems: 'flex-end' }}>
-                                  <Text style={{ color: '#FFFFFF', fontSize: 15, fontWeight: '800' }}>{otherUser?.full_name || 'משתמש'}</Text>
-                                  <Text style={{ color: '#C9CDD6', fontSize: 13, marginTop: 2 }}>{otherUser?.phone || 'מספר לא זמין'}</Text>
-                                </View>
-                              </View>
-                              {otherUser?.phone ? (
-                                <TouchableOpacity
-                                  style={{
-                                    flexDirection: 'row-reverse',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    gap: 8 as any,
-                                    backgroundColor: '#25D366',
-                                    paddingVertical: 11,
-                                    paddingHorizontal: 16,
-                                    borderRadius: 10,
-                                  }}
-                                  activeOpacity={0.85}
-                                  onPress={() =>
-                                    openWhatsApp(
-                                      otherUser.phone as string,
-                                      `היי${otherUser?.full_name ? ` ${otherUser.full_name.split(' ')[0]}` : ''}, אישרתי את בקשת ההתאמה ב-Homie. בוא/י נדבר ונראה אם יש התאמה!`
-                                    )
-                                  }
-                                >
-                                  <Text style={{ color: '#FFFFFF', fontSize: 14, fontWeight: '800' }}>שלח הודעה בוואטסאפ</Text>
-                                </TouchableOpacity>
-                              ) : null}
-                            </View>
-                          </View>
-                        )
+                        <View style={{ marginTop: 10, alignItems: 'flex-end' }}>
+                          <Text style={{ color: '#C9CDD6', fontSize: 13, fontWeight: '800', textAlign: 'right' }}>
+                            אישרת את הבקשה. מספר הטלפון שלך נחשף לצד השני.
+                          </Text>
+                        </View>
                       )}
                     </View>
                     {!!item.created_at ? (

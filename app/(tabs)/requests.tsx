@@ -88,27 +88,23 @@ export default function RequestsScreen() {
   // Use a vector icon to ensure it always renders (remote PNGs can fail/tint inconsistently)
 
   const mapMatchStatus = (status: string | null | undefined): UnifiedItem['status'] => {
-    const normalized = (status || '').trim();
-    switch (normalized) {
-      case 'אושר':
-      case 'APPROVED':
-        return 'APPROVED';
-      case 'נדחה':
-      case 'REJECTED':
-        return 'REJECTED';
-      case 'לא רלוונטי':
-      case 'IRRELEVANT':
-      case 'NOT_RELEVANT':
-        return 'NOT_RELEVANT';
-      case 'ממתין':
-      case 'PENDING':
-        return 'PENDING';
-      case 'CANCELLED':
-      case 'בוטל':
-        return 'CANCELLED';
-      default:
-        return 'PENDING';
-    }
+    const raw = String(status || '').trim();
+    const upper = raw.toUpperCase();
+    // Hebrew variants (keep as-is)
+    if (raw === 'אושר') return 'APPROVED';
+    if (raw === 'נדחה') return 'REJECTED';
+    if (raw === 'ממתין') return 'PENDING';
+    if (raw === 'בוטל') return 'CANCELLED';
+    if (raw === 'לא רלוונטי') return 'NOT_RELEVANT';
+
+    // English variants (case-insensitive)
+    if (upper === 'APPROVED' || upper === 'ACCEPTED') return 'APPROVED';
+    if (upper === 'REJECTED' || upper === 'DECLINED' || upper === 'DENIED') return 'REJECTED';
+    if (upper === 'PENDING' || upper === 'WAITING') return 'PENDING';
+    if (upper === 'CANCELLED' || upper === 'CANCELED') return 'CANCELLED';
+    if (upper === 'IRRELEVANT' || upper === 'NOT_RELEVANT') return 'NOT_RELEVANT';
+
+    return 'PENDING';
   };
 
   const isPartnerRequestNotification = (n: Notification): boolean => {
@@ -643,8 +639,18 @@ export default function RequestsScreen() {
         _sender_group_id: row.group_id, // inviter's group
       }));
 
-      const recvUnifiedRaw = [...aptRecv, ...matchRecv, ...matchRecvFromGroups, ...groupRecv]
-        .sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
+      // Merge and de-dupe by id (a group-targeted match might later get receiver_id set on approval
+      // and therefore appear in BOTH receiver_id and receiver_group_id queries).
+      const recvUnifiedRaw = (() => {
+        const merged = [...aptRecv, ...matchRecv, ...matchRecvFromGroups, ...groupRecv];
+        const byId = new Map<string, any>();
+        merged.forEach((it: any) => {
+          const id = String(it?.id || '').trim();
+          if (!id) return;
+          if (!byId.has(id)) byId.set(id, it);
+        });
+        return Array.from(byId.values()).sort((a: any, b: any) => (a.created_at < b.created_at ? 1 : -1));
+      })();
 
       // Normalize display user for group-targeted matches:
       // For any item with _receiver_group_id, choose a representative member so recipient_id is a real user id.
@@ -1561,10 +1567,17 @@ export default function RequestsScreen() {
     if (!user?.id) return;
     try {
       setActionId(match.id);
-      await supabase
+      const { error: updErr } = await supabase
         .from('matches')
-        .update({ status: 'APPROVED', updated_at: new Date().toISOString() })
+        // IMPORTANT: matches table has a constraint (matches_receiver_oneof_chk) that prevents
+        // setting receiver_id when receiver_group_id is already set. For group-targeted matches,
+        // we only update status/updated_at.
+        .update({ status: 'APPROVED', updated_at: new Date().toISOString() } as any)
         .eq('id', match.id);
+      if (updErr) throw updErr;
+      
+      // Optimistic UI: update immediately so the row switches from buttons to status text
+      setReceived((prev) => prev.map((r) => (r.id === match.id ? ({ ...(r as any), status: 'APPROVED' } as any) : r)));
 
       const approverLabel = await computeGroupAwareLabel(user.id);
       await insertNotificationOnce({
@@ -1590,10 +1603,14 @@ export default function RequestsScreen() {
     if (!user?.id) return;
     try {
       setActionId(match.id);
-      await supabase
+      const { error: updErr } = await supabase
         .from('matches')
         .update({ status: 'REJECTED', updated_at: new Date().toISOString() })
         .eq('id', match.id);
+      if (updErr) throw updErr;
+      
+      // Optimistic UI: update immediately so the row switches from buttons to status text
+      setReceived((prev) => prev.map((r) => (r.id === match.id ? ({ ...(r as any), status: 'REJECTED' } as any) : r)));
 
       const rejecterLabel = await computeGroupAwareLabel(user.id);
       await insertNotificationOnce({
@@ -1775,26 +1792,38 @@ export default function RequestsScreen() {
                         ? 'בקשת התאמה'
                         : 'בקשת מיזוג פרופילים'}
                     </Text>
-                    {item.kind === 'MATCH' && !isGroupMatch && !!otherUser?.full_name ? (
+                    {incoming && item.kind === 'MATCH' && item.status === 'PENDING' ? (
                       <>
-                        <Text style={styles.matchSubtitle}>{otherUser.full_name} אהב את הפרופיל שלך</Text>
-                        <TouchableOpacity
-                          style={styles.matchUserRow}
-                          activeOpacity={0.85}
-                          onPress={() => {
-                            const id = incoming ? item.sender_id : item.recipient_id;
-                            if (id) router.push({ pathname: '/user/[id]', params: { id } });
-                          }}
-                        >
-                          <View style={styles.matchMiniAvatarWrap}>
-                            <Image
-                              source={{ uri: (otherUser.avatar_url as string | undefined) || DEFAULT_AVATAR }}
-                              style={styles.matchMiniAvatarImg}
-                              resizeMode="cover"
-                            />
-                          </View>
-                          <Text style={styles.matchMiniName}>{otherUser.full_name}</Text>
-                        </TouchableOpacity>
+                        <Text style={styles.matchSubtitle}>
+                          {(() => {
+                            const name = !isGroupMatch ? String(otherUser?.full_name || '').trim() : '';
+                            const requesterLabel = isGroupMatch
+                              ? 'פרופיל משותף'
+                              : name
+                                ? `המשתמש/ת "${name}"`
+                                : 'המשתמש/ת';
+                            return `${requesterLabel} מעוניין/ת בך כשותף/ה לדירה.\nבאישור הבקשה, מספר הטלפון שלך ייחשף לצד השני.`;
+                          })()}
+                        </Text>
+                        {!isGroupMatch && !!otherUser?.full_name ? (
+                          <TouchableOpacity
+                            style={styles.matchUserRow}
+                            activeOpacity={0.85}
+                            onPress={() => {
+                              const id = item.sender_id;
+                              if (id) router.push({ pathname: '/user/[id]', params: { id } });
+                            }}
+                          >
+                            <View style={styles.matchMiniAvatarWrap}>
+                              <Image
+                                source={{ uri: (otherUser.avatar_url as string | undefined) || DEFAULT_AVATAR }}
+                                style={styles.matchMiniAvatarImg}
+                                resizeMode="cover"
+                              />
+                            </View>
+                            <Text style={styles.matchMiniName}>{otherUser.full_name}</Text>
+                          </TouchableOpacity>
+                        ) : null}
                       </>
                     ) : null}
                     {incoming && item.kind === 'GROUP' && mergeProposerMembers.length ? (
@@ -2019,78 +2048,11 @@ export default function RequestsScreen() {
                       {/* Sender view: approved JOIN_APT owner details moved to modal ("פרטים נוספים") */}
                       {/* Sender view (sent): expose recipient phone and WhatsApp action once a MATCH is approved */}
                       {!incoming && item.kind === 'MATCH' && item.status === 'APPROVED' && (
-                        isGroupMatch && groupMembers.length ? (
-                          <View style={{ marginTop: 12, alignItems: 'flex-end', gap: 6 as any }}>
-                            <View
-                              style={{
-                                width: '100%',
-                                flexDirection: 'row-reverse',
-                                flexWrap: 'wrap',
-                                gap: 12 as any,
-                                justifyContent: 'flex-end',
-                              }}
-                            >
-                              {groupMembers.map((m, idx) => {
-                                const firstName = (m.full_name || '').split(' ')[0] || '';
-                                return (
-                                  <View
-                                    key={idx}
-                                    style={{
-                                      flexBasis: '48%',
-                                      flexGrow: 0,
-                                      minWidth: 240,
-                                      maxWidth: 360,
-                                      backgroundColor: 'rgba(94,63,45,0.08)',
-                                      borderRadius: 12,
-                                      borderWidth: 1,
-                                      borderColor: 'rgba(94,63,45,0.2)',
-                                      padding: 12,
-                                      gap: 10 as any,
-                                    }}
-                                  >
-                                    <View style={{ flexDirection: 'row-reverse', alignItems: 'center', gap: 10 as any }}>
-                                      <Image
-                                        source={{ uri: m.avatar_url || DEFAULT_AVATAR }}
-                                        style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: '#1F1F29', borderWidth: 2, borderColor: 'rgba(94,63,45,0.3)' }}
-                                      />
-                                      <View style={{ flex: 1, alignItems: 'flex-end' }}>
-                                        <Text style={{ color: '#FFFFFF', fontSize: 15, fontWeight: '800' }}>
-                                          {m.full_name}
-                                        </Text>
-                                        <Text style={{ color: '#C9CDD6', fontSize: 13, marginTop: 2 }}>
-                                          {m.phone || 'מספר לא זמין'}
-                                        </Text>
-                                      </View>
-                                    </View>
-                                    {m.phone ? (
-                                      <TouchableOpacity
-                                        style={{
-                                          flexDirection: 'row-reverse',
-                                          alignItems: 'center',
-                                          justifyContent: 'center',
-                                          gap: 8 as any,
-                                          backgroundColor: '#25D366',
-                                          paddingVertical: 11,
-                                          paddingHorizontal: 16,
-                                          borderRadius: 10,
-                                        }}
-                                        activeOpacity={0.85}
-                                        onPress={() =>
-                                          openWhatsApp(
-                                            m.phone as string,
-                                            `היי${firstName ? ` ${firstName}` : ''}, בקשת ההתאמה שלנו ב-Homie אושרה. בוא/י נדבר ונראה אם יש התאמה!`
-                                          )
-                                        }
-                                      >
-                                        <Text style={{ color: '#FFFFFF', fontSize: 14, fontWeight: '800' }}>
-                                          שלח הודעה בוואטסאפ
-                                        </Text>
-                                      </TouchableOpacity>
-                                    ) : null}
-                                  </View>
-                                );
-                              })}
-                            </View>
+                        isGroupMatch ? (
+                          <View style={{ marginTop: 10, alignItems: 'flex-end' }}>
+                            <Text style={styles.matchApprovedNote}>
+                              הבקשה אושרה על-ידי אחד מחברי הפרופיל המשותף. פרטי הקשר יופיעו בהתראה נפרדת.
+                            </Text>
                           </View>
                         ) : (
                           <View style={{ marginTop: 10, alignItems: 'flex-end', gap: 10 as any }}>
@@ -2173,134 +2135,11 @@ export default function RequestsScreen() {
                         </View>
                       )}
                       {incoming && item.kind === 'MATCH' && item.status === 'APPROVED' && (
-                        isGroupMatch && groupMembers.length ? (
-                          <View style={{ marginTop: 12, alignItems: 'flex-end', gap: 6 as any }}>
-                            <View
-                              style={{
-                                width: '100%',
-                                flexDirection: 'row-reverse',
-                                flexWrap: 'wrap',
-                                gap: 12 as any,
-                                justifyContent: 'flex-end',
-                              }}
-                            >
-                              {groupMembers.map((m, idx) => {
-                                const firstName = (m.full_name || '').split(' ')[0] || '';
-                                return (
-                                  <View
-                                    key={idx}
-                                    style={{
-                                      flexBasis: '48%',
-                                      flexGrow: 0,
-                                      minWidth: 240,
-                                      maxWidth: 360,
-                                      backgroundColor: 'rgba(94,63,45,0.08)',
-                                      borderRadius: 12,
-                                      borderWidth: 1,
-                                      borderColor: 'rgba(94,63,45,0.2)',
-                                      padding: 12,
-                                      gap: 10 as any,
-                                    }}
-                                  >
-                                    <View style={{ flexDirection: 'row-reverse', alignItems: 'center', gap: 10 as any }}>
-                                      <Image
-                                        source={{ uri: m.avatar_url || DEFAULT_AVATAR }}
-                                        style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: '#1F1F29', borderWidth: 2, borderColor: 'rgba(94,63,45,0.3)' }}
-                                      />
-                                      <View style={{ flex: 1, alignItems: 'flex-end' }}>
-                                        <Text style={{ color: '#FFFFFF', fontSize: 15, fontWeight: '800' }}>
-                                          {m.full_name}
-                                        </Text>
-                                        <Text style={{ color: '#C9CDD6', fontSize: 13, marginTop: 2 }}>
-                                          {m.phone || 'מספר לא זמין'}
-                                        </Text>
-                                      </View>
-                                    </View>
-                                    {m.phone ? (
-                                      <TouchableOpacity
-                                        style={{
-                                          flexDirection: 'row-reverse',
-                                          alignItems: 'center',
-                                          justifyContent: 'center',
-                                          gap: 8 as any,
-                                          backgroundColor: '#25D366',
-                                          paddingVertical: 11,
-                                          paddingHorizontal: 16,
-                                          borderRadius: 10,
-                                        }}
-                                        activeOpacity={0.85}
-                                        onPress={() =>
-                                          openWhatsApp(
-                                            m.phone as string,
-                                            `היי${firstName ? ` ${firstName}` : ''}, אישרתי את בקשת ההתאמה ב-Homie. בוא/י נדבר ונראה אם יש התאמה!`
-                                          )
-                                        }
-                                      >
-                                        <Text style={{ color: '#FFFFFF', fontSize: 14, fontWeight: '800' }}>
-                                          שלח הודעה בוואטסאפ
-                                        </Text>
-                                      </TouchableOpacity>
-                                    ) : null}
-                                  </View>
-                                );
-                              })}
-                            </View>
-                          </View>
-                        ) : (
-                          <View style={{ marginTop: 10, alignItems: 'flex-end', gap: 10 as any }}>
-                            <View
-                              style={{
-                                width: '100%',
-                                backgroundColor: 'rgba(94,63,45,0.08)',
-                                borderRadius: 12,
-                                borderWidth: 1,
-                                borderColor: 'rgba(94,63,45,0.2)',
-                                padding: 12,
-                                gap: 10 as any,
-                              }}
-                            >
-                              <View style={{ flexDirection: 'row-reverse', alignItems: 'center', gap: 10 as any }}>
-                                <Image
-                                  source={{ uri: otherUser?.avatar_url || DEFAULT_AVATAR }}
-                                  style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: '#1F1F29', borderWidth: 2, borderColor: 'rgba(94,63,45,0.3)' }}
-                                />
-                                <View style={{ flex: 1, alignItems: 'flex-end' }}>
-                                  <Text style={{ color: '#FFFFFF', fontSize: 15, fontWeight: '800' }}>
-                                    {otherUser?.full_name || 'משתמש'}
-                                  </Text>
-                                  <Text style={{ color: '#C9CDD6', fontSize: 13, marginTop: 2 }}>
-                                    {otherUser?.phone || 'מספר לא זמין'}
-                                  </Text>
-                                </View>
-                              </View>
-                              {otherUser?.phone ? (
-                                <TouchableOpacity
-                                  style={{
-                                    flexDirection: 'row-reverse',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    gap: 8 as any,
-                                    backgroundColor: '#25D366',
-                                    paddingVertical: 11,
-                                    paddingHorizontal: 16,
-                                    borderRadius: 10,
-                                  }}
-                                  activeOpacity={0.85}
-                                  onPress={() =>
-                                    openWhatsApp(
-                                      otherUser.phone as string,
-                                      `היי${otherUser?.full_name ? ` ${otherUser.full_name.split(' ')[0]}` : ''}, אישרתי את בקשת ההתאמה ב-Homie. בוא/י נדבר ונראה אם יש התאמה!`
-                                    )
-                                  }
-                                >
-                                  <Text style={{ color: '#FFFFFF', fontSize: 14, fontWeight: '800' }}>
-                                    שלח הודעה בוואטסאפ
-                                  </Text>
-                                </TouchableOpacity>
-                              ) : null}
-                            </View>
-                          </View>
-                        )
+                        <View style={{ marginTop: 10, alignItems: 'flex-end' }}>
+                          <Text style={styles.matchApprovedNote}>
+                            אישרת את הבקשה. מספר הטלפון שלך נחשף לצד השני.
+                          </Text>
+                        </View>
                       )}
                     </View>
                     {!!item.created_at ? (
@@ -2570,8 +2409,20 @@ export default function RequestsScreen() {
                     : r.kind === 'MATCH'
                     ? 'בקשת שותפות'
                     : 'בקשת מיזוג פרופילים';
+
+                const matchRequesterLabel =
+                  groupMembers.length
+                    ? groupMembers.map((m) => (m as any)?.full_name).filter(Boolean).join(' • ')
+                    : ((otherUser as any)?.full_name || 'המשתמש/ת');
+
                 const subtitle =
-                  r.kind === 'APT' || r.kind === 'APT_INVITE'
+                  r.kind === 'MATCH'
+                    ? r.status === 'APPROVED'
+                      ? `אישרת את הבקשה.\nמספר הטלפון שלך נחשף לצד השני.`
+                      : r.status === 'REJECTED'
+                        ? `דחית את הבקשה.`
+                        : `${matchRequesterLabel} מעוניין/ת בך כשותף/ה לדירה.\nבאישור הבקשה, מספר הטלפון שלך ייחשף לצד השני.`
+                    : r.kind === 'APT' || r.kind === 'APT_INVITE'
                     ? `${(apt as any)?.title || 'דירה'}${(apt as any)?.city ? ` • ${(apt as any).city}` : ''}`
                     : groupMembers.length
                     ? groupMembers.map((m) => (m as any)?.full_name).filter(Boolean).join(' • ')
@@ -2597,7 +2448,7 @@ export default function RequestsScreen() {
                     </TouchableOpacity>
 
                     <View style={styles.igBody}>
-                      <Text style={styles.igMessage} numberOfLines={2}>
+                      <Text style={styles.igMessage} numberOfLines={r.kind === 'MATCH' ? 3 : 2}>
                         <Text style={styles.igTitleStrong}>{title}</Text>
                         {!!subtitle ? <Text>{` ${subtitle}`}</Text> : null}
                       </Text>
@@ -2605,7 +2456,32 @@ export default function RequestsScreen() {
                     </View>
 
                     <View style={styles.igActions}>
-                      {r.status === 'PENDING' ? (
+                      {r.kind === 'MATCH' ? (
+                        r.status === 'PENDING' ? (
+                          <View style={styles.igActionsRow}>
+                            <TouchableOpacity
+                              style={[styles.igBtnPrimary, actionId === r.id ? { opacity: 0.7 } : null]}
+                              disabled={actionId === r.id}
+                              activeOpacity={0.85}
+                              onPress={() => approveIncomingMatch(r)}
+                            >
+                              <Text style={styles.igBtnPrimaryText}>אישור</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              style={[styles.igBtnSecondary, actionId === r.id ? { opacity: 0.7 } : null]}
+                              disabled={actionId === r.id}
+                              activeOpacity={0.85}
+                              onPress={() => rejectIncomingMatch(r)}
+                            >
+                              <Text style={styles.igBtnSecondaryText}>דחייה</Text>
+                            </TouchableOpacity>
+                          </View>
+                        ) : (
+                          <Text style={styles.igStatusText}>
+                            {r.status === 'APPROVED' ? 'אושרה' : r.status === 'REJECTED' ? 'נדחתה' : 'עודכן'}
+                          </Text>
+                        )
+                      ) : r.status === 'PENDING' ? (
                         <View style={styles.igActionsRow}>
                           <TouchableOpacity
                             style={[styles.igBtnPrimary, actionId === r.id ? { opacity: 0.7 } : null]}
@@ -2634,7 +2510,7 @@ export default function RequestsScreen() {
                         </View>
                       ) : r.status === 'APPROVED' ? (
                         <View style={styles.igActionsRow}>
-                          {((r.kind === 'MATCH' || r.kind === 'APT' || r.kind === 'APT_INVITE') && !!(otherUser as any)?.phone) ? (
+                          {((r.kind === 'APT' || r.kind === 'APT_INVITE') && !!(otherUser as any)?.phone) ? (
                             <TouchableOpacity
                               style={styles.igWhatsappBtn}
                               activeOpacity={0.85}
@@ -2645,9 +2521,7 @@ export default function RequestsScreen() {
                                 const aptTitle = (apt as any)?.title || '';
                                 const aptCity = (apt as any)?.city || '';
                                 const message =
-                                  r.kind === 'MATCH'
-                                    ? `היי${firstName ? ` ${firstName}` : ''}, בקשת השותפות שלנו ב-Homie אושרה. אשמח לקבוע שיחה ולהכיר 🙂`
-                                    : `היי${firstName ? ` ${firstName}` : ''}, בקשתך להצטרף לדירה${aptTitle ? `: ${aptTitle}` : ''}${aptCity ? ` (${aptCity})` : ''} אושרה ב-Homie. אשמח לתאם שיחה או צפייה.`;
+                                  `היי${firstName ? ` ${firstName}` : ''}, בקשתך להצטרף לדירה${aptTitle ? `: ${aptTitle}` : ''}${aptCity ? ` (${aptCity})` : ''} אושרה ב-Homie. אשמח לתאם שיחה או צפייה.`;
                                 openWhatsApp(String((otherUser as any).phone), message);
                               }}
                             >
@@ -3377,6 +3251,14 @@ const styles = StyleSheet.create({
     textAlign: 'right',
     marginTop: 6,
     fontWeight: '700',
+    alignSelf: 'stretch',
+  },
+  matchApprovedNote: {
+    color: '#374151',
+    fontSize: 13,
+    textAlign: 'right',
+    marginTop: 10,
+    fontWeight: '800',
     alignSelf: 'stretch',
   },
   matchUserRow: {
