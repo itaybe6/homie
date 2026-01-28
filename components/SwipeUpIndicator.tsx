@@ -1,11 +1,8 @@
 import { ChevronUp } from 'lucide-react-native';
 import { MotiView } from 'moti';
-import { motifySvg } from 'moti/svg';
 import React from 'react';
 import { Platform, View, ViewStyle } from 'react-native';
 import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
-
-const MotifiedChevronUp = motifySvg(ChevronUp)();
 
 export default function SwipeUpIndicator({
   size = 22,
@@ -30,32 +27,35 @@ export default function SwipeUpIndicator({
     );
   }
 
-  const transformOriginStyle =
-    ({ transformOrigin: ['50%', '0%', 0] as any } as any);
-
   return (
     <Animated.View style={style} entering={FadeIn} exiting={FadeOut}>
       {[...Array(3)].map((_, index) => (
         <MotiView
           key={index}
-          style={transformOriginStyle}
-          animate={{ rotate: `${isOpened ? 180 : 0}deg` }}
-          transition={{ type: 'spring', delay: (3 - index) * 50 }}
-        >
-          <MotifiedChevronUp
-            size={size}
-            color={'#fff'}
-            from={{ opacity: 0.25 }}
-            animate={{ opacity: 1 }}
-            transition={{
+          style={{
+            marginTop: -size * 0.45,
+            transformOrigin: ['50%', '0%', 0] as any,
+          } as any}
+          from={{ opacity: 0.25 }}
+          animate={{
+            rotate: `${isOpened ? 180 : 0}deg`,
+            opacity: 1,
+          }}
+          transition={{
+            rotate: {
+              type: 'spring',
+              delay: (3 - index) * 50,
+            },
+            opacity: {
               type: 'timing',
               loop: true,
               repeatReverse: true,
               delay: (3 - index) * 250,
               duration: 750,
-            }}
-            style={{ marginTop: -size * 0.45 }}
-          />
+            },
+          }}
+        >
+          <ChevronUp size={size} color={'#fff'} />
         </MotiView>
       ))}
     </Animated.View>
