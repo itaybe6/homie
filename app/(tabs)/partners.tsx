@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   SafeAreaView,
   StyleSheet,
@@ -16,6 +16,8 @@ import {
   ViewStyle,
   Share,
   useWindowDimensions,
+  Platform,
+  PanResponder,
 } from 'react-native';
 import Animated, {
   useSharedValue,
@@ -27,10 +29,11 @@ import Animated, {
   runOnJS,
 } from 'react-native-reanimated';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import { SlidersHorizontal, ChevronLeft, ChevronRight, Heart, X, MapPin, Share2, Users, RefreshCw, User as UserIcon } from 'lucide-react-native';
+import { ChevronLeft, ChevronRight, ChevronDown, Heart, X, Share2, Users, RefreshCw, User as UserIcon, Search } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useRouter } from 'expo-router';
+import { Redirect, useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
+import { colors } from '@/lib/theme';
 import { useAuthStore } from '@/stores/authStore';
 import { User, UserSurveyResponse } from '@/types/database';
 import { computeGroupAwareLabel } from '@/lib/group';
@@ -41,6 +44,9 @@ import { cityNeighborhoods, canonicalizeCityName } from '@/assets/data/neighborh
 import { Apartment } from '@/types/database';
 // GroupCard implemented inline below
 import MatchPercentBadge from '@/components/MatchPercentBadge';
+import { KeyFabPanel } from '@/components/KeyFabPanel';
+import { useUiStore } from '@/stores/uiStore';
+import { subscribeOpenPartnersFilters } from '@/lib/partnersFiltersBus';
 
 import {
   calculateMatchScore,
@@ -50,11 +56,10 @@ import {
   PartnerDietPref,
   PartnerPetsPref,
   DietType,
-  Lifestyle,
+  HomeLifestyle,
   CleaningFrequency,
   HostingPreference,
   CookingStyle,
-  HomeVibe,
 } from '@/utils/matchCalculator';
 
 // Keep swipe cards visually consistent (prevents the next card peeking below the current one)
@@ -126,9 +131,194 @@ function normalizeOccupationValue(value?: string | null): 'student' | 'worker' |
 function normalizeOccupationPreference(value?: string | null): 'student' | 'worker' | 'any' | null {
   const normalized = normalizeKey(value, occupationPrefAliasMap);
   if (normalized) return normalized;
+  if (value && value.includes('לא סטודנט')) return 'worker';
   if (value && value.includes('סטודנט')) return 'student';
   if (value && value.includes('עובד')) return 'worker';
   return null;
+}
+
+function clampNumber(n: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, n));
+}
+
+function AgeRangeSlider({
+  min,
+  max,
+  valueMin,
+  valueMax,
+  onChange,
+}: {
+  min: number;
+  max: number;
+  valueMin: number;
+  valueMax: number;
+  onChange: (minV: number, maxV: number) => void;
+}) {
+  const [trackWidth, setTrackWidth] = useState(1);
+  const HANDLE = 26;
+
+  // Distance from RIGHT (RTL), in px: 0..trackWidth
+  const [posMin, setPosMin] = useState(0);
+  const [posMax, setPosMax] = useState(0);
+  const posMinRef = useRef(0);
+  const posMaxRef = useRef(0);
+  const startMinRef = useRef(0);
+  const startMaxRef = useRef(0);
+  const trackWidthRef = useRef(1);
+  const minRef = useRef(min);
+  const maxRef = useRef(max);
+  const onChangeRef = useRef(onChange);
+
+  useEffect(() => {
+    trackWidthRef.current = trackWidth;
+  }, [trackWidth]);
+  useEffect(() => {
+    minRef.current = min;
+    maxRef.current = max;
+  }, [min, max]);
+  useEffect(() => {
+    onChangeRef.current = onChange;
+  }, [onChange]);
+
+  const valueToPos = (v: number) => {
+    const minV = minRef.current;
+    const maxV = maxRef.current;
+    const tw = trackWidthRef.current;
+    const clamped = clampNumber(v, minV, maxV);
+    return ((clamped - minV) / Math.max(1, maxV - minV)) * tw;
+  };
+  const posToValue = (p: number) => {
+    const minV = minRef.current;
+    const maxV = maxRef.current;
+    const tw = trackWidthRef.current;
+    const ratio = clampNumber(p / Math.max(1, tw), 0, 1);
+    return Math.round(minV + ratio * (maxV - minV));
+  };
+
+  const setPositions = (nextMin: number, nextMax: number) => {
+    posMinRef.current = nextMin;
+    posMaxRef.current = nextMax;
+    setPosMin(nextMin);
+    setPosMax(nextMax);
+  };
+
+  useEffect(() => {
+    setPositions(valueToPos(valueMin), valueToPos(valueMax));
+  }, [trackWidth, valueMin, valueMax, min, max]);
+
+  const minResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onStartShouldSetPanResponderCapture: () => true,
+        onMoveShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponderCapture: () => true,
+        onPanResponderTerminationRequest: () => false,
+        onPanResponderGrant: () => {
+          startMinRef.current = posMinRef.current;
+        },
+        onPanResponderMove: (_evt, gestureState) => {
+          const next = clampNumber(
+            startMinRef.current - gestureState.dx,
+            0,
+            posMaxRef.current,
+          );
+          setPositions(next, posMaxRef.current);
+        },
+        onPanResponderRelease: () => {
+          const a = posToValue(posMinRef.current);
+          const b = posToValue(posMaxRef.current);
+          onChangeRef.current(Math.min(a, b), Math.max(a, b));
+        },
+        onPanResponderTerminate: () => {
+          const a = posToValue(posMinRef.current);
+          const b = posToValue(posMaxRef.current);
+          onChangeRef.current(Math.min(a, b), Math.max(a, b));
+        },
+      }),
+    [],
+  );
+
+  const maxResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onStartShouldSetPanResponderCapture: () => true,
+        onMoveShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponderCapture: () => true,
+        onPanResponderTerminationRequest: () => false,
+        onPanResponderGrant: () => {
+          startMaxRef.current = posMaxRef.current;
+        },
+        onPanResponderMove: (_evt, gestureState) => {
+          const tw = trackWidthRef.current;
+          const next = clampNumber(
+            startMaxRef.current - gestureState.dx,
+            posMinRef.current,
+            tw,
+          );
+          setPositions(posMinRef.current, next);
+        },
+        onPanResponderRelease: () => {
+          const a = posToValue(posMinRef.current);
+          const b = posToValue(posMaxRef.current);
+          onChangeRef.current(Math.min(a, b), Math.max(a, b));
+        },
+        onPanResponderTerminate: () => {
+          const a = posToValue(posMinRef.current);
+          const b = posToValue(posMaxRef.current);
+          onChangeRef.current(Math.min(a, b), Math.max(a, b));
+        },
+      }),
+    [],
+  );
+
+  return (
+    <View style={styles.rangeWrap}>
+      <View
+        style={styles.rangeTrackWrap}
+        onLayout={(e) => {
+          const w = e.nativeEvent.layout.width;
+          if (w && Number.isFinite(w)) setTrackWidth(Math.max(1, Math.round(w)));
+        }}
+      >
+        <View style={styles.rangeTrackBg} />
+        <View
+          style={[
+            styles.rangeTrackActive,
+            {
+              right: clampNumber(posMin, 0, trackWidth),
+              width: Math.max(0, posMax - posMin),
+            },
+          ]}
+        />
+
+        <View
+          {...minResponder.panHandlers}
+          style={[
+            styles.rangeThumb,
+            {
+              right: clampNumber(posMin - HANDLE / 2, -HANDLE / 2, trackWidth - HANDLE / 2),
+            },
+          ]}
+        />
+        <View
+          {...maxResponder.panHandlers}
+          style={[
+            styles.rangeThumb,
+            {
+              right: clampNumber(posMax - HANDLE / 2, -HANDLE / 2, trackWidth - HANDLE / 2),
+            },
+          ]}
+        />
+      </View>
+
+      <View style={styles.rangeLabelsRow}>
+        <Text style={styles.rangeLabelText}>{max}</Text>
+        <Text style={styles.rangeLabelText}>{min}</Text>
+      </View>
+    </View>
+  );
 }
 
 type BrowseItem =
@@ -138,11 +328,19 @@ type BrowseItem =
 export default function PartnersScreen() {
   const router = useRouter();
   const currentUser = useAuthStore((s) => s.user);
+  const didAutoInitCityFilterRef = useRef(false);
+  const [filtersReady, setFiltersReady] = useState(false);
+
+  // Owners should not have access to the partners screen.
+  if ((currentUser as any)?.role === 'owner') {
+    return <Redirect href="/(tabs)/home" />;
+  }
+
   const insets = useSafeAreaInsets();
   const [items, setItems] = useState<BrowseItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [showFilters, setShowFilters] = useState(false);
+  const [isFiltersOpen, setIsFiltersOpen] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [gender, setGender] = useState<'any' | 'male' | 'female'>('any');
   const [ageMin, setAgeMin] = useState<number>(20);
@@ -152,8 +350,34 @@ export default function PartnersScreen() {
   const [groupGender, setGroupGender] = useState<'any' | 'male' | 'female'>('any');
   const [groupSize, setGroupSize] = useState<'any' | 2 | 3>('any');
   const [selectedCities, setSelectedCities] = useState<string[]>([]);
+  const [citySearch, setCitySearch] = useState<string>('');
+  const [isCityPickerOpen, setIsCityPickerOpen] = useState(false);
   const [matchScores, setMatchScores] = useState<Record<string, number | null>>({});
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
+  const [includePassed, setIncludePassed] = useState(false);
+
+  const closePartnersFilters = useUiStore((s) => s.closePartnersFilters);
+
+  // Fallback open signal (dev/HMR safe)
+  useEffect(() => {
+    return subscribeOpenPartnersFilters(() => setIsFiltersOpen(true));
+  }, []);
+
+  const closeFilters = () => {
+    setIsCityPickerOpen(false);
+    setCitySearch('');
+    closePartnersFilters();
+    setIsFiltersOpen(false);
+  };
+
+  const selectedCity = selectedCities[0] || '';
+
+  const filteredCityOptions = useMemo(() => {
+    const q = citySearch.trim();
+    const list = Object.keys(cityNeighborhoods);
+    if (!q) return list;
+    return list.filter((c) => c.includes(q));
+  }, [citySearch]);
 
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const translateX = useSharedValue(0);
@@ -199,7 +423,6 @@ export default function PartnersScreen() {
       const next = i + 1;
       return next >= items.length ? items.length : next;
     });
-    translateX.value = 0;
   };
 
   const swipeGesture = Gesture.Pan()
@@ -211,11 +434,18 @@ export default function PartnersScreen() {
       'worklet';
       if (translateX.value > SWIPE_THRESHOLD) {
         translateX.value = withTiming(screenWidth + 200, { duration: 180 }, (finished) => {
-          if (finished) runOnJS(onSwipe)('like');
+          if (finished) {
+            // Reset on the UI thread BEFORE swapping the underlying item (prevents the next card "jumping" in).
+            translateX.value = 0;
+            runOnJS(onSwipe)('like');
+          }
         });
       } else if (translateX.value < -SWIPE_THRESHOLD) {
         translateX.value = withTiming(-screenWidth - 200, { duration: 180 }, (finished) => {
-          if (finished) runOnJS(onSwipe)('pass');
+          if (finished) {
+            translateX.value = 0;
+            runOnJS(onSwipe)('pass');
+          }
         });
       } else {
         translateX.value = withSpring(0, { damping: 18, stiffness: 180 });
@@ -244,8 +474,10 @@ export default function PartnersScreen() {
       Extrapolate.CLAMP,
     );
     return {
-      transform: [{ scale: 0.985 + progress * 0.015 }, { translateY: 10 - progress * 10 }],
-      opacity: 0.92 + progress * 0.08,
+      // Keep the next card in a stable position to avoid any perceived "jump" when swapping cards.
+      // We only apply a very subtle scale/opacity change.
+      transform: [{ scale: 0.99 + progress * 0.01 }],
+      opacity: 0.94 + progress * 0.06,
     };
   });
 
@@ -257,9 +489,27 @@ export default function PartnersScreen() {
     opacity: interpolate(translateX.value, [-SWIPE_THRESHOLD, 0], [0.75, 0], Extrapolate.CLAMP),
   }));
 
+  // Default: show only partners in the same city as the current logged-in user.
+  // We run this once per session (unless user explicitly changes filters).
   useEffect(() => {
+    if (!currentUser?.id) return;
+    if (didAutoInitCityFilterRef.current) return;
+
+    const myCity = canonicalizeCityName(String((currentUser as any)?.city || '').trim());
+    if (myCity) {
+      setSelectedCities([myCity]);
+    }
+
+    didAutoInitCityFilterRef.current = true;
+    setFiltersReady(true);
+  }, [currentUser?.id, (currentUser as any)?.city]);
+
+  // Initial fetch happens only after we applied default filters.
+  useEffect(() => {
+    if (!currentUser?.id) return;
+    if (!filtersReady) return;
     fetchUsersAndGroups();
-  }, [currentUser?.id]);
+  }, [currentUser?.id, filtersReady]);
 
   const parsePreferredAgeRange = (value?: string | null): { min: number | null; max: number | null } => {
     if (!value) return { min: null, max: null };
@@ -289,32 +539,36 @@ export default function PartnersScreen() {
     if (typeof survey?.is_shomer_shabbat === 'boolean') compat.is_shomer_shabbat = survey.is_shomer_shabbat;
     if (typeof survey?.keeps_kosher === 'boolean') compat.keeps_kosher = survey.keeps_kosher;
     if (survey?.diet_type) compat.diet_type = survey.diet_type as DietType;
-    if (survey?.lifestyle) compat.lifestyle = survey.lifestyle as Lifestyle;
+    if ((survey as any)?.home_lifestyle) compat.home_lifestyle = (survey as any).home_lifestyle as HomeLifestyle;
     if (typeof survey?.cleanliness_importance === 'number')
       compat.cleanliness_importance = survey.cleanliness_importance;
     if (survey?.cleaning_frequency) compat.cleaning_frequency = survey.cleaning_frequency as CleaningFrequency;
     if (survey?.hosting_preference) compat.hosting_preference = survey.hosting_preference as HostingPreference;
     if (survey?.cooking_style) compat.cooking_style = survey.cooking_style as CookingStyle;
-    if (survey?.home_vibe) compat.home_vibe = survey.home_vibe as HomeVibe;
-    if (survey?.preferred_city) compat.preferred_city = survey.preferred_city;
+    {
+      const cities = Array.isArray((survey as any)?.preferred_cities) ? ((survey as any).preferred_cities as any[]) : [];
+      const primary = cities.length ? String(cities[0] ?? '').trim() : '';
+      if (primary) compat.preferred_city = primary as any;
+    }
     if (Array.isArray(survey?.preferred_neighborhoods)) compat.preferred_neighborhoods = survey.preferred_neighborhoods;
-    if (Number.isFinite(survey?.price_range as number)) compat.price_range = Number(survey?.price_range);
-    if (typeof survey?.bills_included === 'boolean') compat.bills_included = survey.bills_included;
+    if (Number.isFinite((survey as any)?.price_min as number)) compat.price_min = Number((survey as any).price_min);
+    if (Number.isFinite((survey as any)?.price_max as number)) compat.price_max = Number((survey as any).price_max);
+    if (Number.isFinite(survey?.price_range as number)) compat.price_range = Number((survey as any).price_range);
     if (survey?.floor_preference) compat.floor_preference = survey.floor_preference;
     if (typeof survey?.has_balcony === 'boolean') compat.has_balcony = survey.has_balcony;
-    if (typeof survey?.has_elevator === 'boolean') compat.has_elevator = survey.has_elevator;
-    if (typeof survey?.wants_master_room === 'boolean') compat.wants_master_room = survey.wants_master_room;
     if (typeof survey?.pets_allowed === 'boolean') compat.pets_allowed = survey.pets_allowed;
-    if (typeof survey?.with_broker === 'boolean') compat.with_broker = survey.with_broker;
     if (typeof survey?.preferred_roommates === 'number') compat.preferred_roommates = survey.preferred_roommates;
-    if (survey?.move_in_month) compat.move_in_month = survey.move_in_month;
+    if ((survey as any)?.move_in_month_from) compat.move_in_month_from = (survey as any).move_in_month_from;
+    if ((survey as any)?.move_in_month_to) compat.move_in_month_to = (survey as any).move_in_month_to;
+    if (typeof (survey as any)?.move_in_is_flexible === 'boolean')
+      compat.move_in_is_flexible = (survey as any).move_in_is_flexible;
+    if (survey?.move_in_month) compat.move_in_month = survey.move_in_month; // legacy
     if (typeof survey?.is_sublet === 'boolean') compat.is_sublet = survey.is_sublet;
     if (survey?.sublet_month_from) compat.sublet_month_from = survey.sublet_month_from;
     if (survey?.sublet_month_to) compat.sublet_month_to = survey.sublet_month_to;
     if (survey?.relationship_status) compat.relationship_status = survey.relationship_status;
     const occupationValue = normalizeOccupationValue(survey?.occupation);
     if (occupationValue) compat.occupation = occupationValue;
-    if (typeof survey?.works_from_home === 'boolean') compat.works_from_home = survey.works_from_home;
 
     if (survey?.partner_smoking_preference)
       compat.partner_smoking_preference = survey.partner_smoking_preference as PartnerSmokingPref;
@@ -430,7 +684,8 @@ export default function PartnersScreen() {
     return true;
   };
 
-  const fetchUsersAndGroups = async () => {
+  const fetchUsersAndGroups = async (opts?: { includePassed?: boolean }) => {
+    const includePassedNow = typeof opts?.includePassed === 'boolean' ? opts.includePassed : includePassed;
     setIsLoading(true);
     setMatchScores({});
     try {
@@ -610,6 +865,8 @@ export default function PartnersScreen() {
 
         matchRows.forEach((row) => {
           const status = String(row.status || '').trim().toUpperCase();
+          const isNotRelevant = status === 'NOT_RELEVANT';
+          const shouldHideForOutgoing = !(includePassedNow && isNotRelevant);
 
           // APPROVED is a mutual "match": hide the other side regardless of direction.
           if (status === 'APPROVED') {
@@ -637,19 +894,21 @@ export default function PartnersScreen() {
           // If someone acted on me (incoming request / NOT_RELEVANT), I should still be able to see them here.
 
           // Outgoing: User -> User
-          if (row.sender_id === authId && row.receiver_id) {
+          if (row.sender_id === authId && row.receiver_id && shouldHideForOutgoing) {
             interacted.add(row.receiver_id);
           }
 
           // Outgoing: User -> Group
-          if (row.sender_id === authId && row.receiver_group_id) {
+          if (row.sender_id === authId && row.receiver_group_id && shouldHideForOutgoing) {
             interactedGroupIds.add(row.receiver_group_id);
           }
 
           // Outgoing: My Group -> User/Group
           if (row.sender_group_id && myGroupIds.has(row.sender_group_id)) {
-            if (row.receiver_id) interacted.add(row.receiver_id);
-            if (row.receiver_group_id) interactedGroupIds.add(row.receiver_group_id);
+            if (shouldHideForOutgoing) {
+              if (row.receiver_id) interacted.add(row.receiver_id);
+              if (row.receiver_group_id) interactedGroupIds.add(row.receiver_group_id);
+            }
           }
         });
       }
@@ -727,9 +986,16 @@ export default function PartnersScreen() {
     }
   };
 
-  const onRefresh = async () => {
+  const onRefresh = async (opts?: { resetIncludePassed?: boolean }) => {
     setIsRefreshing(true);
-    await fetchUsersAndGroups();
+    // "Refresh" on end/empty should look for new matches, not resurface NOT_RELEVANT.
+    const shouldReset =
+      typeof opts?.resetIncludePassed === 'boolean'
+        ? opts.resetIncludePassed
+        : includePassed && (isDeckExhausted || items.length === 0);
+
+    if (shouldReset) setIncludePassed(false);
+    await fetchUsersAndGroups({ includePassed: shouldReset ? false : includePassed });
     setIsRefreshing(false);
   };
 
@@ -960,6 +1226,7 @@ export default function PartnersScreen() {
           style={{ marginBottom: 0 }}
           mediaHeight={swipeCardHeight}
           enableParallaxDetails
+          strongTextOverlay
           onDetailsOpenChange={setIsDetailsOpen}
           onOpen={(u) =>
             router.push({
@@ -980,6 +1247,7 @@ export default function PartnersScreen() {
         onLike={(groupId, users) => handleGroupLike(groupId, users)}
         onPass={(groupId, users) => handleGroupPass(groupId, users)}
         mediaHeight={swipeCardHeight}
+        strongTextOverlay
         onDetailsOpenChange={setIsDetailsOpen}
         onOpen={(userId: string) =>
           router.push({
@@ -1002,7 +1270,10 @@ export default function PartnersScreen() {
     if (isDeckExhausted) return;
     const outTarget = type === 'like' ? screenWidth + 200 : -screenWidth - 200;
     translateX.value = withTiming(outTarget, { duration: 180 }, (finished) => {
-      if (finished) runOnJS(onSwipe)(type);
+      if (finished) {
+        translateX.value = 0;
+        runOnJS(onSwipe)(type);
+      }
     });
   };
 
@@ -1035,19 +1306,8 @@ export default function PartnersScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <View style={[styles.topBar, { top: insets.top + 8 }]}>
-        <View style={styles.actionsRow}>
-          <TouchableOpacity
-            activeOpacity={0.8}
-            style={styles.topActionBtn}
-            onPress={() => setShowFilters(true)}
-          >
-            <SlidersHorizontal size={20} color="#FFFFFF" />
-          </TouchableOpacity>
-        </View>
-      </View>
-
       <ScrollView
+        scrollEnabled={!isDetailsOpen}
         contentContainerStyle={[
           styles.listContent,
           {
@@ -1078,10 +1338,37 @@ export default function PartnersScreen() {
                 כרגע אין התאמות זמינות. אפשר לנסות שוב בעוד כמה דקות או לרענן.
               </Text>
               <View style={styles.emptyStateActions}>
+                {!includePassed ? (
+                  <TouchableOpacity
+                    activeOpacity={0.9}
+                    style={[styles.emptyStateBtn, styles.emptyStateBtnSecondary]}
+                    onPress={() => {
+                      const enable = () => {
+                        setIncludePassed(true);
+                        fetchUsersAndGroups({ includePassed: true });
+                      };
+                      if (Platform.OS === 'web') {
+                        enable();
+                        return;
+                      }
+                      Alert.alert(
+                        'להציג שותפים שסימנת כלא רלוונטיים?',
+                        'נוכל להציג שוב גם שותפים שסימנת בהחלקה שמאלה. תמיד אפשר לסמן שוב כלא רלוונטי.',
+                        [{ text: 'ביטול', style: 'cancel' }, { text: 'כן, הצג שוב', onPress: enable }],
+                      );
+                    }}
+                    accessibilityRole="button"
+                    accessibilityLabel="הצג שוב שותפים שסימנתי כלא רלוונטיים"
+                  >
+                    <Text style={[styles.emptyStateBtnText, styles.emptyStateBtnTextSecondary]}>
+                      הצג שוב “לא רלוונטי”
+                    </Text>
+                  </TouchableOpacity>
+                ) : null}
                 <TouchableOpacity
                   activeOpacity={0.9}
                   style={[styles.emptyStateBtn, styles.emptyStateBtnPrimary]}
-                  onPress={onRefresh}
+                  onPress={() => onRefresh({ resetIncludePassed: true })}
                   accessibilityRole="button"
                   accessibilityLabel="רענון שותפים"
                 >
@@ -1107,10 +1394,38 @@ export default function PartnersScreen() {
                 זה הכול לעכשיו — אפשר לרענן כדי לבדוק אם נוספו התאמות חדשות.
               </Text>
               <View style={styles.endOfDeckActions}>
+                {!includePassed ? (
+                  <TouchableOpacity
+                    activeOpacity={0.9}
+                    style={[styles.endOfDeckBtn, styles.endOfDeckBtnSecondary]}
+                    onPress={() => {
+                      const enable = () => {
+                        setIncludePassed(true);
+                        // Reload the deck including NOT_RELEVANT profiles
+                        fetchUsersAndGroups({ includePassed: true });
+                      };
+                      if (Platform.OS === 'web') {
+                        enable();
+                        return;
+                      }
+                      Alert.alert(
+                        'להציג שותפים שסימנת כלא רלוונטיים?',
+                        'נוכל להציג שוב גם שותפים שסימנת בהחלקה שמאלה. תמיד אפשר לסמן שוב כלא רלוונטי.',
+                        [{ text: 'ביטול', style: 'cancel' }, { text: 'כן, הצג שוב', onPress: enable }],
+                      );
+                    }}
+                    accessibilityRole="button"
+                    accessibilityLabel="הצג שוב שותפים שסימנתי כלא רלוונטיים"
+                  >
+                    <Text style={[styles.endOfDeckBtnText, styles.endOfDeckBtnTextSecondary]}>
+                      הצג שוב “לא רלוונטי”
+                    </Text>
+                  </TouchableOpacity>
+                ) : null}
                 <TouchableOpacity
                   activeOpacity={0.9}
                   style={[styles.endOfDeckBtn, styles.endOfDeckBtnPrimary]}
-                  onPress={onRefresh}
+                  onPress={() => onRefresh({ resetIncludePassed: true })}
                   accessibilityRole="button"
                   accessibilityLabel="רענון שותפים"
                 >
@@ -1190,193 +1505,269 @@ export default function PartnersScreen() {
               accessibilityLabel="אהבתי"
               onPress={() => triggerSwipe('like')}
             >
-              <Heart size={26} color="#7C5CFF" fill="#7C5CFF" />
+              <Heart size={26} color={colors.success} fill={colors.success} />
             </TouchableOpacity>
           </View>
         </View>
       ) : null}
 
-      {showFilters ? (
-        <Modal
-          visible
-          transparent
-          animationType="slide"
-          statusBarTranslucent
-          onRequestClose={() => setShowFilters(false)}
-        >
-          <View style={styles.filterOverlay}>
-            <TouchableOpacity style={styles.filterBackdrop} activeOpacity={1} onPress={() => setShowFilters(false)} />
-            <View style={[styles.filterSheet, { paddingBottom: Math.max(20, 20 + insets.bottom) }]}>
-            <Text style={styles.filterTitle}>סינון תוצאות</Text>
-
-            <View style={styles.filterSection}>
-              <Text style={styles.filterLabel}>סוג פרופיל</Text>
-              <View style={styles.chipsRow}>
-                {[
-                  { key: 'all', label: 'כולם' },
-                  { key: 'singles', label: 'בודדים' },
-                  { key: 'groups', label: 'קבוצות' },
-                ].map((opt: any) => {
-                  const active = profileType === opt.key;
-                  return (
-                    <TouchableOpacity
-                      key={opt.key}
-                      style={[styles.chip, active && styles.chipActive]}
-                      onPress={() => setProfileType(opt.key)}
-                    >
-                      <Text style={[styles.chipText, active && styles.chipTextActive]}>{opt.label}</Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-            </View>
-
-            <View style={styles.filterSection}>
-              <Text style={styles.filterLabel}>טווח גילאים</Text>
-              <View style={styles.ageRow}>
-                <View style={styles.ageInputWrap}>
-                  <Text style={styles.ageLabel}>מגיל</Text>
-                  <TextInput
-                    style={styles.ageInput}
-                    keyboardType="numeric"
-                    placeholder="18"
-                    placeholderTextColor="#6B7280"
-                    value={ageActive ? String(ageMin) : ''}
-                    onChangeText={(t) => {
-                      const n = parseInt(t || '', 10);
-                      if (!isNaN(n)) {
-                        setAgeMin(n);
-                        setAgeActive(true);
-                      } else {
-                        setAgeActive(false);
-                      }
-                    }}
-                  />
-                </View>
-                <View style={styles.ageInputWrap}>
-                  <Text style={styles.ageLabel}>עד גיל</Text>
-                  <TextInput
-                    style={styles.ageInput}
-                    keyboardType="numeric"
-                    placeholder="40"
-                    placeholderTextColor="#6B7280"
-                    value={ageActive ? String(ageMax) : ''}
-                    onChangeText={(t) => {
-                      const n = parseInt(t || '', 10);
-                      if (!isNaN(n)) {
-                        setAgeMax(n);
-                        setAgeActive(true);
-                      } else {
-                        setAgeActive(false);
-                      }
-                    }}
-                  />
-                </View>
-              </View>
-            </View>
-
-            <View style={styles.filterSection}>
-              <Text style={styles.filterLabel}>עיר</Text>
-              <View style={styles.chipsRow}>
-                <TouchableOpacity
-                  key="any"
-                  style={[styles.chip, selectedCities.length === 0 && styles.chipActive]}
-                  onPress={() => setSelectedCities([])}
-                >
-                  <Text style={[styles.chipText, selectedCities.length === 0 && styles.chipTextActive]}>
-                    הכל
-                  </Text>
-                </TouchableOpacity>
-                {Object.keys(cityNeighborhoods).map((c) => {
-                  const active = selectedCities.includes(c);
-                  return (
-                    <TouchableOpacity
-                      key={c}
-                      style={[styles.chip, active && styles.chipActive]}
-                      onPress={() => {
-                        if (active) {
-                          setSelectedCities(selectedCities.filter((x) => x !== c));
-                        } else {
-                          setSelectedCities([...selectedCities, c]);
-                        }
-                      }}
-                    >
-                      <Text style={[styles.chipText, active && styles.chipTextActive]}>{c}</Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-            </View>
-
-            {profileType !== 'groups' ? (
-              <View style={styles.filterSection}>
-                <Text style={styles.filterLabel}>מגדר (משתמשים בודדים)</Text>
-                <View style={styles.chipsRow}>
-                  {[
-                    { key: 'any', label: 'כולם' },
-                    { key: 'female', label: 'נשים' },
-                    { key: 'male', label: 'גברים' },
-                  ].map((g: any) => {
-                    const active = gender === g.key;
-                    return (
-                      <TouchableOpacity
-                        key={g.key}
-                        style={[styles.chip, active && styles.chipActive]}
-                        onPress={() => setGender(g.key)}
-                      >
-                        <Text style={[styles.chipText, active && styles.chipTextActive]}>{g.label}</Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-              </View>
-            ) : null}
-
-            {profileType === 'groups' ? (
-              <>
+      <KeyFabPanel
+        isOpen={isFiltersOpen}
+        onClose={closeFilters}
+        title="סינון תוצאות"
+        subtitle=""
+        anchor="bottom"
+        bottomOffset={Math.max(18, insets.bottom + 16)}
+        openedWidth={Math.min(screenWidth * 0.94, 520)}
+        panelStyle={{
+          backgroundColor: 'rgba(255,255,255,0.90)',
+          borderColor: 'rgba(229,231,235,0.9)',
+          maxHeight: Math.round(screenHeight * 0.88),
+        }}
+        duration={420}
+      >
+        <View>
+          <ScrollView
+            style={styles.filterScroll}
+            contentContainerStyle={styles.filterScrollContent}
+            showsVerticalScrollIndicator={false}
+          >
+                {/* Profile type */}
                 <View style={styles.filterSection}>
-                  <Text style={styles.filterLabel}>מגדר (קבוצות)</Text>
-                  <View style={styles.chipsRow}>
+                  <Text style={styles.filterLabel}>סוג פרופיל</Text>
+                  <View style={styles.segmentWrap}>
+                    <View
+                      pointerEvents="none"
+                      style={[
+                        styles.segmentIndicator,
+                        {
+                          right:
+                            `${(
+                              [{ key: 'singles' }, { key: 'groups' }, { key: 'all' }]
+                                .findIndex((o: any) => o.key === profileType)
+                              * 33.3333
+                            ).toFixed(4)}%`,
+                        } as any,
+                      ]}
+                    />
                     {[
-                      { key: 'any', label: 'כולם' },
-                      { key: 'male', label: 'רק בנים' },
-                      { key: 'female', label: 'רק בנות' },
-                    ].map((g: any) => {
-                      const active = groupGender === g.key;
+                      { key: 'singles', label: 'בודדים' },
+                      { key: 'groups', label: 'קבוצות' },
+                      { key: 'all', label: 'כולם' },
+                    ].map((opt: any) => {
+                      const active = profileType === opt.key;
                       return (
                         <TouchableOpacity
-                          key={g.key}
-                          style={[styles.chip, active && styles.chipActive]}
-                          onPress={() => setGroupGender(g.key)}
+                          key={opt.key}
+                          activeOpacity={0.9}
+                          style={styles.segmentBtn}
+                          onPress={() => setProfileType(opt.key)}
                         >
-                          <Text style={[styles.chipText, active && styles.chipTextActive]}>{g.label}</Text>
-                        </TouchableOpacity>
-                      );
-                    })}
-                  </View>
-                </View>
-                <View style={styles.filterSection}>
-                  <Text style={styles.filterLabel}>מספר שותפים בקבוצה</Text>
-                  <View style={styles.chipsRow}>
-                    {(['any', 2, 3] as any[]).map((sz) => {
-                      const active = groupSize === sz;
-                      return (
-                        <TouchableOpacity
-                          key={String(sz)}
-                          style={[styles.chip, active && styles.chipActive]}
-                          onPress={() => setGroupSize(sz as any)}
-                        >
-                          <Text style={[styles.chipText, active && styles.chipTextActive]}>
-                            {sz === 'any' ? 'הכל' : String(sz)}
+                          <Text style={[styles.segmentText, active ? styles.segmentTextActive : null]}>
+                            {opt.label}
                           </Text>
                         </TouchableOpacity>
                       );
                     })}
                   </View>
                 </View>
-              </>
-            ) : null}
 
+                {/* Age */}
+                <View style={styles.filterSection}>
+                  <View style={styles.sectionRow}>
+                    <Text style={styles.filterLabel}>טווח גילאים</Text>
+                    <View style={styles.ageValuePill}>
+                      <Text style={styles.ageValueText}>
+                        {`${Math.min(ageMin, ageMax)} - ${Math.max(ageMin, ageMax)}`}
+                      </Text>
+                    </View>
+                  </View>
+                  <AgeRangeSlider
+                    min={18}
+                    max={41}
+                    valueMin={Math.min(ageMin, ageMax)}
+                    valueMax={Math.max(ageMin, ageMax)}
+                    onChange={(minV, maxV) => {
+                      setAgeMin(minV);
+                      setAgeMax(maxV);
+                      setAgeActive(true);
+                    }}
+                  />
+                </View>
+
+                {/* City */}
+                <View style={styles.filterSection}>
+                  <Text style={styles.filterLabel}>עיר</Text>
+                  <TouchableOpacity
+                    activeOpacity={0.9}
+                    style={styles.dropdownField}
+                    onPress={() => setIsCityPickerOpen(true)}
+                    accessibilityRole="button"
+                    accessibilityLabel="בחירת עיר"
+                  >
+                    <ChevronDown size={18} color="#9CA3AF" />
+                    <Text style={styles.dropdownText} numberOfLines={1}>
+                      {selectedCity || 'הכל'}
+                    </Text>
+                  </TouchableOpacity>
+
+                  {isCityPickerOpen ? (
+                    <View style={styles.cityPickerOverlay}>
+                      <TouchableOpacity
+                        style={styles.cityPickerBackdrop}
+                        activeOpacity={1}
+                        onPress={() => {
+                          setIsCityPickerOpen(false);
+                          setCitySearch('');
+                        }}
+                      />
+                      <View style={styles.cityPickerPanel}>
+                        <View style={styles.cityPickerHeader}>
+                          <Text style={styles.cityPickerTitle}>בחר עיר</Text>
+                          <TouchableOpacity
+                            style={styles.cityPickerCloseBtn}
+                            activeOpacity={0.85}
+                            onPress={() => {
+                              setIsCityPickerOpen(false);
+                              setCitySearch('');
+                            }}
+                          >
+                            <X size={18} color="#9CA3AF" />
+                          </TouchableOpacity>
+                        </View>
+
+                        <View style={styles.searchWrap}>
+                          <TextInput
+                            value={citySearch}
+                            onChangeText={setCitySearch}
+                            placeholder="חפש עיר..."
+                            placeholderTextColor="#9CA3AF"
+                            style={styles.searchInput}
+                          />
+                          <View style={styles.searchIcon}>
+                            <Search size={18} color="#9CA3AF" />
+                          </View>
+                        </View>
+
+                        <ScrollView style={{ maxHeight: 320 }} showsVerticalScrollIndicator={false}>
+                          <TouchableOpacity
+                            activeOpacity={0.9}
+                            style={[styles.cityPickerRow, !selectedCity ? styles.cityPickerRowActive : null]}
+                            onPress={() => {
+                              setSelectedCities([]);
+                              setIsCityPickerOpen(false);
+                              setCitySearch('');
+                            }}
+                          >
+                            <Text style={[styles.cityPickerRowText, !selectedCity ? styles.cityPickerRowTextActive : null]}>
+                              הכל
+                            </Text>
+                          </TouchableOpacity>
+                          {filteredCityOptions.map((c) => {
+                            const active = selectedCity === c;
+                            return (
+                              <TouchableOpacity
+                                key={c}
+                                activeOpacity={0.9}
+                                style={[styles.cityPickerRow, active ? styles.cityPickerRowActive : null]}
+                                onPress={() => {
+                                  setSelectedCities([c]);
+                                  setIsCityPickerOpen(false);
+                                  setCitySearch('');
+                                }}
+                              >
+                                <Text style={[styles.cityPickerRowText, active ? styles.cityPickerRowTextActive : null]}>
+                                  {c}
+                                </Text>
+                              </TouchableOpacity>
+                            );
+                          })}
+                        </ScrollView>
+                      </View>
+                    </View>
+                  ) : null}
+                </View>
+
+                {/* Gender (singles) */}
+                {profileType !== 'groups' ? (
+                  <View style={styles.filterSection}>
+                    <Text style={styles.filterLabel}>מגדר (משתמשים בודדים)</Text>
+                    <View style={styles.pillRow}>
+                      {[
+                        { key: 'female', label: 'נשים' },
+                        { key: 'male', label: 'גברים' },
+                        { key: 'any', label: 'כולם' },
+                      ].map((g: any) => {
+                        const active = gender === g.key;
+                        return (
+                          <TouchableOpacity
+                            key={g.key}
+                            activeOpacity={0.9}
+                            style={[styles.pillBtn, active ? styles.pillBtnActive : styles.pillBtnInactive]}
+                            onPress={() => setGender(g.key)}
+                          >
+                            <Text style={[styles.pillText, active ? styles.pillTextActive : styles.pillTextInactive]}>
+                              {g.label}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  </View>
+                ) : null}
+
+                {/* Groups filters */}
+                {profileType === 'groups' ? (
+                  <>
+                    <View style={styles.filterSection}>
+                      <Text style={styles.filterLabel}>מגדר (קבוצות)</Text>
+                      <View style={styles.pillRow}>
+                        {[
+                          { key: 'female', label: 'רק בנות' },
+                          { key: 'male', label: 'רק בנים' },
+                          { key: 'any', label: 'כולם' },
+                        ].map((g: any) => {
+                          const active = groupGender === g.key;
+                          return (
+                            <TouchableOpacity
+                              key={g.key}
+                              activeOpacity={0.9}
+                              style={[styles.pillBtn, active ? styles.pillBtnActive : styles.pillBtnInactive]}
+                              onPress={() => setGroupGender(g.key)}
+                            >
+                              <Text style={[styles.pillText, active ? styles.pillTextActive : styles.pillTextInactive]}>
+                                {g.label}
+                              </Text>
+                            </TouchableOpacity>
+                          );
+                        })}
+                      </View>
+                    </View>
+                    <View style={styles.filterSection}>
+                      <Text style={styles.filterLabel}>מספר שותפים בקבוצה</Text>
+                      <View style={styles.pillRow}>
+                        {(['any', 2, 3] as any[]).map((sz) => {
+                          const active = groupSize === sz;
+                          return (
+                            <TouchableOpacity
+                              key={String(sz)}
+                              activeOpacity={0.9}
+                              style={[styles.pillBtn, active ? styles.pillBtnActive : styles.pillBtnInactive]}
+                              onPress={() => setGroupSize(sz as any)}
+                            >
+                              <Text style={[styles.pillText, active ? styles.pillTextActive : styles.pillTextInactive]}>
+                                {sz === 'any' ? 'הכל' : String(sz)}
+                              </Text>
+                            </TouchableOpacity>
+                          );
+                        })}
+                      </View>
+                    </View>
+                  </>
+                ) : null}
+          </ScrollView>
+
+          <View style={styles.filterFooter}>
             <View style={styles.filterActions}>
               <TouchableOpacity
                 style={[styles.filterBtn, styles.resetBtn]}
@@ -1390,6 +1781,9 @@ export default function PartnersScreen() {
                   setGroupGender('any');
                   setGroupSize('any');
                   setSelectedCities([]);
+                  setCitySearch('');
+                  setIsCityPickerOpen(false);
+                  setIncludePassed(false);
                 }}
               >
                 <Text style={styles.resetText}>איפוס</Text>
@@ -1398,7 +1792,7 @@ export default function PartnersScreen() {
                 style={[styles.filterBtn, styles.applyBtn]}
                 activeOpacity={0.9}
                 onPress={() => {
-                  setShowFilters(false);
+                  closeFilters();
                   fetchUsersAndGroups();
                 }}
               >
@@ -1406,9 +1800,8 @@ export default function PartnersScreen() {
               </TouchableOpacity>
             </View>
           </View>
-          </View>
-        </Modal>
-      ) : null}
+        </View>
+      </KeyFabPanel>
 
     </SafeAreaView>
   );
@@ -1424,13 +1817,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: '#FFFFFF',
-  },
-  topBar: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    zIndex: 20,
-    paddingHorizontal: 16,
   },
   brandRow: {
     flexDirection: 'row',
@@ -1450,19 +1836,6 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: '#FFFFFF',
     letterSpacing: 0.3,
-  },
-  topActionBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  actionsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
   },
   headerArea: {
     paddingHorizontal: 16,
@@ -1739,58 +2112,385 @@ const styles = StyleSheet.create({
   },
   filterBackdrop: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    backgroundColor: 'rgba(0,0,0,0.35)',
     zIndex: 999,
   },
   filterSheet: {
-    backgroundColor: '#14141C',
-    padding: 16,
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.82)',
+    padding: 0,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
-    paddingBottom: 28,
+    borderColor: 'rgba(255,255,255,0.60)',
+    paddingBottom: 18,
     zIndex: 1000,
+    maxHeight: '90%',
+    shadowColor: '#000',
+    shadowOpacity: 0.10,
+    shadowRadius: 24,
+    shadowOffset: { width: 0, height: 14 },
+    elevation: 16,
   },
-  filterTitle: {
-    color: '#FFFFFF',
+  filterHeader: {
+    paddingHorizontal: 18,
+    paddingTop: 18,
+    paddingBottom: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(229,231,235,0.65)',
+  },
+  filterHeaderBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(243,244,246,0.9)',
+    borderWidth: 1,
+    borderColor: 'rgba(229,231,235,0.9)',
+  },
+  filterHeaderTitle: {
+    color: '#111827',
     fontSize: 18,
     fontWeight: '900',
-    textAlign: 'right',
-    marginBottom: 12,
+    textAlign: 'center',
+  },
+  filterScroll: {
+    flex: 1,
+  },
+  filterScrollContent: {
+    paddingHorizontal: 18,
+    paddingTop: 18,
+    paddingBottom: 16,
+    gap: 18 as any,
   },
   filterSection: {
-    marginBottom: 12,
+    marginBottom: 0,
   },
   filterLabel: {
-    color: '#C7CBD1',
-    fontSize: 14,
-    marginBottom: 8,
+    color: '#6B7280',
+    fontSize: 13,
+    marginBottom: 10,
     textAlign: 'right',
+  },
+  dropdownField: {
+    height: 50,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: 'rgba(229,231,235,0.9)',
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    shadowColor: '#000',
+    shadowOpacity: 0.05,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 6,
+  },
+  dropdownText: {
+    flex: 1,
+    marginRight: 10,
+    color: '#111827',
+    fontSize: 14,
+    fontWeight: '900',
+    textAlign: 'right',
+  },
+  cityPickerOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 2000,
+    justifyContent: 'flex-end',
+  },
+  cityPickerBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.25)',
+  },
+  cityPickerPanel: {
+    backgroundColor: 'rgba(255,255,255,0.96)',
+    borderTopLeftRadius: 22,
+    borderTopRightRadius: 22,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(229,231,235,0.9)',
+    shadowColor: '#000',
+    shadowOpacity: 0.10,
+    shadowRadius: 22,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 14,
+  },
+  cityPickerHeader: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+  cityPickerTitle: {
+    color: '#111827',
+    fontSize: 16,
+    fontWeight: '900',
+    textAlign: 'right',
+  },
+  cityPickerCloseBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(243,244,246,0.95)',
+    borderWidth: 1,
+    borderColor: 'rgba(229,231,235,0.9)',
+  },
+  cityPickerRow: {
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(229,231,235,0.8)',
+    backgroundColor: 'rgba(243,244,246,0.6)',
+    marginBottom: 8,
+  },
+  cityPickerRowActive: {
+    backgroundColor: 'rgba(79,70,229,0.08)',
+    borderColor: 'rgba(79,70,229,0.22)',
+  },
+  cityPickerRowText: {
+    color: '#374151',
+    fontSize: 14,
+    fontWeight: '800',
+    textAlign: 'right',
+  },
+  cityPickerRowTextActive: {
+    color: '#4F46E5',
+    fontWeight: '900',
+  },
+  sectionRow: {
+    flexDirection: 'row-reverse',
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+  ageValuePill: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: 'rgba(229,231,235,0.9)',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 10,
+    shadowColor: '#000',
+    shadowOpacity: 0.06,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 6,
+  },
+  ageValueText: {
+    color: '#111827',
+    fontSize: 15,
+    fontWeight: '900',
+    writingDirection: 'ltr',
+  },
+  rangeWrap: {
+    gap: 10 as any,
+  },
+  rangeTrackWrap: {
+    height: 34,
+    justifyContent: 'center',
+    position: 'relative',
+  },
+  rangeTrackBg: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    height: 6,
+    borderRadius: 999,
+    backgroundColor: 'rgba(229,231,235,0.95)',
+  },
+  rangeTrackActive: {
+    position: 'absolute',
+    height: 6,
+    borderRadius: 999,
+    backgroundColor: '#4F46E5',
+  },
+  rangeThumb: {
+    position: 'absolute',
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 2,
+    borderColor: '#4F46E5',
+    shadowColor: '#000',
+    shadowOpacity: 0.12,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 10,
+    zIndex: 10,
+    ...(Platform.OS === 'web'
+      ? ({
+          cursor: 'grab',
+          userSelect: 'none',
+          touchAction: 'none',
+        } as any)
+      : null),
+  },
+  rangeLabelsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  rangeLabelText: {
+    color: '#9CA3AF',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  segmentWrap: {
+    position: 'relative',
+    flexDirection: 'row-reverse',
+    backgroundColor: 'rgba(243,244,246,0.95)',
+    borderRadius: 18,
+    padding: 4,
+    borderWidth: 1,
+    borderColor: 'rgba(229,231,235,0.9)',
+    overflow: 'hidden',
+  },
+  segmentIndicator: {
+    position: 'absolute',
+    top: 4,
+    bottom: 4,
+    width: '33.3333%',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    shadowColor: '#000',
+    shadowOpacity: 0.06,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 6,
+  },
+  segmentBtn: {
+    flex: 1,
+    height: 38,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 2,
+  },
+  segmentText: {
+    color: '#6B7280',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  segmentTextActive: {
+    color: '#111827',
+    fontWeight: '900',
+  },
+  searchWrap: {
+    position: 'relative',
+  },
+  searchInput: {
+    height: 46,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: 'rgba(229,231,235,0.9)',
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 16,
+    paddingRight: 44,
+    textAlign: 'right',
+    color: '#111827',
+    shadowColor: '#000',
+    shadowOpacity: 0.05,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 6,
+  },
+  searchIcon: {
+    position: 'absolute',
+    right: 14,
+    top: 0,
+    bottom: 0,
+    justifyContent: 'center',
+  },
+  cityChipsWrap: {
+    flexDirection: 'row-reverse',
+    flexWrap: 'wrap',
+    gap: 8 as any,
+    marginTop: 10,
+    marginBottom: 10,
+  },
+  cityHintPill: {
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 999,
+    backgroundColor: 'rgba(243,244,246,0.9)',
+    borderWidth: 1,
+    borderColor: 'rgba(229,231,235,0.9)',
+  },
+  cityHintText: {
+    color: '#6B7280',
+    fontWeight: '800',
   },
   chipsRow: {
     flexDirection: 'row-reverse',
     flexWrap: 'wrap',
     gap: 8 as any,
   },
-  chip: {
+  cityChip: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 6 as any,
     paddingHorizontal: 12,
     paddingVertical: 8,
-    borderRadius: 16,
-    backgroundColor: '#1C1C26',
+    borderRadius: 999,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)',
   },
-  chipActive: {
-    backgroundColor: '#2A2A37',
-    borderColor: 'rgba(255,255,255,0.15)',
+  cityChipActive: {
+    backgroundColor: 'rgba(79,70,229,0.08)',
+    borderColor: 'rgba(79,70,229,0.18)',
   },
-  chipText: {
-    color: '#E6E9F0',
-    fontWeight: '700',
+  cityChipInactive: {
+    backgroundColor: 'rgba(243,244,246,0.85)',
+    borderColor: 'rgba(229,231,235,0.9)',
   },
-  chipTextActive: {
-    color: '#0F0F14',
+  cityChipText: {
+    fontSize: 12,
+    fontWeight: '800',
+    textAlign: 'right',
+  },
+  cityChipTextActive: {
+    color: '#4F46E5',
+  },
+  cityChipTextInactive: {
+    color: '#6B7280',
+  },
+  pillRow: {
+    flexDirection: 'row-reverse',
+    gap: 10 as any,
+  },
+  pillBtn: {
+    flex: 1,
+    height: 48,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+  },
+  pillBtnActive: {
+    backgroundColor: 'rgba(79,70,229,0.08)',
+    borderColor: '#4F46E5',
+  },
+  pillBtnInactive: {
+    backgroundColor: '#FFFFFF',
+    borderColor: 'rgba(229,231,235,0.9)',
+  },
+  pillText: {
+    fontSize: 14,
+    fontWeight: '900',
+  },
+  pillTextActive: {
+    color: '#4F46E5',
+  },
+  pillTextInactive: {
+    color: '#6B7280',
   },
   ageRow: {
     flexDirection: 'row-reverse',
@@ -1800,7 +2500,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   ageLabel: {
-    color: '#9DA4AE',
+    color: '#9CA3AF',
     fontSize: 12,
     marginBottom: 6,
     textAlign: 'right',
@@ -1809,11 +2509,19 @@ const styles = StyleSheet.create({
     height: 44,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
-    backgroundColor: '#1C1C26',
-    color: '#E6E9F0',
+    borderColor: 'rgba(229,231,235,0.9)',
+    backgroundColor: '#FFFFFF',
+    color: '#111827',
     paddingHorizontal: 12,
     textAlign: 'right',
+  },
+  filterFooter: {
+    paddingHorizontal: 18,
+    paddingTop: 10,
+    paddingBottom: 0,
+    backgroundColor: 'rgba(255,255,255,0.35)',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(229,231,235,0.65)',
   },
   filterActions: {
     flexDirection: 'row',
@@ -1822,28 +2530,38 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   filterBtn: {
-    height: 44,
-    borderRadius: 12,
+    height: 52,
+    borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 16,
     flex: 1,
   },
   resetBtn: {
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    backgroundColor: 'rgba(243,244,246,0.95)',
     marginRight: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(229,231,235,0.9)',
   },
   applyBtn: {
-    backgroundColor: '#22C55E',
+    backgroundColor: 'rgba(229,231,235,0.95)',
     marginLeft: 8,
+    flex: 2,
+    borderWidth: 1,
+    borderColor: 'rgba(209,213,219,0.9)',
+    shadowColor: '#000',
+    shadowOpacity: 0.08,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 10,
   },
   resetText: {
-    color: '#E6E9F0',
-    fontWeight: '800',
+    color: '#6B7280',
+    fontWeight: '900',
     textAlign: 'center',
   },
   applyText: {
-    color: '#0F0F14',
+    color: '#374151',
     fontWeight: '900',
     textAlign: 'center',
   },
@@ -2223,7 +2941,7 @@ const groupStyles = StyleSheet.create({
     alignItems: 'baseline',
   },
   apartmentPriceAmount: {
-    color: '#22C55E',
+    color: colors.success,
     fontSize: 16,
     fontWeight: '800',
     textAlign: 'right',

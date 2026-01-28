@@ -11,18 +11,15 @@ import {
 } from 'react-native';
 import {
   Accessibility,
-  ArrowUpDown,
   Shield,
-  Sun,
-  Utensils,
-  Wind,
   PawPrint,
   Sofa,
   ChevronDown,
   Tag,
-  Sparkles,
   DoorOpen,
+  Trees,
 } from 'lucide-react-native';
+import { alpha, colors } from '@/lib/theme';
 
 export type FilterChipType = 'toggle' | 'dropdown';
 
@@ -57,12 +54,8 @@ export const defaultFilterChips: FilterChip[] = [
   { id: 'pets_allowed', label: 'חיות מחמד', type: 'toggle', renderIcon: (c, s) => <PawPrint color={c} size={s} /> },
   { id: 'is_furnished', label: 'מרוהט', type: 'toggle', renderIcon: (c, s) => <Sofa color={c} size={s} /> },
   { id: 'wheelchair_accessible', label: 'גישה לנכים', type: 'toggle', renderIcon: (c, s) => <Accessibility color={c} size={s} /> },
-  { id: 'has_safe_room', label: 'ממ״ד', type: 'toggle', renderIcon: (c, s) => <Shield color={c} size={s} /> },
-  { id: 'has_elevator', label: 'מעלית', type: 'toggle', renderIcon: (c, s) => <ArrowUpDown color={c} size={s} /> },
-  { id: 'kosher_kitchen', label: 'מטבח כשר', type: 'toggle', renderIcon: (c, s) => <Utensils color={c} size={s} /> },
-  { id: 'has_air_conditioning', label: 'מיזוג', type: 'toggle', renderIcon: (c, s) => <Wind color={c} size={s} /> },
-  { id: 'has_solar_heater', label: 'דוד שמש', type: 'toggle', renderIcon: (c, s) => <Sun color={c} size={s} /> },
-  { id: 'is_renovated', label: 'משופצת', type: 'toggle', renderIcon: (c, s) => <Sparkles color={c} size={s} /> },
+  { id: 'has_safe_room', label: 'ממד', type: 'toggle', renderIcon: (c, s) => <Shield color={c} size={s} /> },
+  { id: 'garden', label: 'גינה', type: 'toggle', renderIcon: (c, s) => <Trees color={c} size={s} /> },
   { id: 'balcony', label: 'מרפסת', type: 'toggle', renderIcon: (c, s) => <DoorOpen color={c} size={s} /> },
 ];
 
@@ -95,14 +88,14 @@ export default function FilterChipsBar({
   const [internalSelected, setInternalSelected] = useState<string[]>([]);
   const active = selectedIds ?? internalSelected;
   const inactiveBg = inactiveBackgroundColor ?? '#FFFFFF';
-  const activeBg = activeBackgroundColor ?? '#FFFFFF';
+  const activeBg = activeBackgroundColor ?? alpha(colors.success, 0.86);
   const inactiveBd = inactiveBorderColor ?? 'transparent';
-  const activeBd = activeBorderColor ?? 'transparent';
+  const activeBd = activeBorderColor ?? alpha(colors.success, 0.6);
   const inactiveTxt = inactiveTextColor ?? '#6B7280';
-  const activeTxt = activeTextColor ?? '#5e3f2d';
+  const activeTxt = activeTextColor ?? colors.white;
   const inactiveIc = inactiveIconColor ?? '#6B7280';
-  const activeIc = activeIconColor ?? '#5e3f2d';
-  const borderW = typeof chipBorderWidth === 'number' ? chipBorderWidth : 0;
+  const activeIc = activeIconColor ?? colors.white;
+  const borderW = typeof chipBorderWidth === 'number' ? chipBorderWidth : 1;
 
   // Preserve horizontal scroll offset when toggling chips to avoid jump-to-start
   const scrollRef = useRef<ScrollView | null>(null);
@@ -288,8 +281,8 @@ const styles = StyleSheet.create({
   },
   chipActive: {
     // Default active bg; can be overridden via props.
-    backgroundColor: 'rgba(94,63,45,0.10)',
-    borderColor: 'transparent',
+    backgroundColor: alpha(colors.success, 0.86),
+    borderColor: alpha(colors.success, 0.6),
   },
   chipInnerRow: {
     flexDirection: 'row-reverse',

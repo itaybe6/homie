@@ -18,7 +18,8 @@ import {
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useNavigation } from '@react-navigation/native';
 import { Sparkles, Check, ChevronRight, X } from 'lucide-react-native';
-import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
+import { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuthStore } from '@/stores/authStore';
 import { UserSurveyResponse } from '@/types/database';
 import { fetchUserSurvey, upsertUserSurvey } from '@/lib/survey';
@@ -52,7 +53,12 @@ import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-g
 
 type SurveyState = Partial<UserSurveyResponse>;
 
-type CitySuggestion = { id: string; text: string };
+type CitySuggestion = { id: string; text: string; display?: string };
+
+// Approx bounding box for Israel to bias/place-filter Mapbox results a bit.
+// [minLng, minLat, maxLng, maxLat]
+// Keep it a bit generous to avoid accidentally clipping border-area localities.
+const IL_BBOX: [number, number, number, number] = [34.0, 29.0, 36.0, 33.8];
 
 const PRIMARY = '#5e3f2d';
 // Match the login screen dark background
@@ -83,6 +89,21 @@ function hasFiniteNumber(v: unknown): boolean {
   return typeof v === 'number' && Number.isFinite(v);
 }
 
+function normalizeCityList(input: unknown): string[] {
+  const arr = Array.isArray(input) ? input : [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of arr) {
+    const s = typeof raw === 'string' ? raw.trim() : '';
+    if (!s) continue;
+    const key = s.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(s);
+  }
+  return out;
+}
+
 function isQuestionAnswered(questionKey: string, s: SurveyState): boolean {
   switch (questionKey) {
     // About you
@@ -90,8 +111,6 @@ function isQuestionAnswered(questionKey: string, s: SurveyState): boolean {
       return hasNonEmptyText(s.occupation);
     case 'student_year':
       return hasFiniteNumber(s.student_year);
-    case 'works_from_home':
-      return typeof s.works_from_home === 'boolean';
     case 'shabbat':
       return typeof s.is_shomer_shabbat === 'boolean';
     case 'diet':
@@ -104,8 +123,8 @@ function isQuestionAnswered(questionKey: string, s: SurveyState): boolean {
       return hasNonEmptyText(s.relationship_status);
     case 'pet':
       return typeof s.has_pet === 'boolean';
-    case 'lifestyle':
-      return hasNonEmptyText(s.lifestyle);
+    case 'home_lifestyle':
+      return hasNonEmptyText(s.home_lifestyle);
     case 'cleanliness':
       return hasFiniteNumber(s.cleanliness_importance);
     case 'cleaning_frequency':
@@ -114,46 +133,45 @@ function isQuestionAnswered(questionKey: string, s: SurveyState): boolean {
       return hasNonEmptyText(s.hosting_preference);
     case 'cooking':
       return hasNonEmptyText(s.cooking_style);
-    case 'home_vibe':
-      return hasNonEmptyText(s.home_vibe);
 
     // Apartment you want
     case 'price':
-      return hasFiniteNumber(s.price_range);
-    case 'bills':
-      return s.bills_included === true || s.bills_included === false || s.bills_included === null;
+      return (
+        hasFiniteNumber((s as any).price_min) &&
+        hasFiniteNumber((s as any).price_max) &&
+        Number((s as any).price_max) >= Number((s as any).price_min) + 400
+      );
     case 'preferred_city':
-      return hasNonEmptyText(s.preferred_city);
+      // Legacy question-key kept for flow; we now store multiple cities in preferred_cities
+      return normalizeCityList((s as any).preferred_cities).length > 0;
     case 'preferred_neighborhoods':
       return Array.isArray(s.preferred_neighborhoods) && s.preferred_neighborhoods.length > 0;
     case 'floor':
       return hasNonEmptyText(s.floor_preference);
     case 'balcony':
       return s.has_balcony === true || s.has_balcony === false || s.has_balcony === null;
-    case 'elevator':
-      return s.has_elevator === true || s.has_elevator === false || s.has_elevator === null;
-    case 'master':
-      return s.wants_master_room === true || s.wants_master_room === false || s.wants_master_room === null;
     case 'is_sublet':
       return typeof s.is_sublet === 'boolean';
     case 'sublet_period':
       return hasNonEmptyText(s.sublet_month_from) && hasNonEmptyText(s.sublet_month_to);
     case 'move_in_month':
-      return hasNonEmptyText(s.move_in_month);
-    case 'roommates_min':
-      return hasFiniteNumber((s as any).preferred_roommates_min);
-    case 'roommates_max':
-      return hasFiniteNumber((s as any).preferred_roommates_max);
+      // legacy key kept in flow; validate new fields
+      return hasNonEmptyText((s as any).move_in_month_from) &&
+        (!!(s as any).move_in_is_flexible ? hasNonEmptyText((s as any).move_in_month_to) : true);
+    case 'roommates_range': {
+      const min = (s as any).preferred_roommates_min;
+      const max = (s as any).preferred_roommates_max;
+      return hasFiniteNumber(min) && hasFiniteNumber(max) && Number(max) >= Number(min);
+    }
     case 'pets_allowed':
       return typeof s.pets_allowed === 'boolean';
-    case 'broker':
-      return s.with_broker === true || s.with_broker === false || s.with_broker === null;
 
     // Partner you want
-    case 'age_min':
-      return hasFiniteNumber((s as any).preferred_age_min);
-    case 'age_max':
-      return hasFiniteNumber((s as any).preferred_age_max);
+    case 'age_range': {
+      const min = (s as any).preferred_age_min;
+      const max = (s as any).preferred_age_max;
+      return hasFiniteNumber(min) && hasFiniteNumber(max) && Number(max) >= Number(min);
+    }
     case 'pref_gender':
       return hasNonEmptyText(s.preferred_gender);
     case 'pref_occ':
@@ -173,21 +191,20 @@ function isQuestionAnswered(questionKey: string, s: SurveyState): boolean {
   }
 }
 
-const lifestyleOptions = ['רגוע', 'פעיל', 'ספונטני', 'ביתי', 'חברתי'];
+const homeLifestyleOptions = ['שקט וביתי', 'רגוע ולימודי', 'מאוזן', 'חברתי ופעיל', 'זורם וספונטני'];
 const dietOptions = ['ללא הגבלה', 'צמחוני', 'טבעוני'];
 const relationOptions = ['רווק/ה', 'בזוגיות'];
 const cleaningFrequencyOptions = ['פעם בשבוע', 'פעמיים בשבוע', 'פעם בשבועיים', 'כאשר צריך'];
 const hostingOptions = ['פעם בשבוע', 'לפעמים', 'כמה שיותר'];
-const cookingOptions = ['כל אחד לעצמו', 'לפעמים מתחלקים', 'מבשלים יחד'];
-const vibesOptions = ['שקטה ולימודית', 'זורמת וחברתית', 'לא משנה לי'];
-const floorOptions = ['קרקע', 'נמוכה', 'ביניים', 'גבוהה', 'לא משנה לי'];
+const cookingOptions = ['קניות משותפות', 'כל אחד לעצמו', 'לא משנה לי'];
+const floorOptions = ['קרקע', 'בניין', 'לא משנה לי'];
 const genderPrefOptions = ['זכר', 'נקבה', 'לא משנה'];
-const occupationPrefOptions = ['סטודנט', 'עובד', 'לא משנה'];
+const occupationPrefOptions = ['סטודנט', 'עובד', 'לא משנה']; // legacy (kept for any older drafts)
 const partnerShabbatPrefOptions = ['אין בעיה', 'מעדיפ/ה שלא'];
 const partnerDietPrefOptions = ['אין בעיה', 'מעדיפ/ה שלא טבעוני', 'כשר בלבד'];
 const partnerSmokingPrefOptions = ['אין בעיה', 'מעדיפ/ה שלא'];
 const studentYearOptions = ['שנה א׳', 'שנה ב׳', 'שנה ג׳', 'שנה ד׳', 'שנה ה׳', 'שנה ו׳', 'שנה ז׳'];
-// Roommates are now selected via sliders (1–5) in two separate steps.
+// Roommates are selected via a single dropdown (0–4 roommates).
 const HEB_MONTH_NAMES = [
   'ינואר',
   'פברואר',
@@ -203,9 +220,54 @@ const HEB_MONTH_NAMES = [
   'דצמבר',
 ];
 
+function draftStepStorageKey(userId: string) {
+  return `survey:draft_step_key:${userId}`;
+}
+
+// Stable ordering for resume fallbacks (in case the draft question is currently hidden).
+const PART_1_KEYS = [
+  'occupation',
+  'student_year',
+  'shabbat',
+  'diet',
+  'kosher',
+  'smoker',
+  'relationship',
+  'pet',
+  'home_lifestyle',
+  'cleanliness',
+  'cleaning_frequency',
+  'hosting',
+  'cooking',
+] as const;
+const PART_2_KEYS = [
+  'age_range',
+  'pref_gender',
+  'pref_occ',
+  'partner_shabbat',
+  'partner_diet',
+  'partner_smoking',
+  'partner_pets',
+] as const;
+const PART_3_KEYS = [
+  'price',
+  'preferred_city',
+  'preferred_neighborhoods',
+  'floor',
+  'balcony',
+  'is_sublet',
+  'sublet_period',
+  'move_in_month',
+  'roommates_range',
+  // Legacy/deprecated: kept ONLY for draft-resume routing compatibility (older drafts may store this key).
+  // The actual question was removed from the survey UI.
+  'pets_allowed',
+] as const;
+
 export default function SurveyScreen() {
+  const __debugRunId = 'resume-debug-1';
   const params = useLocalSearchParams<{ mode?: string }>();
-  const isEditMode = String(params?.mode || '') === 'edit';
+  const isEditModeRequested = String(params?.mode || '') === 'edit';
   const router = useRouter();
   const navigation = useNavigation<any>();
   const { user } = useAuthStore();
@@ -229,12 +291,15 @@ export default function SurveyScreen() {
   const [editConfirmOpen, setEditConfirmOpen] = useState(false);
 
   // Month picker (shared KeyFabPanel) — must live outside the clipped card.
-  type MonthPickerTarget = 'sublet_month_from' | 'sublet_month_to' | 'move_in_month';
+  type MonthPickerTarget =
+    | 'sublet_month_from'
+    | 'sublet_month_to'
+    | 'move_in_month_from'
+    | 'move_in_month_to';
   const [monthPickerOpen, setMonthPickerOpen] = useState(false);
-  const [monthPickerTarget, setMonthPickerTarget] = useState<MonthPickerTarget>('move_in_month');
+  const [monthPickerTarget, setMonthPickerTarget] = useState<MonthPickerTarget>('move_in_month_from');
   const [monthPickerTitle, setMonthPickerTitle] = useState<string>('בחר חודש');
   const [monthPickerTempDate, setMonthPickerTempDate] = useState<Date>(() => new Date());
-  const [monthPickerPendingDate, setMonthPickerPendingDate] = useState<Date | null>(null);
 
   // List picker (KeyFabPanel) for select-style questions (e.g. age).
   type ListPickerTarget = 'preferred_age_min' | 'preferred_age_max';
@@ -244,13 +309,23 @@ export default function SurveyScreen() {
 
   const latestStateRef = useRef<SurveyState>({});
   const exitingRef = useRef(false);
+  const savingRef = useRef(false);
   const latestStepKeyRef = useRef<string | null>(null);
   const didResumeRef = useRef(false);
   const transitionDirRef = useRef<1 | -1>(1);
 
+  // "Edit mode" should only apply when the survey is already completed.
+  // If a user enters from profile with mode=edit but they have an incomplete draft,
+  // we should resume the draft instead of forcing them back to the start of a part.
+  const isEditMode = isEditModeRequested && state.is_completed === true;
+
   useEffect(() => {
     latestStateRef.current = state;
   }, [state]);
+
+  useEffect(() => {
+    savingRef.current = saving;
+  }, [saving]);
 
   useEffect(() => {
     const showSub = Keyboard.addListener('keyboardDidShow', () => setKeyboardVisible(true));
@@ -269,15 +344,69 @@ export default function SurveyScreen() {
         if (existing) {
           const hydrated = hydrateSurvey(existing);
           setState(hydrated);
-          setCityQuery(hydrated.preferred_city || '');
+          // City selection is multi now; keep the input empty on load.
+          setCityQuery('');
           setNeighborhoodSearch('');
-          setResumeStepKey(existing.is_completed ? null : (existing.draft_step_key ?? null));
+          // Prefer server draft_step_key, fallback to local storage (useful if the DB column is missing in some envs).
+          let localDraftKey: string | null = null;
+          try {
+            localDraftKey = await AsyncStorage.getItem(draftStepStorageKey(user.id));
+          } catch {
+            localDraftKey = null;
+          }
+          const preferredDraftKey = (existing as any).draft_step_key ?? localDraftKey ?? null;
+          // #region agent log
+          fetch('http://127.0.0.1:7242/ingest/1e8b170c-0b87-47bb-bc4f-bb72ea5d43b8', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              sessionId: 'debug-session',
+              runId: __debugRunId,
+              hypothesisId: 'H1',
+              location: 'app/(tabs)/onboarding/survey.tsx:loadSurvey',
+              message: 'loaded survey row',
+              data: {
+                userId: user.id,
+                rowId: (existing as any)?.id ?? null,
+                updatedAt: (existing as any)?.updated_at ?? null,
+                isCompleted: (existing as any)?.is_completed ?? null,
+                serverDraftKey: (existing as any)?.draft_step_key ?? null,
+                localDraftKey,
+                preferredDraftKey,
+                modeParam: String(params?.mode || ''),
+              },
+              timestamp: Date.now(),
+            }),
+          }).catch(() => {});
+          // #endregion
+          // If we have a draft pointer (especially for edit sessions), always keep it so we can resume.
+          // Only clear local storage when the survey is completed AND there's no draft pointer.
+          setResumeStepKey(preferredDraftKey);
+          if (existing.is_completed && !preferredDraftKey) {
+            try {
+              await AsyncStorage.removeItem(draftStepStorageKey(user.id));
+            } catch {
+              // ignore
+            }
+          } else if (preferredDraftKey) {
+            // Keep local storage in sync (best effort).
+            try {
+              await AsyncStorage.setItem(draftStepStorageKey(user.id), String(preferredDraftKey));
+            } catch {
+              // ignore
+            }
+          }
           didResumeRef.current = false;
         } else {
           setState({ is_completed: false });
           setCityQuery('');
           setNeighborhoodSearch('');
           setResumeStepKey(null);
+          try {
+            await AsyncStorage.removeItem(draftStepStorageKey(user.id));
+          } catch {
+            // ignore
+          }
           didResumeRef.current = true;
           setCurrentStep(0);
         }
@@ -301,17 +430,41 @@ export default function SurveyScreen() {
 
       // Prefer Mapbox autocomplete (same UX as registration city picker). Fallback to local list if token missing.
       if (mapboxToken) {
-        const results = await autocompleteMapbox({
-          accessToken: mapboxToken,
-          query,
-          country: 'il',
-          language: 'he',
-          limit: 8,
-          types: 'place,locality',
-        });
+        // Try Mapbox first; if it returns nothing (or token fails), fallback to local list
+        // so the user still sees suggestions instead of an empty UI.
+        const runMapbox = async (opts: { types?: string; language?: string; bbox?: [number, number, number, number] }) =>
+          await autocompleteMapbox({
+            accessToken: mapboxToken,
+            query,
+            country: 'il',
+            language: opts.language ?? 'he',
+            limit: 15,
+            types: opts.types ?? 'place,locality,localadmin,neighborhood',
+            bbox: opts.bbox,
+          });
+
+        let results = await runMapbox({ language: 'he', bbox: IL_BBOX });
+        if (!results.length) {
+          // Relax filters progressively (some Mapbox configs can be picky)
+          results = await runMapbox({ language: 'he', types: 'place,locality', bbox: IL_BBOX });
+        }
+        if (!results.length) {
+          // Last resort: remove bbox/types entirely and let Mapbox decide
+          results = await autocompleteMapbox({
+            accessToken: mapboxToken,
+            query,
+            country: 'il',
+            language: 'he',
+            limit: 15,
+          });
+        }
+
         if (cancelled) return;
-        setCitySuggestions(results.map((f) => ({ id: f.id, text: f.text })));
-        return;
+        if (results.length) {
+          setCitySuggestions(results.map((f) => ({ id: f.id, text: f.text, display: f.place_name })));
+          return;
+        }
+        // Fall through to local list fallback (helps when token is missing/invalid in runtime).
       }
 
       const names = searchCitiesWithNeighborhoods(query, 8);
@@ -327,10 +480,21 @@ export default function SurveyScreen() {
     };
   }, [cityQuery, mapboxToken]);
 
+  const selectedCities = useMemo(() => {
+    return normalizeCityList((state as any).preferred_cities);
+  }, [(state as any).preferred_cities]);
+
+  const primaryCity = useMemo(() => (selectedCities.length ? selectedCities[0] : ''), [selectedCities]);
+
   useEffect(() => {
     let cancelled = false;
     const load = () => {
-      const name = (state.preferred_city || '').trim();
+      // Neighborhoods are only supported for a single city at a time.
+      if (selectedCities.length !== 1) {
+        if (!cancelled) setNeighborhoodOptions([]);
+        return;
+      }
+      const name = primaryCity.trim();
       if (!name) {
         if (!cancelled) setNeighborhoodOptions([]);
         return;
@@ -346,7 +510,7 @@ export default function SurveyScreen() {
     return () => {
       cancelled = true;
     };
-  }, [state.preferred_city]);
+  }, [primaryCity, selectedCities.length]);
 
   // Removed Google place id resolution (local-only cities)
 
@@ -411,19 +575,45 @@ export default function SurveyScreen() {
   const openMonthPicker = (target: MonthPickerTarget, title: string, currentValue?: string | null) => {
     Keyboard.dismiss();
     const parsed = parseYYYYMM(currentValue ?? null);
-    const base = parsed ?? new Date();
+    const now = new Date();
+    const nowMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const isMoveInTarget = target === 'move_in_month_from' || target === 'move_in_month_to';
+    // For move-in, never start from a past month (we only allow current month -> future).
+    const base =
+      isMoveInTarget && parsed && parsed < nowMonthStart
+        ? nowMonthStart
+        : parsed ?? nowMonthStart;
     setMonthPickerTarget(target);
     setMonthPickerTitle(title);
     setMonthPickerTempDate(new Date(base.getFullYear(), base.getMonth(), 1));
-    setMonthPickerPendingDate(null);
     setMonthPickerOpen(true);
   };
 
   const commitMonthPicker = (picked: Date) => {
     const yyyymm = formatDateToYYYYMM(new Date(picked.getFullYear(), picked.getMonth(), 1));
 
-    if (monthPickerTarget === 'move_in_month') {
-      setField('move_in_month', yyyymm);
+    if (monthPickerTarget === 'move_in_month_from') {
+      setState((prev) => {
+        const next: SurveyState = { ...(prev as any), move_in_month_from: yyyymm } as any;
+        const flexible = !!(prev as any).move_in_is_flexible;
+        if (!flexible) (next as any).move_in_month_to = yyyymm;
+        const from = parseYYYYMM(yyyymm);
+        const to = parseYYYYMM((next as any).move_in_month_to);
+        if (from && to && to < from) (next as any).move_in_month_to = yyyymm;
+        return next;
+      });
+      setMonthPickerOpen(false);
+      return;
+    }
+
+    if (monthPickerTarget === 'move_in_month_to') {
+      setState((prev) => {
+        const next: SurveyState = { ...(prev as any), move_in_month_to: yyyymm } as any;
+        const from = parseYYYYMM((next as any).move_in_month_from);
+        const to = parseYYYYMM(yyyymm);
+        if (from && to && to < from) (next as any).move_in_month_from = yyyymm;
+        return next;
+      });
       setMonthPickerOpen(false);
       return;
     }
@@ -452,8 +642,18 @@ export default function SurveyScreen() {
     }
   };
 
+  const commitMonthPickerYYYYMM = (yyyymm: string) => {
+    const parsed = parseYYYYMM(yyyymm);
+    if (!parsed) {
+      setMonthPickerOpen(false);
+      return;
+    }
+    commitMonthPicker(parsed);
+  };
+
   const clearMonthPicker = () => {
-    if (monthPickerTarget === 'move_in_month') setField('move_in_month', undefined);
+    if (monthPickerTarget === 'move_in_month_from') setField('move_in_month_from' as any, undefined);
+    if (monthPickerTarget === 'move_in_month_to') setField('move_in_month_to' as any, undefined);
     if (monthPickerTarget === 'sublet_month_from') setField('sublet_month_from', undefined as any);
     if (monthPickerTarget === 'sublet_month_to') setField('sublet_month_to', undefined as any);
     setMonthPickerOpen(false);
@@ -463,6 +663,7 @@ export default function SurveyScreen() {
     key: string;
     title: string;
     subtitle?: string;
+    explanation?: string;
     isVisible?: () => boolean;
     render: () => React.ReactNode;
   };
@@ -565,19 +766,32 @@ function PartCarouselPagination({
       // About you
       {
         key: 'occupation',
-        title: 'מה אני עושה ביומיום?',
-        subtitle: 'זה עוזר לנו להבין את הלו״ז והוייב שלך.',
+        title: 'האם אתה סטודנט?',
+        subtitle: 'זה עוזר לנו להבין את הלוז והאווירה שאתה מייצר.',
         render: () => (
-          <ChipSelect
-            options={['סטודנט', 'עובד']}
-            value={normalizeToTextChoice(state.occupation, ['סטודנט', 'עובד'])}
-            onChange={(v) => {
+          <ToggleRow
+            value={
+              state.occupation === 'סטודנט' ? true : state.occupation === 'עובד' ? false : undefined
+            }
+            centerOptions
+            showYesIcon={false}
+            onToggle={(isStudent) => {
+              const wasAnswered = state.occupation === 'סטודנט' || state.occupation === 'עובד';
               setState((prev) => {
-                const next: SurveyState = { ...prev, occupation: v || undefined };
-                if (v !== 'סטודנט') next.student_year = undefined;
-                if (v !== 'עובד') next.works_from_home = undefined;
+                const next: SurveyState = {
+                  ...prev,
+                  occupation: isStudent ? 'סטודנט' : 'עובד',
+                };
+                if (!isStudent) next.student_year = undefined;
                 return next;
               });
+              // Auto-advance only on first answer (matches "like pressing סטודנט/עובד" behavior).
+              if (!wasAnswered) {
+                setTimeout(() => {
+                  setCurrentStep((s) => s + 1);
+                  scrollRef.current?.scrollTo?.({ y: 0, animated: false });
+                }, 0);
+              }
             }}
           />
         ),
@@ -585,6 +799,7 @@ function PartCarouselPagination({
       {
         key: 'student_year',
         title: 'באיזו שנה בתואר?',
+        explanation: 'בחר/י את שנת הלימודים הנוכחית שלך',
         isVisible: () => state.occupation === 'סטודנט',
         render: () => (
           <ChipSelect
@@ -605,117 +820,174 @@ function PartCarouselPagination({
           />
         ),
       },
-      {
-        key: 'works_from_home',
-        title: 'עובד/ת מהבית?',
-        isVisible: () => state.occupation === 'עובד',
-        render: () => (
-          <ChipSelect
-            options={['כן', 'לא']}
-            value={
-              state.works_from_home === undefined
-                ? null
-                : state.works_from_home
-                ? 'כן'
-                : 'לא'
-            }
-            onChange={(v) => {
-              if (!v) {
-                setField('works_from_home', undefined);
-                return;
-              }
-              setField('works_from_home', v === 'כן');
-            }}
-          />
-        ),
-      },
       // Title is already displayed in the card header; avoid repeating it inside the toggle row.
-      { key: 'shabbat', title: 'שומר/ת שבת?', render: () => <ToggleRow value={state.is_shomer_shabbat} onToggle={(v) => setField('is_shomer_shabbat', v)} centerOptions showYesIcon={false} /> },
-      { key: 'diet', title: 'מה התזונה שלי?', render: () => <ChipSelect options={dietOptions} value={state.diet_type || null} onChange={(v) => setField('diet_type', v || null)} /> },
+      { key: 'shabbat', title: 'שומר/ת שבת?', explanation: 'האם את/ה שומר/ת שבת לפי ההלכה', render: () => <ToggleRow value={state.is_shomer_shabbat} onToggle={(v) => setField('is_shomer_shabbat', v)} centerOptions showYesIcon={false} /> },
+      { key: 'diet', title: 'מה התזונה שלי?', explanation: 'בחר/י את סוג התזונה שלך - ללא הגבלה, צמחוני או טבעוני', render: () => <ChipSelect options={dietOptions} value={state.diet_type || null} onChange={(v) => setField('diet_type', v || null)} /> },
       {
         key: 'kosher',
-        title: 'אוכל כשר?',
+        title: 'מטבח כשר?',
+        explanation: 'האם חשוב לך מטבח כשר בדירה',
         render: () => (
           <ChipSelect
-            options={['כשר', 'לא כשר']}
-            value={state.keeps_kosher === undefined ? null : state.keeps_kosher ? 'כשר' : 'לא כשר'}
+            options={['כן', 'לא מפריע לי']}
+            value={state.keeps_kosher === undefined ? null : state.keeps_kosher ? 'כן' : 'לא מפריע לי'}
             onChange={(v) => {
               if (!v) {
                 setField('keeps_kosher', undefined);
                 return;
               }
-              setField('keeps_kosher', v === 'כשר');
+              setField('keeps_kosher', v === 'כן');
             }}
           />
         ),
       },
       // Title is already displayed in the card header; avoid repeating it inside the toggle row.
-      { key: 'smoker', title: 'מעשן/ת?', render: () => <ToggleRow value={state.is_smoker} onToggle={(v) => setField('is_smoker', v)} centerOptions showYesIcon={false} /> },
-      { key: 'relationship', title: 'מצב זוגי', render: () => <ChipSelect options={relationOptions} value={state.relationship_status || null} onChange={(v) => setField('relationship_status', v || null)} /> },
+      { key: 'smoker', title: 'מעשן/ת?', explanation: 'האם את/ה מעשן/ת סיגריות או מוצרי טבק', render: () => <ToggleRow value={state.is_smoker} onToggle={(v) => setField('is_smoker', v)} centerOptions showYesIcon={false} /> },
+      { key: 'relationship', title: 'מצב זוגי', explanation: 'האם את/ה רווק/ה או בזוגיות', render: () => <ChipSelect options={relationOptions} value={state.relationship_status || null} onChange={(v) => setField('relationship_status', v || null)} /> },
       // Title is already displayed in the card header; avoid repeating it inside the toggle row.
-      { key: 'pet', title: 'מגיע/ה עם בעל חיים?', render: () => <ToggleRow value={state.has_pet} onToggle={(v) => setField('has_pet', v)} centerOptions showYesIcon={false} /> },
-      { key: 'lifestyle', title: 'האופי היומיומי שלי', render: () => <ChipSelect options={lifestyleOptions} value={state.lifestyle || null} onChange={(v) => setField('lifestyle', v || null)} /> },
+      { key: 'pet', title: 'מגיע/ה עם בעל חיים?', explanation: 'האם את/ה מתכננ/ת לגור עם בעל חיים (למשל כלב/חתול)?', render: () => <ToggleRow value={state.has_pet} onToggle={(v) => setField('has_pet', v)} centerOptions showYesIcon={false} /> },
+      { key: 'home_lifestyle', title: 'מה אני רוצה שיהיה בבית?', explanation: 'איך את/ה רוצה שהאווירה בבית תהיה - שקט, חברתי, מאוזן וכו\'', render: () => <ChipSelect options={homeLifestyleOptions} value={state.home_lifestyle || null} onChange={(v) => setField('home_lifestyle', v || null)} /> },
       {
         key: 'cleanliness',
         title: 'כמה חשוב לי ניקיון?',
         subtitle: 'בחר/י ערך בין 1 ל-5',
+        explanation: '1 = לא חשוב לי, 5 = מאוד חשוב לי',
         render: () => (
           <View style={{ gap: 10 }}>
-            <BalloonSlider5
-              value={state.cleanliness_importance || 3}
-              onChange={(v) => setField('cleanliness_importance', v)}
+            <SelectInput
+              label="חשיבות ניקיון"
+              options={['1', '2', '3', '4', '5']}
+              value={
+                typeof state.cleanliness_importance === 'number' && Number.isFinite(state.cleanliness_importance)
+                  ? String(state.cleanliness_importance)
+                  : null
+              }
+              placeholder="בחר/י"
+              onChange={(v) => {
+                if (!v) {
+                  setField('cleanliness_importance', undefined);
+                  return;
+                }
+                const n = parseInt(v, 10);
+                setField('cleanliness_importance', Number.isFinite(n) ? n : undefined);
+              }}
             />
           </View>
         ),
       },
-      { key: 'cleaning_frequency', title: 'תדירות ניקיון', render: () => <ChipSelect options={cleaningFrequencyOptions} value={state.cleaning_frequency || null} onChange={(v) => setField('cleaning_frequency', v || null)} /> },
-      { key: 'hosting', title: 'אוהבים לארח?', render: () => <ChipSelect options={hostingOptions} value={state.hosting_preference || null} onChange={(v) => setField('hosting_preference', v || null)} /> },
-      { key: 'cooking', title: 'אוכל ובישולים', render: () => <ChipSelect options={cookingOptions} value={state.cooking_style || null} onChange={(v) => setField('cooking_style', v || null)} /> },
-      { key: 'home_vibe', title: 'אווירה בבית', render: () => <ChipSelect options={vibesOptions} value={state.home_vibe || null} onChange={(v) => setField('home_vibe', v || null)} /> },
+      { key: 'cleaning_frequency', title: 'תדירות ניקיון', explanation: 'כמה פעמים את/ה רוצה לנקות את הבית', render: () => <ChipSelect options={cleaningFrequencyOptions} value={state.cleaning_frequency || null} onChange={(v) => setField('cleaning_frequency', v || null)} /> },
+      { key: 'hosting', title: 'אוהבים לארח?', explanation: 'כמה פעמים את/ה רוצה לארח חברים בבית', render: () => <ChipSelect options={hostingOptions} value={state.hosting_preference || null} onChange={(v) => setField('hosting_preference', v || null)} /> },
+      { key: 'cooking', title: 'קניות', explanation: 'איך את/ה רוצה לנהל קניות מזון - משותף או כל אחד לעצמו', render: () => <ChipSelect options={cookingOptions} value={state.cooking_style || null} onChange={(v) => setField('cooking_style', v || null)} /> },
 
       // Apartment you want
       {
         key: 'price',
         title: 'תקציב שכירות (₪)',
+        explanation: 'הכנס/י את טווח התקציב החודשי שלך לשכר דירה',
         render: () => (
           <View style={{ gap: 8 }}>
-            <View style={styles.currencyInputWrap}>
-              <View style={styles.currencySymbolWrap}>
-                <Text style={styles.currencySymbol}>₪</Text>
+            <View style={{ flexDirection: 'row-reverse', gap: 12 }}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.helperText}>מינימום</Text>
+                <View style={styles.currencyInputWrap}>
+                  <View style={styles.currencySymbolWrap}>
+                    <Text style={styles.currencySymbol}>₪</Text>
+                  </View>
+                  <TextInput
+                    value={((state as any).price_min ?? '').toString()}
+                    onChangeText={(txt) => {
+                      const v = toNumberOrNull(txt);
+                      setState((prev) => {
+                        const next: SurveyState = { ...prev, price_min: v as any };
+                        const minVal = typeof v === 'number' ? v : null;
+                        const curMax = (prev as any).price_max;
+                        if (typeof minVal === 'number') {
+                          const minAllowedMax = minVal + 400;
+                          if (typeof curMax !== 'number' || curMax < minAllowedMax) {
+                            next.price_max = minAllowedMax as any;
+                          }
+                        } else {
+                          next.price_max = (prev as any).price_max;
+                        }
+                        return next;
+                      });
+                    }}
+                    placeholder="לדוגמה: 1000"
+                    placeholderTextColor="#6B7280"
+                    keyboardType="numeric"
+                    style={[styles.input, styles.currencyInput]}
+                  />
+                </View>
               </View>
-              <TextInput
-                value={state.price_range?.toString() || ''}
-                onChangeText={(txt) => setField('price_range', toNumberOrNull(txt))}
-                placeholder="לדוגמה: 3500"
-                placeholderTextColor="#6B7280"
-                keyboardType="numeric"
-                style={[styles.input, styles.currencyInput]}
-              />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.helperText}>מקסימום</Text>
+                <View style={styles.currencyInputWrap}>
+                  <View style={styles.currencySymbolWrap}>
+                    <Text style={styles.currencySymbol}>₪</Text>
+                  </View>
+                  <TextInput
+                    value={((state as any).price_max ?? '').toString()}
+                    onChangeText={(txt) => {
+                      const v = toNumberOrNull(txt);
+                      setField('price_max' as any, v as any);
+                    }}
+                    onEndEditing={() => {
+                      setState((prev) => {
+                        const minVal = (prev as any).price_min;
+                        const maxVal = (prev as any).price_max;
+                        if (typeof minVal === 'number') {
+                          const minAllowedMax = minVal + 400;
+                          if (typeof maxVal === 'number' && maxVal < minAllowedMax) {
+                            return { ...prev, price_max: minAllowedMax as any };
+                          }
+                        }
+                        return prev;
+                      });
+                    }}
+                    placeholder="לדוגמה: 1400"
+                    placeholderTextColor="#6B7280"
+                    keyboardType="numeric"
+                    style={[styles.input, styles.currencyInput]}
+                  />
+                </View>
+              </View>
             </View>
+            <Text style={styles.helperText}>המקסימום חייב להיות לפחות ₪400 מעל המינימום.</Text>
           </View>
         ),
       },
       {
-        key: 'bills',
-        title: 'חשבונות כלולים?',
-        render: () => (
-          <TriChoiceRow
-            // Title is already displayed in the card header; avoid repeating it inside the row.
-            value={state.bills_included}
-            yesLabel="כלולים"
-            noLabel="לא כלולים"
-            anyLabel="לא משנה לי"
-            centerOptions
-            showYesIcon={false}
-            onChange={(v) => setField('bills_included', v)}
-          />
-        ),
-      },
-      {
         key: 'preferred_city',
-        title: 'עיר מועדפת',
+        title: 'עיר',
+        explanation: 'אפשר לבחור כמה ערים. התחילו להקליד ובחרו מהרשימה.',
         render: () => (
           <View style={{ gap: 10 }}>
+            {selectedCities.length ? (
+              <View style={{ flexDirection: 'row-reverse', flexWrap: 'wrap', gap: 8 }}>
+                {selectedCities.map((c) => (
+                  <TouchableOpacity
+                    key={`city-${c}`}
+                    style={[styles.chip, styles.chipActive]}
+                    activeOpacity={0.9}
+                    onPress={() => {
+                      const next = selectedCities.filter((x) => x !== c);
+                      setState((prev) => ({
+                        ...prev,
+                        preferred_cities: next.length ? next : undefined,
+                        // If the selected city list changes, neighborhoods may no longer be valid.
+                        preferred_neighborhoods: undefined,
+                      } as any));
+                      setNeighborhoodSearch('');
+                      Keyboard.dismiss();
+                    }}
+                    accessibilityRole="button"
+                    accessibilityLabel={`הסר עיר ${c}`}
+                  >
+                    <Text style={[styles.chipText, styles.chipTextActive]}>{c} ✕</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            ) : null}
             <TextInput
               style={styles.input}
               placeholder="לדוגמה: תל אביב"
@@ -724,8 +996,7 @@ function PartCarouselPagination({
               onChangeText={(txt) => {
                 setCityQuery(txt);
                 setNeighborhoodSearch('');
-                setField('preferred_city', txt ? txt : undefined);
-                setField('preferred_neighborhoods', undefined);
+                // Selection happens from suggestions; don't treat raw typing as a chosen city.
               }}
             />
             {citySuggestions.length > 0 ? (
@@ -735,15 +1006,20 @@ function PartCarouselPagination({
                     key={s.id}
                     style={[styles.suggestionItem, idx === citySuggestions.length - 1 ? styles.suggestionItemLast : null]}
                     onPress={() => {
-                      setCityQuery(s.text);
+                      const next = normalizeCityList([...selectedCities, s.text]);
+                      setState((prev) => ({
+                        ...prev,
+                        preferred_cities: next.length ? next : undefined,
+                        // If more than 1 city selected, neighborhoods are not supported.
+                        preferred_neighborhoods: next.length === 1 ? (prev.preferred_neighborhoods ?? []) : undefined,
+                      } as any));
+                      setCityQuery('');
                       setCitySuggestions([]);
                       setNeighborhoodSearch('');
-                      setField('preferred_city', s.text);
-                      setField('preferred_neighborhoods', []);
                       Keyboard.dismiss();
                     }}
                   >
-                    <Text style={styles.suggestionText}>{s.text}</Text>
+                    <Text style={styles.suggestionText}>{s.display || s.text}</Text>
                   </TouchableOpacity>
                 ))}
               </View>
@@ -754,7 +1030,10 @@ function PartCarouselPagination({
       {
         key: 'preferred_neighborhoods',
         title: 'שכונות מועדפות',
-        isVisible: () => !!state.preferred_city,
+        explanation: 'בחר/י את השכונות המועדפות עלייך בעיר שבחרת',
+        // Only show when we actually have a neighborhood list for the selected city;
+        // otherwise the user can get stuck (this app currently ships neighborhoods for a subset of cities).
+        isVisible: () => selectedCities.length === 1 && !!primaryCity && neighborhoodOptions.length > 0,
         render: () => (
           <View style={{ gap: 10 }}>
             {neighborhoodOptions.length ? (
@@ -805,13 +1084,14 @@ function PartCarouselPagination({
           </View>
         ),
       },
-      { key: 'floor', title: 'קומה מועדפת', render: () => <ChipSelect options={floorOptions} value={state.floor_preference || null} onChange={(v) => setField('floor_preference', v || null)} /> },
+      { key: 'floor', title: 'קומה מועדפת', explanation: 'איזו קומה את/ה מעדיף/ה - קרקע, בניין או לא משנה לי', render: () => <ChipSelect options={floorOptions} value={state.floor_preference || null} onChange={(v) => setField('floor_preference', v || null)} /> },
       {
         key: 'balcony',
         title: 'עם מרפסת/גינה?',
+        explanation: 'האם חשוב לך שתהיה מרפסת או גינה בדירה',
         render: () => (
           <TriChoiceRow
-            value={state.has_balcony}
+            value={state.has_balcony ?? null}
             anyLabel="לא משנה לי"
             centerOptions
             showYesIcon={false}
@@ -820,34 +1100,9 @@ function PartCarouselPagination({
         ),
       },
       {
-        key: 'elevator',
-        title: 'חשוב שתהיה מעלית?',
-        render: () => (
-          <TriChoiceRow
-            value={state.has_elevator}
-            anyLabel="לא משנה לי"
-            centerOptions
-            showYesIcon={false}
-            onChange={(v) => setField('has_elevator', v)}
-          />
-        ),
-      },
-      {
-        key: 'master',
-        title: 'חדר מאסטר?',
-        render: () => (
-          <TriChoiceRow
-            value={state.wants_master_room}
-            anyLabel="לא משנה לי"
-            centerOptions
-            showYesIcon={false}
-            onChange={(v) => setField('wants_master_room', v)}
-          />
-        ),
-      },
-      {
         key: 'is_sublet',
         title: 'האם מדובר בסאבלט?',
+        explanation: 'סאבלט = שכירות זמנית לתקופה מוגדרת (לרוב כמה שבועות). אם את/ה מחפש/ת שכירות רגילה/קבועה — בחר/י "לא".',
         render: () => (
           <ToggleRow
             value={state.is_sublet}
@@ -869,6 +1124,7 @@ function PartCarouselPagination({
       {
         key: 'sublet_period',
         title: 'בחרו את טווח הסאבלט',
+        explanation: 'בחר/י חודש כניסה וחודש סיום לסאבלט.',
         isVisible: () => !!state.is_sublet,
         render: () => (
           <View style={{ gap: 12 }}>
@@ -894,119 +1150,151 @@ function PartCarouselPagination({
       {
         key: 'move_in_month',
         title: 'תאריך כניסה',
+        explanation: 'מתי את/ה רוצה להיכנס לדירה - חודש ספציפי או טווח חודשים',
         isVisible: () => !state.is_sublet,
         render: () => (
-          <MonthPickerInput
-            placeholder="בחר/י תאריך"
-            value={state.move_in_month || null}
-            accessibilityLabel="תאריך כניסה"
-            onPress={() => openMonthPicker('move_in_month', 'בחר תאריך כניסה', state.move_in_month || null)}
-          />
-        ),
-      },
-      {
-        key: 'roommates_min',
-        title: 'מינימום שותפים',
-        subtitle: 'בחר/י בין 1 ל-5',
-        render: () => (
-          <View style={{ gap: 10 }}>
-            <BalloonSlider5
-              value={Math.max(1, Math.min(5, (state as any).preferred_roommates_min ?? 1))}
-              onChange={(v) => setField('preferred_roommates_min' as any, v)}
+          <View style={{ gap: 12 }}>
+            <ChipSelect
+              options={['לא גמיש', 'טווח חודשים']}
+              value={((state as any).move_in_is_flexible ? 'טווח חודשים' : 'לא גמיש') as any}
+              onChange={(v) => {
+                const isFlexible = v === 'טווח חודשים';
+                setState((prev) => {
+                  const next: SurveyState = { ...(prev as any), move_in_is_flexible: isFlexible } as any;
+                  const from = (prev as any).move_in_month_from ?? null;
+                  if (!isFlexible && from) (next as any).move_in_month_to = from;
+                  return next;
+                });
+              }}
             />
+            <MonthPickerInput
+              label={(state as any).move_in_is_flexible ? 'מחודש' : 'חודש כניסה'}
+              placeholder="בחר/י תאריך"
+              value={(state as any).move_in_month_from || null}
+              accessibilityLabel="תאריך כניסה"
+              onPress={() =>
+                openMonthPicker('move_in_month_from', 'בחר תאריך כניסה', (state as any).move_in_month_from || null)
+              }
+            />
+            {!!(state as any).move_in_is_flexible && (
+              <MonthPickerInput
+                label="עד חודש"
+                placeholder="בחר/י תאריך"
+                value={(state as any).move_in_month_to || null}
+                accessibilityLabel="טווח תאריך כניסה"
+                onPress={() =>
+                  openMonthPicker('move_in_month_to', 'בחר תאריך סיום', (state as any).move_in_month_to || null)
+                }
+              />
+            )}
           </View>
         ),
       },
       {
-        key: 'roommates_max',
-        title: 'מקסימום שותפים',
-        subtitle: 'בחר/י בין 1 ל-5',
+        key: 'roommates_range',
+        title: 'טווח שותפים',
+        subtitle: 'בחר/י אופציה',
+        explanation: 'כמה שותפים את/ה רוצה לגור איתם',
         render: () => (
           <View style={{ gap: 10 }}>
-            <BalloonSlider5
-              value={Math.max(1, Math.min(5, (state as any).preferred_roommates_max ?? Math.max(1, Math.min(5, (state as any).preferred_roommates_min ?? 1))))}
-              onChange={(v) => setField('preferred_roommates_max' as any, v)}
-            />
+            {(() => {
+              const options = [
+                'אני לבד',
+                'אני עם עוד שותף',
+                'אני ועוד 2 שותפים',
+                'אני ועוד 3 שותפים',
+                'אני ועוד 4 שותפים',
+              ];
+
+              const min = (state as any).preferred_roommates_min;
+              const max = (state as any).preferred_roommates_max;
+              const valueNum =
+                typeof min === 'number' && typeof max === 'number' && Number.isFinite(min) && Number.isFinite(max) && min === max
+                  ? min
+                  : null;
+              const currentValue =
+                typeof valueNum === 'number' && valueNum >= 0 && valueNum <= 4 ? options[valueNum] : null;
+
+              return (
+                <SelectInput
+                  label="כמה שותפים?"
+                  options={options}
+                  value={currentValue}
+                  placeholder="בחר/י"
+                  onChange={(label) => {
+                    const idx = label ? options.indexOf(label) : -1;
+                    if (idx < 0) {
+                      setState((prev) => ({ ...(prev as any), preferred_roommates_min: null, preferred_roommates_max: null } as any));
+                      return;
+                    }
+                    setState((prev) => ({ ...(prev as any), preferred_roommates_min: idx, preferred_roommates_max: idx } as any));
+                  }}
+                />
+              );
+            })()}
           </View>
-        ),
-      },
-      {
-        key: 'pets_allowed',
-        title: 'אפשר להביא חיות לדירה?',
-        render: () => (
-          <ToggleRow
-            value={state.pets_allowed}
-            centerOptions
-            showYesIcon={false}
-            onToggle={(v) => setField('pets_allowed', v)}
-          />
-        ),
-      },
-      {
-        key: 'broker',
-        title: 'משנה לך תיווך?',
-        render: () => (
-          <TriChoiceRow
-            value={state.with_broker}
-            yesLabel="עם תיווך"
-            noLabel="בלי תיווך"
-            anyLabel="לא משנה לי"
-            centerOptions
-            showYesIcon={false}
-            onChange={(v) => setField('with_broker', v)}
-          />
         ),
       },
 
       // Partner you want
       {
-        key: 'age_min',
-        title: 'גיל מינימלי לשותפ/ה',
+        key: 'age_range',
+        title: 'טווח גילאים לשותפ/ה',
+        explanation: 'בחר/י את טווח הגילאים המועדף עלייך לשותפים',
         render: () => (
           <View style={{ gap: 10 }}>
-            <TouchableOpacity
-              style={styles.input}
-              activeOpacity={0.9}
-              onPress={() => openListPicker('preferred_age_min', 'בחר גיל מינימלי')}
-              accessibilityRole="button"
-              accessibilityLabel="בחר גיל מינימלי"
-            >
-              <Text
-                style={
-                  (state as any).preferred_age_min != null ? styles.selectText : styles.selectPlaceholder
-                }
+            <View>
+              <Text style={styles.helperText}>מינימום</Text>
+              <TouchableOpacity
+                style={styles.input}
+                activeOpacity={0.9}
+                onPress={() => openListPicker('preferred_age_min', 'בחר גיל מינימלי')}
+                accessibilityRole="button"
+                accessibilityLabel="בחר גיל מינימלי"
               >
-                {(state as any).preferred_age_min != null ? String((state as any).preferred_age_min) : 'בחר גיל'}
-              </Text>
-            </TouchableOpacity>
+                <Text
+                  style={
+                    (state as any).preferred_age_min != null ? styles.selectText : styles.selectPlaceholder
+                  }
+                >
+                  {(state as any).preferred_age_min != null ? String((state as any).preferred_age_min) : 'בחר גיל'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+            <View>
+              <Text style={styles.helperText}>מקסימום</Text>
+              <TouchableOpacity
+                style={styles.input}
+                activeOpacity={0.9}
+                onPress={() => openListPicker('preferred_age_max', 'בחר גיל מקסימלי')}
+                accessibilityRole="button"
+                accessibilityLabel="בחר גיל מקסימלי"
+              >
+                <Text style={(state as any).preferred_age_max != null ? styles.selectText : styles.selectPlaceholder}>
+                  {(state as any).preferred_age_max != null ? String((state as any).preferred_age_max) : 'בחר גיל'}
+                </Text>
+              </TouchableOpacity>
+            </View>
           </View>
         ),
       },
+      { key: 'pref_gender', title: 'מגדר מועדף של השותפ/ה?', explanation: 'האם יש לך העדפה למגדר מסוים של השותפים', render: () => <ChipSelect options={genderPrefOptions} value={state.preferred_gender || null} onChange={(v) => setField('preferred_gender', v || null)} /> },
       {
-        key: 'age_max',
-        title: 'גיל מקסימלי לשותפ/ה',
+        key: 'pref_occ',
+        title: 'אני רוצה שותף בסטטוס כמו שלי ?',
+        explanation: '',
         render: () => (
-          <View style={{ gap: 10 }}>
-            <TouchableOpacity
-              style={styles.input}
-              activeOpacity={0.9}
-              onPress={() => openListPicker('preferred_age_max', 'בחר גיל מקסימלי')}
-              accessibilityRole="button"
-              accessibilityLabel="בחר גיל מקסימלי"
-            >
-              <Text style={(state as any).preferred_age_max != null ? styles.selectText : styles.selectPlaceholder}>
-                {(state as any).preferred_age_max != null ? String((state as any).preferred_age_max) : 'בחר גיל'}
-              </Text>
-            </TouchableOpacity>
-          </View>
+          <ChipSelect
+            options={['סטודנט', 'לא סטודנט']}
+            value={state.preferred_occupation || null}
+            onChange={(v) => setField('preferred_occupation', v || null)}
+          />
         ),
       },
-      { key: 'pref_gender', title: 'מגדר מועדף של השותפ/ה?', render: () => <ChipSelect options={genderPrefOptions} value={state.preferred_gender || null} onChange={(v) => setField('preferred_gender', v || null)} /> },
-      { key: 'pref_occ', title: 'עיסוק מועדף של השותפ/ה?', render: () => <ChipSelect options={occupationPrefOptions} value={state.preferred_occupation || null} onChange={(v) => setField('preferred_occupation', v || null)} /> },
-      { key: 'partner_shabbat', title: 'שותפים שומרי שבת?', render: () => <ChipSelect options={partnerShabbatPrefOptions} value={state.partner_shabbat_preference || null} onChange={(v) => setField('partner_shabbat_preference', v || null)} /> },
-      { key: 'partner_diet', title: 'שותפים עם תזונה מתאימה?', render: () => <ChipSelect options={partnerDietPrefOptions} value={state.partner_diet_preference || null} onChange={(v) => setField('partner_diet_preference', v || null)} /> },
-      { key: 'partner_smoking', title: 'שותפים שמעשנים?', render: () => <ChipSelect options={partnerSmokingPrefOptions} value={state.partner_smoking_preference || null} onChange={(v) => setField('partner_smoking_preference', v || null)} /> },
-      { key: 'partner_pets', title: 'שותפים שמגיעים עם בעלי חיים?', render: () => <ChipSelect options={['אין בעיה', 'מעדיפ/ה שלא']} value={state.partner_pets_preference || null} onChange={(v) => setField('partner_pets_preference', v || null)} /> },
+      { key: 'partner_shabbat', title: 'שותפים שומרי שבת?', explanation: 'האם חשוב לך שהשותפים יהיו שומרי שבת או לא', render: () => <ChipSelect options={partnerShabbatPrefOptions} value={state.partner_shabbat_preference || null} onChange={(v) => setField('partner_shabbat_preference', v || null)} /> },
+      { key: 'partner_diet', title: 'שותפים עם תזונה מתאימה?', explanation: 'האם יש לך העדפה לגבי התזונה של השותפים - כשר, לא טבעוני וכו\'', render: () => <ChipSelect options={partnerDietPrefOptions} value={state.partner_diet_preference || null} onChange={(v) => setField('partner_diet_preference', v || null)} /> },
+      { key: 'partner_smoking', title: 'שותפים שמעשנים?', explanation: 'האם את/ה מוכן/ה לגור עם שותפים שמעשנים', render: () => <ChipSelect options={partnerSmokingPrefOptions} value={state.partner_smoking_preference || null} onChange={(v) => setField('partner_smoking_preference', v || null)} /> },
+      { key: 'partner_pets', title: 'שותפים שמגיעים עם בעלי חיים?', explanation: 'האם זה מתאים לך ששותפ/ה יגיע/תגיע עם בעל חיים?', render: () => <ChipSelect options={['אין בעיה', 'מעדיפ/ה שלא']} value={state.partner_pets_preference || null} onChange={(v) => setField('partner_pets_preference', v || null)} /> },
     ];
 
     return q.filter((item) => (item.isVisible ? item.isVisible() : true));
@@ -1029,20 +1317,23 @@ function PartCarouselPagination({
     return map;
   }, [questions]);
 
-  // Split questions into 3 parts based on the user's requested boundaries.
-  // Part 1: "קצת עליי" - from first question up to (excluding) "תקציב שכירות" (price)
-  // Part 2: "מה שאני מחפש בדירה" - from "תקציב שכירות" (price) up to (excluding) "גיל מינימלי לשותפ/ה" (age_min)
-  // Part 3: "שותפים שאני מחפש" - from "גיל מינימלי לשותפ/ה" (age_min) to the end
+  // Split questions into 3 parts in the desired order:
+  // Part 1: על עצמי
+  // Part 2: על השותפ/ה
+  // Part 3: על הדירה
   const items: SurveyItem[] = useMemo(() => {
     const idxPrice = questions.findIndex((q) => q.key === 'price');
-    const idxAgeMin = questions.findIndex((q) => q.key === 'age_min');
+    const idxAgeRange = questions.findIndex((q) => q.key === 'age_range');
 
     const part1Questions = idxPrice > 0 ? questions.slice(0, idxPrice) : questions.slice(0, Math.max(0, idxPrice));
-    const part2Questions =
-      idxPrice >= 0 && (idxAgeMin < 0 || idxAgeMin > idxPrice)
-        ? questions.slice(idxPrice, idxAgeMin < 0 ? undefined : idxAgeMin)
+
+    // NOTE: In the questions list, apartment questions appear before partner questions,
+    // but the requested flow is: about -> partner -> apartment.
+    const apartmentQuestions =
+      idxPrice >= 0 && (idxAgeRange < 0 || idxAgeRange > idxPrice)
+        ? questions.slice(idxPrice, idxAgeRange < 0 ? undefined : idxAgeRange)
         : [];
-    const part3Questions = idxAgeMin >= 0 ? questions.slice(idxAgeMin) : [];
+    const partnerQuestions = idxAgeRange >= 0 ? questions.slice(idxAgeRange) : [];
 
     const out: SurveyItem[] = [];
     if (part1Questions.length) {
@@ -1050,30 +1341,30 @@ function PartCarouselPagination({
         type: 'section',
         key: '__section_about',
         partNumber: 1,
-        title: 'קצת עליי',
+        title: 'על עצמי',
         subtitle: 'כמה שאלות קצרות כדי שנכיר אותך ונבין את הוייב שלך.',
       });
       for (const q of part1Questions) out.push({ type: 'question', key: q.key, partNumber: 1, question: q });
     }
-    if (part2Questions.length) {
+    if (partnerQuestions.length) {
       out.push({
         type: 'section',
-        key: '__section_apartment',
         partNumber: 2,
-        title: 'הדירה שאני מחפש/ת',
-        subtitle: 'בוא/י נבין מה חשוב לך בדירה – עיר, שכונה, תאריך כניסה ועוד.',
+        key: '__section_partners',
+        title: 'על השותפ/ה',
+        subtitle: 'בוא/י נבין מי השותפים שהכי יכולים להתאים לך – גיל, מגדר, הרגלים ועוד.',
       });
-      for (const q of part2Questions) out.push({ type: 'question', key: q.key, partNumber: 2, question: q });
+      for (const q of partnerQuestions) out.push({ type: 'question', key: q.key, partNumber: 2, question: q });
     }
-    if (part3Questions.length) {
+    if (apartmentQuestions.length) {
       out.push({
         type: 'section',
-        key: '__section_partners',
         partNumber: 3,
-        title: 'השותפים שאני מחפש/ת',
-        subtitle: 'ספרו לנו מי השותפים שהכי יכולים להתאים לכם – כדי שנוכל לדייק את ההתאמה.',
+        key: '__section_apartment',
+        title: 'על הדירה',
+        subtitle: 'בוא/י נבין מה חשוב לך בדירה – תקציב, עיר, שכונה, תאריך כניסה ועוד.',
       });
-      for (const q of part3Questions) out.push({ type: 'question', key: q.key, partNumber: 3, question: q });
+      for (const q of apartmentQuestions) out.push({ type: 'question', key: q.key, partNumber: 3, question: q });
     }
 
     return out;
@@ -1099,18 +1390,47 @@ function PartCarouselPagination({
     return null;
   }, [activeItem, clampedIndex, items]);
 
+  // IMPORTANT:
+  // Some questions show a default UI selection (e.g. sliders) even when the value is not yet stored in `state`.
+  // This can block "Next" because `isQuestionAnswered` checks the stored state, not the rendered default.
+  // So when entering such questions, we persist their defaults once (without overriding real user choices).
+  const activeRenderedQuestionKey = useMemo(() => {
+    return activeItem?.type === 'question' ? activeItem.question.key : null;
+  }, [activeItem]);
+
+  useEffect(() => {
+    if (loading) return;
+    if (!activeRenderedQuestionKey) return;
+
+    setState((prev) => {
+      let next: SurveyState | null = null;
+
+      // No defaults for cleanliness dropdown; require an explicit choice.
+
+      // No defaults for roommates dropdown; require an explicit choice.
+
+      return next ?? prev;
+    });
+  }, [activeRenderedQuestionKey, loading]);
+
   const activeQuestionNumber = useMemo(() => {
     if (!activeQuestionKey) return 0;
     const idx = questionIndexByKey.get(activeQuestionKey);
     return typeof idx === 'number' ? idx + 1 : 0;
   }, [activeQuestionKey, questionIndexByKey]);
 
+  const answeredQuestionsCount = useMemo(() => {
+    return questions.reduce((count, q) => count + (isQuestionAnswered(q.key, state) ? 1 : 0), 0);
+  }, [questions, state]);
+
   const progressPercent = useMemo(() => {
     if (!totalQuestions) return 0;
-    // "Reached" semantics: question 1 => 0%, then ramps up; final completion handled on submit.
-    const reached = Math.max(0, Math.min(totalQuestions, (activeQuestionNumber || 1) - 1));
-    return Math.round((reached / totalQuestions) * 100);
-  }, [activeQuestionNumber, totalQuestions]);
+    // Progress should reflect how many questions are answered, not where the user is located in the flow.
+    // If the survey is marked completed (e.g. returning in edit mode), always show 100%.
+    if (state.is_completed) return 100;
+    const answered = Math.max(0, Math.min(totalQuestions, answeredQuestionsCount));
+    return Math.round((answered / totalQuestions) * 100);
+  }, [answeredQuestionsCount, state.is_completed, totalQuestions]);
 
   const progressRingSize = useMemo(() => {
     // Bigger, hero-like ring (similar to the reference). Clamp for small/large screens.
@@ -1149,18 +1469,127 @@ function PartCarouselPagination({
   // Track the user's current question so "exit & save" can resume next time.
   useEffect(() => {
     latestStepKeyRef.current = activeQuestionKey ?? null;
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/1e8b170c-0b87-47bb-bc4f-bb72ea5d43b8', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sessionId: 'debug-session',
+        runId: __debugRunId,
+        hypothesisId: 'H3',
+        location: 'app/(tabs)/onboarding/survey.tsx:latestStepKeyRef',
+        message: 'activeQuestionKey changed',
+        data: {
+          activeQuestionKey: activeQuestionKey ?? null,
+          isEditModeRequested,
+          isEditMode,
+          editSelectedPart,
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
   }, [activeQuestionKey]);
 
   // Resume draft at the last seen question (once per screen mount).
   useEffect(() => {
     if (loading) return;
-    if (isEditMode) return;
     if (didResumeRef.current) return;
     const key = resumeStepKey;
     didResumeRef.current = true;
     if (!key) return;
-    const idx = items.findIndex((it) => it.type === 'question' && it.question.key === key);
-    if (idx >= 0) setCurrentStep(idx);
+
+    // If we're entering via edit mode and we have a draft key, jump directly into that part.
+    if (isEditModeRequested) {
+      const k = String(key);
+      const part: 1 | 2 | 3 | null = (PART_1_KEYS as readonly string[]).includes(k)
+        ? 1
+        : (PART_2_KEYS as readonly string[]).includes(k)
+          ? 2
+          : (PART_3_KEYS as readonly string[]).includes(k)
+            ? 3
+            : null;
+      if (part) setEditSelectedPart(part);
+    }
+
+    const directIdx = items.findIndex((it) => it.type === 'question' && it.question.key === key);
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/1e8b170c-0b87-47bb-bc4f-bb72ea5d43b8', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sessionId: 'debug-session',
+        runId: __debugRunId,
+        hypothesisId: 'H4',
+        location: 'app/(tabs)/onboarding/survey.tsx:resumeEffect',
+        message: 'resume attempt',
+        data: {
+          resumeStepKey: key,
+          directIdx,
+          totalItems: items.length,
+          isEditModeRequested,
+          isEditMode,
+          editSelectedPart,
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
+    if (directIdx >= 0) {
+      setCurrentStep(directIdx);
+      return;
+    }
+
+    // Fallback: draft key might refer to a question that is currently hidden (isVisible=false).
+    // Try to resume to the nearest visible question in the same part (forward preference).
+    const pickNearestVisible = (orderedKeys: readonly string[]) => {
+      const pos = orderedKeys.indexOf(key);
+      const visibleKeySet = questionIndexByKey; // Map<key, visibleIndex>
+      const findItemIdxByQuestionKey = (k: string) =>
+        items.findIndex((it) => it.type === 'question' && it.question.key === k);
+
+      if (pos >= 0) {
+        for (let i = pos; i < orderedKeys.length; i++) {
+          const candidate = orderedKeys[i];
+          if (visibleKeySet.has(candidate)) {
+            const idx = findItemIdxByQuestionKey(candidate);
+            if (idx >= 0) return idx;
+          }
+        }
+        for (let i = pos - 1; i >= 0; i--) {
+          const candidate = orderedKeys[i];
+          if (visibleKeySet.has(candidate)) {
+            const idx = findItemIdxByQuestionKey(candidate);
+            if (idx >= 0) return idx;
+          }
+        }
+      }
+
+      for (let i = 0; i < orderedKeys.length; i++) {
+        const candidate = orderedKeys[i];
+        if (visibleKeySet.has(candidate)) {
+          const idx = findItemIdxByQuestionKey(candidate);
+          if (idx >= 0) return idx;
+        }
+      }
+      return null;
+    };
+
+    const p1 = pickNearestVisible(PART_1_KEYS as any);
+    if (p1 != null) {
+      setCurrentStep(p1);
+      return;
+    }
+    const p2 = pickNearestVisible(PART_2_KEYS as any);
+    if (p2 != null) {
+      setCurrentStep(p2);
+      return;
+    }
+    const p3 = pickNearestVisible(PART_3_KEYS as any);
+    if (p3 != null) {
+      setCurrentStep(p3);
+      return;
+    }
   }, [loading, resumeStepKey, items]);
 
   const goToStep = (nextStep: number) => {
@@ -1210,6 +1639,12 @@ function PartCarouselPagination({
           : null,
       });
       await upsertUserSurvey(payload);
+      // Clear local draft pointer on completion.
+      try {
+        await AsyncStorage.removeItem(draftStepStorageKey(user.id));
+      } catch {
+        // ignore
+      }
       Alert.alert('נשמר', 'השאלון נשמר בהצלחה');
       router.back();
     } catch (e: any) {
@@ -1228,20 +1663,74 @@ function PartCarouselPagination({
 
   const saveDraft = async (): Promise<void> => {
     if (!user?.id) return;
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/1e8b170c-0b87-47bb-bc4f-bb72ea5d43b8', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sessionId: 'debug-session',
+        runId: __debugRunId,
+        hypothesisId: 'H2',
+        location: 'app/(tabs)/onboarding/survey.tsx:saveDraft',
+        message: 'saveDraft called',
+        data: {
+          userId: user.id,
+          latestStepKeyRef: latestStepKeyRef.current,
+          resumeStepKey,
+          currentStep,
+          isEditModeRequested,
+          isEditMode,
+          editSelectedPart,
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
     const payload = normalizePayload(user.id, latestStateRef.current, {
       isCompleted: false,
       draftStepKey: latestStepKeyRef.current,
       coerceBooleans: false,
     });
     await upsertUserSurvey(payload);
+    // Also persist locally so resume works even if the server doesn't have draft_step_key column.
+    try {
+      const key = latestStepKeyRef.current;
+      if (key) await AsyncStorage.setItem(draftStepStorageKey(user.id), key);
+    } catch {
+      // ignore
+    }
   };
 
   const saveEdit = async (): Promise<void> => {
     if (!user?.id) return;
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/1e8b170c-0b87-47bb-bc4f-bb72ea5d43b8', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sessionId: 'debug-session',
+        runId: __debugRunId,
+        hypothesisId: 'H2',
+        location: 'app/(tabs)/onboarding/survey.tsx:saveEdit',
+        message: 'saveEdit called',
+        data: {
+          userId: user.id,
+          latestStepKeyRef: latestStepKeyRef.current,
+          resumeStepKey,
+          currentStep,
+          isEditModeRequested,
+          isEditMode,
+          editSelectedPart,
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
     // In edit mode we keep is_completed=true but DO NOT coerce missing booleans to false.
     const payload = normalizePayload(user.id, latestStateRef.current, {
       isCompleted: true,
-      draftStepKey: null,
+      // Save the last question key so we can resume the edit session later.
+      draftStepKey: latestStepKeyRef.current,
       coerceBooleans: false,
     });
     await upsertUserSurvey(payload);
@@ -1274,7 +1763,7 @@ function PartCarouselPagination({
       // Prevent infinite loop when we dispatch the saved action
       if (exitingRef.current) return;
       // If we're already saving, let the navigation proceed
-      if (saving) return;
+      if (savingRef.current) return;
 
       // We want to save draft before leaving
       e.preventDefault();
@@ -1365,7 +1854,7 @@ function PartCarouselPagination({
                   width: popupCardWidth,
                   maxHeight: cardMaxHeight,
                   // Prevent collapse on section cards (no header/scroll measuring).
-                  minHeight: 200,
+                  ...(isEditMode && !editSelectedPart ? { minHeight: 200 } : activeItem?.type !== 'question' ? { minHeight: 200 } : {}),
                 },
               ]}
             >
@@ -1386,18 +1875,18 @@ function PartCarouselPagination({
                   {[
                     {
                       partNumber: 1 as const,
-                      title: 'קצת עליי',
+                      title: 'על עצמי',
                       subtitle: 'עריכת שאלות עלייך וההרגלים שלך.',
                     },
                     {
                       partNumber: 2 as const,
-                      title: 'הדירה שאני מחפש/ת',
-                      subtitle: 'עריכת העדפות דירה – תקציב, עיר, כניסה ועוד.',
+                      title: 'על השותפ/ה',
+                      subtitle: 'עריכת העדפות השותפים – גיל, מגדר ועוד.',
                     },
                     {
                       partNumber: 3 as const,
-                      title: 'השותפים שאני מחפש/ת',
-                      subtitle: 'עריכת העדפות השותפים – גיל, מגדר ועוד.',
+                      title: 'על הדירה',
+                      subtitle: 'עריכת העדפות דירה – תקציב, עיר, כניסה ועוד.',
                     },
                   ].map((p) => (
                     <TouchableOpacity
@@ -1407,12 +1896,26 @@ function PartCarouselPagination({
                       onPress={() => {
                         // Snapshot current saved state so we can discard changes for this edit session.
                         editSnapshotRef.current = JSON.parse(JSON.stringify(state || {})) as SurveyState;
-                        const firstIdx = items.findIndex(
-                          (it) => it.type === 'question' && it.partNumber === p.partNumber
-                        );
-                        if (firstIdx >= 0) {
+                        const firstIdx = items.findIndex((it) => it.type === 'question' && it.partNumber === p.partNumber);
+
+                        // If we have a stored draft_step_key (from server/local) and it belongs to this part,
+                        // resume from that question instead of starting the part over.
+                        const draftKey = (state as any)?.draft_step_key as string | null | undefined;
+                        const belongsToPart =
+                          p.partNumber === 1
+                            ? !!draftKey && (PART_1_KEYS as readonly string[]).includes(draftKey)
+                            : p.partNumber === 2
+                              ? !!draftKey && (PART_2_KEYS as readonly string[]).includes(draftKey)
+                              : !!draftKey && (PART_3_KEYS as readonly string[]).includes(draftKey);
+                        const resumeIdx =
+                          belongsToPart && draftKey
+                            ? items.findIndex((it) => it.type === 'question' && it.question.key === draftKey)
+                            : -1;
+
+                        const targetIdx = resumeIdx >= 0 ? resumeIdx : firstIdx;
+                        if (targetIdx >= 0) {
                           setEditSelectedPart(p.partNumber);
-                          setCurrentStep(firstIdx);
+                          setCurrentStep(targetIdx);
                         }
                       }}
                     >
@@ -1446,6 +1949,9 @@ function PartCarouselPagination({
                     {!!activeItem.question.subtitle && (
                       <Text style={styles.popupSubtitle}>{activeItem.question.subtitle}</Text>
                     )}
+                    {!!activeItem.question.explanation && (
+                      <Text style={styles.popupExplanation}>{activeItem.question.explanation}</Text>
+                    )}
                   </Animated.View>
 
                   {activeItem.question.key === 'cleanliness' ||
@@ -1453,12 +1959,10 @@ function PartCarouselPagination({
                   activeItem.question.key === 'floor' ||
                   activeItem.question.key === 'sublet_period' ||
                   activeItem.question.key === 'move_in_month' ||
-                  activeItem.question.key === 'roommates_min' ||
-                  activeItem.question.key === 'roommates_max' ||
-                  activeItem.question.key === 'age_min' ||
-                  activeItem.question.key === 'age_max' ||
+                  activeItem.question.key === 'roommates_range' ||
+                  activeItem.question.key === 'age_range' ||
                   activeItem.question.key === 'cooking' ||
-                  activeItem.question.key === 'home_vibe' ? (
+                  activeItem.question.key === 'home_lifestyle' ? (
                     // Render without ScrollView so horizontal pan gestures are never stolen.
                     <View style={[styles.popupBody, { maxHeight: bodyMaxHeight }]}>
                       <View style={styles.questionContentWrap}>{activeItem.question.render?.()}</View>
@@ -1674,48 +2178,52 @@ function PartCarouselPagination({
         anchor="bottom"
         bottomOffset={120}
       >
-        {Platform.OS === 'android' ? (
-          <DateTimePicker
-            value={monthPickerTempDate}
-            mode="date"
-            display="default"
-            onChange={(event: any, selected?: Date) => {
-              const type = event?.type;
-              if (type === 'dismissed') {
-                setMonthPickerOpen(false);
-                return;
-              }
-              if (type === 'set') {
-                const picked = selected ?? monthPickerTempDate;
-                commitMonthPicker(picked);
-              }
-            }}
-          />
-        ) : (
-          <>
-            <DateTimePicker
-              value={monthPickerPendingDate ?? monthPickerTempDate}
-              mode="date"
-              display="spinner"
-              locale="he-IL"
-              onChange={(_, selected) => {
-                if (!selected) return;
-                setMonthPickerPendingDate(new Date(selected.getFullYear(), selected.getMonth(), 1));
-              }}
-            />
-            <View style={{ flexDirection: 'row-reverse', gap: 10, justifyContent: 'space-between' }}>
-              <TouchableOpacity style={[styles.pickerCancel, { marginTop: 0 }]} onPress={clearMonthPicker}>
-                <Text style={styles.pickerCancelText}>נקה</Text>
-              </TouchableOpacity>
+        <ScrollView
+          style={{ maxHeight: 360 }}
+          contentContainerStyle={{ paddingVertical: 8 }}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="always"
+          nestedScrollEnabled
+        >
+          {buildMonthOptions({
+            baseDate: monthPickerTempDate,
+            monthsBack: monthPickerTarget === 'move_in_month_from' || monthPickerTarget === 'move_in_month_to' ? 0 : 3,
+            monthsForward: 24,
+          }).map((opt) => {
+            const currentValue =
+              monthPickerTarget === 'move_in_month_from'
+                ? ((state as any).move_in_month_from ?? null)
+                : monthPickerTarget === 'move_in_month_to'
+                  ? ((state as any).move_in_month_to ?? null)
+                : monthPickerTarget === 'sublet_month_from'
+                  ? state.sublet_month_from ?? null
+                  : monthPickerTarget === 'sublet_month_to'
+                    ? state.sublet_month_to ?? null
+                    : null;
+            const active = currentValue === opt.value;
+            return (
               <TouchableOpacity
-                style={[styles.primaryBtn, { minWidth: 120 }]}
-                onPress={() => commitMonthPicker(monthPickerPendingDate ?? monthPickerTempDate)}
+                key={`month-${opt.value}`}
+                style={[styles.pickerOption, active ? styles.pickerOptionActive : null]}
+                onPress={() => commitMonthPickerYYYYMM(opt.value)}
+                activeOpacity={0.85}
               >
-                <Text style={styles.primaryBtnText}>אישור</Text>
+                <Text style={[styles.pickerOptionText, active ? styles.pickerOptionTextActive : null]}>{opt.label}</Text>
               </TouchableOpacity>
-            </View>
-          </>
-        )}
+            );
+          })}
+        </ScrollView>
+        <View style={{ flexDirection: 'row-reverse', gap: 10, justifyContent: 'space-between', marginTop: 8 }}>
+          <TouchableOpacity style={[styles.pickerCancel, { marginTop: 0, flex: 1 }]} onPress={clearMonthPicker}>
+            <Text style={styles.pickerCancelText}>נקה</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.primaryBtn, { minWidth: 120, flex: 1 }]}
+            onPress={() => setMonthPickerOpen(false)}
+          >
+            <Text style={styles.primaryBtnText}>סגור</Text>
+          </TouchableOpacity>
+        </View>
       </KeyFabPanel>
 
       {/* Shared list picker panel (outside the clipped card) */}
@@ -1822,42 +2330,41 @@ function normalizePayload(
   s: SurveyState,
   opts: { isCompleted: boolean; draftStepKey: string | null; coerceBooleans?: boolean }
 ) {
+  const preferredCities = normalizeCityList((s as any).preferred_cities);
   const coerce = typeof opts.coerceBooleans === 'boolean' ? opts.coerceBooleans : opts.isCompleted; // default legacy behavior
   const payload: any = {
     user_id: userId,
     is_completed: opts.isCompleted,
-    draft_step_key: opts.isCompleted ? null : (opts.draftStepKey ?? null),
+    // Allow saving a draft pointer even when is_completed=true (useful for edit sessions that want to resume).
+    // Callers should pass null explicitly when they want to clear it (e.g. final submit).
+    draft_step_key: opts.draftStepKey ?? null,
     is_sublet: coerce ? (s.is_sublet ?? false) : (s.is_sublet ?? null),
     occupation: s.occupation ?? null,
     student_year: s.student_year ?? null,
-    works_from_home:
-      s.occupation === 'עובד'
-        ? coerce
-          ? (s.works_from_home ?? false)
-          : (s.works_from_home ?? null)
-        : null,
     keeps_kosher: coerce ? (s.keeps_kosher ?? false) : (s.keeps_kosher ?? null),
     is_shomer_shabbat: coerce ? (s.is_shomer_shabbat ?? false) : (s.is_shomer_shabbat ?? null),
     diet_type: s.diet_type ?? null,
     is_smoker: coerce ? (s.is_smoker ?? false) : (s.is_smoker ?? null),
     relationship_status: s.relationship_status ?? null,
     has_pet: coerce ? (s.has_pet ?? false) : (s.has_pet ?? null),
-    lifestyle: s.lifestyle ?? null,
+    home_lifestyle: s.home_lifestyle ?? null,
     cleanliness_importance: s.cleanliness_importance ?? null,
     cleaning_frequency: s.cleaning_frequency ?? null,
     hosting_preference: s.hosting_preference ?? null,
     cooking_style: s.cooking_style ?? null,
-    home_vibe: s.home_vibe ?? null,
+    price_min: (s as any).price_min ?? null,
+    price_max: (s as any).price_max ?? null,
+    // keep legacy field for older rows/environments
     price_range: s.price_range ?? null,
-    bills_included: s.bills_included ?? null,
-    preferred_city: s.preferred_city ?? null,
+    // Multi-city
+    preferred_cities: preferredCities.length ? preferredCities : null,
     preferred_neighborhoods:
       s.preferred_neighborhoods && s.preferred_neighborhoods.length > 0 ? s.preferred_neighborhoods : null,
     floor_preference: s.floor_preference ?? null,
     has_balcony: s.has_balcony ?? null,
-    has_elevator: s.has_elevator ?? null,
-    wants_master_room: s.wants_master_room ?? null,
-    move_in_month: s.move_in_month ?? null,
+    move_in_month_from: (s as any).move_in_month_from ?? null,
+    move_in_month_to: (s as any).move_in_month_to ?? null,
+    move_in_is_flexible: (s as any).move_in_is_flexible ?? false,
     preferred_roommates_min: (s as any).preferred_roommates_min ?? null,
     preferred_roommates_max: (s as any).preferred_roommates_max ?? null,
     preferred_roommates:
@@ -1865,8 +2372,8 @@ function normalizePayload(
       (s as any).preferred_roommates_min ??
       s.preferred_roommates ??
       null,
-    pets_allowed: coerce ? (s.pets_allowed ?? false) : (s.pets_allowed ?? null),
-    with_broker: s.with_broker ?? null,
+    // Nullable column; keep null when unanswered so we don't accidentally force "false" after removing the question.
+    pets_allowed: s.pets_allowed ?? null,
     sublet_month_from: s.is_sublet ? (s.sublet_month_from ?? null) : null,
     sublet_month_to: s.is_sublet ? (s.sublet_month_to ?? null) : null,
     preferred_age_min:
@@ -1926,6 +2433,32 @@ function generateUpcomingMonths(count = 12): string[] {
   return list;
 }
 
+function addMonths(date: Date, deltaMonths: number): Date {
+  return new Date(date.getFullYear(), date.getMonth() + deltaMonths, 1);
+}
+
+function buildMonthOptions({
+  baseDate,
+  monthsBack = 3,
+  monthsForward = 24,
+}: {
+  baseDate: Date;
+  monthsBack?: number;
+  monthsForward?: number;
+}): { label: string; value: string }[] {
+  const start = addMonths(baseDate, -Math.max(0, monthsBack));
+  const total = Math.max(1, monthsBack + monthsForward + 1);
+  const out: { label: string; value: string }[] = [];
+  for (let i = 0; i < total; i++) {
+    const d = addMonths(start, i);
+    out.push({
+      label: `${HEB_MONTH_NAMES[d.getMonth()]} ${d.getFullYear()}`,
+      value: formatDateToYYYYMM(d),
+    });
+  }
+  return out;
+}
+
 function parseYYYYMM(value?: string | null): Date | null {
   if (!value) return null;
   const m = /^(\d{4})-(\d{2})$/.exec(value.trim());
@@ -1960,6 +2493,35 @@ function generateNumberRange(start: number, end: number): string[] {
 function hydrateSurvey(existing: UserSurveyResponse): SurveyState {
   const next: SurveyState = { ...existing };
 
+  // Cities: ensure multi-city field is hydrated.
+  const hydratedCities = normalizeCityList((existing as any).preferred_cities);
+  if (hydratedCities.length) {
+    (next as any).preferred_cities = hydratedCities;
+  }
+
+  // Budget: if only legacy price_range exists, derive a range.
+  if ((existing as any).price_min == null && (existing as any).price_max == null && typeof (existing as any).price_range === 'number') {
+    const v = (existing as any).price_range;
+    if (Number.isFinite(v) && v > 0) {
+      (next as any).price_min = v;
+      (next as any).price_max = v + 400;
+    }
+  }
+
+  // Move-in: if only legacy move_in_month exists, derive exact range (non-flexible).
+  if (
+    (existing as any).move_in_month_from == null &&
+    (existing as any).move_in_month_to == null &&
+    typeof (existing as any).move_in_month === 'string'
+  ) {
+    const v = (existing as any).move_in_month;
+    if (v) {
+      (next as any).move_in_month_from = v;
+      (next as any).move_in_month_to = v;
+      (next as any).move_in_is_flexible = false;
+    }
+  }
+
   if (existing.occupation) {
     if (existing.occupation.startsWith('סטודנט')) {
       next.occupation = 'סטודנט';
@@ -1974,13 +2536,9 @@ function hydrateSurvey(existing: UserSurveyResponse): SurveyState {
       }
     } else if (existing.occupation === 'עובד - מהבית') {
       next.occupation = 'עובד';
-      next.works_from_home = true;
     }
   }
 
-  if (existing.works_from_home !== undefined) {
-    next.works_from_home = existing.works_from_home;
-  }
   if (existing.keeps_kosher !== undefined) {
     next.keeps_kosher = existing.keeps_kosher;
   } else if (existing.diet_type === 'כשר') {
@@ -1989,6 +2547,14 @@ function hydrateSurvey(existing: UserSurveyResponse): SurveyState {
   }
   if (existing.preferred_neighborhoods) {
     next.preferred_neighborhoods = [...existing.preferred_neighborhoods];
+  }
+
+  // Floor preference: migrate legacy values (נמוכה/ביניים/גבוהה) to "בניין"
+  if (typeof (next as any).floor_preference === 'string' && (next as any).floor_preference) {
+    const v = String((next as any).floor_preference).trim();
+    if (v && !floorOptions.includes(v)) {
+      (next as any).floor_preference = v === 'קרקע' ? 'קרקע' : v === 'לא משנה לי' ? 'לא משנה לי' : 'בניין';
+    }
   }
 
   return next;
@@ -2135,27 +2701,29 @@ function ToggleRow({
   showYesIcon = true,
 }: {
   label?: string;
-  value: boolean;
+  value: boolean | undefined;
   onToggle: (v: boolean) => void;
   centerOptions?: boolean;
   showYesIcon?: boolean;
 }) {
+  const isYes = value === true;
+  const isNo = value === false;
   return (
     <View style={[styles.toggleRow, centerOptions ? styles.toggleRowCentered : null]}>
       {!!label && <Text style={styles.label}>{label}</Text>}
       <View style={[styles.toggleOptions, centerOptions ? styles.toggleOptionsCentered : null]}>
         <TouchableOpacity
-          style={[styles.toggleBtn, value ? styles.toggleActive : null]}
+          style={[styles.toggleBtn, isYes ? styles.toggleActive : null]}
           onPress={() => onToggle(true)}
         >
-          {showYesIcon ? <Check size={16} color={value ? '#0F0F14' : '#9DA4AE'} /> : null}
-          <Text style={[styles.toggleText, value ? styles.toggleTextActive : null]}>כן</Text>
+          {showYesIcon ? <Check size={16} color={isYes ? '#0F0F14' : '#9DA4AE'} /> : null}
+          <Text style={[styles.toggleText, isYes ? styles.toggleTextActive : null]}>כן</Text>
         </TouchableOpacity>
         <TouchableOpacity
-          style={[styles.toggleBtn, !value ? styles.toggleActive : null]}
+          style={[styles.toggleBtn, isNo ? styles.toggleActive : null]}
           onPress={() => onToggle(false)}
         >
-          <Text style={[styles.toggleText, !value ? styles.toggleTextActive : null]}>לא</Text>
+          <Text style={[styles.toggleText, isNo ? styles.toggleTextActive : null]}>לא</Text>
         </TouchableOpacity>
       </View>
     </View>
@@ -2383,6 +2951,16 @@ const ProgressRingLine = memo(function ProgressRingLine({
   const step = 360 / PROGRESS_RING_LINES;
 
   const stylez = useAnimatedStyle(() => {
+    const p = progress.value;
+    // At ~100% the last couple of segments never fully reach the "white" stop in the interpolation
+    // (because their stop is beyond 100). Force a true full ring at the end.
+    if (p >= 99.6) {
+      return {
+        transform: [{ translateY: 0 }],
+        backgroundColor: '#FFFFFF',
+      };
+    }
+
     const inputRange = [
       ((index - 2) * 100) / PROGRESS_RING_LINES,
       (index * 100) / PROGRESS_RING_LINES,
@@ -2392,14 +2970,16 @@ const ProgressRingLine = memo(function ProgressRingLine({
     return {
       transform: [
         {
-          translateY: interpolate(progress.value, inputRange, [size * 0.06, size * 0.06, 0], Extrapolation.CLAMP),
+          translateY: interpolate(p, inputRange, [size * 0.06, size * 0.06, 0], Extrapolation.CLAMP),
         },
       ],
-      backgroundColor: interpolateColor(progress.value, inputRange, [
-        'rgba(255,255,255,0.18)',
-        'rgba(255,255,255,0.18)',
-        '#FFFFFF',
-      ]),
+      backgroundColor: interpolateColor(
+        p,
+        inputRange,
+        ['rgba(255,255,255,0.18)', 'rgba(255,255,255,0.18)', '#FFFFFF'],
+        'RGB',
+        Extrapolation.CLAMP
+      ),
     };
   });
 
@@ -2475,6 +3055,10 @@ function BalloonSlider5({ value, onChange }: { value: number; onChange: (v: numb
   const BALLOON_W = 44;
   const trackWidth = useSharedValue(1);
   const x = useSharedValue(0);
+  const isInteractingRef = useRef(false);
+  const setIsInteracting = (v: boolean) => {
+    isInteractingRef.current = v;
+  };
 
   // RTL slider: 1 is on the RIGHT, 5 is on the LEFT.
   // Derived 1..5 value from position.
@@ -2495,6 +3079,8 @@ function BalloonSlider5({ value, onChange }: { value: number; onChange: (v: numb
 
   // Keep slider in sync when value changes externally.
   useEffect(() => {
+    // Avoid fighting the gesture while dragging (causes jitter/stuck feeling on web).
+    if (isInteractingRef.current) return;
     const vv = clamp(Math.round(value || 1), 1, 5);
     const w = trackWidth.value;
     if (w > 1) {
@@ -2511,6 +3097,9 @@ function BalloonSlider5({ value, onChange }: { value: number; onChange: (v: numb
     .failOffsetY([-12, 12])
     .shouldCancelWhenOutside(false)
     .hitSlop({ left: 25, right: 25, top: 25, bottom: 25 })
+    .onBegin(() => {
+      runOnJS(setIsInteracting)(true);
+    })
     .onChange((ev) => {
       const w = trackWidth.value;
       if (w <= 1) return;
@@ -2522,6 +3111,9 @@ function BalloonSlider5({ value, onChange }: { value: number; onChange: (v: numb
       const step = w / 4;
       const snapped = Math.round(x.value / step) * step;
       x.value = withSpring(snapped, { damping: 16, stiffness: 180 });
+    })
+    .onFinalize(() => {
+      runOnJS(setIsInteracting)(false);
     });
 
   const progressStyle = useAnimatedStyle(() => {
@@ -2536,7 +3128,8 @@ function BalloonSlider5({ value, onChange }: { value: number; onChange: (v: numb
     };
   });
 
-  const balloonX = useDerivedValue(() => withSpring(x.value));
+  // Follow finger directly while dragging (spring here causes jitter).
+  const balloonX = useDerivedValue(() => x.value);
   const balloonStyle = useAnimatedStyle(() => {
     return {
       transform: [{ translateX: balloonX.value - BALLOON_W / 2 }],
@@ -2560,8 +3153,13 @@ function BalloonSlider5({ value, onChange }: { value: number; onChange: (v: numb
           onLayout={(e) => {
             const w = Math.max(1, e.nativeEvent.layout.width);
             trackWidth.value = w;
-            const vv = clamp(Math.round(value || 1), 1, 5);
-            x.value = ((5 - vv) / 4) * w;
+            // Don't reset position mid-drag (layout can happen during rerenders on web)
+            if (!isInteractingRef.current) {
+              const vv = clamp(Math.round(value || 1), 1, 5);
+              x.value = ((5 - vv) / 4) * w;
+            } else {
+              x.value = clamp(x.value, 0, w);
+            }
           }}
         >
           <Animated.View style={[styles.sliderProgress, progressStyle]} />
@@ -2871,15 +3469,23 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 18,
   },
+  popupExplanation: {
+    marginTop: 4,
+    color: '#9CA3AF',
+    fontSize: 11,
+    fontWeight: '500',
+    textAlign: 'center',
+    lineHeight: 16,
+  },
   popupBody: {
-    marginTop: 8,
+    marginTop: 4,
   },
   popupBodyContent: {
     // Give the last row of chips some breathing room so taps near the bottom edge don't get cancelled.
-    paddingBottom: 44,
+    paddingBottom: 22,
   },
   questionContentWrap: {
-    paddingTop: 4,
+    paddingTop: 0,
   },
   sheet: {
     backgroundColor: 'rgba(255,255,255,0.96)',

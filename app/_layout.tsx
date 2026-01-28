@@ -160,7 +160,8 @@ export default function RootLayout() {
         </Stack>
         {/* Global white top bar: notifications (left), Homie (center), requests (right) */}
         {shouldShowGlobalTopBar && <GlobalTopBar backgroundColor={globalTopBarBg} />}
-        <StatusBar style="auto" />
+        {/* White Safe Area at the top => use dark status bar content (black text/icons). */}
+        <StatusBar style="dark" />
       </AppAlertProvider>
     </GestureHandlerRootView>
   );

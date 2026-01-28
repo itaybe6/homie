@@ -18,6 +18,7 @@ import { useAuthStore } from '@/stores/authStore';
 import { User } from '@/types/database';
 import { computeGroupAwareLabel } from '@/lib/group';
 import { insertNotificationOnce } from '@/lib/notifications';
+import { alpha, colors } from '@/lib/theme';
 
 type StatusFilterValue = 'ALL' | 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED' | 'NOT_RELEVANT';
 
@@ -48,6 +49,7 @@ export default function GroupRequestsScreen() {
   const [groupMembersByGroupId, setGroupMembersByGroupId] = useState<Record<string, string[]>>({});
 
   const DEFAULT_AVATAR = 'https://cdn-icons-png.flaticon.com/512/847/847969.png';
+  const MAX_GROUP_MEMBERS = 4;
 
   const mapGroupStatus = (status: string | null | undefined): UnifiedItem['status'] => {
     const s = (status || '').toUpperCase();
@@ -208,13 +210,7 @@ export default function GroupRequestsScreen() {
       const inviterId = (invite as any).inviter_id as string;
       const inviteeId = (invite as any).invitee_id as string;
 
-      // 2) Accept the invite
-      await supabase
-        .from('profile_group_invites')
-        .update({ status: 'ACCEPTED', responded_at: new Date().toISOString() })
-        .eq('id', item.id);
-      
-      // 3) Determine ACTIVE group ids
+      // 2) Determine ACTIVE group ids (before accepting, so we can enforce capacity)
       const [{ data: meGroupRow }, { data: inviterGroupRow }] = await Promise.all([
         supabase
           .from('profile_group_members')
@@ -256,7 +252,40 @@ export default function GroupRequestsScreen() {
         inviterGroupId = undefined;
       }
 
-      // 4) Execute scenario
+      // 3) Capacity guard (max 4 members in the resulting shared profile)
+      try {
+        const getMembers = async (gid?: string) => {
+          if (!gid) return [];
+          const { data } = await supabase
+            .from('profile_group_members')
+            .select('user_id')
+            .eq('group_id', gid)
+            .eq('status', 'ACTIVE');
+          return (data || []).map((r: any) => String(r?.user_id || '').trim()).filter(Boolean);
+        };
+        const memberSet = new Set<string>();
+        // Always include the two "parties" of the invite and the approver (covers "invite to groupmate" cases).
+        [inviterId, inviteeId, user.id].forEach((id) => id && memberSet.add(String(id)));
+        (await getMembers(approverGroupId)).forEach((id) => memberSet.add(id));
+        (await getMembers(inviterGroupId)).forEach((id) => memberSet.add(id));
+        if (memberSet.size > MAX_GROUP_MEMBERS) {
+          Alert.alert(
+            'לא ניתן לאשר',
+            `אישור הבקשה ייצור פרופיל משותף עם ${memberSet.size} משתמשים. המקסימום הוא ${MAX_GROUP_MEMBERS}.`
+          );
+          return;
+        }
+      } catch {
+        // If capacity check fails (RLS/network), fall back to previous behavior.
+      }
+
+      // 4) Accept the invite
+      await supabase
+        .from('profile_group_invites')
+        .update({ status: 'ACCEPTED', responded_at: new Date().toISOString() })
+        .eq('id', item.id);
+      
+      // 5) Execute scenario
       let finalGroupId: string | undefined;
       if (approverGroupId && !inviterGroupId) {
         const insertRes = await supabase
@@ -454,7 +483,7 @@ export default function GroupRequestsScreen() {
   const StatusPill = ({ status }: { status: UnifiedItem['status'] }) => {
     const config: Record<UnifiedItem['status'], { bg: string; color: string; text: string }> = {
       PENDING: { bg: '#363649', color: '#E5E7EB', text: 'ממתין' },
-      APPROVED: { bg: 'rgba(34,197,94,0.18)', color: '#22C55E', text: 'אושר' },
+      APPROVED: { bg: alpha(colors.success, 0.18), color: colors.success, text: 'אושר' },
       REJECTED: { bg: 'rgba(248,113,113,0.18)', color: '#F87171', text: 'נדחה' },
       CANCELLED: { bg: 'rgba(148,163,184,0.18)', color: '#94A3B8', text: 'בוטל' },
       NOT_RELEVANT: { bg: 'rgba(148,163,184,0.18)', color: '#94A3B8', text: 'לא רלוונטי' },
@@ -900,13 +929,13 @@ const styles = StyleSheet.create({
   approveBtn: {
     backgroundColor: 'transparent',
     borderWidth: 1,
-    borderColor: 'rgba(34,197,94,0.6)',
+    borderColor: alpha(colors.success, 0.6),
     paddingHorizontal: 12,
     paddingVertical: 10,
     borderRadius: 10,
   },
   approveBtnText: {
-    color: '#22C55E',
+    color: colors.success,
     fontSize: 14,
     fontWeight: '800',
   },

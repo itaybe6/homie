@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo } from 'react';
-import { StyleProp, StyleSheet, TextStyle, TouchableOpacity, View, ViewStyle } from 'react-native';
+import { Platform, StyleProp, StyleSheet, Text, TextStyle, TouchableOpacity, View, ViewStyle } from 'react-native';
 import Animated, { Easing, useAnimatedProps, useSharedValue, withTiming } from 'react-native-reanimated';
 import Svg, { Circle, G } from 'react-native-svg';
 import { TextInput } from 'react-native';
+import { alpha, colors } from '@/lib/theme';
 
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 const AnimatedTextInput = Animated.createAnimatedComponent(TextInput);
@@ -32,8 +33,8 @@ export default function DonutChart({
   size = 64,
   strokeWidth = 10,
   durationMs = 900,
-  color = '#16A34A',
-  trackColor = 'rgba(22,163,74,0.16)',
+  color = colors.success,
+  trackColor = alpha(colors.success, 0.16),
   textColor,
   style,
   textStyle,
@@ -41,6 +42,7 @@ export default function DonutChart({
   onPress,
   accessibilityLabel,
 }: DonutChartProps) {
+  const isWeb = Platform.OS === 'web';
   const radius = useMemo(() => Math.max(6, (size - strokeWidth) / 2), [size, strokeWidth]);
   const circumference = useMemo(() => 2 * Math.PI * radius, [radius]);
 
@@ -73,6 +75,78 @@ export default function DonutChart({
       defaultValue: label,
     } as any;
   });
+
+  // NOTE: On web, `react-native-reanimated` + `react-native-svg` can crash when Reanimated
+  // tries to apply array styles via `setNativeProps` on SVG shapes.
+  // We render a non-animated (static) SVG on web to avoid that runtime error.
+  if (isWeb) {
+    const perc = disabled ? 0 : normalized ?? 0;
+    const dashOffset = circumference - (circumference * perc) / 100;
+    const label = disabled ? '--%' : `${perc}%`;
+
+    const webContent = (
+      <View style={[styles.root, { width: size, height: size }, style]}>
+        <Svg
+          height={size}
+          width={size}
+          viewBox={`0 0 ${(radius + strokeWidth) * 2} ${(radius + strokeWidth) * 2}`}
+        >
+          <G rotation="-90" origin={`${radius + strokeWidth}, ${radius + strokeWidth}`}>
+            <Circle
+              cx="50%"
+              cy="50%"
+              r={radius}
+              fill="transparent"
+              stroke={trackColor}
+              strokeWidth={strokeWidth}
+              strokeLinejoin="round"
+            />
+            <Circle
+              cx="50%"
+              cy="50%"
+              r={radius}
+              fill="transparent"
+              stroke={disabled ? '#9CA3AF' : color}
+              strokeWidth={strokeWidth}
+              strokeLinecap="round"
+              strokeDasharray={circumference}
+              strokeDashoffset={dashOffset}
+            />
+          </G>
+        </Svg>
+        <View style={[StyleSheet.absoluteFillObject, styles.center]} pointerEvents="none">
+          <Text
+            style={[
+              styles.text,
+              {
+                width: radius * 2,
+                fontSize: Math.max(12, Math.round(size * 0.26)),
+                color: textColor ?? (disabled ? '#9CA3AF' : color),
+              },
+              textStyle,
+            ]}
+            numberOfLines={1}
+          >
+            {label}
+          </Text>
+        </View>
+      </View>
+    );
+
+    if (!onPress) return webContent;
+
+    return (
+      <TouchableOpacity
+        activeOpacity={0.9}
+        onPress={onPress}
+        disabled={!!disabled}
+        accessibilityRole="button"
+        accessibilityLabel={accessibilityLabel || 'אחוז התאמה'}
+      >
+        {webContent}
+      </TouchableOpacity>
+    );
+  }
 
   const content = (
     <View style={[styles.root, { width: size, height: size }, style]}>

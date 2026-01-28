@@ -4,9 +4,8 @@ import type {
   CleaningFrequency,
   CookingStyle,
   DietType,
-  HomeVibe,
+  HomeLifestyle,
   HostingPreference,
-  Lifestyle,
   PartnerDietPref,
   PartnerPetsPref,
   PartnerShabbatPref,
@@ -77,6 +76,8 @@ function normalizeOccupationValue(value?: string | null): 'student' | 'worker' |
 function normalizeOccupationPreference(value?: string | null): 'student' | 'worker' | 'any' | null {
   const normalized = normalizeKey(value, occupationPrefAliasMap);
   if (normalized) return normalized;
+  // New UI uses "לא סטודנט" instead of "עובד"
+  if (value && value.includes('לא סטודנט')) return 'worker';
   if (value && value.includes('סטודנט')) return 'student';
   if (value && value.includes('עובד')) return 'worker';
   return null;
@@ -106,24 +107,35 @@ export function buildCompatSurvey(
   if (typeof survey?.is_shomer_shabbat === 'boolean') compat.is_shomer_shabbat = survey.is_shomer_shabbat;
   if (typeof survey?.keeps_kosher === 'boolean') compat.keeps_kosher = survey.keeps_kosher;
   if (survey?.diet_type) compat.diet_type = survey.diet_type as DietType;
-  if ((survey as any)?.lifestyle) compat.lifestyle = (survey as any).lifestyle as Lifestyle;
+  if ((survey as any)?.home_lifestyle) compat.home_lifestyle = (survey as any).home_lifestyle as HomeLifestyle;
   if (typeof survey?.cleanliness_importance === 'number') compat.cleanliness_importance = survey.cleanliness_importance;
   if (survey?.cleaning_frequency) compat.cleaning_frequency = survey.cleaning_frequency as CleaningFrequency;
   if (survey?.hosting_preference) compat.hosting_preference = survey.hosting_preference as HostingPreference;
   if (survey?.cooking_style) compat.cooking_style = survey.cooking_style as CookingStyle;
-  if (survey?.home_vibe) compat.home_vibe = survey.home_vibe as HomeVibe;
-  if (survey?.preferred_city) compat.preferred_city = survey.preferred_city;
+  {
+    const cities = Array.isArray((survey as any)?.preferred_cities) ? ((survey as any).preferred_cities as any[]) : [];
+    const primary = cities.length ? String(cities[0] ?? '').trim() : '';
+    if (primary) compat.preferred_city = primary as any;
+  }
   if (Array.isArray((survey as any)?.preferred_neighborhoods)) compat.preferred_neighborhoods = (survey as any).preferred_neighborhoods;
+  if (Number.isFinite((survey as any)?.price_min as number)) compat.price_min = Number((survey as any).price_min);
+  if (Number.isFinite((survey as any)?.price_max as number)) compat.price_max = Number((survey as any).price_max);
   if (Number.isFinite(survey?.price_range as number)) compat.price_range = Number(survey?.price_range);
-  if (typeof survey?.bills_included === 'boolean') compat.bills_included = survey.bills_included;
   if (survey?.floor_preference) compat.floor_preference = survey.floor_preference;
-  if (typeof survey?.has_balcony === 'boolean') compat.has_balcony = survey.has_balcony;
-  if (typeof survey?.has_elevator === 'boolean') compat.has_elevator = survey.has_elevator;
-  if (typeof survey?.wants_master_room === 'boolean') compat.wants_master_room = survey.wants_master_room;
+  // tri-state: true/false/null (null = "לא משנה לי"). If missing -> keep undefined.
+  if (survey && 'has_balcony' in survey) compat.has_balcony = (survey as any).has_balcony;
   if (typeof survey?.pets_allowed === 'boolean') compat.pets_allowed = survey.pets_allowed;
-  if (typeof survey?.with_broker === 'boolean') compat.with_broker = survey.with_broker;
   if (typeof survey?.preferred_roommates === 'number') compat.preferred_roommates = survey.preferred_roommates;
-  if (survey?.move_in_month) compat.move_in_month = survey.move_in_month;
+  if (Number.isFinite((survey as any)?.preferred_roommates_min as number))
+    compat.preferred_roommates_min = Number((survey as any).preferred_roommates_min);
+  if (Number.isFinite((survey as any)?.preferred_roommates_max as number))
+    compat.preferred_roommates_max = Number((survey as any).preferred_roommates_max);
+  if (typeof survey?.student_year === 'number') compat.student_year = survey.student_year;
+  if ((survey as any)?.move_in_month_from) compat.move_in_month_from = (survey as any).move_in_month_from;
+  if ((survey as any)?.move_in_month_to) compat.move_in_month_to = (survey as any).move_in_month_to;
+  if (typeof (survey as any)?.move_in_is_flexible === 'boolean')
+    compat.move_in_is_flexible = (survey as any).move_in_is_flexible;
+  if (survey?.move_in_month) compat.move_in_month = survey.move_in_month; // legacy
   if (typeof (survey as any)?.is_sublet === 'boolean') compat.is_sublet = (survey as any).is_sublet;
   if ((survey as any)?.sublet_month_from) compat.sublet_month_from = (survey as any).sublet_month_from;
   if ((survey as any)?.sublet_month_to) compat.sublet_month_to = (survey as any).sublet_month_to;
@@ -131,7 +143,6 @@ export function buildCompatSurvey(
 
   const occupationValue = normalizeOccupationValue((survey as any)?.occupation);
   if (occupationValue) compat.occupation = occupationValue;
-  if (typeof survey?.works_from_home === 'boolean') compat.works_from_home = survey.works_from_home;
 
   if ((survey as any)?.partner_smoking_preference)
     compat.partner_smoking_preference = (survey as any).partner_smoking_preference as PartnerSmokingPref;

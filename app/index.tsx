@@ -50,7 +50,13 @@ export default function Index() {
   if ((user as any)?.role === 'admin') {
     return <Redirect href="/admin" />;
   }
-  return <Redirect href="/(tabs)/home" />;
+
+  // Owners should land on apartments ("דירות") and not on partners.
+  if ((user as any)?.role === 'owner') {
+    return <Redirect href="/(tabs)/home" />;
+  }
+
+  return <Redirect href="/(tabs)/partners" />;
 }
 
 const styles = StyleSheet.create({

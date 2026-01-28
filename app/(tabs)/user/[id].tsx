@@ -14,8 +14,7 @@ import {
   useWindowDimensions,
   Linking,
 } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useFocusEffect } from '@react-navigation/native';
+import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { User } from '@/types/database';
 import { ArrowLeft, MapPin, UserPlus2, Cigarette, PawPrint, Utensils, Moon, Users, Home, Calendar, User as UserIcon, Building2, Bed, Heart, Briefcase, ClipboardList, Images, X, Instagram } from 'lucide-react-native';
@@ -28,16 +27,16 @@ import Ticker from '@/components/Ticker';
 import { KeyFabPanel } from '@/components/KeyFabPanel';
 import Animated, { FadeIn, FadeOut, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import DonutChart from '@/components/DonutChart';
+import { alpha, colors } from '@/lib/theme';
 import MaskedView from '@react-native-masked-view/masked-view';
 import {
   calculateMatchScore,
   CompatUserSurvey,
   DietType,
-  Lifestyle,
+  HomeLifestyle,
   CleaningFrequency,
   HostingPreference,
   CookingStyle,
-  HomeVibe,
   PartnerSmokingPref,
   PartnerShabbatPref,
   PartnerDietPref,
@@ -109,6 +108,7 @@ function normalizeOccupationValue(value?: string | null): 'student' | 'worker' |
 function normalizeOccupationPreference(value?: string | null): 'student' | 'worker' | 'any' | null {
   const normalized = normalizeKey(value, occupationPrefAliasMap);
   if (normalized) return normalized;
+  if (value && value.includes('לא סטודנט')) return 'worker';
   if (value && value.includes('סטודנט')) return 'student';
   if (value && value.includes('עובד')) return 'worker';
   return null;
@@ -158,32 +158,36 @@ function buildCompatSurvey(
   if (typeof survey?.is_shomer_shabbat === 'boolean') compat.is_shomer_shabbat = survey.is_shomer_shabbat;
   if (typeof survey?.keeps_kosher === 'boolean') compat.keeps_kosher = survey.keeps_kosher;
   if (survey?.diet_type) compat.diet_type = survey.diet_type as DietType;
-  if (survey?.lifestyle) compat.lifestyle = survey.lifestyle as Lifestyle;
+  if ((survey as any)?.home_lifestyle) compat.home_lifestyle = (survey as any).home_lifestyle as HomeLifestyle;
   if (typeof survey?.cleanliness_importance === 'number') compat.cleanliness_importance = survey.cleanliness_importance;
   if (survey?.cleaning_frequency) compat.cleaning_frequency = survey.cleaning_frequency as CleaningFrequency;
   if (survey?.hosting_preference) compat.hosting_preference = survey.hosting_preference as HostingPreference;
   if (survey?.cooking_style) compat.cooking_style = survey.cooking_style as CookingStyle;
-  if (survey?.home_vibe) compat.home_vibe = survey.home_vibe as HomeVibe;
-  if (survey?.preferred_city) compat.preferred_city = survey.preferred_city;
+  {
+    const cities = Array.isArray((survey as any)?.preferred_cities) ? ((survey as any).preferred_cities as any[]) : [];
+    const primary = cities.length ? String(cities[0] ?? '').trim() : '';
+    if (primary) compat.preferred_city = primary as any;
+  }
   if (Array.isArray((survey as any)?.preferred_neighborhoods))
     compat.preferred_neighborhoods = (survey as any).preferred_neighborhoods;
+  if (Number.isFinite((survey as any)?.price_min as number)) compat.price_min = Number((survey as any).price_min);
+  if (Number.isFinite((survey as any)?.price_max as number)) compat.price_max = Number((survey as any).price_max);
   if (Number.isFinite(survey?.price_range as number)) compat.price_range = Number(survey?.price_range);
-  if (typeof survey?.bills_included === 'boolean') compat.bills_included = survey.bills_included;
   if (survey?.floor_preference) compat.floor_preference = survey.floor_preference;
   if (typeof survey?.has_balcony === 'boolean') compat.has_balcony = survey.has_balcony;
-  if (typeof survey?.has_elevator === 'boolean') compat.has_elevator = survey.has_elevator;
-  if (typeof survey?.wants_master_room === 'boolean') compat.wants_master_room = survey.wants_master_room;
   if (typeof survey?.pets_allowed === 'boolean') compat.pets_allowed = survey.pets_allowed;
-  if (typeof survey?.with_broker === 'boolean') compat.with_broker = survey.with_broker;
   if (typeof survey?.preferred_roommates === 'number') compat.preferred_roommates = survey.preferred_roommates;
-  if (survey?.move_in_month) compat.move_in_month = survey.move_in_month;
+  if ((survey as any)?.move_in_month_from) compat.move_in_month_from = (survey as any).move_in_month_from;
+  if ((survey as any)?.move_in_month_to) compat.move_in_month_to = (survey as any).move_in_month_to;
+  if (typeof (survey as any)?.move_in_is_flexible === 'boolean')
+    compat.move_in_is_flexible = (survey as any).move_in_is_flexible;
+  if (survey?.move_in_month) compat.move_in_month = survey.move_in_month; // legacy
   if (typeof survey?.is_sublet === 'boolean') compat.is_sublet = survey.is_sublet;
   if (survey?.sublet_month_from) compat.sublet_month_from = survey.sublet_month_from;
   if (survey?.sublet_month_to) compat.sublet_month_to = survey.sublet_month_to;
   if (survey?.relationship_status) compat.relationship_status = survey.relationship_status;
   const occupationValue = normalizeOccupationValue(survey?.occupation);
   if (occupationValue) compat.occupation = occupationValue;
-  if (typeof survey?.works_from_home === 'boolean') compat.works_from_home = survey.works_from_home;
 
   if (survey?.partner_smoking_preference)
     compat.partner_smoking_preference = survey.partner_smoking_preference as PartnerSmokingPref;
@@ -222,6 +226,12 @@ export default function UserProfileScreen() {
   const [profile, setProfile] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [inviteLoading, setInviteLoading] = useState(false);
+  const [isMergeConfirmOpen, setIsMergeConfirmOpen] = useState(false);
+  const mergeCheckIdRef = React.useRef(0);
+  const [mergeCapacity, setMergeCapacity] = useState<{
+    status: 'idle' | 'checking' | 'ok' | 'blocked';
+    message?: string | null;
+  }>({ status: 'idle', message: null });
   const [isSurveyOpen, setIsSurveyOpen] = useState(false);
   const [surveyActiveSection, setSurveyActiveSection] = useState<'about' | 'apartment' | 'partner'>('about');
   const segW = useSharedValue(1);
@@ -745,18 +755,47 @@ export default function UserProfileScreen() {
       highlights.push({ label, value: trimmed });
     };
 
-    push('עיר מועדפת', survey.preferred_city || undefined);
-    if (typeof survey.price_range === 'number') {
-      const formatted = formatCurrency(survey.price_range);
-      push('תקציב חודשי', formatted);
+    {
+      const cities = Array.isArray((survey as any)?.preferred_cities) ? (survey as any).preferred_cities : null;
+      const cityLabel =
+        cities && cities.length
+          ? String(cities.filter(Boolean).map((c: any) => String(c).trim()).filter(Boolean).join(', '))
+          : undefined;
+      push(cities && cities.length > 1 ? 'ערים מועדפות' : 'עיר מועדפת', cityLabel);
     }
-    push('כניסה מתוכננת', formatMonthLabel(survey.move_in_month));
-    push('וייב יומיומי', survey.lifestyle || survey.home_vibe || undefined);
+    {
+      const min = (survey as any).price_min;
+      const max = (survey as any).price_max;
+      if (typeof min === 'number' && typeof max === 'number') {
+        push('תקציב חודשי', `${formatCurrency(min)} - ${formatCurrency(max)}`);
+      } else if (typeof survey.price_range === 'number') {
+        const formatted = formatCurrency(survey.price_range);
+        push('תקציב חודשי', formatted);
+      }
+    }
+    {
+      const from = (survey as any).move_in_month_from || survey.move_in_month;
+      const to = (survey as any).move_in_month_to || from;
+      const flexible = !!(survey as any).move_in_is_flexible;
+      const label = flexible && from && to && to !== from
+        ? `${formatMonthLabel(from)} - ${formatMonthLabel(to)}`
+        : formatMonthLabel(from);
+      push('כניסה מתוכננת', label);
+    }
+    push('וייב יומיומי', (survey as any).home_lifestyle || undefined);
     if (survey.is_sublet) highlights.push({ label: 'סאבלט', value: 'כן' });
     return highlights;
   }, [survey]);
 
   type SurveySectionKey = 'about' | 'apartment' | 'partner';
+
+  const formatPreferredRoommatesLabel = (value: number) => {
+    if (!Number.isFinite(value)) return '';
+    const n = Math.max(0, Math.min(4, Math.round(value)));
+    if (n === 0) return 'אני לבד';
+    if (n === 1) return 'אני עם עוד שותף';
+    return `אני ועוד ${n} שותפים`;
+  };
 
   const surveyItems = useMemo(() => {
     if (!survey) return [];
@@ -805,7 +844,6 @@ export default function UserProfileScreen() {
     if (typeof survey.student_year === 'number' && survey.student_year > 0) {
       add('about', 'שנת לימודים', `שנה ${formatHebrewYear(survey.student_year)}`);
     }
-    addBool('about', 'עבודה מהבית', survey.works_from_home);
     addBool('about', 'שומר/ת כשרות', survey.keeps_kosher);
     addBool('about', 'שומר/ת שבת', survey.is_shomer_shabbat);
     add('about', 'תזונה', survey.diet_type);
@@ -815,9 +853,8 @@ export default function UserProfileScreen() {
     if (typeof survey.cleanliness_importance === 'number') add('about', 'חשיבות ניקיון', `${survey.cleanliness_importance}/5`);
     add('about', 'תדירות ניקיון', survey.cleaning_frequency);
     add('about', 'העדפת אירוח', survey.hosting_preference);
-    add('about', 'סטייל בישול', survey.cooking_style);
-    add('about', 'וייב בבית', survey.home_vibe);
-    add('about', 'סגנון חיים', (survey as any).lifestyle);
+    add('about', 'קניות', survey.cooking_style);
+    add('about', 'סגנון הבית', (survey as any).home_lifestyle);
 
     // הדירה שאני מחפש/ת
     addBool('apartment', 'האם מדובר בסאבלט?', survey.is_sublet);
@@ -827,19 +864,51 @@ export default function UserProfileScreen() {
         .join(' → ');
       add('apartment', 'טווח סאבלט', period);
     }
-    if (typeof survey.price_range === 'number') add('apartment', 'תקציב שכירות', formatCurrency(survey.price_range));
-    addTriBool('apartment', 'חשבונות כלולים?', survey.bills_included);
-    add('apartment', 'עיר מועדפת', survey.preferred_city);
+    {
+      const min = (survey as any).price_min;
+      const max = (survey as any).price_max;
+      if (typeof min === 'number' && typeof max === 'number') {
+        add('apartment', 'תקציב שכירות', `${formatCurrency(min)} - ${formatCurrency(max)}`);
+      } else if (typeof survey.price_range === 'number') {
+        add('apartment', 'תקציב שכירות', formatCurrency(survey.price_range));
+      }
+    }
+    {
+      const cities = Array.isArray((survey as any)?.preferred_cities) ? (survey as any).preferred_cities : null;
+      const cityLabel =
+        cities && cities.length
+          ? String(cities.filter(Boolean).map((c: any) => String(c).trim()).filter(Boolean).join(', '))
+          : undefined;
+      add('apartment', cities && cities.length > 1 ? 'ערים מועדפות' : 'עיר מועדפת', cityLabel);
+    }
     const neighborhoodsJoined = normalizeNeighborhoods((survey.preferred_neighborhoods as unknown) ?? null);
     if (neighborhoodsJoined) add('apartment', 'שכונות מועדפות', neighborhoodsJoined);
     add('apartment', 'קומה מועדפת', survey.floor_preference);
     addTriBool('apartment', 'עם מרפסת/גינה?', survey.has_balcony);
-    addTriBool('apartment', 'חשוב שתהיה מעלית?', survey.has_elevator);
-    addTriBool('apartment', 'חדר מאסטר?', survey.wants_master_room);
-    add('apartment', 'תאריך כניסה', formatMonthLabel(survey.move_in_month));
-    if (typeof survey.preferred_roommates === 'number') add('apartment', 'מספר שותפים מועדף', `${survey.preferred_roommates}`);
+    {
+      const from = (survey as any).move_in_month_from || survey.move_in_month;
+      const to = (survey as any).move_in_month_to || from;
+      const flexible = !!(survey as any).move_in_is_flexible;
+      const label = flexible && from && to && to !== from
+        ? `${formatMonthLabel(from)} - ${formatMonthLabel(to)}`
+        : formatMonthLabel(from);
+      add('apartment', 'תאריך כניסה', label);
+    }
+    {
+      const rmMin = (survey as any).preferred_roommates_min;
+      const rmMax = (survey as any).preferred_roommates_max;
+      const rmSingle =
+        typeof rmMin === 'number' && typeof rmMax === 'number' && rmMin === rmMax
+          ? rmMin
+          : typeof survey.preferred_roommates === 'number'
+            ? survey.preferred_roommates
+            : null;
+      if (typeof rmSingle === 'number') {
+        const label = formatPreferredRoommatesLabel(rmSingle);
+        if (label) add('apartment', 'מספר שותפים מועדף', label);
+      }
+    }
     addBool('apartment', 'חיות מורשות', survey.pets_allowed);
-    addTriBool('apartment', 'משנה לך תיווך?', survey.with_broker);
 
     // השותפ/ה שאני מחפש/ת
     const minAge = (survey as any).preferred_age_min;
@@ -874,6 +943,50 @@ export default function UserProfileScreen() {
     return Math.min(420, Math.max(320, Math.round(screenWidth - 32)));
   }, [screenWidth]);
 
+  const mergePanelWidth = useMemo(() => {
+    // Reuse the same sizing as other panels for consistent look & feel.
+    // Wider by 10px on each side vs previous (reduce side margins).
+    // Slightly narrower: add 5px margin on each side.
+    return Math.min(420, Math.max(320, Math.round(screenWidth - 30)));
+  }, [screenWidth]);
+
+  const MAX_GROUP_MEMBERS = 4;
+
+  const getActiveGroupMemberIds = async (userId: string): Promise<string[]> => {
+    const uid = String(userId || '').trim();
+    if (!uid) return [];
+    try {
+      const { data: membership } = await supabase
+        .from('profile_group_members')
+        .select('group_id')
+        .eq('user_id', uid)
+        .eq('status', 'ACTIVE')
+        .maybeSingle();
+      const groupId = (membership as any)?.group_id as string | undefined;
+      if (!groupId) return [uid];
+      const { data: members } = await supabase
+        .from('profile_group_members')
+        .select('user_id')
+        .eq('group_id', groupId)
+        .eq('status', 'ACTIVE');
+      const ids = (members || [])
+        .map((r: any) => String(r?.user_id || '').trim())
+        .filter(Boolean);
+      const set = new Set<string>([uid, ...ids]);
+      return Array.from(set);
+    } catch {
+      return [uid];
+    }
+  };
+
+  const isMergeWithinCapacity = async (): Promise<boolean> => {
+    if (!me?.id || !profile?.id) return false;
+    const myIds = await getActiveGroupMemberIds(String(me.id));
+    const theirIds = await getActiveGroupMemberIds(String(profile.id));
+    const union = new Set<string>([...myIds, ...theirIds]);
+    return union.size <= MAX_GROUP_MEMBERS;
+  };
+
   const surveyPanelMaxHeight = useMemo(() => {
     return Math.min(560, Math.round(screenHeight * 0.72));
   }, [screenHeight]);
@@ -892,10 +1005,26 @@ export default function UserProfileScreen() {
     tabIdx.value = withTiming(activeTabIndex, { duration: 220 });
   }, [activeTabIndex, tabIdx]);
 
+  const isWeb = Platform.OS === 'web';
+
   const indicatorStyle = useAnimatedStyle(() => {
     // Buttons are laid out row-reverse visually: index 0 is rightmost.
     const x = (2 - tabIdx.value) * segW.value;
+    // Reanimated-web can crash if `style` is provided as an array (it may try to set style[0]).
+    // On web we return a full style object so the element can use `style={indicatorStyle}`.
+    const webBase = isWeb
+      ? {
+          position: 'absolute' as const,
+          top: 6,
+          bottom: 6,
+          left: 6,
+          borderRadius: 999,
+          backgroundColor: '#FFFFFF',
+        }
+      : {};
+
     return {
+      ...(webBase as any),
       width: segW.value,
       transform: [{ translateX: x }],
     };
@@ -1063,7 +1192,10 @@ export default function UserProfileScreen() {
       return;
     }
     if (mergeBlockedByTheirSharedGroup) {
-      Alert.alert('לא ניתן למזג', 'המשתמש/ת כבר נמצא/ת בפרופיל משותף.');
+      Alert.alert(
+        'לא ניתן למזג',
+        `המשתמש/ת כבר נמצא/ת בפרופיל משותף מלא (${MAX_GROUP_MEMBERS}/${MAX_GROUP_MEMBERS}).`
+      );
       return;
     }
     if (hasPendingMergeInvite) {
@@ -1079,6 +1211,7 @@ export default function UserProfileScreen() {
           profOwned,
           profPartner,
           profMembership,
+          meMembership,
         ] = await Promise.all([
           supabase.from('apartments').select('id').eq('owner_id', me.id).limit(1),
           supabase.from('apartments').select('id').contains('partner_ids', [me.id] as any).limit(1),
@@ -1090,6 +1223,12 @@ export default function UserProfileScreen() {
             .eq('user_id', profile.id)
             .eq('status', 'ACTIVE')
             .maybeSingle(),
+          supabase
+            .from('profile_group_members')
+            .select('group_id')
+            .eq('user_id', me.id)
+            .eq('status', 'ACTIVE')
+            .maybeSingle(),
         ]);
         const isMeLinkedNow = ((meOwned.data || []).length + (mePartner.data || []).length) > 0;
         const isProfileLinkedNow = ((profOwned.data || []).length + (profPartner.data || []).length) > 0;
@@ -1097,26 +1236,26 @@ export default function UserProfileScreen() {
           showMergeBlockedAlert();
           return;
         }
-        // Live check: block if invitee belongs to an ACTIVE group with 2+ members.
-        const inviteeGroupId = (profMembership as any)?.data?.group_id as string | undefined;
-        if (inviteeGroupId) {
-          try {
-            const { data: inviteeMembers } = await supabase
-              .from('profile_group_members')
-              .select('user_id')
-              .eq('group_id', inviteeGroupId)
-              .eq('status', 'ACTIVE');
-            const memberCount = (inviteeMembers || []).filter((r: any) => !!r?.user_id).length;
-            if (memberCount >= 2) {
-              Alert.alert('לא ניתן למזג', 'המשתמש/ת כבר נמצא/ת בפרופיל משותף.');
-              return;
-            }
-          } catch {
-            if (mergeBlockedByTheirSharedGroup) {
-              Alert.alert('לא ניתן למזג', 'המשתמש/ת כבר נמצא/ת בפרופיל משותף.');
-              return;
-            }
+        // Live check: allow as long as final shared profile size <= MAX_GROUP_MEMBERS.
+        try {
+          const inviteeGroupId = (profMembership as any)?.data?.group_id as string | undefined;
+          const myGroupId = (meMembership as any)?.data?.group_id as string | undefined;
+          if (inviteeGroupId && myGroupId && inviteeGroupId === myGroupId) {
+            router.push('/(tabs)/partners');
+            return;
           }
+          const myIds = await getActiveGroupMemberIds(String(me.id));
+          const theirIds = await getActiveGroupMemberIds(String(profile.id));
+          const union = new Set<string>([...myIds, ...theirIds]);
+          if (union.size > MAX_GROUP_MEMBERS) {
+            Alert.alert(
+              'לא ניתן למזג',
+              `מיזוג זה ייצור פרופיל משותף עם ${union.size} משתמשים. המקסימום הוא ${MAX_GROUP_MEMBERS}.`
+            );
+            return;
+          }
+        } catch {
+          // ignore; approval flow will validate too
         }
       } catch (e) {
         // If the live check fails for any reason, fall back to state values
@@ -1125,7 +1264,10 @@ export default function UserProfileScreen() {
           return;
         }
         if (mergeBlockedByTheirSharedGroup) {
-          Alert.alert('לא ניתן למזג', 'המשתמש/ת כבר נמצא/ת בפרופיל משותף.');
+          Alert.alert(
+            'לא ניתן למזג',
+            `המשתמש/ת כבר נמצא/ת בפרופיל משותף מלא (${MAX_GROUP_MEMBERS}/${MAX_GROUP_MEMBERS}).`
+          );
           return;
         }
       }
@@ -1187,6 +1329,22 @@ export default function UserProfileScreen() {
     }
     try {
       setInviteLoading(true);
+      // Capacity check (max shared profile size).
+      try {
+        const myIds = await getActiveGroupMemberIds(String(me.id));
+        const theirIds = await getActiveGroupMemberIds(String(profile.id));
+        const union = new Set<string>([...myIds, ...theirIds]);
+        if (union.size > MAX_GROUP_MEMBERS) {
+          Alert.alert(
+            'לא ניתן למזג',
+            `מיזוג זה ייצור פרופיל משותף עם ${union.size} משתמשים. המקסימום הוא ${MAX_GROUP_MEMBERS}.`
+          );
+          setInviteLoading(false);
+          return;
+        }
+      } catch {
+        // ignore and continue; approval flow will validate too
+      }
       // Double-check on press (in addition to state) that both users are associated with an apartment.
       // This prevents a race where the state hasn't updated yet.
       try {
@@ -1211,12 +1369,24 @@ export default function UserProfileScreen() {
       } catch (e) {
         // If verification failed, continue with local state fallback (handled by button handler too)
       }
-      // Prefer an existing ACTIVE group that I'm a member of; if none, fallback to a group I created; else create new
-      const [{ data: myActiveMembership }, { data: createdByMeGroup, error: gErr }] = await Promise.all([
+      // Determine ACTIVE group ids for both sides.
+      // Key rule: if the viewed user is already in an ACTIVE shared profile and I'm not in any,
+      // we should send the invite to THEIR group so they can approve and add me in.
+      const [
+        { data: myActiveMembership },
+        { data: profileActiveMembership },
+        { data: createdByMeGroup, error: gErr },
+      ] = await Promise.all([
         supabase
           .from('profile_group_members')
           .select('group_id')
           .eq('user_id', me.id)
+          .eq('status', 'ACTIVE')
+          .maybeSingle(),
+        supabase
+          .from('profile_group_members')
+          .select('group_id')
+          .eq('user_id', profile.id)
           .eq('status', 'ACTIVE')
           .maybeSingle(),
         supabase
@@ -1230,8 +1400,18 @@ export default function UserProfileScreen() {
       ]);
       if (gErr) throw gErr;
 
-      let groupId = (myActiveMembership as any)?.group_id as string | undefined;
-      if (!groupId) {
+      const myActiveGroupId = (myActiveMembership as any)?.group_id as string | undefined;
+      const profileActiveGroupId = (profileActiveMembership as any)?.group_id as string | undefined;
+
+      let groupId: string | undefined;
+      // If I have an active group, invite them into mine (or merge later if they have their own).
+      if (myActiveGroupId) {
+        groupId = myActiveGroupId;
+      } else if (profileActiveGroupId) {
+        // I am "solo" and they are already in a shared profile → invite to THEIR group.
+        groupId = profileActiveGroupId;
+      } else {
+        // Neither side has an active group → reuse the latest group I created (if any), else create.
         groupId = (createdByMeGroup as any)?.id as string | undefined;
       }
       // Create group if none found
@@ -1294,28 +1474,32 @@ export default function UserProfileScreen() {
       } catch {}
 
       // Ensure I (the inviter) am ACTIVE in this group before inviting anyone
-      try {
-        // Prefer SECURITY DEFINER RPC to bypass RLS safely
-        const { error: rpcErr } = await supabase.rpc('add_self_to_group', { p_group_id: groupId });
-        if (rpcErr) {
-          // Fallback to client-side upsert if RPC not available
-          const insertMe = await supabase
-            .from('profile_group_members')
-            .insert([{ group_id: groupId, user_id: me.id, status: 'ACTIVE' } as any], {
-              onConflict: 'group_id,user_id',
-              ignoreDuplicates: true,
-            } as any);
-          // If the row already exists (or insert ignored), force status to ACTIVE (best-effort)
-          if ((insertMe as any)?.error || (insertMe as any)?.status === 409) {
-            await supabase
+      // BUT: if we're inviting into the viewed user's existing group (I'm solo), we intentionally
+      // do NOT add myself yet — they'll approve, and the approval flow will add/merge correctly.
+      if (!profileActiveGroupId || groupId !== profileActiveGroupId) {
+        try {
+          // Prefer SECURITY DEFINER RPC to bypass RLS safely
+          const { error: rpcErr } = await supabase.rpc('add_self_to_group', { p_group_id: groupId });
+          if (rpcErr) {
+            // Fallback to client-side upsert if RPC not available
+            const insertMe = await supabase
               .from('profile_group_members')
-              .update({ status: 'ACTIVE' })
-              .eq('group_id', groupId as string)
-              .eq('user_id', me.id);
+              .insert([{ group_id: groupId, user_id: me.id, status: 'ACTIVE' } as any], {
+                onConflict: 'group_id,user_id',
+                ignoreDuplicates: true,
+              } as any);
+            // If the row already exists (or insert ignored), force status to ACTIVE (best-effort)
+            if ((insertMe as any)?.error || (insertMe as any)?.status === 409) {
+              await supabase
+                .from('profile_group_members')
+                .update({ status: 'ACTIVE' })
+                .eq('group_id', groupId as string)
+                .eq('user_id', me.id);
+            }
           }
+        } catch {
+          // ignore; worst case the invite still gets created and approver will join
         }
-      } catch {
-        // ignore; worst case the invite still gets created and approver will join
       }
 
       // Prevent duplicate pending invite for same user in same group
@@ -1377,10 +1561,39 @@ export default function UserProfileScreen() {
     !!groupContext && Array.isArray(groupContext.members) && groupContext.members.length >= 2;
   const mergeBlockedByApartments =
     !!me?.id && !isMeInViewedGroup && meInApartment && profileInApartment;
-  // Block sending merge invite if the viewed user is already in an ACTIVE shared profile (2+ members),
-  // unless I'm already part of that same shared profile.
+  // NEW RULE: shared profile can include up to MAX_GROUP_MEMBERS users.
+  // Hard-block only if the viewed profile is already at max capacity (and I'm not in that group).
   const mergeBlockedByTheirSharedGroup =
-    !isMeInViewedGroup && profileIsInSharedGroup;
+    !isMeInViewedGroup && profileIsInSharedGroup && (groupContext?.members?.length || 0) >= MAX_GROUP_MEMBERS;
+
+  const openMergeConfirm = () => {
+    if (inviteLoading || groupLoading) return;
+    // Avoid opening if we already have a pending invite.
+    if (hasPendingMergeInvite) return;
+    if (!me?.id || !profile?.id) return;
+    // Open immediately (no delay); validate capacity in the background.
+    setIsMergeConfirmOpen(true);
+    setMergeCapacity({ status: 'checking', message: null });
+    const runId = ++mergeCheckIdRef.current;
+    (async () => {
+      try {
+        const ok = await isMergeWithinCapacity();
+        if (runId !== mergeCheckIdRef.current) return;
+        if (ok) {
+          setMergeCapacity({ status: 'ok', message: null });
+        } else {
+          setMergeCapacity({
+            status: 'blocked',
+            message: `מיזוג זה ייצור פרופיל משותף עם יותר מ-${MAX_GROUP_MEMBERS} משתמשים. המקסימום הוא ${MAX_GROUP_MEMBERS}.`,
+          });
+        }
+      } catch {
+        if (runId !== mergeCheckIdRef.current) return;
+        // If we can't verify right now, allow the user to proceed; the server-side flow will still validate.
+        setMergeCapacity({ status: 'ok', message: null });
+      }
+    })();
+  };
 
   const SurveyPill = ({
     children,
@@ -1483,7 +1696,7 @@ export default function UserProfileScreen() {
                 router.push('/(tabs)/partners');
                 return;
               }
-              handleMergeHeaderPress();
+              openMergeConfirm();
             };
             const IconComp = isMeInViewedGroup ? Users : UserPlus2;
             return (
@@ -1579,7 +1792,7 @@ export default function UserProfileScreen() {
                         router.push('/(tabs)/partners');
                         return;
                       }
-                      handleMergeHeaderPress();
+                      openMergeConfirm();
                     }}
                     disabled={isDisabled}
                   >
@@ -1810,62 +2023,87 @@ export default function UserProfileScreen() {
           {/* Survey CTA (match + questionnaire) — placed under the apartment section */}
           <View style={styles.section}>
             <View style={styles.surveyCTAOuter}>
-              <TouchableOpacity
-                style={[
-                  styles.surveyCTA,
-                  (surveyLoading || !survey) ? styles.surveyCTADisabled : null,
-                ]}
-                activeOpacity={0.9}
-                onPress={() => {
-                  if (surveyLoading) return;
-                  if (!survey) return;
-                  setSurveyActiveSection('about');
-                  setIsSurveyOpen(true);
-                }}
-                disabled={surveyLoading || !survey}
-              >
-                <View style={styles.surveyCTAAvatarCol}>
-                  <View style={styles.surveyCTAAvatarRingWrap}>
-                    <DonutChart
-                      percentage={typeof matchPercent === 'number' ? matchPercent : 0}
-                      size={54}
-                      strokeWidth={5}
-                      durationMs={850}
-                      color="#16A34A"
-                      trackColor="rgba(22,163,74,0.14)"
-                      textColor="transparent"
-                      textStyle={{ fontSize: 0 } as any}
-                      accessibilityLabel="אחוזי התאמה"
-                    />
-                    <View style={styles.surveyCTAAvatarWrap}>
-                      <Image
-                        source={{ uri: profile.avatar_url || 'https://cdn-icons-png.flaticon.com/512/847/847969.png' }}
-                        style={styles.surveyCTAAvatar}
-                      />
-                    </View>
-                  </View>
-                  <Text style={styles.surveyCTAMatchValue}>{matchPercentDisplay}</Text>
-                  <Text style={styles.surveyCTAMatchLabel}>אחוזי התאמה</Text>
-                </View>
-                <View style={styles.surveyCTATexts}>
-                  <Text style={styles.surveyCTATitle}>
-                    {`קצת על ${profile.full_name?.split(' ')?.[0] || 'המשתמש/ת'}`}
-                  </Text>
-                  <Text style={styles.surveyCTASubtitle} numberOfLines={1}>
-                    {(() => {
-                      const firstName = profile.full_name?.split(' ')?.[0] || 'המשתמש/ת';
-                      if (surveyLoading) return 'טוען...';
-                      if (surveyError) return surveyError;
-                      if (!survey) return `${firstName} עדיין לא מילא/ה את השאלון`;
-                      return `הכירו את ${firstName} יותר טוב`;
-                    })()}
-                  </Text>
-                </View>
+              {(() => {
+                const firstName = profile.full_name?.split(' ')?.[0] || 'המשתמש/ת';
+                const canOpenSurvey = !surveyLoading && !!survey && !surveyError;
+                const subtitle = (() => {
+                  if (surveyLoading) return 'טוען...';
+                  if (surveyError) return surveyError;
+                  if (!survey) return `${firstName} עדיין לא מילא/ה את השאלון`;
+                  return `הכירו את ${firstName} יותר טוב`;
+                })();
 
-                <View style={styles.surveyCTACtaPill}>
-                  <Text style={styles.surveyCTACtaPillText}>לצפייה</Text>
-                </View>
-              </TouchableOpacity>
+                const Content = (
+                  <>
+                    <View style={styles.surveyCTAAvatarCol}>
+                      <View style={styles.surveyCTAAvatarRingWrap}>
+                        <DonutChart
+                          percentage={typeof matchPercent === 'number' ? matchPercent : 0}
+                          size={54}
+                          strokeWidth={5}
+                          durationMs={850}
+                          color={colors.success}
+                          trackColor={alpha(colors.success, 0.14)}
+                          textColor="transparent"
+                          textStyle={{ fontSize: 0 } as any}
+                          accessibilityLabel="אחוזי התאמה"
+                        />
+                        <View style={styles.surveyCTAAvatarWrap}>
+                          <Image
+                            source={{ uri: profile.avatar_url || 'https://cdn-icons-png.flaticon.com/512/847/847969.png' }}
+                            style={styles.surveyCTAAvatar}
+                          />
+                        </View>
+                      </View>
+                      <Text style={styles.surveyCTAMatchValue}>{matchPercentDisplay}</Text>
+                      <Text style={styles.surveyCTAMatchLabel}>אחוזי התאמה</Text>
+                    </View>
+                    <View style={styles.surveyCTATexts}>
+                      <Text style={styles.surveyCTATitle}>
+                        {`קצת על ${firstName}`}
+                      </Text>
+                      <Text style={styles.surveyCTASubtitle} numberOfLines={2}>
+                        {subtitle}
+                      </Text>
+                    </View>
+                    {canOpenSurvey ? (
+                      <View style={styles.surveyCTACtaPill}>
+                        <Text style={styles.surveyCTACtaPillText}>לצפייה</Text>
+                      </View>
+                    ) : (
+                      <View style={styles.surveyCTABadgePill}>
+                        <ClipboardList size={16} color="#6B7280" />
+                        <Text style={styles.surveyCTABadgeText}>
+                          {surveyLoading ? 'טוען...' : surveyError ? 'לא זמין' : 'אין שאלון'}
+                        </Text>
+                      </View>
+                    )}
+                  </>
+                );
+
+                if (canOpenSurvey) {
+                  return (
+                    <TouchableOpacity
+                      style={styles.surveyCTA}
+                      activeOpacity={0.9}
+                      onPress={() => {
+                        setSurveyActiveSection('about');
+                        setIsSurveyOpen(true);
+                      }}
+                      accessibilityRole="button"
+                      accessibilityLabel="פתח שאלון"
+                    >
+                      {Content}
+                    </TouchableOpacity>
+                  );
+                }
+
+                return (
+                  <View style={[styles.surveyCTA, styles.surveyCTADisabled]} accessibilityElementsHidden={false}>
+                    {Content}
+                  </View>
+                );
+              })()}
             </View>
           </View>
 
@@ -1969,7 +2207,7 @@ export default function UserProfileScreen() {
             segW.value = Math.max(1, (w - 12) / 3);
           }}
         >
-          <Animated.View style={[styles.surveySegIndicator, indicatorStyle]} />
+          <Animated.View style={isWeb ? indicatorStyle : [styles.surveySegIndicator, indicatorStyle]} />
           <View style={styles.surveySegRow}>
             <TouchableOpacity
               style={styles.surveySegBtn}
@@ -2057,6 +2295,117 @@ export default function UserProfileScreen() {
             </View>
           )}
         </ScrollView>
+      </KeyFabPanel>
+
+      {/* Merge confirmation (uses the same animated panel as the apartment "key" button) */}
+      <KeyFabPanel
+        isOpen={isMergeConfirmOpen}
+        onClose={() => {
+          setIsMergeConfirmOpen(false);
+          mergeCheckIdRef.current += 1;
+          setMergeCapacity({ status: 'idle', message: null });
+        }}
+        title="מיזוג פרופילים"
+        subtitle=""
+        anchor="center"
+        topOffset={insets.top + 24}
+        bottomOffset={insets.bottom + 24}
+        openedWidth={mergePanelWidth}
+        // Keep a small comfortable inner padding so text doesn't touch edges.
+        panelStyle={{ maxHeight: 520, borderRadius: 22, padding: 16 }}
+      >
+        <View style={styles.mergeConfirmBody}>
+          <Text style={styles.mergeConfirmTitle} numberOfLines={2}>
+            {`לפני ששולחים בקשה ל-${profile.full_name?.split(' ')?.[0] || 'המשתמש/ת'}`}
+          </Text>
+          <View style={styles.mergeConfirmBullets}>
+            <View style={styles.mergeConfirmBulletRow}>
+              <View style={styles.mergeConfirmDot} />
+              <Text style={styles.mergeConfirmText}>
+                מיזוג יוצר <Text style={styles.mergeConfirmStrong}>פרופיל משותף</Text> אחד.
+              </Text>
+            </View>
+            <View style={styles.mergeConfirmBulletRow}>
+              <View style={styles.mergeConfirmDot} />
+              <Text style={styles.mergeConfirmText}>
+                הבקשה נשלחת עכשיו, והמיזוג יופעל רק אחרי <Text style={styles.mergeConfirmStrong}>אישור</Text> מהצד השני.
+              </Text>
+            </View>
+            <View style={styles.mergeConfirmBulletRow}>
+              <View style={styles.mergeConfirmDot} />
+              <Text style={styles.mergeConfirmText}>
+                המקסימום בפרופיל משותף הוא <Text style={styles.mergeConfirmStrong}>{MAX_GROUP_MEMBERS}</Text> משתמשים
+                {'\n'}
+                (לדוגמה: <Text style={styles.mergeConfirmStrong}>2+2</Text> זה אפשרי).
+              </Text>
+            </View>
+            <View style={styles.mergeConfirmNote}>
+              <Text style={styles.mergeConfirmNoteText}>
+                לא ניתן למזג אם לשני הצדדים כבר יש דירה משויכת (כבעלים או כשותפים), או אם המיזוג יחרוג מהמקסימום.
+              </Text>
+            </View>
+            {mergeCapacity.status === 'blocked' ? (
+              <View style={styles.mergeConfirmWarning}>
+                <Text style={styles.mergeConfirmWarningText}>{mergeCapacity.message || 'לא ניתן למזג כרגע.'}</Text>
+              </View>
+            ) : null}
+          </View>
+
+          <View style={styles.mergeConfirmActions}>
+            <TouchableOpacity
+              style={styles.mergeConfirmCancelBtn}
+              activeOpacity={0.9}
+              onPress={() => {
+                setIsMergeConfirmOpen(false);
+                mergeCheckIdRef.current += 1;
+                setMergeCapacity({ status: 'idle', message: null });
+              }}
+              accessibilityRole="button"
+              accessibilityLabel="ביטול מיזוג"
+            >
+              <Text style={styles.mergeConfirmCancelText}>ביטול</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.mergeConfirmApproveBtn,
+                (inviteLoading ||
+                  groupLoading ||
+                  hasPendingMergeInvite ||
+                  mergeCapacity.status === 'checking' ||
+                  mergeCapacity.status === 'blocked')
+                  ? styles.mergeConfirmApproveDisabled
+                  : null,
+              ]}
+              activeOpacity={0.9}
+              disabled={
+                inviteLoading ||
+                groupLoading ||
+                hasPendingMergeInvite ||
+                mergeCapacity.status === 'checking' ||
+                mergeCapacity.status === 'blocked'
+              }
+              onPress={() => {
+                setIsMergeConfirmOpen(false);
+                mergeCheckIdRef.current += 1;
+                setMergeCapacity({ status: 'idle', message: null });
+                handleMergeHeaderPress();
+              }}
+              accessibilityRole="button"
+              accessibilityLabel="אישור ושליחת בקשה למיזוג"
+            >
+              <Text style={styles.mergeConfirmApproveText}>
+                {mergeCapacity.status === 'checking'
+                  ? 'בודק...'
+                  : inviteLoading
+                    ? 'שולח...'
+                    : hasPendingMergeInvite
+                      ? 'כבר נשלחה'
+                      : 'אישור'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
       </KeyFabPanel>
     </SafeAreaView>
   );
@@ -2210,7 +2559,7 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   matchPercentText: {
-    color: '#16A34A',
+    color: colors.success,
     fontSize: 18,
     fontWeight: '900',
     includeFontPadding: false,
@@ -2360,7 +2709,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   surveyCTAMatchValue: {
-    color: '#16A34A',
+    color: colors.success,
     fontSize: 11,
     fontWeight: '900',
     includeFontPadding: false,
@@ -2399,7 +2748,7 @@ const styles = StyleSheet.create({
   },
   matchDonutLabel: {
     marginTop: 6,
-    color: '#16A34A',
+    color: colors.success,
     fontSize: 11,
     fontWeight: '900',
     textAlign: 'center',
@@ -2416,10 +2765,28 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   surveyCTACtaPillText: {
-    color: '#16A34A',
+    color: colors.success,
     fontSize: 12,
     fontWeight: '900',
     textAlign: 'center',
+    includeFontPadding: false,
+  },
+  surveyCTABadgePill: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: 'rgba(107,114,128,0.10)',
+    borderWidth: 1,
+    borderColor: 'rgba(107,114,128,0.18)',
+    alignSelf: 'center',
+  },
+  surveyCTABadgeText: {
+    color: '#6B7280',
+    fontSize: 12,
+    fontWeight: '900',
     includeFontPadding: false,
   },
   modalOverlay: {
@@ -3321,6 +3688,117 @@ const styles = StyleSheet.create({
   },
   aptImageThumbSpacing: {
     marginLeft: 8,
+  },
+  mergeConfirmBody: {
+    paddingTop: 4,
+    paddingBottom: 2,
+    gap: 10,
+  },
+  mergeConfirmTitle: {
+    color: '#111827',
+    fontSize: 16,
+    fontWeight: '900',
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    lineHeight: 22,
+  },
+  mergeConfirmText: {
+    color: '#374151',
+    fontSize: 13,
+    fontWeight: '800',
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    lineHeight: 19,
+  },
+  mergeConfirmStrong: {
+    color: '#111827',
+    fontWeight: '900',
+  },
+  mergeConfirmBullets: {
+    gap: 10,
+  },
+  mergeConfirmBulletRow: {
+    flexDirection: 'row-reverse',
+    alignItems: 'flex-start',
+    gap: 10,
+  },
+  mergeConfirmDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginTop: 6,
+    backgroundColor: 'rgba(22,163,74,0.9)',
+  },
+  mergeConfirmNote: {
+    marginTop: 2,
+    backgroundColor: 'rgba(22,163,74,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(22,163,74,0.20)',
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  mergeConfirmNoteText: {
+    color: '#065F46',
+    fontSize: 12,
+    fontWeight: '800',
+    lineHeight: 18,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
+  mergeConfirmWarning: {
+    backgroundColor: 'rgba(248,113,113,0.10)',
+    borderWidth: 1,
+    borderColor: 'rgba(248,113,113,0.22)',
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  mergeConfirmWarningText: {
+    color: '#991B1B',
+    fontSize: 12,
+    fontWeight: '900',
+    lineHeight: 18,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
+  mergeConfirmActions: {
+    marginTop: 6,
+    flexDirection: 'row',
+    gap: 10,
+  },
+  mergeConfirmCancelBtn: {
+    flex: 1,
+    height: 44,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F3F4F6',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  mergeConfirmCancelText: {
+    color: '#111827',
+    fontSize: 14,
+    fontWeight: '900',
+  },
+  mergeConfirmApproveBtn: {
+    flex: 1,
+    height: 44,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#5e3f2d',
+    borderWidth: 1,
+    borderColor: '#5e3f2d',
+  },
+  mergeConfirmApproveDisabled: {
+    opacity: 0.65,
+  },
+  mergeConfirmApproveText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '900',
   },
 });
 

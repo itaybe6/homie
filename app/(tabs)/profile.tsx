@@ -15,8 +15,7 @@ import {
   useWindowDimensions,
   Linking,
 } from 'react-native';
-import { useRouter } from 'expo-router';
-import { useFocusEffect } from '@react-navigation/native';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   LogOut,
@@ -28,24 +27,31 @@ import {
   Inbox,
   Trash2,
   ClipboardList,
+  User as UserIcon,
+  Users,
+  Home,
   Building2,
   Calendar,
   Camera,
   Copy,
   Image as ImageIcon,
   Instagram,
+  Eye,
+  Heart,
 } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { MotiPressable } from 'moti/interactions';
 import * as Clipboard from 'expo-clipboard';
-import MaskedView from '@react-native-masked-view/masked-view';
+import Animated, { FadeIn, FadeOut, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { supabase } from '@/lib/supabase';
 import { authService } from '@/lib/auth';
 import { useAuthStore } from '@/stores/authStore';
 import { useApartmentStore } from '@/stores/apartmentStore';
 import { User, Apartment, UserSurveyResponse } from '@/types/database';
+import { KeyFabPanel } from '@/components/KeyFabPanel';
+import { alpha, colors } from '@/lib/theme';
 
 
 type AvatarFabItem = {
@@ -183,7 +189,7 @@ function AvatarPhotoFab({
           justifyContent: 'center',
         }}
       >
-        <X size={iconSize} color="#5e3f2d" />
+        <X size={iconSize} color={colors.primary} />
       </MotiPressable>
     </View>
   );
@@ -192,10 +198,11 @@ function AvatarPhotoFab({
 export default function ProfileScreen() {
   const router = useRouter();
   const { user, setUser } = useAuthStore();
+  const isOwner = (user as any)?.role === 'owner';
   const apartments = useApartmentStore((state) => state.apartments);
   const removeApartmentFromStore = useApartmentStore((state) => state.removeApartment);
   const insets = useSafeAreaInsets();
-  const { height: windowHeight } = useWindowDimensions();
+  const { height: windowHeight, width: windowWidth } = useWindowDimensions();
 
   const [profile, setProfile] = useState<User | null>(null);
   const [userApartments, setUserApartments] = useState<Apartment[]>([]);
@@ -211,11 +218,19 @@ export default function ProfileScreen() {
   const [isDeletingImage, setIsDeletingImage] = useState(false);
   const [isAddingImage, setIsAddingImage] = useState(false);
   const [isSurveyOpen, setIsSurveyOpen] = useState(false);
+  const [surveyActiveSection, setSurveyActiveSection] = useState<'about' | 'apartment' | 'partner'>('about');
+  const segW = useSharedValue(1);
+  const tabIdx = useSharedValue(0);
   const [sharedGroups, setSharedGroups] = useState<
     { id: string; name?: string | null; members: Pick<User, 'id' | 'full_name' | 'avatar_url'>[] }[]
   >([]);
   const [surveyResponse, setSurveyResponse] = useState<UserSurveyResponse | null>(null);
   const ignoreNextGalleryPressRef = useRef(false);
+
+  useEffect(() => {
+    // Owners should not see the survey UI. Close it if it was opened somehow.
+    if (isOwner && isSurveyOpen) setIsSurveyOpen(false);
+  }, [isOwner, isSurveyOpen]);
 
   const ownedApartments = useMemo(() => {
     const uid = (user as any)?.id as string | undefined;
@@ -260,6 +275,54 @@ export default function ProfileScreen() {
     const safeMax = Math.max(420, Math.round(windowHeight - (insets.top + 24)));
     return Math.min(hardMax, safeMax);
   }, [windowHeight, insets.top]);
+
+  // Match the survey viewer sizing used on other user's profile screen.
+  const surveyPanelWidth = useMemo(() => {
+    return Math.min(420, Math.max(320, Math.round(windowWidth - 32)));
+  }, [windowWidth]);
+
+  const surveyPanelMaxHeight = useMemo(() => {
+    return Math.min(560, Math.round(windowHeight * 0.72));
+  }, [windowHeight]);
+
+  const surveyPanelScrollMaxHeight = useMemo(() => {
+    return Math.min(440, Math.round(windowHeight * 0.42));
+  }, [windowHeight]);
+
+  const activeTabIndex = useMemo(() => {
+    if (surveyActiveSection === 'about') return 0;
+    if (surveyActiveSection === 'partner') return 1;
+    return 2;
+  }, [surveyActiveSection]);
+
+  useEffect(() => {
+    tabIdx.value = withTiming(activeTabIndex, { duration: 220 });
+  }, [activeTabIndex, tabIdx]);
+
+  const isWeb = Platform.OS === 'web';
+
+  const indicatorStyle = useAnimatedStyle(() => {
+    // Buttons are laid out row-reverse visually: index 0 is rightmost.
+    const x = (2 - tabIdx.value) * segW.value;
+    // Reanimated-web can crash if `style` is provided as an array (it may try to set style[0]).
+    // On web we return a full style object so the element can use `style={indicatorStyle}`.
+    const webBase = isWeb
+      ? {
+          position: 'absolute' as const,
+          top: 6,
+          bottom: 6,
+          left: 6,
+          borderRadius: 999,
+          backgroundColor: '#FFFFFF',
+        }
+      : {};
+
+    return {
+      ...(webBase as any),
+      width: segW.value,
+      transform: [{ translateX: x }],
+    };
+  });
 
   const [fullName, setFullName] = useState('');
   const [age, setAge] = useState('');
@@ -1102,13 +1165,34 @@ export default function ProfileScreen() {
       highlights.push({ label, value: trimmed });
     };
 
-    push('עיר מועדפת', surveyResponse.preferred_city || undefined);
-    if (typeof surveyResponse.price_range === 'number') {
-      const formatted = formatCurrency(surveyResponse.price_range);
-      push('תקציב חודשי', formatted);
+    {
+      const cities = Array.isArray((surveyResponse as any).preferred_cities) ? (surveyResponse as any).preferred_cities : null;
+      const cityLabel =
+        cities && cities.length
+          ? String(cities.filter(Boolean).map((c: any) => String(c).trim()).filter(Boolean).join(', '))
+          : undefined;
+      push(cities && cities.length > 1 ? 'ערים מועדפות' : 'עיר מועדפת', cityLabel);
     }
-    push('כניסה מתוכננת', formatMonthLabel(surveyResponse.move_in_month));
-    push('וייב יומיומי', surveyResponse.lifestyle || surveyResponse.home_vibe || undefined);
+    {
+      const min = (surveyResponse as any).price_min;
+      const max = (surveyResponse as any).price_max;
+      if (typeof min === 'number' && typeof max === 'number') {
+        push('תקציב חודשי', `${formatCurrency(min)} - ${formatCurrency(max)}`);
+      } else if (typeof surveyResponse.price_range === 'number') {
+        const formatted = formatCurrency(surveyResponse.price_range);
+        push('תקציב חודשי', formatted);
+      }
+    }
+    {
+      const from = (surveyResponse as any).move_in_month_from || surveyResponse.move_in_month;
+      const to = (surveyResponse as any).move_in_month_to || from;
+      const flexible = !!(surveyResponse as any).move_in_is_flexible;
+      const label = flexible && from && to && to !== from
+        ? `${formatMonthLabel(from)} - ${formatMonthLabel(to)}`
+        : formatMonthLabel(from);
+      push('כניסה מתוכננת', label);
+    }
+    push('וייב יומיומי', (surveyResponse as any).home_lifestyle || undefined);
     if (surveyResponse.is_sublet) {
       highlights.push({ label: 'סאבלט', value: 'כן' });
     }
@@ -1117,6 +1201,15 @@ export default function ProfileScreen() {
   }, [surveyResponse]);
 
   type SurveySectionKey = 'about' | 'apartment' | 'partner';
+
+  const formatPreferredRoommatesLabel = (value: number) => {
+    // In the new survey UI this value represents "אני + עוד N שותפים" where N is 0..4.
+    if (!Number.isFinite(value)) return '';
+    const n = Math.max(0, Math.min(4, Math.round(value)));
+    if (n === 0) return 'אני לבד';
+    if (n === 1) return 'אני עם עוד שותף';
+    return `אני ועוד ${n} שותפים`;
+  };
 
   const surveyItems = useMemo(() => {
     if (!surveyResponse) return [];
@@ -1145,7 +1238,6 @@ export default function ProfileScreen() {
     if (typeof surveyResponse.student_year === 'number' && surveyResponse.student_year > 0) {
       add('about', 'שנת לימודים', `שנה ${surveyResponse.student_year}`);
     }
-    addBool('about', 'עבודה מהבית', surveyResponse.works_from_home);
     addBool('about', 'שומר/ת כשרות', surveyResponse.keeps_kosher);
     addBool('about', 'שומר/ת שבת', surveyResponse.is_shomer_shabbat);
     add('about', 'תזונה', surveyResponse.diet_type);
@@ -1157,9 +1249,8 @@ export default function ProfileScreen() {
     }
     add('about', 'תדירות ניקיון', surveyResponse.cleaning_frequency);
     add('about', 'העדפת אירוח', surveyResponse.hosting_preference);
-    add('about', 'סטייל בישול', surveyResponse.cooking_style);
-    add('about', 'וייב בבית', surveyResponse.home_vibe);
-    add('about', 'סגנון חיים', (surveyResponse as any).lifestyle);
+    add('about', 'קניות', surveyResponse.cooking_style);
+    add('about', 'סגנון הבית', (surveyResponse as any).home_lifestyle);
 
     // הדירה שאני מחפש/ת
     addBool('apartment', 'תת-השכרה', surveyResponse.is_sublet);
@@ -1169,25 +1260,52 @@ export default function ProfileScreen() {
         .join(' → ');
       add('apartment', 'טווח סאבלט', period);
     }
-    if (typeof surveyResponse.price_range === 'number') {
-      add('apartment', 'תקציב שכירות', formatCurrency(surveyResponse.price_range));
+    {
+      const min = (surveyResponse as any).price_min;
+      const max = (surveyResponse as any).price_max;
+      if (typeof min === 'number' && typeof max === 'number') {
+        add('apartment', 'תקציב שכירות', `${formatCurrency(min)} - ${formatCurrency(max)}`);
+      } else if (typeof surveyResponse.price_range === 'number') {
+        add('apartment', 'תקציב שכירות', formatCurrency(surveyResponse.price_range));
+      }
     }
-    addBool('apartment', 'חשבונות כלולים', surveyResponse.bills_included);
-    add('apartment', 'עיר מועדפת', surveyResponse.preferred_city);
+    {
+      const cities = Array.isArray((surveyResponse as any).preferred_cities) ? (surveyResponse as any).preferred_cities : null;
+      const cityLabel =
+        cities && cities.length
+          ? String(cities.filter(Boolean).map((c: any) => String(c).trim()).filter(Boolean).join(', '))
+          : undefined;
+      add('apartment', cities && cities.length > 1 ? 'ערים מועדפות' : 'עיר מועדפת', cityLabel);
+    }
     const neighborhoodsJoined = normalizeNeighborhoods((surveyResponse.preferred_neighborhoods as unknown) ?? null);
     if (neighborhoodsJoined) {
       add('apartment', 'שכונות מועדפות', neighborhoodsJoined);
     }
     add('apartment', 'קומה מועדפת', surveyResponse.floor_preference);
     addBool('apartment', 'מרפסת', surveyResponse.has_balcony);
-    addBool('apartment', 'מעלית', surveyResponse.has_elevator);
-    addBool('apartment', 'חדר מאסטר', surveyResponse.wants_master_room);
-    add('apartment', 'חודש כניסה', formatMonthLabel(surveyResponse.move_in_month));
-    if (typeof surveyResponse.preferred_roommates === 'number') {
-      add('apartment', 'מספר שותפים מועדף', `${surveyResponse.preferred_roommates}`);
+    {
+      const from = (surveyResponse as any).move_in_month_from || surveyResponse.move_in_month;
+      const to = (surveyResponse as any).move_in_month_to || from;
+      const flexible = !!(surveyResponse as any).move_in_is_flexible;
+      const label = flexible && from && to && to !== from
+        ? `${formatMonthLabel(from)} - ${formatMonthLabel(to)}`
+        : formatMonthLabel(from);
+      add('apartment', 'חודש כניסה', label);
+    }
+    // Roommates (new UI stores 0..4 as preferred_roommates_min/max and also mirrors to preferred_roommates)
+    const rmMin = (surveyResponse as any).preferred_roommates_min;
+    const rmMax = (surveyResponse as any).preferred_roommates_max;
+    const rmSingle =
+      typeof rmMin === 'number' && typeof rmMax === 'number' && rmMin === rmMax
+        ? rmMin
+        : typeof surveyResponse.preferred_roommates === 'number'
+          ? surveyResponse.preferred_roommates
+          : null;
+    if (typeof rmSingle === 'number') {
+      const label = formatPreferredRoommatesLabel(rmSingle);
+      if (label) add('apartment', 'מספר שותפים מועדף', label);
     }
     addBool('apartment', 'חיות מורשות', surveyResponse.pets_allowed);
-    addBool('apartment', 'עם מתווך', surveyResponse.with_broker);
     // Some schemas store min/max instead of preferred_age_range; derive when missing.
     const minAge = (surveyResponse as any).preferred_age_min;
     const maxAge = (surveyResponse as any).preferred_age_max;
@@ -1235,7 +1353,7 @@ export default function ProfileScreen() {
   if (isLoading) {
     return (
       <View style={styles.centerContainer}>
-        <ActivityIndicator size="large" color="#5e3f2d" />
+        <ActivityIndicator size="large" color={colors.primary} />
       </View>
     );
   }
@@ -1319,14 +1437,13 @@ export default function ProfileScreen() {
                         }
                       }}
                     >
-                      <LinearGradient colors={grad as any} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.igBtnBorder}>
-                        <View style={styles.igBtnInner}>
-                          <MaskedView
-                            maskElement={<Instagram size={iconSize} color="#000000" />}
-                          >
-                            <LinearGradient colors={grad as any} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ width: iconSize, height: iconSize }} />
-                          </MaskedView>
-                        </View>
+                      <LinearGradient
+                        colors={grad as any}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 1 }}
+                        style={styles.igBtnInner}
+                      >
+                        <Instagram size={iconSize} color="#FFFFFF" />
                       </LinearGradient>
                     </TouchableOpacity>
                   );
@@ -1337,7 +1454,7 @@ export default function ProfileScreen() {
                 <View style={styles.metaChipsRow}>
                   {(profile?.address || profile?.city) ? (
                     <View style={styles.metaChip}>
-                      <MapPin size={14} color="#5e3f2d" />
+                      <MapPin size={14} color={colors.primary} />
                       <Text style={styles.metaChipText} numberOfLines={1}>
                         {profile?.address || profile?.city}
                       </Text>
@@ -1345,7 +1462,7 @@ export default function ProfileScreen() {
                   ) : null}
                   {profile?.age ? (
                     <View style={styles.metaChip}>
-                      <Calendar size={14} color="#5e3f2d" />
+                      <Calendar size={14} color={colors.primary} />
                       <Text style={styles.metaChipText}>גיל {profile.age}</Text>
                     </View>
                   ) : null}
@@ -1412,6 +1529,73 @@ export default function ProfileScreen() {
             </View>
           </View>
         )}
+
+        {/* Survey CTA (not for owners) */}
+        {!isOwner ? (
+          <View style={styles.sectionDark}>
+            <View style={styles.surveyCTA}>
+              {profile ? (
+                <LinearGradient
+                  colors={[colors.successMuted, colors.success]}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={styles.surveyCTAAvatarRing}
+                >
+                  <View style={styles.surveyCTAAvatarInner}>
+                    <Image
+                      source={{ uri: profile.avatar_url || 'https://cdn-icons-png.flaticon.com/512/847/847969.png' }}
+                      style={styles.surveyCTAAvatar}
+                    />
+                  </View>
+                </LinearGradient>
+              ) : null}
+
+              <TouchableOpacity
+                style={styles.surveyCTATexts}
+                activeOpacity={0.9}
+                onPress={() => {
+                  router.push({ pathname: '/(tabs)/onboarding/survey', params: { mode: 'edit' } } as any);
+                }}
+                accessibilityRole="button"
+                accessibilityLabel="עריכת שאלון"
+              >
+                <Text style={styles.surveyCTATitle}>
+                  {`השאלון של ${(profile?.full_name || '').split(' ')?.[0] || 'אני'}`}
+                </Text>
+                <Text style={styles.surveyCTASubtitle} numberOfLines={1}>
+                  {surveyResponse ? 'לחצו כאן כדי לערוך את השאלון' : 'לחצו כאן כדי למלא את השאלון'}
+                </Text>
+              </TouchableOpacity>
+
+              <View style={styles.surveyCTAActions}>
+                {surveyResponse ? (
+                  <TouchableOpacity
+                    style={styles.surveyEyeBtn}
+                    activeOpacity={0.9}
+                    onPress={() => setIsSurveyOpen(true)}
+                    accessibilityRole="button"
+                    accessibilityLabel="צפייה בשאלון"
+                  >
+                    <Eye size={18} color={colors.primary} />
+                  </TouchableOpacity>
+                ) : null}
+                <TouchableOpacity
+                  style={[styles.surveyCTACtaPill, surveyResponse ? styles.surveyCTACtaPillBrown : null]}
+                  activeOpacity={0.9}
+                  onPress={() => {
+                    router.push({ pathname: '/(tabs)/onboarding/survey', params: { mode: 'edit' } } as any);
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel={surveyResponse ? 'עריכת שאלון' : 'מילוי שאלון'}
+                >
+                  <Text style={[styles.surveyCTACtaPillText, surveyResponse ? styles.surveyCTACtaPillTextBrown : null]}>
+                    {surveyResponse ? 'עריכה' : 'מילוי'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        ) : null}
 
         {/* Shared profile (if any) */}
         <View style={styles.sectionDark}>
@@ -1490,7 +1674,7 @@ export default function ProfileScreen() {
               </View>
               <View style={styles.sectionEmptyWrap}>
                 <View style={styles.sectionEmptyIconPill}>
-                  <Inbox size={18} color="#5e3f2d" />
+                <Inbox size={18} color={colors.primary} />
                 </View>
                 <Text style={styles.sectionEmptyTitle}>כרגע אין שותפים</Text>
                 <Text style={styles.sectionEmptyText}>כשתצטרף/י לקבוצה או תזמין/י שותפים, הם יופיעו כאן.</Text>
@@ -1725,7 +1909,7 @@ export default function ProfileScreen() {
               ) : (
                 <View style={styles.sectionEmptyWrap}>
                   <View style={styles.sectionEmptyIconPill}>
-                    <Building2 size={18} color="#5e3f2d" />
+                    <Building2 size={18} color={colors.primary} />
                   </View>
                   <Text style={styles.sectionEmptyTitle}>עדיין אין דירה</Text>
                   <Text style={styles.sectionEmptyText}>עדיין לא בחרת דירה להצגה בפרופיל.</Text>
@@ -1766,7 +1950,7 @@ export default function ProfileScreen() {
                         accessibilityRole="button"
                         accessibilityLabel="העתק קוד דירה"
                       >
-                        <Copy size={16} color="#5e3f2d" />
+                        <Copy size={16} color={colors.primary} />
                         <Text style={styles.aptPasscodeCopyText}>העתק</Text>
                       </TouchableOpacity>
                     </View>
@@ -1787,46 +1971,30 @@ export default function ProfileScreen() {
           </View>
         </View>
 
+        {/* Likes Card */}
         <View style={styles.sectionDark}>
           <TouchableOpacity
-            style={styles.surveyCTA}
-            activeOpacity={0.9}
-            onPress={() => {
-              router.push({ pathname: '/(tabs)/onboarding/survey', params: { mode: 'edit' } } as any);
-            }}
+            style={styles.likesCard}
+            activeOpacity={0.95}
+            onPress={() => router.push('/likes' as any)}
+            accessibilityRole="button"
+            accessibilityLabel="דירות שאהבתי"
           >
-            {profile ? (
+            <View style={styles.likesCardContent}>
+              <View style={styles.likesTextWrap}>
+                <Text style={styles.likesTitle}>דירות שאהבתי</Text>
+                <Text style={styles.likesSubtitle}>כל הדירות שסימנת בלב</Text>
+              </View>
               <LinearGradient
-                colors={['#4ADE80', '#16A34A']}
+                colors={['#EC4899', '#F43F5E']}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
-                style={styles.surveyCTAAvatarRing}
+                style={styles.likesIconGradient}
               >
-                <View style={styles.surveyCTAAvatarInner}>
-                  <Image
-                    source={{ uri: profile.avatar_url || 'https://cdn-icons-png.flaticon.com/512/847/847969.png' }}
-                    style={styles.surveyCTAAvatar}
-                  />
-                </View>
+                <Heart size={24} color="#FFFFFF" fill="#FFFFFF" />
               </LinearGradient>
-            ) : null}
-            <View style={styles.surveyCTATexts}>
-              <Text style={styles.surveyCTATitle}>
-                {`השאלון של ${(profile?.full_name || '').split(' ')?.[0] || 'אני'}`}
-              </Text>
-              <Text style={styles.surveyCTASubtitle} numberOfLines={1}>
-                {'לחצו כאן כדי לערוך את השאלון'}
-              </Text>
-            </View>
-            <View style={styles.surveyCTACtaPill}>
-              <Text style={styles.surveyCTACtaPillText}>לצפייה</Text>
             </View>
           </TouchableOpacity>
-          {!isSurveyCompleted && (
-            <Text style={styles.surveyCTAHint}>
-              מלא/י את השאלון כדי שנוכל לחפש לך התאמות טובות יותר.
-            </Text>
-          )}
         </View>
 
         {/* Gallery section */}
@@ -1866,7 +2034,7 @@ export default function ProfileScreen() {
                     onPress={isAddingImage ? undefined : addGalleryImage}
                     activeOpacity={0.9}
                   >
-                    <Plus size={18} color="#5e3f2d" />
+                    <Plus size={18} color={colors.primary} />
                     <Text style={styles.galleryAddTileText}>הוסף</Text>
                   </TouchableOpacity>
                 )}
@@ -1878,7 +2046,7 @@ export default function ProfileScreen() {
                   onPress={isAddingImage ? undefined : addGalleryImage}
                   activeOpacity={0.9}
                 >
-                  <Plus size={18} color="#5e3f2d" />
+                  <Plus size={18} color={colors.primary} />
                   <Text style={styles.galleryAddTileText}>הוסף</Text>
                 </TouchableOpacity>
               </View>
@@ -1929,103 +2097,131 @@ export default function ProfileScreen() {
           </View>
         </Modal>
       )}
-      <Modal visible={isSurveyOpen} animationType="slide" transparent onRequestClose={() => setIsSurveyOpen(false)}>
-        <View style={styles.modalOverlay}>
-          <TouchableOpacity style={styles.modalBackdrop} activeOpacity={1} onPress={() => setIsSurveyOpen(false)} />
-          <View style={[styles.sheet, { height: surveySheetMaxHeight }]}>
-            <View style={styles.sheetHandleWrap}>
-              <View style={styles.sheetHandle} />
-            </View>
-            <View style={styles.sheetHeader}>
-              <Text style={styles.sheetTitle}>סיכום ההעדפות</Text>
-              <TouchableOpacity onPress={() => setIsSurveyOpen(false)} style={styles.closeBtn}>
-                <X size={20} color="#FFFFFF" />
+      {!isOwner ? (
+        <KeyFabPanel
+          isOpen={isSurveyOpen}
+          onClose={() => setIsSurveyOpen(false)}
+          title="סיכום ההעדפות"
+          subtitle=""
+          anchor="center"
+          topOffset={insets.top + 24}
+          bottomOffset={insets.bottom + 24}
+          openedWidth={surveyPanelWidth}
+          panelStyle={{ maxHeight: surveyPanelMaxHeight, borderRadius: 22, padding: 14 }}
+        >
+          <View
+            style={styles.surveySegWrap}
+            onLayout={(e) => {
+              const w = Math.max(1, e.nativeEvent.layout.width);
+              // account for horizontal padding inside the segmented control
+              segW.value = Math.max(1, (w - 12) / 3);
+            }}
+          >
+            <Animated.View style={isWeb ? indicatorStyle : [styles.surveySegIndicator, indicatorStyle]} />
+            <View style={styles.surveySegRow}>
+              <TouchableOpacity
+                style={styles.surveySegBtn}
+                onPress={() => setSurveyActiveSection('about')}
+                activeOpacity={0.9}
+              >
+                <UserIcon size={16} color={surveyActiveSection === 'about' ? '#5e3f2d' : '#6B7280'} />
+                <Text style={[styles.surveySegText, surveyActiveSection === 'about' ? styles.surveySegTextActive : null]}>
+                  על עצמי
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.surveySegBtn}
+                onPress={() => setSurveyActiveSection('partner')}
+                activeOpacity={0.9}
+              >
+                <Users size={16} color={surveyActiveSection === 'partner' ? '#5e3f2d' : '#6B7280'} />
+                <Text
+                  style={[
+                    styles.surveySegText,
+                    surveyActiveSection === 'partner' ? styles.surveySegTextActive : null,
+                  ]}
+                >
+                  השותפים
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.surveySegBtn}
+                onPress={() => setSurveyActiveSection('apartment')}
+                activeOpacity={0.9}
+              >
+                <Home size={16} color={surveyActiveSection === 'apartment' ? '#5e3f2d' : '#6B7280'} />
+                <Text
+                  style={[
+                    styles.surveySegText,
+                    surveyActiveSection === 'apartment' ? styles.surveySegTextActive : null,
+                  ]}
+                >
+                  הדירה
+                </Text>
               </TouchableOpacity>
             </View>
-            <ScrollView
-              style={styles.sheetScroll}
-              contentContainerStyle={[styles.sheetContent, { paddingBottom: 16 + (insets.bottom || 0) }]}
-              showsVerticalScrollIndicator={false}
-              keyboardShouldPersistTaps="handled"
-            >
-              {!!surveyHighlights.length && (
-                <View style={styles.surveyHighlightsRow}>
-                  {surveyHighlights.map((item) => (
-                    <View key={`${item.label}-${item.value}`} style={styles.surveyHighlightPill}>
-                      <Text style={styles.surveyHighlightLabel}>{item.label}</Text>
-                      <Text style={styles.surveyHighlightValue}>{item.value}</Text>
+          </View>
+
+          <ScrollView
+            style={[styles.surveyPanelScroll, { maxHeight: surveyPanelScrollMaxHeight }]}
+            contentContainerStyle={styles.surveyPanelContent}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="always"
+            nestedScrollEnabled
+          >
+            {surveyResponse && surveyItems.length ? (
+              <Animated.View
+                key={`survey-part-${surveyActiveSection}`}
+                entering={FadeIn.duration(160)}
+                exiting={FadeOut.duration(120)}
+                style={styles.surveySectionCard}
+              >
+                <Text style={styles.surveySectionTitle}>
+                  {surveyActiveSection === 'about'
+                    ? 'על עצמי'
+                    : surveyActiveSection === 'partner'
+                      ? 'על השותפים'
+                      : 'על הדירה'}
+                </Text>
+                {surveyItems
+                  .filter((i) => i.section === surveyActiveSection)
+                  .map((item, idx, arr) => (
+                    <View key={`${item.section}-${item.label}-${item.value}`}>
+                      <View style={styles.surveyRow}>
+                        <Text style={styles.surveyRowLabel}>{item.label}</Text>
+                        <View style={styles.surveyRowValuePill}>
+                          <Text style={styles.surveyRowValueText}>{item.value}</Text>
+                        </View>
+                      </View>
+                      {idx < arr.length - 1 ? <View style={styles.surveyRowDivider} /> : null}
                     </View>
                   ))}
-                </View>
-              )}
-              {surveyResponse ? (
-                surveyItems.length ? (
-                  <>
-                    <Text style={styles.surveyAllAnswersTitle}>{`סיכום מלא (${surveyItems.length})`}</Text>
-
-                    <View style={styles.surveySectionCard}>
-                      <Text style={styles.surveySectionTitle}>עליי</Text>
-                      {surveyItems.filter((i) => i.section === 'about').map((item, idx, arr) => (
-                        <View key={`${item.section}-${item.label}-${item.value}`}>
-                          <View style={styles.surveyRow}>
-                            <Text style={styles.surveyRowLabel}>{item.label}</Text>
-                            <View style={styles.surveyRowValuePill}>
-                              <Text style={styles.surveyRowValueText}>{item.value}</Text>
-                            </View>
-                          </View>
-                          {idx < arr.length - 1 ? <View style={styles.surveyRowDivider} /> : null}
-                        </View>
-                      ))}
-                    </View>
-
-                    <View style={styles.surveySectionCard}>
-                      <Text style={styles.surveySectionTitle}>הדירה שאני מחפש/ת</Text>
-                      {surveyItems.filter((i) => i.section === 'apartment').map((item, idx, arr) => (
-                        <View key={`${item.section}-${item.label}-${item.value}`}>
-                          <View style={styles.surveyRow}>
-                            <Text style={styles.surveyRowLabel}>{item.label}</Text>
-                            <View style={styles.surveyRowValuePill}>
-                              <Text style={styles.surveyRowValueText}>{item.value}</Text>
-                            </View>
-                          </View>
-                          {idx < arr.length - 1 ? <View style={styles.surveyRowDivider} /> : null}
-                        </View>
-                      ))}
-                    </View>
-
-                    <View style={styles.surveySectionCard}>
-                      <Text style={styles.surveySectionTitle}>השותפ/ה שאני מחפש/ת</Text>
-                      {surveyItems.filter((i) => i.section === 'partner').map((item, idx, arr) => (
-                        <View key={`${item.section}-${item.label}-${item.value}`}>
-                          <View style={styles.surveyRow}>
-                            <Text style={styles.surveyRowLabel}>{item.label}</Text>
-                            <View style={styles.surveyRowValuePill}>
-                              <Text style={styles.surveyRowValueText}>{item.value}</Text>
-                            </View>
-                          </View>
-                          {idx < arr.length - 1 ? <View style={styles.surveyRowDivider} /> : null}
-                        </View>
-                      ))}
-                    </View>
-                  </>
-                ) : (
-                  <View style={styles.surveyEmptyState}>
-                    <Text style={styles.surveyEmptyText}>
-                      סקר ההעדפות הושלם אך אין עדיין נתונים להצגה.
-                    </Text>
-                  </View>
-                )
-              ) : (
-                <View style={styles.surveyEmptyState}>
-                  <Text style={styles.surveyEmptyText}>
-                    ברגע שתמלא/י את סקר ההעדפות נציג כאן את ההתאמות האישיות שלך.
-                  </Text>
-                </View>
-              )}
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
+              </Animated.View>
+            ) : (
+              <View style={styles.surveyEmptyState}>
+                <Text style={styles.surveyEmptyText}>
+                  {surveyResponse ? 'אין נתונים להצגה.' : 'עדיין לא מילאת את השאלון.'}
+                </Text>
+                {!surveyResponse ? (
+                  <TouchableOpacity
+                    style={styles.surveyEmptyCtaBtn}
+                    activeOpacity={0.9}
+                    onPress={() => {
+                      setIsSurveyOpen(false);
+                      router.push({ pathname: '/(tabs)/onboarding/survey', params: { mode: 'edit' } } as any);
+                    }}
+                    accessibilityRole="button"
+                    accessibilityLabel="מלא את השאלון"
+                  >
+                    <ClipboardList size={18} color="#FFFFFF" />
+                    <Text style={styles.surveyEmptyCtaText}>מלא/י את השאלון</Text>
+                  </TouchableOpacity>
+                ) : null}
+              </View>
+            )}
+          </ScrollView>
+        </KeyFabPanel>
+      ) : null}
       {(isSaving || isAddingImage) && (
         <View style={styles.fullScreenLoader}>
           <ActivityIndicator size="large" color="#FFFFFF" />
@@ -2148,7 +2344,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(94,63,45,0.16)',
+    borderColor: alpha(colors.primary, 0.16),
     shadowColor: '#000000',
     shadowOpacity: 0.18,
     shadowRadius: 8,
@@ -2252,9 +2448,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 999,
-    backgroundColor: 'rgba(94,63,45,0.06)',
+    backgroundColor: colors.white,
     borderWidth: 1,
-    borderColor: 'rgba(94,63,45,0.12)',
+    borderColor: alpha(colors.primary, 0.12),
     maxWidth: '100%',
   },
   metaChipText: {
@@ -2271,7 +2467,7 @@ const styles = StyleSheet.create({
     borderColor: 'transparent',
   },
   bioTitle: {
-    color: '#5e3f2d',
+    color: colors.primary,
     fontSize: 13,
     fontWeight: '900',
     textAlign: 'right',
@@ -2487,7 +2683,7 @@ const styles = StyleSheet.create({
     padding: 8,
   },
   saveButton: {
-    backgroundColor: '#5e3f2d',
+    backgroundColor: colors.success,
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 10,
@@ -2851,12 +3047,7 @@ const styles = StyleSheet.create({
   igBtnHit: {
     flexShrink: 0,
   },
-  igBtnBorder: {
-    borderRadius: 999,
-    padding: 1.5,
-  },
   igBtnInner: {
-    backgroundColor: 'rgba(255,255,255,0.0)',
     borderRadius: 999,
     paddingHorizontal: 10,
     paddingVertical: 7,
@@ -2892,13 +3083,13 @@ const styles = StyleSheet.create({
     borderColor: '#E5E7EB',
   },
   surveyBadgeText: {
-    color: '#5e3f2d',
+    color: colors.primary,
     fontSize: 12,
     fontWeight: '800',
   },
   surveyBadgeSuccess: {
-    backgroundColor: 'rgba(34,197,94,0.12)',
-    borderColor: 'rgba(34,197,94,0.25)',
+    backgroundColor: alpha(colors.success, 0.12),
+    borderColor: alpha(colors.success, 0.25),
   },
   surveyBadgePending: {
     backgroundColor: 'rgba(250,204,21,0.12)',
@@ -2923,15 +3114,14 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   surveySectionCard: {
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
+    backgroundColor: '#F3F4F6',
+    borderWidth: 0,
     borderRadius: 18,
     padding: 14,
     marginBottom: 12,
   },
   surveySectionTitle: {
-    color: '#5e3f2d',
+    color: colors.primary,
     fontSize: 14,
     fontWeight: '900',
     textAlign: 'right',
@@ -2953,9 +3143,9 @@ const styles = StyleSheet.create({
   },
   surveyRowValuePill: {
     maxWidth: '55%',
-    backgroundColor: 'rgba(94,63,45,0.08)',
+    backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: 'rgba(94,63,45,0.18)',
+    borderColor: 'rgba(17,24,39,0.10)',
     paddingHorizontal: 10,
     paddingVertical: 8,
     borderRadius: 14,
@@ -2969,8 +3159,59 @@ const styles = StyleSheet.create({
   },
   surveyRowDivider: {
     height: StyleSheet.hairlineWidth,
-    backgroundColor: '#EEF2F7',
+    backgroundColor: 'rgba(17,24,39,0.10)',
     marginVertical: 10,
+  },
+  surveySegWrap: {
+    position: 'relative',
+    backgroundColor: '#E5E7EB',
+    borderWidth: 0,
+    borderRadius: 999,
+    padding: 6,
+    marginBottom: 12,
+    overflow: 'hidden',
+  },
+  surveySegRow: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+  },
+  surveySegIndicator: {
+    position: 'absolute',
+    top: 6,
+    bottom: 6,
+    left: 6,
+    borderRadius: 999,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 0,
+    shadowColor: '#000',
+    shadowOpacity: 0.08,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 2,
+  },
+  surveySegBtn: {
+    flex: 1,
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 8,
+  },
+  surveySegText: {
+    color: '#6B7280',
+    fontSize: 13,
+    fontWeight: '900',
+    textAlign: 'center',
+    writingDirection: 'rtl',
+  },
+  surveySegTextActive: {
+    color: colors.primary,
+  },
+  surveyPanelScroll: {
+    // maxHeight is set dynamically based on screen size
+  },
+  surveyPanelContent: {
+    paddingBottom: 10,
   },
   surveyHighlightPill: {
     backgroundColor: '#F9FAFB',
@@ -3032,20 +3273,58 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     textAlign: 'right',
   },
+  surveyEmptyCtaBtn: {
+    marginTop: 8,
+    height: 46,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#5e3f2d',
+    flexDirection: 'row-reverse',
+    gap: 8,
+    paddingHorizontal: 14,
+    alignSelf: 'flex-end',
+  },
+  surveyEmptyCtaText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '900',
+    includeFontPadding: false,
+    lineHeight: 18,
+    textAlign: 'center',
+    writingDirection: 'rtl',
+  },
   surveyCTA: {
     flexDirection: 'row-reverse',
     alignItems: 'center',
     justifyContent: 'space-between',
     backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderWidth: 0,
+    borderColor: 'transparent',
     borderRadius: 20,
     paddingHorizontal: 16,
     paddingVertical: 14,
     shadowColor: '#000000',
-    shadowOpacity: 0.06,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 3,
+    ...(Platform.OS === 'web' ? ({ boxShadow: '0 12px 28px rgba(0,0,0,0.10)' } as any) : null),
+  },
+  surveyCTAActions: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 10,
+  },
+  surveyEyeBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: colors.white,
+    borderWidth: 1,
+    borderColor: alpha(colors.primary, 0.16),
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   surveyCTATexts: {
     flex: 1,
@@ -3063,30 +3342,29 @@ const styles = StyleSheet.create({
     fontSize: 13,
     textAlign: 'right',
   },
-  surveyCTAHint: {
-    marginTop: 10,
-    color: '#6B7280',
-    fontSize: 13,
-    lineHeight: 18,
-    textAlign: 'right',
-    alignSelf: 'stretch',
-  },
   surveyCTACtaPill: {
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 999,
-    backgroundColor: 'rgba(22,163,74,0.10)',
+    backgroundColor: alpha(colors.success, 0.12),
     borderWidth: 1,
-    borderColor: 'rgba(22,163,74,0.20)',
+    borderColor: alpha(colors.success, 0.22),
     alignItems: 'center',
     justifyContent: 'center',
   },
   surveyCTACtaPillText: {
-    color: '#16A34A',
+    color: colors.success,
     fontSize: 12,
     fontWeight: '900',
     textAlign: 'center',
     includeFontPadding: false,
+  },
+  surveyCTACtaPillBrown: {
+    backgroundColor: '#5e3f2d',
+    borderColor: 'rgba(94,63,45,0.25)',
+  },
+  surveyCTACtaPillTextBrown: {
+    color: '#FFFFFF',
   },
   modalOverlay: {
     flex: 1,
@@ -3322,6 +3600,57 @@ const styles = StyleSheet.create({
     lineHeight: 16,
     includeFontPadding: false,
   },
+  likesCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    borderWidth: 0,
+    borderColor: 'transparent',
+    shadowColor: '#000000',
+    shadowOpacity: 0.08,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 3,
+    ...(Platform.OS === 'web' ? ({ boxShadow: '0 12px 28px rgba(0,0,0,0.10)' } as any) : null),
+  },
+  likesCardContent: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 18,
+    paddingVertical: 16,
+  },
+  likesTextWrap: {
+    flex: 1,
+    alignItems: 'flex-end',
+    gap: 4,
+  },
+  likesTitle: {
+    color: '#111827',
+    fontSize: 17,
+    fontWeight: '900',
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    letterSpacing: -0.3,
+  },
+  likesSubtitle: {
+    color: '#6B7280',
+    fontSize: 13,
+    fontWeight: '600',
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
+  likesIconGradient: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#EC4899',
+    shadowOpacity: 0.35,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 6,
+  },
   sharedAvatarsRow: {
     flexDirection: 'row-reverse',
     alignItems: 'center',
@@ -3406,15 +3735,15 @@ const styles = StyleSheet.create({
   },
   aptPricePill: {
     alignSelf: 'flex-end',
-    backgroundColor: 'rgba(34,197,94,0.15)',
+    backgroundColor: alpha(colors.success, 0.15),
     borderWidth: 1,
-    borderColor: 'rgba(34,197,94,0.25)',
+    borderColor: alpha(colors.success, 0.25),
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 999,
   },
   aptPriceText: {
-    color: '#22C55E',
+    color: colors.success,
     fontWeight: '900',
     fontSize: 13,
   },

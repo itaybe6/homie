@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useAuthStore } from '@/stores/authStore';
 import { fetchUserSurvey } from '@/lib/survey';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Home, Users, Plus, Heart, User as UserIcon } from 'lucide-react-native';
+import { Home, Users, Plus, Search, User as UserIcon, Heart } from 'lucide-react-native';
 import { supabase } from '@/lib/supabase';
 
 function FloatingCenterTabButton({
@@ -46,6 +46,7 @@ export default function TabLayout() {
   const router = useRouter();
   const pathname = usePathname();
   const { user } = useAuthStore();
+  const isOwner = (user as any)?.role === 'owner';
   const hasPromptedRef = useRef(false);
   const prevUserIdRef = useRef<string | null>(null);
   const isCheckingSurveyRef = useRef(false);
@@ -104,6 +105,13 @@ export default function TabLayout() {
     if (!user) {
       prevUserIdRef.current = null;
       hasPromptedRef.current = false;
+      isCheckingSurveyRef.current = false;
+      return;
+    }
+
+    // Owners do not need the preferences survey.
+    if ((user as any)?.role === 'owner') {
+      hasPromptedRef.current = true;
       isCheckingSurveyRef.current = false;
       return;
     }
@@ -179,6 +187,18 @@ export default function TabLayout() {
         tabBarLabelStyle: { fontSize: 12, fontWeight: '600' },
       }}>
       <Tabs.Screen
+        name="partners"
+        options={
+          isOwner
+            ? // Owners: replace this spot with "Likes" tab instead of partners
+              { href: null }
+            : {
+                tabBarLabel: 'שותפים',
+                tabBarIcon: ({ color }) => <Users size={24} color={color} />,
+              }
+        }
+      />
+      <Tabs.Screen
         name="home"
         options={{
           tabBarLabel: 'דירות',
@@ -186,11 +206,15 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
-        name="partners"
-        options={{
-          tabBarLabel: 'שותפים',
-          tabBarIcon: ({ color }) => <Users size={24} color={color} />,
-        }}
+        name="likes"
+        options={
+          isOwner
+            ? {
+                tabBarLabel: 'אהבתי',
+                tabBarIcon: ({ color }) => <Heart size={24} color={color} />,
+              }
+            : { href: null }
+        }
       />
       <Tabs.Screen
         name="add-apartment"
@@ -254,10 +278,10 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
-        name="likes"
+        name="search"
         options={{
-          tabBarLabel: 'אהבתי',
-          tabBarIcon: ({ color }) => <Heart size={24} color={color} />,
+          tabBarLabel: 'חיפוש',
+          tabBarIcon: ({ color }) => <Search size={24} color={color} />,
         }}
       />
       <Tabs.Screen
@@ -269,6 +293,7 @@ export default function TabLayout() {
       />
       {/* Map screen: keep tab bar visible but hide from tab items */}
       <Tabs.Screen name="map" options={{ href: null }} />
+      {/* Likes screen is conditionally shown above (owners) */}
       {/* Hide nested detail routes from the tab bar */}
       <Tabs.Screen name="user/[id]" options={{ href: null }} />
       <Tabs.Screen name="group-requests" options={{ href: null }} />

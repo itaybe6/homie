@@ -14,6 +14,7 @@ import {
 import { useRouter } from 'expo-router';
 import { BarChart2, Users, Home as HomeIcon, CheckCircle2, XCircle, Gauge, Phone, MapPin } from 'lucide-react-native';
 import { supabase } from '@/lib/supabase';
+import { alpha, colors } from '@/lib/theme';
 import { authService } from '@/lib/auth';
 import { useAuthStore } from '@/stores/authStore';
 
@@ -24,8 +25,8 @@ const TEXT_MUTED = '#6B7280';
 
 export default function AdminDashboard() {
   const router = useRouter();
-  const authUser = useAuthStore((s) => s.user);
-  const setStoreUser = useAuthStore((s) => s.setUser);
+  const authUser = useAuthStore((s: any) => s.user);
+  const setStoreUser = useAuthStore((s: any) => s.setUser);
   const [active, setActive] = useState<AdminTab>('overview');
   const [loading, setLoading] = useState(true);
   const [reloadKey, setReloadKey] = useState(0);
@@ -232,7 +233,7 @@ export default function AdminDashboard() {
       { key: 'apartments', title: 'דירות', value: totalApartments, icon: HomeIcon, color: '#00BCD4' },
       { key: 'regularUsers', title: 'משתמשים רגילים', value: regularUsersCount, icon: Users, color: '#60A5FA' },
       { key: 'owners', title: 'בעלי דירות', value: ownersCount, icon: HomeIcon, color: '#34D399' },
-      { key: 'approved', title: 'מאץ׳ים מאושרים', value: matchesApproved, icon: CheckCircle2, color: '#22C55E' },
+      { key: 'approved', title: 'מאץ׳ים מאושרים', value: matchesApproved, icon: CheckCircle2, color: colors.success },
       { key: 'pending', title: 'מאץ׳ים ממתינים', value: matchesPending, icon: XCircle, color: '#F59E0B' },
       { key: 'assigned', title: 'שותפים משויכים', value: assignedCount, icon: Gauge, color: '#38BDF8' },
       { key: 'unassigned', title: 'שותפים לא משויכים', value: unassignedCount, icon: Gauge, color: '#EF4444' },
@@ -503,7 +504,7 @@ export default function AdminDashboard() {
         <View style={{ flex: 1 }}>
           <View style={[styles.section, { paddingHorizontal: 16 }]}>
             <View style={styles.matchesWrap}>
-              <SmallStat title="מאושרים" value={matchesApproved} color="#22C55E" Icon={CheckCircle2} />
+              <SmallStat title="מאושרים" value={matchesApproved} color={colors.success} Icon={CheckCircle2} />
               <SmallStat title="ממתינים" value={matchesPending} color="#F59E0B" Icon={XCircle} />
             </View>
           </View>
@@ -700,7 +701,7 @@ function ApartmentRow({ apt, partners, owner }: { apt: any; partners?: any[]; ow
 function MatchRow({ match, sender, receiver }: { match: any; sender: any; receiver: any }) {
   const status = (match?.status || 'PENDING').trim();
   const badgeConfig: Record<string, { bg: string; color: string; label: string }> = {
-    APPROVED: { bg: '#16A34A22', color: '#22C55E', label: 'מאושר' },
+    APPROVED: { bg: alpha(colors.success, 0.13), color: colors.success, label: 'מאושר' },
     PENDING: { bg: '#F59E0B22', color: '#F59E0B', label: 'ממתין' },
     REJECTED: { bg: '#F8717122', color: '#F87171', label: 'נדחה' },
     NOT_RELEVANT: { bg: '#94A3B822', color: '#94A3B8', label: 'לא רלוונטי' },
@@ -1164,7 +1165,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   aptPrice: {
-    color: '#22C55E',
+    color: colors.success,
     fontSize: 20,
     fontWeight: '800',
     textAlign: 'right',

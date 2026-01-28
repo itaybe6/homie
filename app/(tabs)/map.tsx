@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { View, Text, StyleSheet, ActivityIndicator, TextInput, TouchableOpacity, Platform, ScrollView, Image, Modal } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { View, Text, StyleSheet, ActivityIndicator, TextInput, TouchableOpacity, Platform, ScrollView, Image, Modal, useWindowDimensions, FlatList } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import MapboxMap from '@/components/MapboxMap';
 import { KeyFabPanel } from '@/components/KeyFabPanel';
@@ -61,10 +61,52 @@ function transformSupabaseImageUrl(value: string): string {
 
 export default function MapTabScreen() {
   const router = useRouter();
+  const { width: windowWidth } = useWindowDimensions();
   const token = process.env.EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN as string | undefined;
-  const styleUrl = process.env.EXPO_PUBLIC_MAPBOX_STYLE_URL as string | undefined;
+  // Use Mapbox Standard to preserve the app's original look.
+  const styleUrl = 'mapbox://styles/mapbox/streets-v12';
   const insets = useSafeAreaInsets();
   const pointBrown = '#5e3f2d';
+  const resultCardWidth = useMemo(() => {
+    // Cards should be wide, but still show a noticeable peek of the next/previous card.
+    // Clamp for small/large screens.
+    const w = Math.round(windowWidth * 0.78);
+    return Math.max(260, Math.min(380, w));
+  }, [windowWidth]);
+  const [highlightApartmentId, setHighlightApartmentId] = useState<string | null>(null);
+  const onViewableItemsChanged = useRef(
+    ({ viewableItems }: { viewableItems: Array<{ item?: any; isViewable: boolean }> }) => {
+      const first = (viewableItems || []).find((v) => v?.isViewable && v?.item?.id);
+      if (first?.item?.id) setHighlightApartmentId(String(first.item.id));
+    }
+  ).current;
+  const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 65 }).current;
+
+  function toRad(d: number) {
+    return (d * Math.PI) / 180;
+  }
+
+  function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number) {
+    const R = 6371; // km
+    const dLat = toRad(lat2 - lat1);
+    const dLng = toRad(lng2 - lng1);
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+  }
+
+  function formatDistanceKm(km: number): string {
+    if (!Number.isFinite(km) || km < 0) return '';
+    if (km < 1) {
+      const meters = Math.max(0, Math.round(km * 1000));
+      return `${meters} מ׳`;
+    }
+    const rounded = Math.round(km * 10) / 10; // 0.1km precision
+    const asStr = String(rounded).endsWith('.0') ? String(Math.round(rounded)) : String(rounded);
+    return `${asStr} ק״מ`;
+  }
 
   const [points, setPoints] = useState<MapboxFeatureCollection>({
     type: 'FeatureCollection',
@@ -87,13 +129,13 @@ export default function MapTabScreen() {
 
   const filterChips = useMemo<FilterChip[]>(
     () => [
+      ...defaultFilterChips,
       {
         id: 'distance',
         label: distanceKm ? `טווח: עד ${distanceKm} ק״מ` : 'טווח',
         type: 'dropdown',
         renderIcon: (c, s) => <MapPin color={c} size={s} />,
       },
-      ...defaultFilterChips,
     ],
     [distanceKm]
   );
@@ -404,22 +446,6 @@ export default function MapTabScreen() {
     const selected = new Set(chipSelected || []);
     const chipFilters = selectedFiltersFromIds(Array.from(selected));
 
-    function toRad(d: number) {
-      return (d * Math.PI) / 180;
-    }
-
-    function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number) {
-      const R = 6371; // km
-      const dLat = toRad(lat2 - lat1);
-      const dLng = toRad(lng2 - lng1);
-      const a =
-        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-        Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
-        Math.sin(dLng / 2) * Math.sin(dLng / 2);
-      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-      return R * c;
-    }
-
     const features = (points.features || []).filter((f) => {
       const props = (f as any)?.properties ?? {};
       const title = safeLower(props.title);
@@ -439,11 +465,14 @@ export default function MapTabScreen() {
       if (chipFilters.is_furnished && !props?.is_furnished) return false;
       if (chipFilters.wheelchair_accessible && !props?.wheelchair_accessible) return false;
       if (chipFilters.has_safe_room && !props?.has_safe_room) return false;
-      if (chipFilters.has_elevator && !props?.has_elevator) return false;
-      if (chipFilters.kosher_kitchen && !props?.kosher_kitchen) return false;
-      if (chipFilters.has_air_conditioning && !props?.has_air_conditioning) return false;
-      if (chipFilters.has_solar_heater && !props?.has_solar_heater) return false;
-      if (chipFilters.is_renovated && !props?.is_renovated) return false;
+      if (chipFilters.garden) {
+        const aptType = String(props?.apartment_type || '').toUpperCase();
+        const gardenSqmRaw = props?.garden_square_meters;
+        const gardenSqm =
+          typeof gardenSqmRaw === 'number' && Number.isFinite(gardenSqmRaw) ? (gardenSqmRaw as number) : null;
+        const hasGarden = aptType === 'GARDEN' || (gardenSqm !== null && gardenSqm > 0);
+        if (!hasGarden) return false;
+      }
       if (chipFilters.balcony) {
         const bc = typeof props?.balcony_count === 'number' ? (props.balcony_count as number) : 0;
         if (bc <= 0) return false;
@@ -519,11 +548,19 @@ export default function MapTabScreen() {
 
   const results = useMemo(() => {
     const PLACEHOLDER = 'https://images.pexels.com/photos/1457842/pexels-photo-1457842.jpeg';
-    return (filteredPoints.features || [])
+    const mapped = (filteredPoints.features || [])
       .map((f) => {
         const props = (f as any)?.properties ?? {};
         const id = String(props.id || '').trim();
         if (!id) return null;
+        const coords = (f as any)?.geometry?.coordinates;
+        const lng = Array.isArray(coords) ? Number(coords[0]) : NaN;
+        const lat = Array.isArray(coords) ? Number(coords[1]) : NaN;
+        const distanceKmNum =
+          userLocation && Number.isFinite(lng) && Number.isFinite(lat)
+            ? haversineKm(userLocation.lat, userLocation.lng, lat, lng)
+            : null;
+        const distanceLabel = distanceKmNum != null ? formatDistanceKm(distanceKmNum) : null;
         // Prefer "main" image from the images JSON array; fall back to image_url; then placeholder.
         let primaryFromJson = '';
         try {
@@ -553,18 +590,32 @@ export default function MapTabScreen() {
           city,
           address,
           availableSlots: Number.isFinite(availableSlots) ? availableSlots : null,
+          distanceLabel,
+          distanceKm: distanceKmNum,
         };
       })
-      .filter(Boolean)
-      .slice(0, 25) as Array<{
+      .filter(Boolean) as Array<{
       id: string;
       imageCandidates: string[];
       title: string;
       city: string;
       address: string;
       availableSlots: number | null;
+      distanceLabel: string | null;
+      distanceKm: number | null;
     }>;
-  }, [filteredPoints]);
+
+    // If we have a user location, sort by distance ascending (closest first).
+    if (userLocation) {
+      mapped.sort((a, b) => {
+        const da = a.distanceKm == null ? Number.POSITIVE_INFINITY : a.distanceKm;
+        const db = b.distanceKm == null ? Number.POSITIVE_INFINITY : b.distanceKm;
+        return da - db;
+      });
+    }
+
+    return mapped.slice(0, 25);
+  }, [filteredPoints, userLocation]);
 
   const resultsKey = useMemo(() => results.map((r) => r.id).join('|'), [results]);
   useEffect(() => {
@@ -584,11 +635,14 @@ export default function MapTabScreen() {
         <MapboxMap
           accessToken={token}
           styleUrl={styleUrl}
+          language="he"
           // Prefer manual center override, then search center, then user location, otherwise fit-to-points.
           center={mapCenter}
           zoom={mapZoom}
           points={filteredPoints}
           pointColor={pointBrown}
+          userLocation={userLocation ? ([userLocation.lng, userLocation.lat] as const) : undefined}
+          highlightApartmentId={highlightApartmentId}
           onApartmentPress={(id: string) => {
             router.push({ pathname: '/apartment/[id]', params: { id, returnTo: '/(tabs)/map' } });
           }}
@@ -621,72 +675,70 @@ export default function MapTabScreen() {
         {/* Bottom results rail */}
         {token && !loadingPoints && !pointsError ? (
           <View pointerEvents="box-none" style={[styles.resultsWrap, { bottom: (insets.bottom || 0) + 12 }]}>
-            <ScrollView
+          {results.length ? (
+            <FlatList
               horizontal
+              inverted
+              data={results}
+              keyExtractor={(r) => String((r as any).id)}
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.resultsContent}
-              style={{ direction: 'rtl' as any }}
-            >
-              {results.length ? (
-                results.map((r) => (
-                  <TouchableOpacity
-                    key={r.id}
-                    activeOpacity={0.92}
-                    onPress={() => router.push({ pathname: '/apartment/[id]', params: { id: r.id, returnTo: '/(tabs)/map' } })}
-                    style={styles.resultCard}
-                    accessibilityRole="button"
-                    accessibilityLabel={`פתח דירה: ${r.title}`}
-                  >
-                    <View style={styles.resultBody}>
-                      <View style={styles.resultTopRow}>
-                        <Text style={styles.resultTitle} numberOfLines={1}>
-                          {r.title}
-                        </Text>
-                      </View>
-                        {typeof r.availableSlots === 'number' ? (
-                          <View style={styles.slotsRow}>
-                            <View style={styles.slotsPill}>
-                              <Text style={styles.slotsText}>{`${r.availableSlots} מקומות פנויים`}</Text>
-                            </View>
-                          </View>
-                        ) : null}
-                        <Text style={styles.resultMeta} numberOfLines={1}>
-                          {r.city || r.address}
-                        </Text>
+              ItemSeparatorComponent={() => <View style={{ width: 10 }} />}
+              onViewableItemsChanged={onViewableItemsChanged}
+              viewabilityConfig={viewabilityConfig}
+              snapToInterval={resultCardWidth + 10}
+              decelerationRate="fast"
+              renderItem={({ item: r }: any) => (
+                <TouchableOpacity
+                  activeOpacity={0.92}
+                  onPress={() => router.push({ pathname: '/apartment/[id]', params: { id: r.id, returnTo: '/(tabs)/map' } })}
+                  style={[styles.resultCard, { width: resultCardWidth }]}
+                  accessibilityRole="button"
+                  accessibilityLabel={`פתח דירה: ${r.title}`}
+                >
+                  <View style={styles.resultBody}>
+                    <View style={styles.resultTopRow}>
+                      <Text style={styles.resultTitle} numberOfLines={1}>
+                        {r.title}
+                      </Text>
                     </View>
-                      <Image
-                        source={{
-                          uri:
-                            r.imageCandidates[
-                              Math.max(
-                                0,
-                                Math.min(
-                                  resultImgCandidateIdxById[r.id] ?? 0,
-                                  r.imageCandidates.length - 1
-                                )
-                              )
-                            ],
-                        }}
-                        style={styles.resultImage}
-                        resizeMode="cover"
-                        onError={() => {
-                          // Try next candidate (e.g., fall back from Supabase render URL to raw URL, then to placeholder)
-                          setResultImgCandidateIdxById((prev) => {
-                            const current = typeof prev[r.id] === 'number' ? prev[r.id] : 0;
-                            const nextIdx = Math.min(current + 1, r.imageCandidates.length - 1);
-                            if (nextIdx === current) return prev;
-                            return { ...prev, [r.id]: nextIdx };
-                          });
-                        }}
-                      />
-                  </TouchableOpacity>
-                ))
-              ) : (
-                <View style={styles.emptyRail}>
-                  <Text style={styles.emptyRailText}>אין תוצאות להצגה</Text>
-                </View>
+                    {typeof r.availableSlots === 'number' ? (
+                      <View style={styles.slotsRow}>
+                        <View style={styles.slotsPill}>
+                          <Text style={styles.slotsText}>{`${r.availableSlots} מקומות פנויים`}</Text>
+                        </View>
+                      </View>
+                    ) : null}
+                    <Text style={styles.resultMeta} numberOfLines={1}>
+                      {`${r.city || r.address}${r.distanceLabel ? ` · ${r.distanceLabel}` : ''}`}
+                    </Text>
+                  </View>
+                  <Image
+                    source={{
+                      uri:
+                        r.imageCandidates[
+                          Math.max(0, Math.min(resultImgCandidateIdxById[r.id] ?? 0, r.imageCandidates.length - 1))
+                        ],
+                    }}
+                    style={styles.resultImage}
+                    resizeMode="cover"
+                    onError={() => {
+                      setResultImgCandidateIdxById((prev) => {
+                        const current = typeof prev[r.id] === 'number' ? prev[r.id] : 0;
+                        const nextIdx = Math.min(current + 1, r.imageCandidates.length - 1);
+                        if (nextIdx === current) return prev;
+                        return { ...prev, [r.id]: nextIdx };
+                      });
+                    }}
+                  />
+                </TouchableOpacity>
               )}
-            </ScrollView>
+            />
+          ) : (
+            <View style={styles.emptyRail}>
+              <Text style={styles.emptyRailText}>אין תוצאות להצגה</Text>
+            </View>
+          )}
           </View>
         ) : null}
       </View>
@@ -695,6 +747,16 @@ export default function MapTabScreen() {
       {token ? (
         <View pointerEvents="box-none" style={[styles.topOverlay, { top: (insets.top || 0) + 10 }]}>
           <View style={styles.searchRow}>
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel={filtersOpen ? 'סגור סינון' : 'פתח סינון'}
+              onPress={() => setFiltersOpen((v) => !v)}
+              activeOpacity={0.9}
+              style={styles.filterIconBtn}
+            >
+              <SlidersHorizontal size={18} color="#5e3f2d" />
+            </TouchableOpacity>
+
             <View style={[styles.searchContainer, { flex: 1 }]}>
               <Search size={20} color="#5e3f2d" style={styles.searchIcon} />
               <TextInput
@@ -720,22 +782,19 @@ export default function MapTabScreen() {
                 </TouchableOpacity>
               ) : null}
             </View>
-
-            <TouchableOpacity
-              accessibilityRole="button"
-              accessibilityLabel={filtersOpen ? 'סגור סינון' : 'פתח סינון'}
-              onPress={() => setFiltersOpen((v) => !v)}
-              activeOpacity={0.9}
-              style={styles.filterIconBtn}
-            >
-              <SlidersHorizontal size={18} color="#5e3f2d" />
-            </TouchableOpacity>
           </View>
 
           {statusText ? (
             <View style={[styles.statusPill, statusTone === 'error' ? styles.statusPillError : styles.statusPillNeutral]}>
-              {loadingPoints ? <ActivityIndicator color="#FFFFFF" /> : null}
-              <Text style={styles.statusText}>{statusText}</Text>
+              {loadingPoints ? <ActivityIndicator color="#5e3f2d" /> : null}
+              <Text
+                style={[
+                  styles.statusText,
+                  statusTone === 'error' ? styles.statusTextError : styles.statusTextNeutral,
+                ]}
+              >
+                {statusText}
+              </Text>
             </View>
           ) : null}
         </View>
@@ -745,8 +804,8 @@ export default function MapTabScreen() {
       <KeyFabPanel
         isOpen={!!token && filtersOpen}
         onClose={() => setFiltersOpen(false)}
-        title="סינון"
-        subtitle="בחרו סינונים כדי לצמצם את הדירות המוצגות במפה"
+        title="סינון דירות"
+        subtitle="בחרו סינונים כדי לצמצם תוצאות"
         // Open from the top, right under the search/filter row.
         anchor="top"
         topOffset={(insets.top || 0) + 10 + 44 + 10}
@@ -760,8 +819,10 @@ export default function MapTabScreen() {
           }}
           inactiveBackgroundColor="#F3F4F6"
           inactiveBorderColor="#E5E7EB"
-          activeBackgroundColor="#EFEAFE"
-          activeBorderColor="rgba(76, 29, 149, 0.28)"
+          activeBackgroundColor="#5e3f2d"
+          activeBorderColor="#5e3f2d"
+          activeTextColor="#FFFFFF"
+          activeIconColor="#FFFFFF"
           style={{ marginTop: 8 }}
         />
       </KeyFabPanel>
@@ -908,27 +969,39 @@ const styles = StyleSheet.create({
   statusPill: {
     marginTop: 10,
     paddingVertical: 10,
-    paddingHorizontal: 12,
-    borderRadius: 14,
+    paddingHorizontal: 14,
+    borderRadius: 16,
     flexDirection: 'row-reverse',
     alignItems: 'center',
     gap: 10,
-    borderWidth: 1,
+    borderWidth: 0,
+    shadowColor: '#000000',
+    shadowOpacity: 0.10,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 4,
+    ...(Platform.OS === 'web' ? ({ boxShadow: '0 12px 28px rgba(0,0,0,0.10)' } as any) : null),
   },
   statusPillNeutral: {
-    backgroundColor: 'rgba(17, 24, 39, 0.86)',
-    borderColor: 'rgba(255,255,255,0.14)',
+    backgroundColor: '#FFFFFF',
+    borderColor: 'transparent',
   },
   statusPillError: {
-    backgroundColor: 'rgba(153, 27, 27, 0.92)',
-    borderColor: 'rgba(255,255,255,0.14)',
+    backgroundColor: '#FEF2F2',
+    borderColor: 'rgba(153, 27, 27, 0.18)',
+    borderWidth: 1,
   },
   statusText: {
-    color: '#FFFFFF',
     fontSize: 12,
     fontWeight: '800',
     textAlign: 'right',
     flex: 1,
+  },
+  statusTextNeutral: {
+    color: '#5e3f2d',
+  },
+  statusTextError: {
+    color: '#991B1B',
   },
   floatingActions: {
     position: 'absolute',
@@ -1075,8 +1148,9 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   modalOptionActive: {
-    backgroundColor: '#EFEAFE',
-    borderColor: '#E9D5FF',
+    // Light brown highlight (match the apartments screen chips)
+    backgroundColor: 'rgba(94,63,45,0.12)',
+    borderColor: 'rgba(94,63,45,0.28)',
   },
   modalOptionText: {
     fontSize: 14,
@@ -1085,7 +1159,7 @@ const styles = StyleSheet.create({
     textAlign: 'right',
   },
   modalOptionTextActive: {
-    color: '#4C1D95',
+    color: '#5e3f2d',
   },
 });
 

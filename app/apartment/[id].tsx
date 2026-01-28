@@ -66,7 +66,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import MapboxMap from '@/components/MapboxMap';
 import type { MapboxFeatureCollection } from '@/lib/mapboxHtml';
 import { geocodeApartmentAddress } from '@/lib/mapboxGeocoding';
-import Ticker from '@/components/Ticker';
 import { fetchUserSurvey } from '@/lib/survey';
 import { calculateMatchScore } from '@/utils/matchCalculator';
 import { buildCompatSurvey } from '@/lib/compatSurvey';
@@ -75,6 +74,7 @@ import FavoriteHeartButton from '@/components/FavoriteHeartButton';
 import { ShareMenuFab } from '@/components/ShareMenuFab';
 import { KeyFabPanel } from '@/components/KeyFabPanel';
 import WhatsAppSvg from '@/components/icons/WhatsAppSvg';
+import { colors } from '@/lib/theme';
 import * as Clipboard from 'expo-clipboard';
 
 export default function ApartmentDetailsScreen() {
@@ -82,7 +82,7 @@ export default function ApartmentDetailsScreen() {
   const navigation = useNavigation();
   const { id, returnTo, openAdd } = useLocalSearchParams();
   const { user } = useAuthStore();
-  const removeApartment = useApartmentStore((state) => state.removeApartment);
+  const removeApartment = useApartmentStore((state: any) => state.removeApartment);
 
   const openUserProfile = (targetUserId: string) => {
     const myId = String((user as any)?.id || '').trim();
@@ -103,6 +103,9 @@ export default function ApartmentDetailsScreen() {
   const [isMembersOpen, setIsMembersOpen] = useState(false);
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [isJoinRequestsOpen, setIsJoinRequestsOpen] = useState(false);
+  const [isJoinRequestConfirmOpen, setIsJoinRequestConfirmOpen] = useState(false);
+  const [isJoinRequestConfirmArmed, setIsJoinRequestConfirmArmed] = useState(false);
+  const joinRequestConfirmArmTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [joinRequests, setJoinRequests] = useState<
     Array<{
       reqId: string;
@@ -121,8 +124,7 @@ export default function ApartmentDetailsScreen() {
   const [isRequestingJoin, setIsRequestingJoin] = useState(false);
   const [hasRequestedJoin, setHasRequestedJoin] = useState(false);
   const [isAssignedAnywhere, setIsAssignedAnywhere] = useState<boolean | null>(null);
-  const [ownerMatchPercent, setOwnerMatchPercent] = useState<number | null>(null);
-  const [ownerMatchDisplay, setOwnerMatchDisplay] = useState<string>('--%');
+  const [matchByUserId, setMatchByUserId] = useState<Record<string, number | null>>({});
   const [isNavOpen, setIsNavOpen] = useState(false);
   const [navDestination, setNavDestination] = useState<string>('');
   const [confirmState, setConfirmState] = useState<{
@@ -146,7 +148,8 @@ export default function ApartmentDetailsScreen() {
   const [isViewerOpen, setViewerOpen] = useState(false);
   const [viewerIndex, setViewerIndex] = useState(0);
   const mapboxToken = process.env.EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN as string | undefined;
-  const mapboxStyleUrl = process.env.EXPO_PUBLIC_MAPBOX_STYLE_URL as string | undefined;
+  // Force Mapbox Standard style for Hebrew language support
+  const mapboxStyleUrl = 'mapbox://styles/mapbox/streets-v12';
   const [aptGeo, setAptGeo] = useState<{ lng: number; lat: number } | null>(null);
   const [isGeocoding, setIsGeocoding] = useState(false);
   const [geoError, setGeoError] = useState<string>('');
@@ -179,57 +182,77 @@ export default function ApartmentDetailsScreen() {
     fetchApartmentDetails();
   }, [id]);
 
-  // Compute match percent between current user and apartment owner (if surveys exist)
+  // Compute match percent between current user and apartment people (if surveys exist)
   useEffect(() => {
     let cancelled = false;
     const run = async () => {
       const myId = String((user as any)?.id || '').trim();
-      const ownerId = String((owner as any)?.id || '').trim();
-      if (!myId || !ownerId || myId === ownerId) {
-        setOwnerMatchPercent(null);
+      if (!myId) {
+        setMatchByUserId({});
         return;
       }
       try {
-        const [mySurvey, ownerSurvey] = await Promise.all([fetchUserSurvey(myId), fetchUserSurvey(ownerId)]);
+        const mySurvey = await fetchUserSurvey(myId);
         if (cancelled) return;
-        if (!mySurvey || !ownerSurvey) {
-          setOwnerMatchPercent(null);
+        if (!mySurvey) {
+          setMatchByUserId({});
           return;
         }
         const myCompat = buildCompatSurvey(user as any, mySurvey as any);
-        const ownerCompat = buildCompatSurvey(owner as any, ownerSurvey as any);
-        const score = calculateMatchScore(myCompat, ownerCompat);
-        const rounded =
-          Number.isFinite(score) && !Number.isNaN(score) ? Math.max(0, Math.min(100, Math.round(score))) : null;
-        setOwnerMatchPercent(rounded);
+
+        const targetsRaw: Array<{ id: string; u: any }> = [
+          owner && (owner as any)?.id ? { id: String((owner as any).id), u: owner as any } : null,
+          ...((members || []).map((m) => ((m as any)?.id ? { id: String((m as any).id), u: m as any } : null)) as any),
+        ].filter(Boolean) as any;
+
+        const seen = new Set<string>();
+        const targets = targetsRaw
+          .map((t) => ({ id: String(t.id || '').trim(), u: t.u }))
+          .filter((t) => t.id && t.id !== myId)
+          .filter((t) => {
+            if (seen.has(t.id)) return false;
+            seen.add(t.id);
+            return true;
+          });
+
+        if (!targets.length) {
+          setMatchByUserId({});
+          return;
+        }
+
+        const results = await Promise.all(
+          targets.map(async ({ id: tid, u }) => {
+            try {
+              const theirSurvey = await fetchUserSurvey(tid);
+              if (!theirSurvey) return [tid, null] as const;
+              const theirCompat = buildCompatSurvey(u as any, theirSurvey as any);
+              const score = calculateMatchScore(myCompat, theirCompat);
+              const rounded =
+                Number.isFinite(score) && !Number.isNaN(score)
+                  ? Math.max(0, Math.min(100, Math.round(score)))
+                  : null;
+              return [tid, rounded] as const;
+            } catch {
+              return [tid, null] as const;
+            }
+          })
+        );
+
+        if (cancelled) return;
+        const next: Record<string, number | null> = {};
+        results.forEach(([tid, v]) => {
+          next[tid] = v;
+        });
+        setMatchByUserId(next);
       } catch {
-        if (!cancelled) setOwnerMatchPercent(null);
+        if (!cancelled) setMatchByUserId({});
       }
     };
     run();
     return () => {
       cancelled = true;
     };
-  }, [user?.id, owner?.id]);
-
-  // Animate match % display like the user profile "match tab"
-  useEffect(() => {
-    let t: any;
-    if (typeof ownerMatchPercent !== 'number' || !Number.isFinite(ownerMatchPercent)) {
-      setOwnerMatchDisplay('--%');
-      return () => {};
-    }
-    const digitsLen = String(ownerMatchPercent).length;
-    const start = `${'0'.repeat(digitsLen)}%`;
-    const end = `${ownerMatchPercent}%`;
-    setOwnerMatchDisplay(start);
-    t = setTimeout(() => setOwnerMatchDisplay(end), 120);
-    return () => {
-      try {
-        clearTimeout(t);
-      } catch {}
-    };
-  }, [ownerMatchPercent]);
+  }, [user?.id, owner?.id, members.map((m) => m.id).join('|')]);
 
   // Geocode apartment address -> show on Mapbox map (bottom map card)
   useEffect(() => {
@@ -731,6 +754,11 @@ export default function ApartmentDetailsScreen() {
     return `כניסה ${formatted}`;
   })();
 
+  const moveInDateLabel = (() => {
+    if (!moveInTagLabel) return null;
+    return moveInTagLabel.replace(/^כניסה\s+/, '');
+  })();
+
   const descriptionText = String((apartment as any)?.description || '').trim();
   const shouldShowReadMore = descriptionText.length > 260;
   
@@ -916,6 +944,7 @@ export default function ApartmentDetailsScreen() {
 
   const handleRequestJoin = async () => {
     try {
+      if (isRequestingJoin) return;
       if (!user?.id) {
         Alert.alert('שגיאה', 'יש להתחבר כדי לבצע פעולה זו');
         return;
@@ -941,6 +970,7 @@ export default function ApartmentDetailsScreen() {
       }
 
       // Also create request rows so user can track status
+      let requestRowsInserted = false;
       try {
         const requestRows = recipients.map((rid) => ({
           sender_id: user.id!,
@@ -957,13 +987,19 @@ export default function ApartmentDetailsScreen() {
         if (reqErr) {
           throw reqErr;
         }
+        requestRowsInserted = true;
       } catch (e: any) {
         console.error('requests insert failed', e);
         Alert.alert('אזהרה', e?.message || 'לא ניתן ליצור שורת בקשה כרגע');
       }
 
-      setHasRequestedJoin(true);
-      Alert.alert('נשלח', 'נוצרה בקשה חדשה');
+      if (requestRowsInserted) {
+        setHasRequestedJoin(true);
+        Alert.alert('נשלח', 'נוצרה בקשה חדשה');
+      } else {
+        // Don't claim success if we couldn't persist the request in DB.
+        setHasRequestedJoin(false);
+      }
     } catch (e: any) {
       console.error('request join failed', e);
       Alert.alert('שגיאה', e?.message || 'לא ניתן לשלוח בקשה כעת');
@@ -981,6 +1017,22 @@ export default function ApartmentDetailsScreen() {
       if (!apartment?.id) return;
 
       setIsRequestingJoin(true);
+
+      const refreshHasRequestedJoin = async () => {
+        try {
+          const { count, error } = await supabase
+            .from('apartments_request')
+            .select('id', { count: 'exact', head: true })
+            .eq('sender_id', user.id)
+            .eq('apartment_id', apartment.id)
+            .eq('type', 'JOIN_APT')
+            .in('status', ['PENDING', 'APPROVED'] as any);
+          if (error) throw error;
+          setHasRequestedJoin((count || 0) > 0);
+        } catch {
+          // if refresh fails, fall back to optimistic state set elsewhere
+        }
+      };
 
       // If already approved, do not allow cancelling via this button.
       // (We treat APPROVED as "already requested" for UI purposes.)
@@ -1002,6 +1054,28 @@ export default function ApartmentDetailsScreen() {
         }
       } catch {
         // ignore
+      }
+
+      // Fetch pending request rows first so we can verify we actually removed something.
+      const { data: pendingRows, error: pendingErr } = await supabase
+        .from('apartments_request')
+        .select('id, status, recipient_id')
+        .eq('sender_id', user.id)
+        .eq('apartment_id', apartment.id)
+        .eq('type', 'JOIN_APT')
+        .eq('status', 'PENDING')
+        .limit(50);
+      if (pendingErr) throw pendingErr;
+
+      const pendingIds = (pendingRows || [])
+        .map((r: any) => String(r?.id || '').trim())
+        .filter(Boolean);
+
+      if (!pendingIds.length) {
+        // Nothing to cancel in DB; refresh local flag from DB and exit quietly.
+        await refreshHasRequestedJoin();
+        Alert.alert('אין בקשה', 'לא נמצאה בקשה פעילה לביטול.');
+        return;
       }
 
       // Best-effort: delete the notifications created for this JOIN_APT request.
@@ -1038,29 +1112,27 @@ export default function ApartmentDetailsScreen() {
         // ignore (non-blocking)
       }
 
-      // Cancel ALL pending JOIN_APT rows for this apartment (there may be multiple recipients)
-      // Prefer DELETE so the request disappears from "Requests" and the UI returns to "הגש בקשה".
-      const { error: delErr } = await supabase
+      // Prefer DELETE so the request disappears from recipients' "Requests".
+      // IMPORTANT: verify affected rows; Supabase returns no error even if 0 rows matched.
+      const { data: deletedRows, error: delErr } = await supabase
         .from('apartments_request')
         .delete()
-        .eq('sender_id', user.id)
-        .eq('apartment_id', apartment.id)
-        .eq('type', 'JOIN_APT')
-        .eq('status', 'PENDING');
+        .in('id', pendingIds as any)
+        .select('id');
 
-      if (delErr) {
-        // Fallback: if DELETE is not allowed by RLS, mark as CANCELLED.
-        const { error: updErr } = await supabase
+      if (delErr || !(deletedRows || []).length) {
+        // Fallback: if DELETE isn't allowed by RLS (or matched 0), mark as NOT_RELEVANT.
+        const { data: updatedRows, error: updErr } = await supabase
           .from('apartments_request')
-          .update({ status: 'CANCELLED', updated_at: new Date().toISOString() } as any)
-          .eq('sender_id', user.id)
-          .eq('apartment_id', apartment.id)
-          .eq('type', 'JOIN_APT')
-          .eq('status', 'PENDING');
-        if (updErr) throw updErr;
+          .update({ status: 'NOT_RELEVANT', updated_at: new Date().toISOString() } as any)
+          .in('id', pendingIds as any)
+          .select('id');
+        if (updErr || !(updatedRows || []).length) {
+          throw updErr || new Error('לא נמחקה/עודכנה אף בקשה (ייתכן חסימת הרשאות RLS)');
+        }
       }
 
-      setHasRequestedJoin(false);
+      await refreshHasRequestedJoin();
       Alert.alert('בוטל', 'הבקשה בוטלה בהצלחה');
     } catch (e: any) {
       console.error('cancel join request failed', e);
@@ -1548,11 +1620,11 @@ export default function ApartmentDetailsScreen() {
             {apartment.title}
           </Text>
 
-          {moveInTagLabel ? (
-            <View style={styles.moveInDateBadge}>
-              <Calendar size={16} color="#16A34A" />
-              <Text style={styles.moveInDateText}>{moveInTagLabel}</Text>
-            </View>
+          {moveInDateLabel ? (
+            <Text style={styles.heroSubtitle} numberOfLines={1}>
+              <Text style={styles.heroSubtitleLabel}>תאריך כניסה: </Text>
+              <Text style={styles.heroSubtitleValue}>{moveInDateLabel}</Text>
+            </Text>
           ) : null}
         </View>
 
@@ -1710,36 +1782,27 @@ export default function ApartmentDetailsScreen() {
             </View>
           ) : null}
 
-          {/* host card */}
-          {!isOwner ? (
-            <View style={styles.hostCard}>
-              <LinearGradient
-                colors={typeof ownerMatchPercent === 'number' ? ['#4ADE80', '#16A34A'] : ['#D1D5DB', '#9CA3AF']}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 0, y: 1 }}
-                style={styles.hostMatchTab}
-              >
-                <Ticker value={ownerMatchDisplay} fontSize={15} staggerDuration={55} style={styles.hostMatchTabValue} />
-                <Text style={styles.hostMatchTabLabel}>התאמה</Text>
-              </LinearGradient>
-              {/* Right: avatar */}
-              <View style={styles.hostAvatarWrap}>
-                <Image
-                  source={{
-                    uri:
-                      (owner as any)?.avatar_url ||
-                      'https://cdn-icons-png.flaticon.com/512/847/847969.png',
-                  }}
-                  style={styles.hostAvatar}
-                />
-              </View>
-              {/* Middle: labels */}
-              <View style={{ flex: 1, alignItems: 'flex-end' }}>
-                <Text style={styles.hostTitle}>בעל הדירה</Text>
-                <Text style={styles.hostSub} numberOfLines={1}>{owner?.full_name || 'בעל הדירה'}</Text>
-              </View>
+          {/* host/owner card */}
+          <View style={styles.hostCard}>
+            {/* Right: avatar */}
+            <View style={styles.hostAvatarWrap}>
+              <Image
+                source={{
+                  uri:
+                    (isOwner ? (user as any)?.avatar_url : (owner as any)?.avatar_url) ||
+                    'https://cdn-icons-png.flaticon.com/512/847/847969.png',
+                }}
+                style={styles.hostAvatar}
+              />
             </View>
-          ) : null}
+            {/* Middle: labels */}
+            <View style={{ flex: 1, alignItems: 'flex-end' }}>
+              <Text style={styles.hostTitle}>{isOwner ? 'זאת הדירה שלך' : 'בעל הדירה'}</Text>
+              <Text style={styles.hostSub} numberOfLines={1}>
+                {(isOwner ? user?.full_name : owner?.full_name) || 'בעל הדירה'}
+              </Text>
+            </View>
+          </View>
 
           {/* price card moved to floating overlay at bottom */}
 
@@ -1748,28 +1811,26 @@ export default function ApartmentDetailsScreen() {
               <Text style={styles.sectionTitle}>מה יש בדירה?</Text>
               <View style={styles.featuresGrid}>
                 {(() => {
+                  const aptType = String((apartment as any)?.apartment_type || '').toUpperCase();
+                  const gardenSqmRaw = (apartment as any)?.garden_square_meters;
+                  const gardenSqm =
+                    typeof gardenSqmRaw === 'number' && Number.isFinite(gardenSqmRaw) ? (gardenSqmRaw as number) : null;
+                  const hasGarden = aptType === 'GARDEN' || (gardenSqm !== null && gardenSqm > 0);
+
                   const balcony = typeof (apartment as any)?.balcony_count === 'number'
                     ? ((apartment as any).balcony_count as number)
                     : 0;
                   const items: Array<{ key: string; label: string; Icon: any }> = [];
 
-                  if (balcony > 0) {
-                    items.push({
-                      key: 'balcony_count',
-                      label: 'מרפסת',
-                      Icon: Home,
-                    });
-                  }
-                  if ((apartment as any)?.wheelchair_accessible) items.push({ key: 'wheelchair_accessible', label: 'גישה לנכים', Icon: Accessibility });
-                  if ((apartment as any)?.has_air_conditioning) items.push({ key: 'has_air_conditioning', label: 'מיזוג', Icon: Snowflake });
-                  if ((apartment as any)?.has_bars) items.push({ key: 'has_bars', label: 'סורגים', Icon: Fence });
-                  if ((apartment as any)?.has_solar_heater) items.push({ key: 'has_solar_heater', label: 'דוד שמש', Icon: Sun });
-                  if ((apartment as any)?.is_furnished) items.push({ key: 'is_furnished', label: 'ריהוט', Icon: Sofa });
-                  if ((apartment as any)?.has_safe_room) items.push({ key: 'has_safe_room', label: 'ממ״ד', Icon: Shield });
-                  if ((apartment as any)?.is_renovated) items.push({ key: 'is_renovated', label: 'משופצת', Icon: Hammer });
+                  // Keep this list EXACTLY as requested + order:
+                  // ממד, חיות מחמד, מרוהט, גישה לנכים, גינה, מרפסת
+                  if ((apartment as any)?.has_safe_room) items.push({ key: 'has_safe_room', label: 'ממד', Icon: Shield });
                   if ((apartment as any)?.pets_allowed) items.push({ key: 'pets_allowed', label: 'חיות מחמד', Icon: PawPrint });
-                  if ((apartment as any)?.has_elevator) items.push({ key: 'has_elevator', label: 'מעלית', Icon: ArrowUpDown });
-                  if ((apartment as any)?.kosher_kitchen) items.push({ key: 'kosher_kitchen', label: 'מטבח כשר', Icon: Utensils });
+                  if ((apartment as any)?.is_furnished) items.push({ key: 'is_furnished', label: 'מרוהט', Icon: Sofa });
+                  if ((apartment as any)?.wheelchair_accessible)
+                    items.push({ key: 'wheelchair_accessible', label: 'גישה לנכים', Icon: Accessibility });
+                  if (hasGarden) items.push({ key: 'garden', label: 'גינה', Icon: Trees });
+                  if (balcony > 0) items.push({ key: 'balcony_count', label: 'מרפסת', Icon: Home });
 
                   if (!items.length) {
                     return (
@@ -1822,6 +1883,7 @@ export default function ApartmentDetailsScreen() {
                       <MapboxMap
                         accessToken={mapboxToken}
                         styleUrl={mapboxStyleUrl}
+                        language="he"
                         center={aptGeo ? ([aptGeo.lng, aptGeo.lat] as const) : undefined}
                         zoom={aptGeo ? 16.5 : 11}
                         points={aptGeo ? aptMapPoints : { type: 'FeatureCollection', features: [] }}
@@ -1871,8 +1933,14 @@ export default function ApartmentDetailsScreen() {
 
           {/* Household section */}
           {(() => {
+            const ownerId = String((apartment as any)?.owner_id || '');
+            const ownerIsAlsoPartner =
+              !!ownerId &&
+              currentPartnerIds.some(
+                (pid) => String(pid || '').toLowerCase() === ownerId.toLowerCase()
+              );
             const rawPeople = [
-              owner
+              owner && ownerIsAlsoPartner
                 ? {
                     id: (owner as any).id,
                     name: (owner as any).full_name || 'בעל הדירה',
@@ -1920,6 +1988,12 @@ export default function ApartmentDetailsScreen() {
                     <View style={styles.peopleGrid}>
                       {people.map((p, idx) => {
                         const meta = typeof p.age === 'number' ? `${p.role} • ${p.age}` : p.role;
+                        const match = matchByUserId[p.id];
+                        const matchLabel = typeof match === 'number' ? `${match}%` : '--%';
+                        const ringColors =
+                          typeof match === 'number'
+                            ? ([colors.successMuted, colors.success] as const)
+                            : (['#E5E7EB', '#D1D5DB'] as const);
                         return (
                           <TouchableOpacity
                             key={`person-${p.id}-${idx}`}
@@ -1930,10 +2004,35 @@ export default function ApartmentDetailsScreen() {
                             }}
                           >
                             <View style={styles.personAvatarWrap}>
-                              <Image
-                                source={{ uri: p.avatar || 'https://cdn-icons-png.flaticon.com/512/847/847969.png' }}
-                                style={styles.personAvatar}
-                              />
+                              <LinearGradient
+                                colors={ringColors as any}
+                                start={{ x: 0, y: 0 }}
+                                end={{ x: 1, y: 1 }}
+                                style={styles.personAvatarRing}
+                              >
+                                <View style={styles.personAvatarInner}>
+                                  <Image
+                                    source={{ uri: p.avatar || 'https://cdn-icons-png.flaticon.com/512/847/847969.png' }}
+                                    style={styles.personAvatar}
+                                  />
+                                </View>
+                              </LinearGradient>
+                              <View
+                                style={[
+                                  styles.personMatchPill,
+                                  typeof match === 'number' ? styles.personMatchPillActive : styles.personMatchPillDisabled,
+                                ]}
+                              >
+                                <Text
+                                  style={[
+                                    styles.personMatchText,
+                                    typeof match === 'number' ? styles.personMatchTextActive : styles.personMatchTextDisabled,
+                                  ]}
+                                  numberOfLines={1}
+                                >
+                                  {matchLabel}
+                                </Text>
+                              </View>
                             </View>
                             <Text style={styles.personName} numberOfLines={1}>
                               {p.name}
@@ -2020,7 +2119,16 @@ export default function ApartmentDetailsScreen() {
                   }
                   return;
                 }
-                handleRequestJoin();
+                // Open confirm popup only (actual submission happens inside the popup).
+                setIsJoinRequestConfirmOpen(true);
+                setIsJoinRequestConfirmArmed(false);
+                if (joinRequestConfirmArmTimeoutRef.current) {
+                  clearTimeout(joinRequestConfirmArmTimeoutRef.current);
+                }
+                // Prevent accidental "double tap" immediately triggering the submit button on some platforms.
+                joinRequestConfirmArmTimeoutRef.current = setTimeout(() => {
+                  setIsJoinRequestConfirmArmed(true);
+                }, 450);
               }}
               disabled={
                 isOwner
@@ -2062,6 +2170,36 @@ export default function ApartmentDetailsScreen() {
           onEnterPassword={() => {
             setIsKeyPanelOpen(false);
             router.push({ pathname: '/apartment/join-passcode', params: { apartmentId: String(id || '') } });
+          }}
+          bottomOffset={ctaHeight + 14}
+        />
+      ) : null}
+
+      {/* "Submit join request" confirm popup (reuses KeyFabPanel animation) */}
+      {!isOwner ? (
+        <KeyFabPanel
+          isOpen={isJoinRequestConfirmOpen}
+          onClose={() => {
+            setIsJoinRequestConfirmOpen(false);
+            setIsJoinRequestConfirmArmed(false);
+            if (joinRequestConfirmArmTimeoutRef.current) {
+              clearTimeout(joinRequestConfirmArmTimeoutRef.current);
+              joinRequestConfirmArmTimeoutRef.current = null;
+            }
+          }}
+          title="רוצים להגיש בקשה להצטרפות?"
+          subtitle="נשלח בקשה לבעל/ת הדירה. לאחר אישור, מספר הוואטסאפ ייחשף ותוכלו להמשיך לדבר שם כדי לקבל סיסמה ולהצטרף כשותפים."
+          bodyText="אפשר לבטל את הבקשה כל עוד היא לא אושרה."
+          primaryActionLabel={isRequestingJoin ? 'שולח...' : 'הגש בקשה'}
+          onPrimaryAction={() => {
+            if (!isJoinRequestConfirmArmed || isRequestingJoin) return;
+            setIsJoinRequestConfirmOpen(false);
+            setIsJoinRequestConfirmArmed(false);
+            if (joinRequestConfirmArmTimeoutRef.current) {
+              clearTimeout(joinRequestConfirmArmTimeoutRef.current);
+              joinRequestConfirmArmTimeoutRef.current = null;
+            }
+            handleRequestJoin();
           }}
           bottomOffset={ctaHeight + 14}
         />
@@ -2208,10 +2346,49 @@ export default function ApartmentDetailsScreen() {
                       }}
                       style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 }}
                     >
-                      <Image
-                        source={{ uri: (m as any).avatar_url || 'https://cdn-icons-png.flaticon.com/512/847/847969.png' }}
-                        style={styles.avatarLarge}
-                      />
+                      {(() => {
+                        const match = matchByUserId[String(m.id)];
+                        const matchLabel = typeof match === 'number' ? `${match}%` : '--%';
+                        const ringColors =
+                          typeof match === 'number'
+                            ? ([colors.successMuted, colors.success] as const)
+                            : (['#E5E7EB', '#D1D5DB'] as const);
+                        return (
+                          <View style={styles.memberAvatarWrap}>
+                            <LinearGradient
+                              colors={ringColors as any}
+                              start={{ x: 0, y: 0 }}
+                              end={{ x: 1, y: 1 }}
+                              style={styles.memberAvatarRing}
+                            >
+                              <View style={styles.memberAvatarInner}>
+                                <Image
+                                  source={{
+                                    uri:
+                                      (m as any).avatar_url || 'https://cdn-icons-png.flaticon.com/512/847/847969.png',
+                                  }}
+                                  style={styles.avatarLarge}
+                                />
+                              </View>
+                            </LinearGradient>
+                            <View
+                              style={[
+                                styles.memberMatchPill,
+                                typeof match === 'number' ? styles.memberMatchPillActive : styles.memberMatchPillDisabled,
+                              ]}
+                            >
+                              <Text
+                                style={[
+                                  styles.memberMatchText,
+                                  typeof match === 'number' ? styles.memberMatchTextActive : styles.memberMatchTextDisabled,
+                                ]}
+                              >
+                                {matchLabel}
+                              </Text>
+                            </View>
+                          </View>
+                        );
+                      })()}
                       <View style={{ flex: 1 }}>
                         <Text style={styles.memberName}>{m.full_name}</Text>
                       </View>
@@ -2732,25 +2909,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 4,
   },
-  moveInDateBadge: {
-    marginTop: 12,
-    flexDirection: 'row-reverse',
-    alignItems: 'center',
-    alignSelf: 'flex-start',
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    backgroundColor: '#F0FDF4',
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: '#86EFAC',
-  },
-  moveInDateText: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#16A34A',
-    writingDirection: 'rtl',
-  },
   ownerPasscodeCard: {
     marginBottom: 12,
     backgroundColor: '#F9FAFB',
@@ -2959,6 +3117,24 @@ const styles = StyleSheet.create({
     textAlign: 'right',
     writingDirection: 'rtl',
   },
+  heroSubtitle: {
+    marginTop: 6,
+    color: '#6B7280',
+    fontSize: 13,
+    fontWeight: '700',
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
+  heroSubtitleLabel: {
+    color: '#6B7280',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  heroSubtitleValue: {
+    color: '#111827',
+    fontSize: 13,
+    fontWeight: '800',
+  },
   tagsRow: {
     flexDirection: 'row-reverse',
     alignItems: 'center',
@@ -3078,9 +3254,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderRadius: 14,
     paddingVertical: 12,
-    paddingRight: 12,
-    // Reserve space for the match tab on the left side
-    paddingLeft: 12 + 78,
+    paddingHorizontal: 12,
     marginBottom: 12,
     ...(Platform.OS === 'ios'
       ? {
@@ -3090,38 +3264,6 @@ const styles = StyleSheet.create({
           shadowOffset: { width: 0, height: 4 },
         }
       : { elevation: 4 }),
-  },
-  hostMatchTab: {
-    position: 'absolute',
-    left: 0,
-    top: 0,
-    bottom: 0,
-    width: 78,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderTopLeftRadius: 14,
-    borderBottomLeftRadius: 14,
-    // Inner edge stays straight (attached look)
-    borderTopRightRadius: 0,
-    borderBottomRightRadius: 0,
-  },
-  hostMatchTabValue: {
-    color: '#FFFFFF',
-    fontSize: 15,
-    fontWeight: '900',
-    lineHeight: 18,
-    includeFontPadding: false,
-    textAlign: 'center',
-    writingDirection: 'ltr',
-  },
-  hostMatchTabLabel: {
-    marginTop: 2,
-    color: 'rgba(255,255,255,0.92)',
-    fontSize: 10,
-    fontWeight: '800',
-    lineHeight: 12,
-    includeFontPadding: false,
-    textAlign: 'center',
   },
   hostIconCircle: {
     width: 28,
@@ -3220,7 +3362,7 @@ const styles = StyleSheet.create({
     flexShrink: 1,
   },
   statusChipTextGreen: {
-    color: '#16A34A',
+    color: colors.success,
   },
   statusChipTextPending: {
     color: '#374151',
@@ -3304,7 +3446,7 @@ const styles = StyleSheet.create({
     writingDirection: 'ltr',
   },
   navPill: {
-    backgroundColor: '#16A34A',
+    backgroundColor: colors.success,
     borderRadius: 12,
     paddingHorizontal: 12,
     paddingVertical: 8,
@@ -3313,7 +3455,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     ...(Platform.OS === 'ios'
       ? {
-          shadowColor: '#16A34A',
+          shadowColor: colors.success,
           shadowOpacity: 0.22,
           shadowRadius: 8,
           shadowOffset: { width: 0, height: 5 },
@@ -3583,7 +3725,7 @@ const styles = StyleSheet.create({
     writingDirection: 'rtl',
   },
   mapNavPill: {
-    backgroundColor: '#16A34A',
+    backgroundColor: colors.success,
     borderRadius: 12,
     paddingHorizontal: 10,
     paddingVertical: 8,
@@ -3644,14 +3786,55 @@ const styles = StyleSheet.create({
     borderWidth: 0,
   },
   personAvatarWrap: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+    width: 66,
+    height: 66,
+    borderRadius: 33,
+    marginBottom: 10,
+    position: 'relative',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  personAvatarRing: {
+    width: 66,
+    height: 66,
+    borderRadius: 33,
+    padding: 3,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  personAvatarInner: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
     overflow: 'hidden',
     backgroundColor: '#F3F4F6',
-    marginBottom: 8,
   },
   personAvatar: { width: '100%', height: '100%' },
+  personMatchPill: {
+    position: 'absolute',
+    bottom: -6,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 999,
+    borderWidth: 1,
+  },
+  personMatchPillActive: {
+    backgroundColor: '#FFFFFF',
+    borderColor: 'rgba(16,185,129,0.28)',
+  },
+  personMatchPillDisabled: {
+    backgroundColor: '#FFFFFF',
+    borderColor: 'rgba(17,24,39,0.12)',
+  },
+  personMatchText: {
+    fontSize: 11,
+    fontWeight: '900',
+    includeFontPadding: false,
+    textAlign: 'center',
+    writingDirection: 'ltr',
+  },
+  personMatchTextActive: { color: '#065F46' },
+  personMatchTextDisabled: { color: '#6B7280' },
   personName: {
     color: '#111827',
     fontSize: 14,
@@ -4031,6 +4214,49 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     backgroundColor: '#1F1F29',
   },
+  memberAvatarWrap: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    position: 'relative',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  memberAvatarRing: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    padding: 3,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  memberAvatarInner: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    overflow: 'hidden',
+    backgroundColor: '#F3F4F6',
+  },
+  memberMatchPill: {
+    position: 'absolute',
+    bottom: -6,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 999,
+    borderWidth: 1,
+    backgroundColor: '#FFFFFF',
+  },
+  memberMatchPillActive: { borderColor: 'rgba(16,185,129,0.28)' },
+  memberMatchPillDisabled: { borderColor: 'rgba(17,24,39,0.12)' },
+  memberMatchText: {
+    fontSize: 11,
+    fontWeight: '900',
+    includeFontPadding: false,
+    textAlign: 'center',
+    writingDirection: 'ltr',
+  },
+  memberMatchTextActive: { color: '#065F46' },
+  memberMatchTextDisabled: { color: '#6B7280' },
   memberName: {
     color: '#111827',
     fontSize: 15,
@@ -4133,8 +4359,8 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
   confirmApprovePrimary: {
-    backgroundColor: '#5e3f2d',
-    borderColor: '#5e3f2d',
+    backgroundColor: colors.success,
+    borderColor: colors.success,
   },
   confirmApprovePrimaryText: {
     color: '#FFFFFF',

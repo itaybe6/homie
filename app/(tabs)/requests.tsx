@@ -1,22 +1,26 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Dimensions,
   View,
   Text,
   StyleSheet,
   Animated,
   SectionList,
   RefreshControl,
+  ScrollView,
   TouchableOpacity,
   ActivityIndicator,
   Image,
+  ImageBackground,
   Alert,
   Linking,
   Modal,
   Pressable,
 } from 'react-native';
-import { useRouter } from 'expo-router';
-import { Bell, Inbox, Filter, Home, Users, UserPlus2, UserPlus, Sparkles, MessageCircle } from 'lucide-react-native';
+import { useRouter, useFocusEffect } from 'expo-router';
+import { Bell, Inbox, Filter, Home, Users, UserPlus2, UserPlus, Sparkles, MessageCircle, X } from 'lucide-react-native';
 import WhatsAppSvg from '@/components/icons/WhatsAppSvg';
+import { FabButton } from '@/components/FabButton';
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/authStore';
 import { Apartment, Notification, User } from '@/types/database';
@@ -25,11 +29,13 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { formatTimeAgoHe } from '@/utils/time';
 import { insertNotificationOnce } from '@/lib/notifications';
 import { useNotificationsStore } from '@/stores/notificationsStore';
+import { alpha, colors } from '@/lib/theme';
 
 export default function RequestsScreen() {
   const router = useRouter();
   const user = useAuthStore((s) => s.user);
   const insets = useSafeAreaInsets();
+  const { width: screenW, height: screenH } = Dimensions.get('window');
   const scrollY = useRef(new Animated.Value(0)).current;
   const markSeenNow = useNotificationsStore((s) => s.markSeenNow);
   const [ownerDetails, setOwnerDetails] = useState<null | { full_name?: string; avatar_url?: string; phone?: string }>(null);
@@ -37,6 +43,11 @@ export default function RequestsScreen() {
     Array.isArray(value) ? value[0] : value;
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  type InboxFilterId = 'ALL' | 'MATCHES' | 'MERGE' | 'APARTMENTS';
+  const [inboxFilter, setInboxFilter] = useState<InboxFilterId>('ALL');
+  const [aptPanelAptId, setAptPanelAptId] = useState<string | null>(null);
+  const [aptPanelOpen, setAptPanelOpen] = useState(false);
+  const aptPanelCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   type UnifiedItem = {
     id: string;
     kind: 'APT' | 'APT_INVITE' | 'MATCH' | 'GROUP';
@@ -69,7 +80,7 @@ export default function RequestsScreen() {
   const [notifSenderGroupIdByUserId, setNotifSenderGroupIdByUserId] = useState<Record<string, string>>({});
   const [notifGroupMembersByGroupId, setNotifGroupMembersByGroupId] = useState<Record<string, string[]>>({});
   const [notifApartmentsById, setNotifApartmentsById] = useState<
-    Record<string, { id: string; title?: string; city?: string; image_urls?: string[] }>
+    Record<string, { id: string; title?: string; city?: string; image_urls?: string[]; bedrooms?: number; bathrooms?: number; square_meters?: number; floor?: number; price?: number; partner_ids?: string[] }>
   >({});
 
   const DEFAULT_AVATAR = 'https://cdn-icons-png.flaticon.com/512/847/847969.png';
@@ -77,27 +88,23 @@ export default function RequestsScreen() {
   // Use a vector icon to ensure it always renders (remote PNGs can fail/tint inconsistently)
 
   const mapMatchStatus = (status: string | null | undefined): UnifiedItem['status'] => {
-    const normalized = (status || '').trim();
-    switch (normalized) {
-      case 'אושר':
-      case 'APPROVED':
-        return 'APPROVED';
-      case 'נדחה':
-      case 'REJECTED':
-        return 'REJECTED';
-      case 'לא רלוונטי':
-      case 'IRRELEVANT':
-      case 'NOT_RELEVANT':
-        return 'NOT_RELEVANT';
-      case 'ממתין':
-      case 'PENDING':
-        return 'PENDING';
-      case 'CANCELLED':
-      case 'בוטל':
-        return 'CANCELLED';
-      default:
-        return 'PENDING';
-    }
+    const raw = String(status || '').trim();
+    const upper = raw.toUpperCase();
+    // Hebrew variants (keep as-is)
+    if (raw === 'אושר') return 'APPROVED';
+    if (raw === 'נדחה') return 'REJECTED';
+    if (raw === 'ממתין') return 'PENDING';
+    if (raw === 'בוטל') return 'CANCELLED';
+    if (raw === 'לא רלוונטי') return 'NOT_RELEVANT';
+
+    // English variants (case-insensitive)
+    if (upper === 'APPROVED' || upper === 'ACCEPTED') return 'APPROVED';
+    if (upper === 'REJECTED' || upper === 'DECLINED' || upper === 'DENIED') return 'REJECTED';
+    if (upper === 'PENDING' || upper === 'WAITING') return 'PENDING';
+    if (upper === 'CANCELLED' || upper === 'CANCELED') return 'CANCELLED';
+    if (upper === 'IRRELEVANT' || upper === 'NOT_RELEVANT') return 'NOT_RELEVANT';
+
+    return 'PENDING';
   };
 
   const isPartnerRequestNotification = (n: Notification): boolean => {
@@ -108,6 +115,15 @@ export default function RequestsScreen() {
   const isMergeProfileNotification = (n: Notification): boolean => {
     const t = (n?.title || '').trim();
     return t.includes('מיזוג פרופילים');
+  };
+
+  const isMatchNotification = (n: Notification): boolean => {
+    const title = String(n?.title || '').trim();
+    const desc = String(n?.description || '').trim();
+    if (title.includes('בקשת התאמה') || title.includes('בקשת ההתאמה') || title.includes('התאמה')) return true;
+    // Our EVENT_KEY convention: "match:<matchId>:approved"
+    if (/EVENT_KEY:match:/.test(desc)) return true;
+    return false;
   };
 
   const isApprovedNotification = (n: Notification): boolean => {
@@ -127,6 +143,16 @@ export default function RequestsScreen() {
     return match ? match[1] : null;
   };
 
+  const isApartmentNotification = (n: Notification): boolean => {
+    const title = String(n?.title || '').trim();
+    const desc = String(n?.description || '').trim();
+    if (extractInviteApartmentId(desc)) return true;
+    if (/INVITE_APT:|APPROVED_APT:/.test(desc)) return true;
+    // Keep heuristic broad: copy variants mention "דירה" / "שותף בדירה"
+    if (title.includes('דירה') || desc.includes('דירה') || desc.includes('שותף בדירה')) return true;
+    return false;
+  };
+
   const isInviteApproved = (description: string): boolean => {
     if (!description) return false;
     const parts = description.split('---');
@@ -139,6 +165,21 @@ export default function RequestsScreen() {
     if (!description) return '';
     const parts = description.split('---');
     return (parts[0] || '').trim();
+  };
+
+  const openApartmentPanel = (aptId: string) => {
+    if (!aptId) return;
+    if (aptPanelCloseTimerRef.current) clearTimeout(aptPanelCloseTimerRef.current);
+    setAptPanelAptId(aptId);
+    requestAnimationFrame(() => setAptPanelOpen(true));
+  };
+
+  const closeApartmentPanel = () => {
+    if (aptPanelCloseTimerRef.current) clearTimeout(aptPanelCloseTimerRef.current);
+    setAptPanelOpen(false);
+    aptPanelCloseTimerRef.current = setTimeout(() => {
+      setAptPanelAptId(null);
+    }, 520);
   };
 
   const fetchNotifications = async (opts?: { markRead?: boolean }) => {
@@ -295,7 +336,7 @@ export default function RequestsScreen() {
       if (aptIds.length > 0) {
         const { data: apts, error: aptsErr } = await supabase
           .from('apartments')
-          .select('id, title, city, image_urls')
+          .select('id, title, city, image_urls, bedrooms, bathrooms, square_meters, floor, price, partner_ids')
           .in('id', aptIds);
         if (aptsErr) throw aptsErr;
         const aMap: Record<string, any> = {};
@@ -311,7 +352,8 @@ export default function RequestsScreen() {
 
       if (opts?.markRead) {
         try {
-          await supabase.from('notifications').update({ is_read: true }).eq('recipient_id', user.id);
+          // Mark read for ALL recipients that are part of the unified inbox (supports merged profiles).
+          await supabase.from('notifications').update({ is_read: true }).in('recipient_id', recipientIds as any);
           // Do not force-set the badge to 0 here; the bell badge is a combined count
           // (unread notifications + pending requests) and is refreshed by the button itself.
         } catch {}
@@ -379,12 +421,29 @@ export default function RequestsScreen() {
     fetchAll();
   }, [user?.id]);
 
-  // When opening this screen (also used for /notifications), mark notifications as read.
-  useEffect(() => {
-    // Reset the bell badge (requests/matches/invites are tracked via lastSeenAt).
-    markSeenNow();
-    fetchNotifications({ markRead: true });
-  }, [user?.id]);
+  // When opening this screen (also used for /notifications), clear the unified bell badge.
+  // Needs to run on focus (tab switches don't always remount the component).
+  useFocusEffect(
+    useCallback(() => {
+      let cancelled = false;
+      const run = async () => {
+        if (!user?.id) return;
+
+        // 1) Hide immediately (optimistic)
+        markSeenNow(user.id);
+
+        // 2) Mark notifications read in DB (including merged-profile recipients)
+        await fetchNotifications({ markRead: true });
+
+        // 3) Re-assert after DB update to avoid a race where the bell refetches before the update finishes
+        if (!cancelled) markSeenNow(user.id);
+      };
+      run();
+      return () => {
+        cancelled = true;
+      };
+    }, [user?.id])
+  );
 
   const fetchAll = async () => {
     if (!user?.id) { setLoading(false); return; }
@@ -580,8 +639,18 @@ export default function RequestsScreen() {
         _sender_group_id: row.group_id, // inviter's group
       }));
 
-      const recvUnifiedRaw = [...aptRecv, ...matchRecv, ...matchRecvFromGroups, ...groupRecv]
-        .sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
+      // Merge and de-dupe by id (a group-targeted match might later get receiver_id set on approval
+      // and therefore appear in BOTH receiver_id and receiver_group_id queries).
+      const recvUnifiedRaw = (() => {
+        const merged = [...aptRecv, ...matchRecv, ...matchRecvFromGroups, ...groupRecv];
+        const byId = new Map<string, any>();
+        merged.forEach((it: any) => {
+          const id = String(it?.id || '').trim();
+          if (!id) return;
+          if (!byId.has(id)) byId.set(id, it);
+        });
+        return Array.from(byId.values()).sort((a: any, b: any) => (a.created_at < b.created_at ? 1 : -1));
+      })();
 
       // Normalize display user for group-targeted matches:
       // For any item with _receiver_group_id, choose a representative member so recipient_id is a real user id.
@@ -658,7 +727,7 @@ export default function RequestsScreen() {
       if (aptIds.length) {
         const { data: apts } = await supabase
           .from('apartments')
-          .select('id, title, city, image_urls, owner_id')
+          .select('id, title, city, image_urls, owner_id, bedrooms, bathrooms, square_meters, floor, price, partner_ids')
           .in('id', aptIds);
         const aMap: Record<string, any> = {};
         (apts || []).forEach((a: any) => { aMap[a.id] = a; });
@@ -1498,10 +1567,17 @@ export default function RequestsScreen() {
     if (!user?.id) return;
     try {
       setActionId(match.id);
-      await supabase
+      const { error: updErr } = await supabase
         .from('matches')
-        .update({ status: 'APPROVED', updated_at: new Date().toISOString() })
+        // IMPORTANT: matches table has a constraint (matches_receiver_oneof_chk) that prevents
+        // setting receiver_id when receiver_group_id is already set. For group-targeted matches,
+        // we only update status/updated_at.
+        .update({ status: 'APPROVED', updated_at: new Date().toISOString() } as any)
         .eq('id', match.id);
+      if (updErr) throw updErr;
+      
+      // Optimistic UI: update immediately so the row switches from buttons to status text
+      setReceived((prev) => prev.map((r) => (r.id === match.id ? ({ ...(r as any), status: 'APPROVED' } as any) : r)));
 
       const approverLabel = await computeGroupAwareLabel(user.id);
       await insertNotificationOnce({
@@ -1527,10 +1603,14 @@ export default function RequestsScreen() {
     if (!user?.id) return;
     try {
       setActionId(match.id);
-      await supabase
+      const { error: updErr } = await supabase
         .from('matches')
         .update({ status: 'REJECTED', updated_at: new Date().toISOString() })
         .eq('id', match.id);
+      if (updErr) throw updErr;
+      
+      // Optimistic UI: update immediately so the row switches from buttons to status text
+      setReceived((prev) => prev.map((r) => (r.id === match.id ? ({ ...(r as any), status: 'REJECTED' } as any) : r)));
 
       const rejecterLabel = await computeGroupAwareLabel(user.id);
       await insertNotificationOnce({
@@ -1554,7 +1634,7 @@ export default function RequestsScreen() {
   const StatusPill = ({ status }: { status: UnifiedItem['status'] }) => {
     const config: Record<UnifiedItem['status'], { bg: string; color: string; text: string }> = {
       PENDING: { bg: '#363649', color: '#E5E7EB', text: 'ממתין' },
-      APPROVED: { bg: 'rgba(34,197,94,0.18)', color: '#22C55E', text: 'אושר' },
+      APPROVED: { bg: alpha(colors.success, 0.18), color: colors.success, text: 'אושר' },
       REJECTED: { bg: 'rgba(248,113,113,0.18)', color: '#F87171', text: 'נדחה' },
       CANCELLED: { bg: 'rgba(148,163,184,0.18)', color: '#94A3B8', text: 'בוטל' },
       NOT_RELEVANT: { bg: 'rgba(148,163,184,0.18)', color: '#94A3B8', text: 'לא רלוונטי' },
@@ -1712,26 +1792,38 @@ export default function RequestsScreen() {
                         ? 'בקשת התאמה'
                         : 'בקשת מיזוג פרופילים'}
                     </Text>
-                    {item.kind === 'MATCH' && !isGroupMatch && !!otherUser?.full_name ? (
+                    {incoming && item.kind === 'MATCH' && item.status === 'PENDING' ? (
                       <>
-                        <Text style={styles.matchSubtitle}>{otherUser.full_name} אהב את הפרופיל שלך</Text>
-                        <TouchableOpacity
-                          style={styles.matchUserRow}
-                          activeOpacity={0.85}
-                          onPress={() => {
-                            const id = incoming ? item.sender_id : item.recipient_id;
-                            if (id) router.push({ pathname: '/user/[id]', params: { id } });
-                          }}
-                        >
-                          <View style={styles.matchMiniAvatarWrap}>
-                            <Image
-                              source={{ uri: (otherUser.avatar_url as string | undefined) || DEFAULT_AVATAR }}
-                              style={styles.matchMiniAvatarImg}
-                              resizeMode="cover"
-                            />
-                          </View>
-                          <Text style={styles.matchMiniName}>{otherUser.full_name}</Text>
-                        </TouchableOpacity>
+                        <Text style={styles.matchSubtitle}>
+                          {(() => {
+                            const name = !isGroupMatch ? String(otherUser?.full_name || '').trim() : '';
+                            const requesterLabel = isGroupMatch
+                              ? 'פרופיל משותף'
+                              : name
+                                ? `המשתמש/ת "${name}"`
+                                : 'המשתמש/ת';
+                            return `${requesterLabel} מעוניין/ת בך כשותף/ה לדירה.\nבאישור הבקשה, מספר הטלפון שלך ייחשף לצד השני.`;
+                          })()}
+                        </Text>
+                        {!isGroupMatch && !!otherUser?.full_name ? (
+                          <TouchableOpacity
+                            style={styles.matchUserRow}
+                            activeOpacity={0.85}
+                            onPress={() => {
+                              const id = item.sender_id;
+                              if (id) router.push({ pathname: '/user/[id]', params: { id } });
+                            }}
+                          >
+                            <View style={styles.matchMiniAvatarWrap}>
+                              <Image
+                                source={{ uri: (otherUser.avatar_url as string | undefined) || DEFAULT_AVATAR }}
+                                style={styles.matchMiniAvatarImg}
+                                resizeMode="cover"
+                              />
+                            </View>
+                            <Text style={styles.matchMiniName}>{otherUser.full_name}</Text>
+                          </TouchableOpacity>
+                        ) : null}
                       </>
                     ) : null}
                     {incoming && item.kind === 'GROUP' && mergeProposerMembers.length ? (
@@ -1956,78 +2048,11 @@ export default function RequestsScreen() {
                       {/* Sender view: approved JOIN_APT owner details moved to modal ("פרטים נוספים") */}
                       {/* Sender view (sent): expose recipient phone and WhatsApp action once a MATCH is approved */}
                       {!incoming && item.kind === 'MATCH' && item.status === 'APPROVED' && (
-                        isGroupMatch && groupMembers.length ? (
-                          <View style={{ marginTop: 12, alignItems: 'flex-end', gap: 6 as any }}>
-                            <View
-                              style={{
-                                width: '100%',
-                                flexDirection: 'row-reverse',
-                                flexWrap: 'wrap',
-                                gap: 12 as any,
-                                justifyContent: 'flex-end',
-                              }}
-                            >
-                              {groupMembers.map((m, idx) => {
-                                const firstName = (m.full_name || '').split(' ')[0] || '';
-                                return (
-                                  <View
-                                    key={idx}
-                                    style={{
-                                      flexBasis: '48%',
-                                      flexGrow: 0,
-                                      minWidth: 240,
-                                      maxWidth: 360,
-                                      backgroundColor: 'rgba(94,63,45,0.08)',
-                                      borderRadius: 12,
-                                      borderWidth: 1,
-                                      borderColor: 'rgba(94,63,45,0.2)',
-                                      padding: 12,
-                                      gap: 10 as any,
-                                    }}
-                                  >
-                                    <View style={{ flexDirection: 'row-reverse', alignItems: 'center', gap: 10 as any }}>
-                                      <Image
-                                        source={{ uri: m.avatar_url || DEFAULT_AVATAR }}
-                                        style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: '#1F1F29', borderWidth: 2, borderColor: 'rgba(94,63,45,0.3)' }}
-                                      />
-                                      <View style={{ flex: 1, alignItems: 'flex-end' }}>
-                                        <Text style={{ color: '#FFFFFF', fontSize: 15, fontWeight: '800' }}>
-                                          {m.full_name}
-                                        </Text>
-                                        <Text style={{ color: '#C9CDD6', fontSize: 13, marginTop: 2 }}>
-                                          {m.phone || 'מספר לא זמין'}
-                                        </Text>
-                                      </View>
-                                    </View>
-                                    {m.phone ? (
-                                      <TouchableOpacity
-                                        style={{
-                                          flexDirection: 'row-reverse',
-                                          alignItems: 'center',
-                                          justifyContent: 'center',
-                                          gap: 8 as any,
-                                          backgroundColor: '#25D366',
-                                          paddingVertical: 11,
-                                          paddingHorizontal: 16,
-                                          borderRadius: 10,
-                                        }}
-                                        activeOpacity={0.85}
-                                        onPress={() =>
-                                          openWhatsApp(
-                                            m.phone as string,
-                                            `היי${firstName ? ` ${firstName}` : ''}, בקשת ההתאמה שלנו ב-Homie אושרה. בוא/י נדבר ונראה אם יש התאמה!`
-                                          )
-                                        }
-                                      >
-                                        <Text style={{ color: '#FFFFFF', fontSize: 14, fontWeight: '800' }}>
-                                          שלח הודעה בוואטסאפ
-                                        </Text>
-                                      </TouchableOpacity>
-                                    ) : null}
-                                  </View>
-                                );
-                              })}
-                            </View>
+                        isGroupMatch ? (
+                          <View style={{ marginTop: 10, alignItems: 'flex-end' }}>
+                            <Text style={styles.matchApprovedNote}>
+                              הבקשה אושרה על-ידי אחד מחברי הפרופיל המשותף. פרטי הקשר יופיעו בהתראה נפרדת.
+                            </Text>
                           </View>
                         ) : (
                           <View style={{ marginTop: 10, alignItems: 'flex-end', gap: 10 as any }}>
@@ -2110,134 +2135,11 @@ export default function RequestsScreen() {
                         </View>
                       )}
                       {incoming && item.kind === 'MATCH' && item.status === 'APPROVED' && (
-                        isGroupMatch && groupMembers.length ? (
-                          <View style={{ marginTop: 12, alignItems: 'flex-end', gap: 6 as any }}>
-                            <View
-                              style={{
-                                width: '100%',
-                                flexDirection: 'row-reverse',
-                                flexWrap: 'wrap',
-                                gap: 12 as any,
-                                justifyContent: 'flex-end',
-                              }}
-                            >
-                              {groupMembers.map((m, idx) => {
-                                const firstName = (m.full_name || '').split(' ')[0] || '';
-                                return (
-                                  <View
-                                    key={idx}
-                                    style={{
-                                      flexBasis: '48%',
-                                      flexGrow: 0,
-                                      minWidth: 240,
-                                      maxWidth: 360,
-                                      backgroundColor: 'rgba(94,63,45,0.08)',
-                                      borderRadius: 12,
-                                      borderWidth: 1,
-                                      borderColor: 'rgba(94,63,45,0.2)',
-                                      padding: 12,
-                                      gap: 10 as any,
-                                    }}
-                                  >
-                                    <View style={{ flexDirection: 'row-reverse', alignItems: 'center', gap: 10 as any }}>
-                                      <Image
-                                        source={{ uri: m.avatar_url || DEFAULT_AVATAR }}
-                                        style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: '#1F1F29', borderWidth: 2, borderColor: 'rgba(94,63,45,0.3)' }}
-                                      />
-                                      <View style={{ flex: 1, alignItems: 'flex-end' }}>
-                                        <Text style={{ color: '#FFFFFF', fontSize: 15, fontWeight: '800' }}>
-                                          {m.full_name}
-                                        </Text>
-                                        <Text style={{ color: '#C9CDD6', fontSize: 13, marginTop: 2 }}>
-                                          {m.phone || 'מספר לא זמין'}
-                                        </Text>
-                                      </View>
-                                    </View>
-                                    {m.phone ? (
-                                      <TouchableOpacity
-                                        style={{
-                                          flexDirection: 'row-reverse',
-                                          alignItems: 'center',
-                                          justifyContent: 'center',
-                                          gap: 8 as any,
-                                          backgroundColor: '#25D366',
-                                          paddingVertical: 11,
-                                          paddingHorizontal: 16,
-                                          borderRadius: 10,
-                                        }}
-                                        activeOpacity={0.85}
-                                        onPress={() =>
-                                          openWhatsApp(
-                                            m.phone as string,
-                                            `היי${firstName ? ` ${firstName}` : ''}, אישרתי את בקשת ההתאמה ב-Homie. בוא/י נדבר ונראה אם יש התאמה!`
-                                          )
-                                        }
-                                      >
-                                        <Text style={{ color: '#FFFFFF', fontSize: 14, fontWeight: '800' }}>
-                                          שלח הודעה בוואטסאפ
-                                        </Text>
-                                      </TouchableOpacity>
-                                    ) : null}
-                                  </View>
-                                );
-                              })}
-                            </View>
-                          </View>
-                        ) : (
-                          <View style={{ marginTop: 10, alignItems: 'flex-end', gap: 10 as any }}>
-                            <View
-                              style={{
-                                width: '100%',
-                                backgroundColor: 'rgba(94,63,45,0.08)',
-                                borderRadius: 12,
-                                borderWidth: 1,
-                                borderColor: 'rgba(94,63,45,0.2)',
-                                padding: 12,
-                                gap: 10 as any,
-                              }}
-                            >
-                              <View style={{ flexDirection: 'row-reverse', alignItems: 'center', gap: 10 as any }}>
-                                <Image
-                                  source={{ uri: otherUser?.avatar_url || DEFAULT_AVATAR }}
-                                  style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: '#1F1F29', borderWidth: 2, borderColor: 'rgba(94,63,45,0.3)' }}
-                                />
-                                <View style={{ flex: 1, alignItems: 'flex-end' }}>
-                                  <Text style={{ color: '#FFFFFF', fontSize: 15, fontWeight: '800' }}>
-                                    {otherUser?.full_name || 'משתמש'}
-                                  </Text>
-                                  <Text style={{ color: '#C9CDD6', fontSize: 13, marginTop: 2 }}>
-                                    {otherUser?.phone || 'מספר לא זמין'}
-                                  </Text>
-                                </View>
-                              </View>
-                              {otherUser?.phone ? (
-                                <TouchableOpacity
-                                  style={{
-                                    flexDirection: 'row-reverse',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    gap: 8 as any,
-                                    backgroundColor: '#25D366',
-                                    paddingVertical: 11,
-                                    paddingHorizontal: 16,
-                                    borderRadius: 10,
-                                  }}
-                                  activeOpacity={0.85}
-                                  onPress={() =>
-                                    openWhatsApp(
-                                      otherUser.phone as string,
-                                      `היי${otherUser?.full_name ? ` ${otherUser.full_name.split(' ')[0]}` : ''}, אישרתי את בקשת ההתאמה ב-Homie. בוא/י נדבר ונראה אם יש התאמה!`
-                                    )
-                                  }
-                                >
-                                  <Text style={{ color: '#FFFFFF', fontSize: 14, fontWeight: '800' }}>
-                                    שלח הודעה בוואטסאפ
-                                  </Text>
-                                </TouchableOpacity>
-                              ) : null}
-                            </View>
-                          </View>
-                        )
+                        <View style={{ marginTop: 10, alignItems: 'flex-end' }}>
+                          <Text style={styles.matchApprovedNote}>
+                            אישרת את הבקשה. מספר הטלפון שלך נחשף לצד השני.
+                          </Text>
+                        </View>
                       )}
                     </View>
                     {!!item.created_at ? (
@@ -2268,6 +2170,21 @@ export default function RequestsScreen() {
     | { kind: 'NOTIFICATION'; id: string; created_at: string; notification: Notification }
     | { kind: 'REQUEST'; id: string; created_at: string; request: UnifiedItem };
 
+  const inboxDomainForRow = (row: InboxRow): InboxFilterId | 'OTHER' => {
+    if (row.kind === 'REQUEST') {
+      const k = row.request.kind;
+      if (k === 'MATCH') return 'MATCHES';
+      if (k === 'GROUP') return 'MERGE';
+      if (k === 'APT' || k === 'APT_INVITE') return 'APARTMENTS';
+      return 'OTHER';
+    }
+    const n = row.notification;
+    if (isMergeProfileNotification(n)) return 'MERGE';
+    if (isMatchNotification(n)) return 'MATCHES';
+    if (isApartmentNotification(n)) return 'APARTMENTS';
+    return 'OTHER';
+  };
+
   const bucketLabelHe = (iso: string): string => {
     const t = Date.parse(iso || '');
     if (!Number.isFinite(t)) return 'מוקדם יותר';
@@ -2297,7 +2214,7 @@ export default function RequestsScreen() {
     return totalMonths <= 1 ? 'לפני חודש' : `לפני ${totalMonths} חודשים`;
   };
 
-  const inboxRows = useMemo<InboxRow[]>(() => {
+  const inboxRowsAll = useMemo<InboxRow[]>(() => {
     const skipTitles = new Set<string>([
       'בקשת שותפות חדשה',
       'בקשת שותפות מפרופיל משותף',
@@ -2313,6 +2230,11 @@ export default function RequestsScreen() {
       return tb - ta;
     });
   }, [notifItems, received]);
+
+  const inboxRows = useMemo<InboxRow[]>(() => {
+    if (inboxFilter === 'ALL') return inboxRowsAll;
+    return (inboxRowsAll || []).filter((row) => inboxDomainForRow(row) === inboxFilter);
+  }, [inboxRowsAll, inboxFilter]);
 
   const inboxSections = useMemo(() => {
     const map: Record<string, InboxRow[]> = {};
@@ -2341,8 +2263,47 @@ export default function RequestsScreen() {
               keyExtractor={(row) => `${row.kind}:${row.id}`}
               stickySectionHeadersEnabled={false}
               showsVerticalScrollIndicator={false}
+              // Allow pull-to-refresh even when content doesn't fill the screen
+              bounces
+              alwaysBounceVertical
+              overScrollMode="always"
               refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#5e3f2d" />}
-              contentContainerStyle={[styles.igListContent, inboxRows.length === 0 ? { flex: 1, justifyContent: 'center' } : null]}
+              contentContainerStyle={[
+                styles.igListContent,
+                { flexGrow: 1 },
+                inboxRows.length === 0 ? { paddingTop: 8 } : null,
+              ]}
+              ListHeaderComponent={
+                <View style={styles.filtersWrap}>
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    style={{ direction: 'rtl' as any }}
+                    contentContainerStyle={styles.segmentScrollContent}
+                  >
+                    {/* Keep "הכל" right-most in RTL */}
+                    {[
+                      { id: 'APARTMENTS' as const, label: 'דירות', Icon: Home },
+                      { id: 'MERGE' as const, label: 'מיזוג פרופילים', Icon: Users },
+                      { id: 'MATCHES' as const, label: 'מאצ׳ים', Icon: Sparkles },
+                      { id: 'ALL' as const, label: 'הכל', Icon: Bell },
+                    ].map(({ id, label, Icon }) => {
+                      const active = inboxFilter === id;
+                      return (
+                        <TouchableOpacity
+                          key={id}
+                          activeOpacity={0.85}
+                          onPress={() => setInboxFilter(id)}
+                          style={[styles.segmentBtn, active ? styles.segmentBtnActive : null]}
+                        >
+                          <Text style={[styles.segmentText, active ? styles.segmentTextActive : null]}>{label}</Text>
+                          <Icon size={14} color={active ? '#5e3f2d' : '#6B7280'} />
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </ScrollView>
+                </View>
+              }
               ListEmptyComponent={
                 <View style={styles.emptyState}>
                   <View style={styles.emptyIconWrap}>
@@ -2367,9 +2328,16 @@ export default function RequestsScreen() {
                   const descText = displayDescription(n.description);
                   const canApproveInvite = !!aptId && !isInviteApproved(n.description);
                   const isApproved = isApprovedNotification(n);
+                  const canOpenApartmentPanel = !!aptId;
 
                   return (
-                    <View style={styles.igRow}>
+                    <Pressable
+                      style={styles.igRow}
+                      onPress={() => {
+                        if (!canOpenApartmentPanel) return;
+                        openApartmentPanel(aptId as string);
+                      }}
+                    >
                       <TouchableOpacity
                         activeOpacity={0.85}
                         style={styles.igAvatarWrap}
@@ -2420,7 +2388,7 @@ export default function RequestsScreen() {
                           </TouchableOpacity>
                         </View>
                       ) : null}
-                    </View>
+                    </Pressable>
                   );
                 }
 
@@ -2431,6 +2399,7 @@ export default function RequestsScreen() {
                 const groupMemberIds = senderGroupId ? (groupMembersByGroupId[senderGroupId] || []) : [];
                 const groupMembers = groupMemberIds.map((id) => usersById[id]).filter(Boolean) as Partial<User>[];
                 const apt = r.apartment_id ? aptsById[r.apartment_id] : undefined;
+                const canOpenApartmentPanel = (r.kind === 'APT' || r.kind === 'APT_INVITE') && !!r.apartment_id;
 
                 const title =
                   r.kind === 'APT_INVITE'
@@ -2440,15 +2409,33 @@ export default function RequestsScreen() {
                     : r.kind === 'MATCH'
                     ? 'בקשת שותפות'
                     : 'בקשת מיזוג פרופילים';
+
+                const matchRequesterLabel =
+                  groupMembers.length
+                    ? groupMembers.map((m) => (m as any)?.full_name).filter(Boolean).join(' • ')
+                    : ((otherUser as any)?.full_name || 'המשתמש/ת');
+
                 const subtitle =
-                  r.kind === 'APT' || r.kind === 'APT_INVITE'
+                  r.kind === 'MATCH'
+                    ? r.status === 'APPROVED'
+                      ? `אישרת את הבקשה.\nמספר הטלפון שלך נחשף לצד השני.`
+                      : r.status === 'REJECTED'
+                        ? `דחית את הבקשה.`
+                        : `${matchRequesterLabel} מעוניין/ת בך כשותף/ה לדירה.\nבאישור הבקשה, מספר הטלפון שלך ייחשף לצד השני.`
+                    : r.kind === 'APT' || r.kind === 'APT_INVITE'
                     ? `${(apt as any)?.title || 'דירה'}${(apt as any)?.city ? ` • ${(apt as any).city}` : ''}`
                     : groupMembers.length
                     ? groupMembers.map((m) => (m as any)?.full_name).filter(Boolean).join(' • ')
                     : ((otherUser as any)?.full_name || '');
 
                 return (
-                  <View style={styles.igRow}>
+                  <Pressable
+                    style={styles.igRow}
+                    onPress={() => {
+                      if (!canOpenApartmentPanel) return;
+                      openApartmentPanel(r.apartment_id as string);
+                    }}
+                  >
                     <TouchableOpacity
                       activeOpacity={0.85}
                       style={styles.igAvatarWrap}
@@ -2461,7 +2448,7 @@ export default function RequestsScreen() {
                     </TouchableOpacity>
 
                     <View style={styles.igBody}>
-                      <Text style={styles.igMessage} numberOfLines={2}>
+                      <Text style={styles.igMessage} numberOfLines={r.kind === 'MATCH' ? 3 : 2}>
                         <Text style={styles.igTitleStrong}>{title}</Text>
                         {!!subtitle ? <Text>{` ${subtitle}`}</Text> : null}
                       </Text>
@@ -2469,7 +2456,32 @@ export default function RequestsScreen() {
                     </View>
 
                     <View style={styles.igActions}>
-                      {r.status === 'PENDING' ? (
+                      {r.kind === 'MATCH' ? (
+                        r.status === 'PENDING' ? (
+                          <View style={styles.igActionsRow}>
+                            <TouchableOpacity
+                              style={[styles.igBtnPrimary, actionId === r.id ? { opacity: 0.7 } : null]}
+                              disabled={actionId === r.id}
+                              activeOpacity={0.85}
+                              onPress={() => approveIncomingMatch(r)}
+                            >
+                              <Text style={styles.igBtnPrimaryText}>אישור</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              style={[styles.igBtnSecondary, actionId === r.id ? { opacity: 0.7 } : null]}
+                              disabled={actionId === r.id}
+                              activeOpacity={0.85}
+                              onPress={() => rejectIncomingMatch(r)}
+                            >
+                              <Text style={styles.igBtnSecondaryText}>דחייה</Text>
+                            </TouchableOpacity>
+                          </View>
+                        ) : (
+                          <Text style={styles.igStatusText}>
+                            {r.status === 'APPROVED' ? 'אושרה' : r.status === 'REJECTED' ? 'נדחתה' : 'עודכן'}
+                          </Text>
+                        )
+                      ) : r.status === 'PENDING' ? (
                         <View style={styles.igActionsRow}>
                           <TouchableOpacity
                             style={[styles.igBtnPrimary, actionId === r.id ? { opacity: 0.7 } : null]}
@@ -2498,7 +2510,7 @@ export default function RequestsScreen() {
                         </View>
                       ) : r.status === 'APPROVED' ? (
                         <View style={styles.igActionsRow}>
-                          {((r.kind === 'MATCH' || r.kind === 'APT' || r.kind === 'APT_INVITE') && !!(otherUser as any)?.phone) ? (
+                          {((r.kind === 'APT' || r.kind === 'APT_INVITE') && !!(otherUser as any)?.phone) ? (
                             <TouchableOpacity
                               style={styles.igWhatsappBtn}
                               activeOpacity={0.85}
@@ -2509,9 +2521,7 @@ export default function RequestsScreen() {
                                 const aptTitle = (apt as any)?.title || '';
                                 const aptCity = (apt as any)?.city || '';
                                 const message =
-                                  r.kind === 'MATCH'
-                                    ? `היי${firstName ? ` ${firstName}` : ''}, בקשת השותפות שלנו ב-Homie אושרה. אשמח לקבוע שיחה ולהכיר 🙂`
-                                    : `היי${firstName ? ` ${firstName}` : ''}, בקשתך להצטרף לדירה${aptTitle ? `: ${aptTitle}` : ''}${aptCity ? ` (${aptCity})` : ''} אושרה ב-Homie. אשמח לתאם שיחה או צפייה.`;
+                                  `היי${firstName ? ` ${firstName}` : ''}, בקשתך להצטרף לדירה${aptTitle ? `: ${aptTitle}` : ''}${aptCity ? ` (${aptCity})` : ''} אושרה ב-Homie. אשמח לתאם שיחה או צפייה.`;
                                 openWhatsApp(String((otherUser as any).phone), message);
                               }}
                             >
@@ -2529,7 +2539,7 @@ export default function RequestsScreen() {
                         </Text>
                       )}
                     </View>
-                  </View>
+                  </Pressable>
                 );
               }}
             />
@@ -2577,6 +2587,124 @@ export default function RequestsScreen() {
           </Pressable>
         </Pressable>
       </Modal>
+
+      {/* Apartment details animated panel (opens when tapping apartment-related notifications/requests) */}
+      <Modal
+        visible={!!aptPanelAptId}
+        transparent
+        animationType="fade"
+        onRequestClose={closeApartmentPanel}
+      >
+        <View style={StyleSheet.absoluteFill}>
+          <Pressable
+            style={styles.aptPanelBackdrop}
+            onPress={closeApartmentPanel}
+            pointerEvents={aptPanelOpen ? 'auto' : 'none'}
+          />
+          <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
+            <FabButton
+              isOpen={aptPanelOpen}
+              onPress={closeApartmentPanel}
+              duration={480}
+              showToggleButton={false}
+              openedSize={Math.min(360, screenW - 48)}
+              closedSize={0}
+              panelStyle={{
+                right: undefined,
+                bottom: undefined,
+                left: (screenW - Math.min(360, screenW - 48)) / 2,
+                top: Math.max(insets.top + 80, screenH * 0.20),
+                backgroundColor: 'transparent',
+              }}
+            >
+              {(() => {
+                const a = aptPanelAptId
+                  ? ((notifApartmentsById as any)?.[aptPanelAptId] || (aptsById as any)?.[aptPanelAptId])
+                  : undefined;
+                const image = a
+                  ? (Array.isArray(a.image_urls) && (a.image_urls as any[]).length ? (a.image_urls as any[])[0] : APT_PLACEHOLDER)
+                  : APT_PLACEHOLDER;
+                const title = (a?.title as string) || 'דירה';
+                const city = (a?.city as string) || '';
+                const bedrooms = typeof a?.bedrooms === 'number' ? a.bedrooms : null;
+                const sqm = typeof a?.square_meters === 'number' ? a.square_meters : null;
+                const floor = typeof a?.floor === 'number' ? a.floor : null;
+                const price = typeof a?.price === 'number' ? a.price : null;
+                const partnerIds = Array.isArray(a?.partner_ids) ? (a.partner_ids as string[]) : [];
+                const partnersCount = partnerIds.length;
+                return (
+                  <View style={styles.aptPanelCard}>
+                    <ImageBackground
+                      source={{ uri: image }}
+                      style={styles.aptPanelHero}
+                      imageStyle={styles.aptPanelHeroImage}
+                      resizeMode="cover"
+                    >
+                      <View style={styles.aptPanelHeroOverlay} pointerEvents="none" />
+                      
+                      {/* Close button */}
+                      <TouchableOpacity
+                        activeOpacity={0.85}
+                        style={styles.aptPanelCloseBtn}
+                        onPress={closeApartmentPanel}
+                        accessibilityRole="button"
+                        accessibilityLabel="סגור"
+                      >
+                        <X size={18} color="#FFFFFF" strokeWidth={3} />
+                      </TouchableOpacity>
+
+                      {/* Partners count badge (top right) */}
+                      {partnersCount > 0 ? (
+                        <View style={styles.aptPanelPartnersBadge}>
+                          <Users size={14} color="#FFFFFF" strokeWidth={2.5} />
+                          <Text style={styles.aptPanelPartnersBadgeText}>{partnersCount}/4</Text>
+                        </View>
+                      ) : null}
+
+                      <View style={styles.aptPanelHeroText}>
+                        <View style={styles.aptPanelTitleRow}>
+                          {price !== null ? (
+                            <Text style={styles.aptPanelPriceInline} numberOfLines={1}>
+                              ₪{price.toLocaleString()}
+                            </Text>
+                          ) : (
+                            <View />
+                          )}
+                          <View style={styles.aptPanelTitleWrap}>
+                            <Text style={styles.aptPanelTitle} numberOfLines={1}>
+                              {title}
+                            </Text>
+                          </View>
+                        </View>
+                        {!!city ? (
+                          <Text style={styles.aptPanelCity} numberOfLines={1}>
+                            {city}
+                          </Text>
+                        ) : null}
+                      </View>
+                    </ImageBackground>
+
+                    <View style={styles.aptPanelBody}>
+                      <TouchableOpacity
+                        activeOpacity={0.92}
+                        style={styles.aptPanelPrimaryBtn}
+                        onPress={() => {
+                          const id = aptPanelAptId;
+                          if (!id) return;
+                          closeApartmentPanel();
+                          router.push({ pathname: '/apartment/[id]', params: { id } } as any);
+                        }}
+                      >
+                        <Text style={styles.aptPanelPrimaryBtnText}>צפייה בדירה המלאה</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                );
+              })()}
+            </FabButton>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -2598,21 +2726,30 @@ const styles = StyleSheet.create({
   },
   filtersWrap: {
     paddingHorizontal: 0,
-    paddingBottom: 6,
+    paddingBottom: 4,
     alignItems: 'flex-end',
+  },
+  segmentScrollContent: {
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 2,
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 8 as any,
   },
   segmentWrap: {
     flexDirection: 'row-reverse',
     alignItems: 'center',
     justifyContent: 'flex-end',
+    paddingRight: 18,
     gap: 8 as any,
   },
   segmentBtn: {
     flexDirection: 'row-reverse',
     alignItems: 'center',
     gap: 8 as any,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
     borderRadius: 999,
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
@@ -2630,7 +2767,7 @@ const styles = StyleSheet.create({
   segmentText: {
     color: '#6B7280',
     fontWeight: '800',
-    fontSize: 13,
+    fontSize: 12,
   },
   segmentTextActive: {
     color: '#5e3f2d',
@@ -2995,8 +3132,9 @@ const styles = StyleSheet.create({
   },
   emptyState: {
     alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 60,
+    justifyContent: 'flex-start',
+    paddingTop: 28,
+    paddingBottom: 36,
     gap: 12 as any,
   },
   emptyIconWrap: {
@@ -3075,9 +3213,9 @@ const styles = StyleSheet.create({
   },
   approvedInlinePill: {
     alignSelf: 'flex-end',
-    backgroundColor: 'rgba(34,197,94,0.18)',
+    backgroundColor: alpha(colors.success, 0.18),
     borderWidth: 1,
-    borderColor: 'rgba(34,197,94,0.35)',
+    borderColor: alpha(colors.success, 0.35),
     paddingHorizontal: 10,
     paddingVertical: 5,
     borderRadius: 999,
@@ -3085,7 +3223,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   approvedInlinePillText: {
-    color: '#16A34A',
+    color: colors.success,
     fontSize: 11,
     fontWeight: '900',
     writingDirection: 'rtl',
@@ -3113,6 +3251,14 @@ const styles = StyleSheet.create({
     textAlign: 'right',
     marginTop: 6,
     fontWeight: '700',
+    alignSelf: 'stretch',
+  },
+  matchApprovedNote: {
+    color: '#374151',
+    fontSize: 13,
+    textAlign: 'right',
+    marginTop: 10,
+    fontWeight: '800',
     alignSelf: 'stretch',
   },
   matchUserRow: {
@@ -3159,15 +3305,15 @@ const styles = StyleSheet.create({
     alignSelf: 'stretch',
   },
   tagApproved: {
-    backgroundColor: 'rgba(34,197,94,0.10)',
+    backgroundColor: alpha(colors.success, 0.1),
     borderWidth: 1,
-    borderColor: 'rgba(34,197,94,0.25)',
+    borderColor: alpha(colors.success, 0.25),
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 999,
   },
   tagApprovedText: {
-    color: '#16A34A',
+    color: colors.success,
     fontSize: 12,
     fontWeight: '900',
   },
@@ -3189,6 +3335,10 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.5)',
     padding: 20,
     justifyContent: 'center',
+  },
+  aptPanelBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(17,24,39,0.65)',
   },
   modalCard: {
     backgroundColor: '#FFFFFF',
@@ -3255,6 +3405,173 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 15,
     fontWeight: '800',
+  },
+  aptPanelCard: {
+    borderRadius: 20,
+    overflow: 'hidden',
+    backgroundColor: '#FFFFFF',
+    shadowColor: '#000',
+    shadowOpacity: 0.24,
+    shadowRadius: 24,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 12,
+  },
+  aptPanelCloseBtn: {
+    position: 'absolute',
+    top: 12,
+    left: 12,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 10,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,255,255,0.30)',
+    shadowColor: '#000',
+    shadowOpacity: 0.22,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 4,
+  },
+  aptPanelPartnersBadge: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 5 as any,
+    backgroundColor: 'rgba(0,0,0,0.65)',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.25)',
+    zIndex: 10,
+  },
+  aptPanelPartnersBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  // NOTE: Price is now rendered inline next to the title (no separate badge).
+  aptPanelTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    width: '100%',
+    gap: 10 as any,
+  },
+  aptPanelTitleWrap: {
+    flex: 1,
+    alignItems: 'flex-end',
+  },
+  aptPanelPriceInline: {
+    color: 'rgba(255,255,255,0.98)',
+    fontSize: 17,
+    fontWeight: '900',
+    letterSpacing: -0.3,
+    textShadowColor: 'rgba(0,0,0,0.75)',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 8,
+  },
+  aptPanelHero: {
+    width: '100%',
+    height: 200,
+    justifyContent: 'flex-end',
+  },
+  aptPanelHeroImage: {
+    width: '100%',
+    height: '100%',
+  },
+  aptPanelHeroOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'transparent',
+  },
+  aptPanelHeroText: {
+    paddingHorizontal: 18,
+    paddingBottom: 14,
+    paddingTop: 38,
+    alignItems: 'flex-end',
+    backgroundColor: 'transparent',
+  },
+  aptPanelBody: {
+    paddingHorizontal: 18,
+    paddingTop: 14,
+    paddingBottom: 18,
+  },
+  aptPanelTitle: {
+    color: '#FFFFFF',
+    fontSize: 17,
+    fontWeight: '900',
+    textAlign: 'right',
+    letterSpacing: -0.3,
+    textShadowColor: 'rgba(0,0,0,0.75)',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 8,
+  },
+  aptPanelCity: {
+    color: 'rgba(255,255,255,0.95)',
+    fontSize: 13,
+    fontWeight: '700',
+    textAlign: 'right',
+    marginTop: 2,
+    textShadowColor: 'rgba(0,0,0,0.65)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 6,
+  },
+  aptPanelDetailsGrid: {
+    flexDirection: 'row-reverse',
+    flexWrap: 'wrap',
+    gap: 8 as any,
+    marginBottom: 2,
+  },
+  aptPanelDetailItem: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 6 as any,
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    shadowColor: '#000',
+    shadowOpacity: 0.04,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 1,
+  },
+  aptPanelDetailIcon: {
+    fontSize: 15,
+  },
+  aptPanelDetailText: {
+    color: '#111827',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  aptPanelActions: {
+    width: '100%',
+  },
+  aptPanelPrimaryBtn: {
+    backgroundColor: '#5e3f2d',
+    borderRadius: 12,
+    paddingHorizontal: 18,
+    paddingVertical: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#5e3f2d',
+    shadowOpacity: 0.28,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 3,
+  },
+  aptPanelPrimaryBtnText: {
+    color: '#FFFFFF',
+    fontWeight: '900',
+    fontSize: 14,
+    letterSpacing: -0.2,
   },
   inviterRow: {
     marginTop: 8,

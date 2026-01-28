@@ -170,34 +170,39 @@ export interface UserSurveyResponse {
   is_sublet?: boolean;
   occupation?: string;
   student_year?: number; // if occupation === 'student', 1–8
-  works_from_home?: boolean; // if occupation === 'עובד'
   keeps_kosher?: boolean; // does the user eat kosher only
   is_shomer_shabbat?: boolean;
   diet_type?: string;
   is_smoker?: boolean;
   relationship_status?: string;
   has_pet?: boolean;
-  lifestyle?: string;
+  home_lifestyle?: string; // merged from lifestyle + home_vibe
   cleanliness_importance?: number; // 1–5
   cleaning_frequency?: string;
   hosting_preference?: string;
   cooking_style?: string;
-  home_vibe?: string;
+  // Budget range (₪) - new fields
+  price_min?: number | null;
+  price_max?: number | null;
+  // Legacy single-value budget
   price_range?: number;
   // Tri-state preferences: true/false/null (null = "לא משנה לי")
-  bills_included?: boolean | null;
-  preferred_city?: string;
+  // New: allow selecting multiple cities. Keep preferred_city as the first/primary city for backwards compatibility.
+  preferred_cities?: string[];
   preferred_neighborhoods?: string[];
   floor_preference?: string;
   has_balcony?: boolean | null;
-  has_elevator?: boolean | null;
-  wants_master_room?: boolean | null;
+  // Move-in range (YYYY-MM)
+  move_in_month_from?: string | null;
+  move_in_month_to?: string | null;
+  // When false => exact month (to == from). When true => flexible range.
+  move_in_is_flexible?: boolean | null;
+  // Legacy single month (deprecated)
   move_in_month?: string;
   preferred_roommates?: number; // legacy single value (kept for backwards compat)
   preferred_roommates_min?: number | null;
   preferred_roommates_max?: number | null;
   pets_allowed?: boolean; // whether the user wants an apartment that allows pets
-  with_broker?: boolean | null;
   sublet_month_from?: string; // format: YYYY-MM
   sublet_month_to?: string;   // format: YYYY-MM
   preferred_age_range?: string;

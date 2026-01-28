@@ -32,6 +32,7 @@ import { Apartment } from '@/types/database';
 import ApartmentCard from '@/components/ApartmentCard';
 import FilterChipsBar, { defaultFilterChips, selectedFiltersFromIds } from '@/components/FilterChipsBar';
 import { KeyFabPanel } from '@/components/KeyFabPanel';
+import { alpha, colors } from '@/lib/theme';
 
 function parseOptionalInt(v: string): number | null {
   const t = String(v || '').trim();
@@ -323,7 +324,7 @@ export default function HomeScreen() {
                 router.push('/(tabs)/map');
               }}
             >
-              <Map size={22} color="#5e3f2d" />
+              <Map size={22} color={colors.primary} />
             </TouchableOpacity>
             {/* Wrap in a real View ref so measureInWindow works reliably (esp. Android) */}
             <View ref={filterBtnRef} collapsable={false}>
@@ -332,13 +333,13 @@ export default function HomeScreen() {
                 style={styles.actionBtnBody}
                 onPress={openFilterPanel}
               >
-                <SlidersHorizontal size={22} color="#5e3f2d" />
+                <SlidersHorizontal size={22} color={colors.primary} />
               </TouchableOpacity>
             </View>
           </View>
           {/* Search input */}
           <View style={[styles.searchContainer, { flex: 1 }]}>
-            <Search size={20} color="#5e3f2d" style={styles.searchIcon} />
+            <Search size={20} color={colors.primary} style={styles.searchIcon} />
             <TextInput
               style={styles.topSearchInput}
               placeholder="חיפוש לפי עיר או שכונה..."
@@ -358,15 +359,15 @@ export default function HomeScreen() {
           withShadow={false}
           chipBorderWidth={1}
           // Inactive chips match the ApartmentCard "בניין/מ״ר" tag pills
-          inactiveBackgroundColor="rgba(94,63,45,0.08)"
-          inactiveBorderColor="rgba(94,63,45,0.18)"
-          inactiveTextColor="#5e3f2d"
-          inactiveIconColor="#5e3f2d"
-          // Active chips match the ApartmentCard "מחיר" badge
-          activeBackgroundColor="#5e3f2d"
-          activeBorderColor="transparent"
-          activeTextColor="#FFFFFF"
-          activeIconColor="#FFFFFF"
+          inactiveBackgroundColor={alpha(colors.primary, 0.08)}
+          inactiveBorderColor={alpha(colors.primary, 0.18)}
+          inactiveTextColor={colors.primary}
+          inactiveIconColor={colors.primary}
+          // Active chips: soft green highlight (less brown repetition)
+          activeBackgroundColor={alpha(colors.success, 0.86)}
+          activeBorderColor={alpha(colors.success, 0.6)}
+          activeTextColor={colors.white}
+          activeIconColor={colors.white}
           onOpenDropdown={(chip) => {
             if (chip.id === 'price' || chip.id === 'rooms') {
               openFilterPanel();
@@ -501,11 +502,14 @@ export default function HomeScreen() {
       if (chipFilters.is_furnished && !anyApt?.is_furnished) return false;
       if (chipFilters.wheelchair_accessible && !anyApt?.wheelchair_accessible) return false;
       if (chipFilters.has_safe_room && !anyApt?.has_safe_room) return false;
-      if (chipFilters.has_elevator && !anyApt?.has_elevator) return false;
-      if (chipFilters.kosher_kitchen && !anyApt?.kosher_kitchen) return false;
-      if (chipFilters.has_air_conditioning && !anyApt?.has_air_conditioning) return false;
-      if (chipFilters.has_solar_heater && !anyApt?.has_solar_heater) return false;
-      if (chipFilters.is_renovated && !anyApt?.is_renovated) return false;
+      if (chipFilters.garden) {
+        const aptType = String(anyApt?.apartment_type || '').toUpperCase();
+        const gardenSqmRaw = anyApt?.garden_square_meters;
+        const gardenSqm =
+          typeof gardenSqmRaw === 'number' && Number.isFinite(gardenSqmRaw) ? (gardenSqmRaw as number) : null;
+        const hasGarden = aptType === 'GARDEN' || (gardenSqm !== null && gardenSqm > 0);
+        if (!hasGarden) return false;
+      }
       if (chipFilters.balcony) {
         const bc = typeof anyApt?.balcony_count === 'number' ? (anyApt.balcony_count as number) : 0;
         if (bc <= 0) return false;
@@ -586,7 +590,7 @@ export default function HomeScreen() {
   if (isLoading && !refreshing) {
     return (
       <View style={styles.centerContainer}>
-        <ActivityIndicator size="large" color="#5e3f2d" />
+        <ActivityIndicator size="large" color={colors.primary} />
       </View>
     );
   }
@@ -617,7 +621,7 @@ export default function HomeScreen() {
             <RefreshControl
               refreshing={refreshing}
               onRefresh={onRefresh}
-              tintColor="#5e3f2d"
+              tintColor={colors.primary}
             />
           }
           ListEmptyComponent={
@@ -963,7 +967,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: 'rgba(94,63,45,0.10)',
+    backgroundColor: alpha(colors.primary, 0.1),
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1033,7 +1037,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   heroText: {
-    color: '#5e3f2d',
+    color: colors.primary,
     fontSize: 20,
     fontWeight: '800',
     lineHeight: 26,
@@ -1091,7 +1095,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   fieldLabel: {
-    color: '#5e3f2d',
+    color: colors.primary,
     fontSize: 13,
     fontWeight: '600',
     textAlign: 'right',
@@ -1154,7 +1158,7 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   gaugeLabel: {
-    color: '#5e3f2d',
+    color: colors.primary,
     fontSize: 12,
     fontWeight: '700',
     textAlign: 'right',
@@ -1188,7 +1192,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#F3F4F6',
   },
   gaugeClearLinkText: {
-    color: '#5e3f2d',
+    color: colors.primary,
     fontSize: 12,
     fontWeight: '800',
   },
@@ -1214,8 +1218,8 @@ const styles = StyleSheet.create({
     opacity: 0.5,
   },
   gaugeMiniBtnPressed: {
-    backgroundColor: 'rgba(94,63,45,0.10)',
-    borderColor: 'rgba(94,63,45,0.28)',
+    backgroundColor: alpha(colors.primary, 0.1),
+    borderColor: alpha(colors.primary, 0.28),
   },
   gaugeMiniBtnText: {
     color: '#111827',
@@ -1236,7 +1240,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   gaugeSegmentFilled: {
-    backgroundColor: '#5e3f2d',
+    backgroundColor: colors.primary,
   },
   gaugeSegmentPressed: {
     opacity: 0.88,
@@ -1278,7 +1282,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#5e3f2d',
+    backgroundColor: colors.success,
   },
   applyText: {
     color: '#FFFFFF',
@@ -1315,13 +1319,13 @@ const styles = StyleSheet.create({
     borderBottomColor: '#F1F5F9',
   },
   suggestionText: {
-    color: '#5e3f2d',
+    color: colors.primary,
     fontSize: 14,
     textAlign: 'right',
     writingDirection: 'rtl',
   },
   suggestionItemSelected: {
-    backgroundColor: '#5e3f2d',
+    backgroundColor: colors.success,
   },
   suggestionTextSelected: {
     color: '#FFFFFF',
@@ -1334,7 +1338,7 @@ const styles = StyleSheet.create({
   },
   selectButtonText: {
     flex: 1,
-    color: '#5e3f2d',
+    color: colors.primary,
     fontSize: 14,
     textAlign: 'right',
     writingDirection: 'rtl',

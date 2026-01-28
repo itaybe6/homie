@@ -3,6 +3,7 @@ import { TouchableOpacity, StyleSheet, View, ViewStyle } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Settings } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { colors } from '@/lib/theme';
 
 type Props = {
   style?: ViewStyle;
@@ -13,7 +14,7 @@ function SettingsButtonBase({ style }: Props) {
   const insets = useSafeAreaInsets();
 
   // Keep consistent with NotificationsButton icon styling.
-  const ICON_COLOR = '#5e3f2d';
+  const ICON_COLOR = colors.primary;
 
   return (
     <View style={[styles.wrap, { marginTop: Math.max(6, insets.top + 2) }, style]}>

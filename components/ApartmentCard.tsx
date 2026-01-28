@@ -6,6 +6,7 @@ import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { LinearGradient } from 'expo-linear-gradient';
 import FavoriteHeartButton from '@/components/FavoriteHeartButton';
 import { formatTimeAgoHe } from '@/utils/time';
+import { alpha, colors } from '@/lib/theme';
 
 interface ApartmentCardProps {
   apartment: Apartment;
@@ -355,13 +356,13 @@ export default function ApartmentCard({
               activeBackgroundColor="#FFE6EC"
               inactiveBackgroundColor="rgba(255,255,255,0.75)"
               activeColor="#FF2D55"
-              inactiveColor="#5e3f2d"
+              inactiveColor={colors.primary}
             />
             {/* Roommates badge */}
             {!isHome ? (
               <View style={styles.roommatesBadge} pointerEvents="none">
                 <View style={styles.badgeIconCircle}>
-                  <Users size={16} color="#5e3f2d" strokeWidth={2.5} />
+                  <Users size={16} color={colors.white} strokeWidth={2.5} />
                 </View>
                 <Text style={styles.roommatesBadgeText}>
                   {typeof maxRoommates === 'number' ? `${partnerSlotsUsed}/${maxRoommates}` : `${partnerSlotsUsed}`}
@@ -371,7 +372,7 @@ export default function ApartmentCard({
             {isHome ? (
               <View style={styles.roommatesBadgeHome} pointerEvents="none">
                 <View style={styles.badgeIconCircleHome}>
-                  <Users size={14} color="#5e3f2d" strokeWidth={2.5} />
+                  <Users size={14} color={colors.white} strokeWidth={2.5} />
                 </View>
                 <Text style={styles.roommatesBadgeHomeText}>
                   {typeof maxRoommates === 'number' ? `${partnerSlotsUsed}/${maxRoommates}` : `${partnerSlotsUsed}`}
@@ -446,16 +447,16 @@ export default function ApartmentCard({
                     {typeTagLabel ? (
                       <View style={styles.tagPill}>
                         {apartmentType === 'GARDEN' ? (
-                          <Trees size={14} color="#5e3f2d" />
+                          <Trees size={14} color={colors.primary} />
                         ) : (
-                          <Building2 size={14} color="#5e3f2d" />
+                          <Building2 size={14} color={colors.primary} />
                         )}
                         <Text style={styles.tagText}>{typeTagLabel}</Text>
                       </View>
                     ) : null}
                     {sqmTagLabel ? (
                       <View style={styles.tagPill}>
-                        <Ruler size={14} color="#5e3f2d" />
+                        <Ruler size={14} color={colors.primary} />
                         <Text style={styles.tagText}>{sqmTagLabel}</Text>
                       </View>
                     ) : null}
@@ -466,7 +467,7 @@ export default function ApartmentCard({
               <View style={styles.metaRowHome}>
                 <View style={styles.metaItemHome}>
                   <View style={[styles.iconCircle, styles.iconCircleCompact]}>
-                    <Users size={14} color="#5e3f2d" strokeWidth={2.5} />
+                    <Users size={14} color={colors.primary} strokeWidth={2.5} />
                   </View>
                   <Text style={styles.metaTextHome} numberOfLines={1}>
                     {roommatesCapacityLabel}
@@ -475,7 +476,7 @@ export default function ApartmentCard({
                 <View style={styles.metaDivider} />
                 <View style={styles.metaItemHome}>
                   <View style={[styles.iconCircle, styles.iconCircleCompact]}>
-                    <BedDouble size={14} color="#5e3f2d" strokeWidth={2.5} />
+                    <BedDouble size={14} color={colors.primary} strokeWidth={2.5} />
                   </View>
                   <Text style={styles.metaTextHome} numberOfLines={1}>
                     {apartment.bedrooms ?? ''} חדרי שינה
@@ -484,7 +485,7 @@ export default function ApartmentCard({
                 <View style={styles.metaDivider} />
                 <View style={styles.metaItemHome}>
                   <View style={[styles.iconCircle, styles.iconCircleCompact]}>
-                    <ShowerHead size={14} color="#5e3f2d" strokeWidth={2.5} />
+                    <ShowerHead size={14} color={colors.primary} strokeWidth={2.5} />
                   </View>
                   <Text style={styles.metaTextHome} numberOfLines={1}>
                     {apartment.bathrooms ?? ''} חדרי רחצה
@@ -517,16 +518,16 @@ export default function ApartmentCard({
                   {typeTagLabel ? (
                     <View style={styles.tagPill}>
                       {apartmentType === 'GARDEN' ? (
-                        <Trees size={14} color="#5e3f2d" />
+                        <Trees size={14} color={colors.primary} />
                       ) : (
-                        <Building2 size={14} color="#5e3f2d" />
+                        <Building2 size={14} color={colors.primary} />
                       )}
                       <Text style={styles.tagText}>{typeTagLabel}</Text>
                     </View>
                   ) : null}
                   {sqmTagLabel ? (
                     <View style={styles.tagPill}>
-                      <Ruler size={14} color="#5e3f2d" />
+                      <Ruler size={14} color={colors.primary} />
                       <Text style={styles.tagText}>{sqmTagLabel}</Text>
                     </View>
                   ) : null}
@@ -537,19 +538,19 @@ export default function ApartmentCard({
                 <View style={styles.statsRow}>
                   <View style={styles.stat}>
                     <View style={[styles.iconCircle, styles.iconCircleCompact]}>
-                      <Users size={14} color="#5e3f2d" strokeWidth={2.5} />
+                      <Users size={14} color={colors.primary} strokeWidth={2.5} />
                     </View>
                     <Text style={styles.statText}>{roommatesCapacityLabel}</Text>
                   </View>
                   <View style={styles.stat}>
                     <View style={[styles.iconCircle, styles.iconCircleCompact]}>
-                      <BedDouble size={14} color="#5e3f2d" strokeWidth={2.5} />
+                      <BedDouble size={14} color={colors.primary} strokeWidth={2.5} />
                     </View>
                     <Text style={styles.statText}>{apartment.bedrooms} חדרים</Text>
                   </View>
                   <View style={styles.stat}>
                     <View style={[styles.iconCircle, styles.iconCircleCompact]}>
-                      <ShowerHead size={14} color="#5e3f2d" strokeWidth={2.5} />
+                      <ShowerHead size={14} color={colors.primary} strokeWidth={2.5} />
                     </View>
                     <Text style={styles.statText}>{apartment.bathrooms} מקלחות</Text>
                   </View>
@@ -639,8 +640,8 @@ const styles = StyleSheet.create({
     gap: 4,
     borderWidth: 1,
     // Match "בניין/מ״ר" tag pill but with an opaque background for better readability on images
-    borderColor: 'rgba(94, 63, 45, 0.18)',
-    backgroundColor: '#F2F0EE',
+    borderColor: alpha(colors.success, 0.9),
+    backgroundColor: alpha(colors.success, 0.84),
     shadowColor: '#000',
     shadowOpacity: 0.16,
     shadowRadius: 10,
@@ -656,7 +657,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   roommatesBadgeText: {
-    color: '#5e3f2d',
+    color: colors.white,
     fontSize: 13,
     fontWeight: '800',
     writingDirection: 'ltr',
@@ -673,9 +674,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 4,
     // Match "בניין/מ״ר" tag pill but with an opaque background for better readability on images
-    backgroundColor: '#F2F0EE',
+    backgroundColor: alpha(colors.success, 0.84),
     borderWidth: 1,
-    borderColor: 'rgba(94, 63, 45, 0.18)',
+    borderColor: alpha(colors.success, 0.9),
     shadowColor: '#000',
     shadowOpacity: 0.10,
     shadowRadius: 8,
@@ -691,7 +692,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   roommatesBadgeHomeText: {
-    color: '#5e3f2d',
+    color: colors.white,
     fontSize: 14,
     fontWeight: '800',
     writingDirection: 'ltr',
@@ -728,15 +729,15 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderRadius: 999,
     // Lighter, semi-transparent pill behind carousel dots
-    backgroundColor: 'rgba(243, 244, 246, 0.78)',
+    backgroundColor: 'rgba(255,255,255,0.78)',
     borderWidth: 1,
-    borderColor: 'rgba(94, 63, 45, 0.10)',
+    borderColor: alpha(colors.primaryMuted, 0.18),
   },
   dotHome: {
     width: 7,
     height: 7,
     borderRadius: 3.5,
-    backgroundColor: '#5e3f2d',
+    backgroundColor: colors.primaryMuted,
   },
   priceBadge: {
     position: 'absolute',
@@ -744,7 +745,7 @@ const styles = StyleSheet.create({
     bottom: 12,
     flexDirection: 'row-reverse',
     alignItems: 'center',
-    backgroundColor: '#5e3f2d',
+    backgroundColor: alpha(colors.success, 0.86),
     borderRadius: 22,
     paddingHorizontal: 12,
     paddingVertical: 8,
@@ -761,7 +762,7 @@ const styles = StyleSheet.create({
     position: 'relative',
     right: undefined,
     bottom: undefined,
-    backgroundColor: '#5e3f2d',
+    backgroundColor: alpha(colors.success, 0.86),
     borderColor: 'rgba(255,255,255,0.18)',
     paddingHorizontal: 12,
     paddingVertical: 8,
@@ -851,15 +852,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 999,
-    backgroundColor: 'rgba(94,63,45,0.08)',
+    backgroundColor: colors.white,
     borderWidth: 1,
-    borderColor: 'rgba(94,63,45,0.18)',
+    borderColor: alpha(colors.primaryMuted, 0.25),
     flexDirection: 'row-reverse',
     alignItems: 'center',
     gap: 6,
   },
   tagText: {
-    color: '#5e3f2d',
+    color: colors.primary,
     fontSize: 12,
     fontWeight: '800',
     textAlign: 'right',
@@ -933,9 +934,9 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: 'rgba(94, 63, 45, 0.08)',
+    backgroundColor: colors.white,
     borderWidth: 1,
-    borderColor: 'rgba(94, 63, 45, 0.15)',
+    borderColor: alpha(colors.primary, 0.12),
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -952,7 +953,7 @@ const styles = StyleSheet.create({
   },
   location: {
     fontSize: 14,
-    color: '#5e3f2d',
+    color: colors.primary,
     textAlign: 'right',
     writingDirection: 'rtl',
   },

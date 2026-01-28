@@ -132,19 +132,19 @@ async function robustUpdate(userId: string, initialPayload: Record<string, any>,
       const inserted = await robustInsert({ ...payload, user_id: userId });
       return inserted as any;
     }
-    // eslint-disable-next-line no-console
-    console.error('[survey] robustUpdate error', {
-      attempts,
-      code: (error as any)?.code,
-      message: (error as any)?.message,
-    });
     // Handle missing column errors (PGRST204 + message mentions column) or 42703 from Postgres
-    const missing = parseMissingColumnName((error as any)?.message || '');
-    if (error.code === '42703' || missing) {
-      const col = missing || extractColumnFromDoesNotExist((error as any)?.message || '');
+    const code = (error as any)?.code;
+    const message = String((error as any)?.message || '');
+    const missing = parseMissingColumnName(message);
+    if (code === '42703' || missing) {
+      const col = missing || extractColumnFromDoesNotExist(message);
       if (col && payload.hasOwnProperty(col)) {
         // eslint-disable-next-line no-console
-        console.warn('[survey] robustUpdate removing missing column and retrying', col);
+        console.warn('[survey] robustUpdate removing missing column and retrying', {
+          attempts,
+          col,
+          code,
+        });
         // Remove the offending column and retry
         const { [col]: _omit, ...rest } = payload;
         payload = rest;
@@ -155,10 +155,12 @@ async function robustUpdate(userId: string, initialPayload: Record<string, any>,
     const safePayload = omitSubletNewFields(payload);
     if (Object.keys(safePayload).length !== Object.keys(payload).length) {
       // eslint-disable-next-line no-console
-      console.warn('[survey] robustUpdate retry without sublet fields');
+      console.warn('[survey] robustUpdate retry without sublet fields', { attempts, code });
       payload = safePayload;
       continue;
     }
+    // eslint-disable-next-line no-console
+    console.error('[survey] robustUpdate error', { attempts, code, message });
     throw error;
   }
   throw new Error('Failed to update survey after multiple attempts');
@@ -200,18 +202,18 @@ async function robustInsert(initialPayload: Record<string, any>) {
       if (fresh) return fresh as any;
       throw new Error('Insert succeeded but the survey row was not found');
     }
-    // eslint-disable-next-line no-console
-    console.error('[survey] robustInsert error', {
-      attempts,
-      code: (error as any)?.code,
-      message: (error as any)?.message,
-    });
-    const missing = parseMissingColumnName((error as any)?.message || '');
-    if (error.code === '42703' || missing) {
-      const col = missing || extractColumnFromDoesNotExist((error as any)?.message || '');
+    const code = (error as any)?.code;
+    const message = String((error as any)?.message || '');
+    const missing = parseMissingColumnName(message);
+    if (code === '42703' || missing) {
+      const col = missing || extractColumnFromDoesNotExist(message);
       if (col && payload.hasOwnProperty(col)) {
         // eslint-disable-next-line no-console
-        console.warn('[survey] robustInsert removing missing column and retrying', col);
+        console.warn('[survey] robustInsert removing missing column and retrying', {
+          attempts,
+          col,
+          code,
+        });
         const { [col]: _omit, ...rest } = payload;
         payload = rest;
         continue;
@@ -220,10 +222,12 @@ async function robustInsert(initialPayload: Record<string, any>) {
     const safePayload = omitSubletNewFields(payload);
     if (Object.keys(safePayload).length !== Object.keys(payload).length) {
       // eslint-disable-next-line no-console
-      console.warn('[survey] robustInsert retry without sublet fields');
+      console.warn('[survey] robustInsert retry without sublet fields', { attempts, code });
       payload = safePayload;
       continue;
     }
+    // eslint-disable-next-line no-console
+    console.error('[survey] robustInsert error', { attempts, code, message });
     throw error;
   }
   throw new Error('Failed to insert survey after multiple attempts');
