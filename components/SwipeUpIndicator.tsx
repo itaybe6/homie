@@ -5,7 +5,7 @@ import { Platform, View, ViewStyle } from 'react-native';
 import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
 
 export default function SwipeUpIndicator({
-  size = 22,
+  size = 28,
   isOpened,
   style,
 }: {
@@ -19,9 +19,21 @@ export default function SwipeUpIndicator({
     return (
       <View style={style}>
         {[...Array(3)].map((_, index) => (
-          <View key={index} style={{ marginTop: -size * 0.45, opacity: 0.25 + index * 0.25 }}>
-            <ChevronUp size={size} color="#fff" />
-          </View>
+          <MotiView
+            key={index}
+            style={{ marginTop: -size * 0.45 }}
+            from={{ opacity: 0.25, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1.1 }}
+            transition={{
+              type: 'timing',
+              loop: true,
+              repeatReverse: true,
+              delay: (3 - index) * 250,
+              duration: 750,
+            }}
+          >
+            <ChevronUp size={size} color="#fff" strokeWidth={3} />
+          </MotiView>
         ))}
       </View>
     );
@@ -35,6 +47,11 @@ export default function SwipeUpIndicator({
           style={{
             marginTop: -size * 0.45,
             transformOrigin: ['50%', '0%', 0] as any,
+            shadowColor: '#000',
+            shadowOffset: { width: 0, height: 1 },
+            shadowOpacity: 0.3,
+            shadowRadius: 2,
+            elevation: 3,
           } as any}
           from={{ opacity: 0.25 }}
           animate={{
@@ -55,7 +72,7 @@ export default function SwipeUpIndicator({
             },
           }}
         >
-          <ChevronUp size={size} color={'#fff'} />
+          <ChevronUp size={size} color={'#fff'} strokeWidth={3} />
         </MotiView>
       ))}
     </Animated.View>
