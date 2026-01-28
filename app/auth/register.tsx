@@ -11,6 +11,7 @@ import {
   TouchableWithoutFeedback,
   Platform,
   ScrollView,
+  Modal,
   Image,
   Animated,
   Easing,
@@ -29,6 +30,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import LavaLamp from '../../components/LavaLamp';
 import KeyboardAwareScrollView from 'react-native-keyboard-aware-scroll-view/lib/KeyboardAwareScrollView';
 import { KeyFabPanel } from '@/components/KeyFabPanel';
+import { TERMS_OF_USE_HE } from '@/lib/termsOfUse';
 
 // App primary accent color (align with dark theme)
 const PRIMARY = '#5e3f2d';
@@ -70,6 +72,9 @@ export default function RegisterScreen() {
   const [isConfirmPasswordVisible, setConfirmPasswordVisible] = useState(false);
   const [emailAlreadyExists, setEmailAlreadyExists] = useState(false);
   const transitionTokenRef = useRef(0);
+  const [showTermsModal, setShowTermsModal] = useState(false);
+  const [termsAccepted, setTermsAccepted] = useState(false);
+  const [termsAcceptedDraft, setTermsAcceptedDraft] = useState(false);
 
   // Autocomplete cities using Mapbox
   useEffect(() => {
@@ -171,6 +176,10 @@ export default function RegisterScreen() {
   };
 
   const handleRegister = async () => {
+    if (!termsAccepted) {
+      setError('יש לאשר את תנאי השימוש לפני הרשמה');
+      return;
+    }
     if (!fullName || !email || !password || !confirmPassword) {
       setError('אנא מלא את כל השדות');
       return;
@@ -282,6 +291,21 @@ export default function RegisterScreen() {
     });
   };
 
+  const goBackOneFormStep = () => {
+    if (mode === 'owner') {
+      transitionToFormStep(0);
+      return;
+    }
+    if (formStep === 3) transitionToFormStep(2);
+    else if (formStep === 2) transitionToFormStep(1);
+    else if (formStep === 1) transitionToFormStep(0);
+  };
+
+  const openTerms = () => {
+    setTermsAcceptedDraft(termsAccepted);
+    setShowTermsModal(true);
+  };
+
   return (
     <View style={styles.container}>
       {/* Animated “liquid glass” background */}
@@ -306,6 +330,18 @@ export default function RegisterScreen() {
       >
         <X size={24} color="#FFFFFF" />
       </TouchableOpacity>
+      {step === 1 && formStep > 0 ? (
+        <TouchableOpacity
+          onPress={goBackOneFormStep}
+          accessibilityRole="button"
+          accessibilityLabel="חזרה"
+          style={[styles.topBackArrowBtn, { top: insets.top + 8 }]}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          disabled={isLoading}
+        >
+          <ChevronRight size={24} color="#FFFFFF" />
+        </TouchableOpacity>
+      ) : null}
       <KeyboardAwareScrollView
         enableOnAndroid
         extraScrollHeight={Platform.OS === 'ios' ? 16 : 24}
@@ -707,11 +743,36 @@ export default function RegisterScreen() {
                       </TouchableOpacity>
                     </View>
                   </View>
+                  <View style={styles.termsBlock}>
+                    <TouchableOpacity
+                      style={styles.termsOpenButton}
+                      onPress={openTerms}
+                      activeOpacity={0.9}
+                      accessibilityRole="button"
+                      accessibilityLabel="פתיחת תנאי שימוש"
+                    >
+                      <Text style={styles.termsOpenButtonText}>פתח/י תנאי שימוש</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.termsStatusRow}
+                      onPress={openTerms}
+                      activeOpacity={0.85}
+                      accessibilityRole="button"
+                      accessibilityLabel="צפייה ואישור תנאי שימוש"
+                    >
+                      <View style={[styles.termsStatusCheck, termsAccepted && styles.termsStatusCheckOn]}>
+                        {termsAccepted ? <Check size={14} color="#FFFFFF" /> : null}
+                      </View>
+                      <Text style={styles.termsStatusText}>
+                        {termsAccepted ? 'אישרת את תנאי השימוש' : 'כדי להירשם צריך לאשר את תנאי השימוש'}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
                   <View style={{ flexDirection: 'row', gap: 12, alignItems: 'center' }}>
                     <TouchableOpacity
-                      style={[styles.button, isLoading && styles.buttonDisabled, { flex: 1 }]}
+                      style={[styles.button, (isLoading || !termsAccepted) && styles.buttonDisabled, { flex: 1 }]}
                       onPress={handleRegister}
-                      disabled={isLoading}
+                      disabled={isLoading || !termsAccepted}
                     >
                       {isLoading ? (
                         <ActivityIndicator color="#FFF" />
@@ -720,16 +781,6 @@ export default function RegisterScreen() {
                           {mode === 'owner' ? 'ממשיכים' : 'יאללה, נכנסים'}
                         </Text>
                       )}
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      accessibilityRole="button"
-                      accessibilityLabel="חזרה"
-                      onPress={() => transitionToFormStep(mode === 'user' ? 1 : 0)}
-                      style={styles.iconButton}
-                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                      disabled={isLoading}
-                    >
-                      <ChevronRight size={28} color="#6B7280" />
                     </TouchableOpacity>
                   </View>
                   <Text style={[styles.sheetSubtitle, { marginTop: 8, textAlign: 'center' }]}>
@@ -834,6 +885,79 @@ export default function RegisterScreen() {
           <Text style={[styles.optionText, { color: '#6B7280' }]}>ביטול</Text>
         </TouchableOpacity>
       </KeyFabPanel>
+
+      {/* Terms of use modal */}
+      {showTermsModal && (
+        <Modal
+          visible
+          transparent
+          animationType="fade"
+          onRequestClose={() => setShowTermsModal(false)}
+        >
+          <View style={styles.termsBackdrop}>
+            <TouchableOpacity
+              style={StyleSheet.absoluteFillObject}
+              activeOpacity={1}
+              onPress={() => setShowTermsModal(false)}
+              accessibilityRole="button"
+              accessibilityLabel="סגור תנאי שימוש"
+            />
+            <View style={[styles.termsSheet, { paddingBottom: insets.bottom + 12 }]}>
+              <View style={styles.termsHeaderRow}>
+                <TouchableOpacity
+                  onPress={() => setShowTermsModal(false)}
+                  style={styles.termsCloseBtn}
+                  accessibilityRole="button"
+                  accessibilityLabel="סגור"
+                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                >
+                  <X size={18} color="#111827" />
+                </TouchableOpacity>
+                <Text style={styles.termsTitle}>תנאי שימוש</Text>
+                <View style={{ width: 32 }} />
+              </View>
+
+              <ScrollView
+                style={styles.termsScroll}
+                contentContainerStyle={{ paddingBottom: 12 }}
+                showsVerticalScrollIndicator={false}
+              >
+                <Text style={styles.termsText}>{TERMS_OF_USE_HE}</Text>
+              </ScrollView>
+
+              <View style={styles.termsFooter}>
+                <TouchableOpacity
+                  style={styles.termsAcceptRow}
+                  onPress={() => setTermsAcceptedDraft((v) => !v)}
+                  activeOpacity={0.85}
+                  accessibilityRole="checkbox"
+                  accessibilityLabel="אישור תנאי שימוש"
+                  accessibilityState={{ checked: termsAcceptedDraft }}
+                >
+                  <View style={[styles.termsCheckbox, termsAcceptedDraft && styles.termsCheckboxChecked]}>
+                    {termsAcceptedDraft ? <Check size={14} color="#FFFFFF" /> : null}
+                  </View>
+                  <Text style={styles.termsAcceptText}>קראתי ואני מאשר/ת את תנאי השימוש</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.termsConfirmButton, !termsAcceptedDraft && styles.termsConfirmButtonDisabled]}
+                  onPress={() => {
+                    setTermsAccepted(true);
+                    setShowTermsModal(false);
+                  }}
+                  disabled={!termsAcceptedDraft}
+                  activeOpacity={0.9}
+                  accessibilityRole="button"
+                  accessibilityLabel="אישור והמשך"
+                >
+                  <Text style={styles.termsConfirmButtonText}>אישור והמשך</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+      )}
     </View>
   );
 }
@@ -1180,6 +1304,17 @@ const styles = StyleSheet.create({
     left: 16,
     zIndex: 50,
   },
+  topBackArrowBtn: {
+    position: 'absolute',
+    right: 16,
+    zIndex: 50,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.14)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   error: {
     backgroundColor: 'rgba(255,59,48,0.12)',
     color: '#FF6B6B',
@@ -1221,6 +1356,157 @@ const styles = StyleSheet.create({
     color: PRIMARY,
     fontSize: 13.5,
     fontWeight: '700',
+  },
+  termsBlock: {
+    marginTop: 10,
+    gap: 10,
+  },
+  termsOpenButton: {
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    backgroundColor: '#FFFFFF',
+    paddingVertical: 12,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  termsOpenButtonText: {
+    color: PRIMARY,
+    fontSize: 14,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  termsStatusRow: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    backgroundColor: 'rgba(94,63,45,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(94,63,45,0.16)',
+  },
+  termsStatusCheck: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 1,
+    borderColor: 'rgba(94,63,45,0.35)',
+    backgroundColor: 'transparent',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  termsStatusCheckOn: {
+    backgroundColor: PRIMARY,
+    borderColor: PRIMARY,
+  },
+  termsStatusText: {
+    flex: 1,
+    color: PRIMARY,
+    fontSize: 12.5,
+    fontWeight: '700',
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    lineHeight: 18,
+  },
+  termsBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent: 'center',
+    paddingHorizontal: 18,
+  },
+  termsSheet: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    overflow: 'hidden',
+    maxHeight: '86%',
+  },
+  termsHeaderRow: {
+    paddingHorizontal: 14,
+    paddingTop: 12,
+    paddingBottom: 10,
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderBottomWidth: 1,
+    borderBottomColor: '#F3F4F6',
+  },
+  termsCloseBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#F3F4F6',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  termsTitle: {
+    color: '#111827',
+    fontSize: 16,
+    fontWeight: '900',
+    textAlign: 'center',
+  },
+  termsScroll: {
+    paddingHorizontal: 14,
+    paddingTop: 12,
+  },
+  termsText: {
+    color: '#111827',
+    fontSize: 14.5,
+    lineHeight: 22,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
+  termsFooter: {
+    paddingHorizontal: 14,
+    paddingTop: 10,
+    paddingBottom: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#F3F4F6',
+    gap: 10,
+  },
+  termsAcceptRow: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 8,
+  },
+  termsCheckbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#9CA3AF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
+  },
+  termsCheckboxChecked: {
+    backgroundColor: PRIMARY,
+    borderColor: PRIMARY,
+  },
+  termsAcceptText: {
+    flex: 1,
+    color: '#111827',
+    fontSize: 13,
+    fontWeight: '800',
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
+  termsConfirmButton: {
+    backgroundColor: PRIMARY,
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  termsConfirmButtonDisabled: {
+    opacity: 0.55,
+  },
+  termsConfirmButtonText: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '800',
   },
   logoWrap: {
     width: 64,

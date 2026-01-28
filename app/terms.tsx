@@ -1,6 +1,7 @@
 import { SafeAreaView, ScrollView, Text, StyleSheet, View, TouchableOpacity } from 'react-native';
 import { useRouter } from 'expo-router';
 import { ArrowLeft } from 'lucide-react-native';
+import { TERMS_OF_USE_HE } from '../lib/termsOfUse';
 
 export default function TermsScreen() {
   const router = useRouter();
@@ -13,10 +14,7 @@ export default function TermsScreen() {
         <Text style={styles.title}>תנאי שימוש</Text>
       </View>
       <ScrollView contentContainerStyle={styles.content}>
-        <Text style={styles.text}>
-          ברוך/ה הבא/ה! זהו עמוד תנאי השימוש של האפליקציה. התוכן המשפטי המלא יופיע כאן.
-          בינתיים, זהו תוכן דמה כדי לאפשר ניווט תקין במסכים. אנא פנה/י למפתח/ת להוספת נוסח מלא.
-        </Text>
+        <Text style={styles.text}>{TERMS_OF_USE_HE}</Text>
       </ScrollView>
     </SafeAreaView>
   );
@@ -57,6 +55,8 @@ const styles = StyleSheet.create({
     color: '#C7CBD1',
     fontSize: 15,
     lineHeight: 22,
+    textAlign: 'right',
+    writingDirection: 'rtl',
   },
 });
 

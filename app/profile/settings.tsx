@@ -25,6 +25,7 @@ import { supabase } from '@/lib/supabase';
 import { Apartment, User } from '@/types/database';
 import { upsertUserSurvey } from '@/lib/survey';
 import { getNeighborhoodsForCityName } from '@/lib/neighborhoods';
+import { TERMS_OF_USE_HE } from '@/lib/termsOfUse';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 
@@ -1757,9 +1758,8 @@ export default function ProfileSettingsScreen() {
                 </TouchableOpacity>
               </View>
               <ScrollView contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 16, paddingTop: 8 }}>
-                <Text style={{ color: '#111827', fontSize: 15, lineHeight: 22, textAlign: 'right' }}>
-                  ברוך/ה הבא/ה! זהו עמוד תנאי השימוש של האפליקציה. התוכן המשפטי המלא יופיע כאן.
-                  בינתיים, זהו תוכן דמה כדי לאפשר ניווט תקין במסכים. אנא פנה/י למפתח/ת להוספת נוסח מלא.
+                <Text style={{ color: '#111827', fontSize: 15, lineHeight: 22, textAlign: 'right', writingDirection: 'rtl' }}>
+                  {TERMS_OF_USE_HE}
                 </Text>
               </ScrollView>
             </Animated.View>
