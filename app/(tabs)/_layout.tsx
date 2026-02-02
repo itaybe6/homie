@@ -67,6 +67,11 @@ export default function TabLayout() {
         setOwnedApartmentId(null);
         return;
       }
+      // Owners are not limited in apartment uploads, so we don't need this check.
+      if ((user as any)?.role === 'owner') {
+        setOwnedApartmentId(null);
+        return;
+      }
       // unknown while checking
       setOwnedApartmentId(undefined);
       try {
@@ -109,8 +114,9 @@ export default function TabLayout() {
       return;
     }
 
-    // Owners do not need the preferences survey.
-    if ((user as any)?.role === 'owner') {
+    // Only regular users should be prompted for the preferences survey.
+    // This avoids a race where role is temporarily undefined for owners and the prompt shows incorrectly.
+    if ((user as any)?.role !== 'user') {
       hasPromptedRef.current = true;
       isCheckingSurveyRef.current = false;
       return;
@@ -222,10 +228,10 @@ export default function TabLayout() {
           tabBarLabel: '',
           tabBarButton: (props) => (
             <FloatingCenterTabButton
-              isVisuallyDisabled={!!user?.id && ownedApartmentId !== null && ownedApartmentId !== undefined}
+              isVisuallyDisabled={!isOwner && !!user?.id && ownedApartmentId !== null && ownedApartmentId !== undefined}
               onPress={async (e) => {
                 // Each user can upload max 1 apartment (by owner_id)
-                if (user?.id) {
+                if (user?.id && !isOwner) {
                   if (ownedApartmentId === undefined) {
                     // Retry on demand so we don't get "stuck" if the background check failed
                     if (isCheckingOwnedApartmentRef.current) return;
@@ -271,7 +277,7 @@ export default function TabLayout() {
               testID={props.testID}>
               <Plus
                 size={32}
-                color={!!user?.id && ownedApartmentId !== null && ownedApartmentId !== undefined ? '#E5E7EB' : '#FFFFFF'}
+                color={!isOwner && !!user?.id && ownedApartmentId !== null && ownedApartmentId !== undefined ? '#E5E7EB' : '#FFFFFF'}
               />
             </FloatingCenterTabButton>
           ),

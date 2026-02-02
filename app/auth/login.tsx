@@ -63,7 +63,14 @@ export default function LoginScreen() {
     try {
       const { user, role } = await authService.signIn(email, password) as any;
       if (user) {
-        const next = role === 'admin' ? '/admin' : '/(tabs)/home';
+        // Owners should land on apartments ("דירות") and never on partners.
+        // Regular users land on partners by default.
+        const next =
+          role === 'admin'
+            ? '/admin'
+            : role === 'owner'
+              ? '/(tabs)/home'
+              : '/(tabs)/partners';
         setUser({ id: user.id, email: user.email!, role });
         router.replace(next as any);
       }

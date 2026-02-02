@@ -17,7 +17,7 @@ import {
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { User } from '@/types/database';
-import { ArrowLeft, MapPin, UserPlus2, Cigarette, PawPrint, Utensils, Moon, Users, Home, Calendar, User as UserIcon, Building2, Bed, Heart, Briefcase, ClipboardList, Images, X, Instagram } from 'lucide-react-native';
+import { ArrowLeft, MapPin, UserPlus2, Cigarette, PawPrint, Utensils, Moon, Users, Home, Calendar, User as UserIcon, Building2, Bed, Heart, Briefcase, ClipboardList, Images, X } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuthStore } from '@/stores/authStore';
@@ -124,26 +124,6 @@ function parsePreferredAgeRange(value?: string | null): { min: number | null; ma
   return { min: first, max: null };
 }
 
-function normalizeInstagramUrl(raw: string): string | null {
-  const trimmed = String(raw || '').trim();
-  if (!trimmed) return null;
-
-  if (trimmed.startsWith('@')) {
-    const handle = trimmed.slice(1).trim().replace(/^\/+|\/+$/g, '');
-    return handle ? `https://instagram.com/${handle}` : null;
-  }
-
-  if (!trimmed.includes('/') && !trimmed.includes('://')) {
-    return `https://instagram.com/${trimmed}`;
-  }
-
-  if (!trimmed.includes('://') && trimmed.toLowerCase().includes('instagram.com')) {
-    return `https://${trimmed.replace(/^\/+/, '')}`;
-  }
-
-  return trimmed;
-}
-
 function buildCompatSurvey(
   userEntry: User | undefined | null,
   survey?: UserSurveyResponse | null,
@@ -234,10 +214,12 @@ export default function UserProfileScreen() {
   }>({ status: 'idle', message: null });
   const [isSurveyOpen, setIsSurveyOpen] = useState(false);
   const [surveyActiveSection, setSurveyActiveSection] = useState<'about' | 'apartment' | 'partner'>('about');
+  const surveyScrollRef = React.useRef<ScrollView>(null);
   const segW = useSharedValue(1);
   const tabIdx = useSharedValue(0);
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);
   const me = useAuthStore((s) => s.user);
+  const myId = String((me as any)?.id || '').trim();
   type GroupMember = Pick<User, 'id' | 'full_name' | 'avatar_url'>;
   const [groupContext, setGroupContext] = useState<{ name?: string | null; members: GroupMember[] } | null>(null);
   const [groupLoading, setGroupLoading] = useState(false);
@@ -272,6 +254,17 @@ export default function UserProfileScreen() {
       profileId: profile?.id,
     });
   }, [routeUserId, profile?.id]);
+  // Block viewing OWNER profiles for non-owner viewers.
+  useEffect(() => {
+    if (!profile?.id) return;
+    const viewerRole = (me as any)?.role;
+    const targetRole = (profile as any)?.role;
+    const isViewingSelf = !!myId && String(profile.id) === myId;
+    if (isViewingSelf) return;
+    if (targetRole === 'owner' && viewerRole !== 'owner') {
+      router.replace('/(tabs)/home' as any);
+    }
+  }, [profile?.id, (profile as any)?.role, (me as any)?.role, myId, router]);
 
   // Delay the match % animation a bit after the screen mounts (feels nicer)
   useEffect(() => {
@@ -1005,6 +998,16 @@ export default function UserProfileScreen() {
     tabIdx.value = withTiming(activeTabIndex, { duration: 220 });
   }, [activeTabIndex, tabIdx]);
 
+  // When switching tabs inside the survey/preferences panel, always reset scroll to top.
+  // This prevents the next section from opening "scrolled down" (especially noticeable on web).
+  useEffect(() => {
+    if (!isSurveyOpen) return;
+    const raf = requestAnimationFrame(() => {
+      surveyScrollRef.current?.scrollTo({ y: 0, animated: false });
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [surveyActiveSection, isSurveyOpen]);
+
   const isWeb = Platform.OS === 'web';
 
   const indicatorStyle = useAnimatedStyle(() => {
@@ -1637,42 +1640,6 @@ export default function UserProfileScreen() {
           >
             <ArrowLeft size={18} color="#111827" />
           </TouchableOpacity>
-
-          {(() => {
-            const igUrl = normalizeInstagramUrl((profile as any)?.instagram_url);
-            if (!igUrl) return null;
-            const iconSize = 18;
-            const grad = ['#F58529', '#DD2A7B', '#8134AF', '#515BD4'] as const;
-            return (
-              <TouchableOpacity
-                style={styles.igTopBtnHit}
-                activeOpacity={0.9}
-                accessibilityRole="button"
-                accessibilityLabel="פתח אינסטגרם"
-                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                onPress={async () => {
-                  try {
-                    await Linking.openURL(igUrl);
-                  } catch {
-                    Alert.alert('שגיאה', 'לא ניתן לפתוח את אינסטגרם');
-                  }
-                }}
-              >
-                <LinearGradient colors={grad as any} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.igTopBtnBorder}>
-                  <View style={styles.igTopBtnInner}>
-                    <MaskedView maskElement={<Instagram size={iconSize} color="#000000" />}>
-                      <LinearGradient
-                        colors={grad as any}
-                        start={{ x: 0, y: 0 }}
-                        end={{ x: 1, y: 1 }}
-                        style={{ width: iconSize, height: iconSize }}
-                      />
-                    </MaskedView>
-                  </View>
-                </LinearGradient>
-              </TouchableOpacity>
-            );
-          })()}
         </View>
 
         <View style={styles.topBarRight}>
@@ -2253,6 +2220,7 @@ export default function UserProfileScreen() {
         </View>
 
         <ScrollView
+          ref={surveyScrollRef}
           style={[styles.surveyPanelScroll, { maxHeight: surveyPanelScrollMaxHeight }]}
           contentContainerStyle={styles.surveyPanelContent}
           showsVerticalScrollIndicator={false}

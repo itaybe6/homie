@@ -329,6 +329,7 @@ export default function PartnersScreen() {
   const router = useRouter();
   const currentUser = useAuthStore((s) => s.user);
   const didAutoInitCityFilterRef = useRef(false);
+  const prevCitiesBeforeAllRef = useRef<string[] | null>(null);
   const [filtersReady, setFiltersReady] = useState(false);
 
   // Owners should not have access to the partners screen.
@@ -370,14 +371,21 @@ export default function PartnersScreen() {
     setIsFiltersOpen(false);
   };
 
-  const selectedCity = selectedCities[0] || '';
+  const allCities = useMemo(() => Object.keys(cityNeighborhoods), []);
+  const isAllCitiesSelected = selectedCities.length > 0 && selectedCities.length >= allCities.length;
+  const selectedCityLabel =
+    selectedCities.length === 0 || isAllCitiesSelected
+      ? 'הכל'
+      : selectedCities.length === 1
+        ? selectedCities[0]
+        : `${selectedCities.length} ערים`;
 
   const filteredCityOptions = useMemo(() => {
     const q = citySearch.trim();
-    const list = Object.keys(cityNeighborhoods);
+    const list = allCities;
     if (!q) return list;
     return list.filter((c) => c.includes(q));
-  }, [citySearch]);
+  }, [citySearch, allCities]);
 
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const translateX = useSharedValue(0);
@@ -648,7 +656,7 @@ export default function PartnersScreen() {
       if (!u.gender || u.gender !== gender) return false;
     }
     // City filter (multi-select)
-    if (selectedCities.length) {
+    if (selectedCities.length && !isAllCitiesSelected) {
       const userCity = canonicalizeCityName(u.city || '');
       if (!selectedCities.includes(userCity)) return false;
     }
@@ -666,7 +674,7 @@ export default function PartnersScreen() {
       if (users.length !== groupSize) return false;
     }
     // city filter: all members must be within selected cities (if any selected)
-    if (selectedCities.length) {
+    if (selectedCities.length && !isAllCitiesSelected) {
       const allInCity = users.every((u) =>
         selectedCities.includes(canonicalizeCityName(u.city || ''))
       );
@@ -1526,7 +1534,7 @@ export default function PartnersScreen() {
         }}
         duration={420}
       >
-        <View>
+        <View style={styles.filtersPanelWrap}>
           <ScrollView
             style={styles.filterScroll}
             contentContainerStyle={styles.filterScrollContent}
@@ -1607,85 +1615,9 @@ export default function PartnersScreen() {
                   >
                     <ChevronDown size={18} color="#9CA3AF" />
                     <Text style={styles.dropdownText} numberOfLines={1}>
-                      {selectedCity || 'הכל'}
+                      {selectedCityLabel}
                     </Text>
                   </TouchableOpacity>
-
-                  {isCityPickerOpen ? (
-                    <View style={styles.cityPickerOverlay}>
-                      <TouchableOpacity
-                        style={styles.cityPickerBackdrop}
-                        activeOpacity={1}
-                        onPress={() => {
-                          setIsCityPickerOpen(false);
-                          setCitySearch('');
-                        }}
-                      />
-                      <View style={styles.cityPickerPanel}>
-                        <View style={styles.cityPickerHeader}>
-                          <Text style={styles.cityPickerTitle}>בחר עיר</Text>
-                          <TouchableOpacity
-                            style={styles.cityPickerCloseBtn}
-                            activeOpacity={0.85}
-                            onPress={() => {
-                              setIsCityPickerOpen(false);
-                              setCitySearch('');
-                            }}
-                          >
-                            <X size={18} color="#9CA3AF" />
-                          </TouchableOpacity>
-                        </View>
-
-                        <View style={styles.searchWrap}>
-                          <TextInput
-                            value={citySearch}
-                            onChangeText={setCitySearch}
-                            placeholder="חפש עיר..."
-                            placeholderTextColor="#9CA3AF"
-                            style={styles.searchInput}
-                          />
-                          <View style={styles.searchIcon}>
-                            <Search size={18} color="#9CA3AF" />
-                          </View>
-                        </View>
-
-                        <ScrollView style={{ maxHeight: 320 }} showsVerticalScrollIndicator={false}>
-                          <TouchableOpacity
-                            activeOpacity={0.9}
-                            style={[styles.cityPickerRow, !selectedCity ? styles.cityPickerRowActive : null]}
-                            onPress={() => {
-                              setSelectedCities([]);
-                              setIsCityPickerOpen(false);
-                              setCitySearch('');
-                            }}
-                          >
-                            <Text style={[styles.cityPickerRowText, !selectedCity ? styles.cityPickerRowTextActive : null]}>
-                              הכל
-                            </Text>
-                          </TouchableOpacity>
-                          {filteredCityOptions.map((c) => {
-                            const active = selectedCity === c;
-                            return (
-                              <TouchableOpacity
-                                key={c}
-                                activeOpacity={0.9}
-                                style={[styles.cityPickerRow, active ? styles.cityPickerRowActive : null]}
-                                onPress={() => {
-                                  setSelectedCities([c]);
-                                  setIsCityPickerOpen(false);
-                                  setCitySearch('');
-                                }}
-                              >
-                                <Text style={[styles.cityPickerRowText, active ? styles.cityPickerRowTextActive : null]}>
-                                  {c}
-                                </Text>
-                              </TouchableOpacity>
-                            );
-                          })}
-                        </ScrollView>
-                      </View>
-                    </View>
-                  ) : null}
                 </View>
 
                 {/* Gender (singles) */}
@@ -1783,6 +1715,7 @@ export default function PartnersScreen() {
                   setSelectedCities([]);
                   setCitySearch('');
                   setIsCityPickerOpen(false);
+                  prevCitiesBeforeAllRef.current = null;
                   setIncludePassed(false);
                 }}
               >
@@ -1800,6 +1733,96 @@ export default function PartnersScreen() {
               </TouchableOpacity>
             </View>
           </View>
+
+          {isCityPickerOpen ? (
+            <View style={styles.cityPickerOverlay}>
+              <TouchableOpacity
+                style={styles.cityPickerBackdrop}
+                activeOpacity={1}
+                onPress={() => {
+                  setIsCityPickerOpen(false);
+                  setCitySearch('');
+                }}
+              />
+              <View style={styles.cityPickerPanel}>
+                <View style={styles.cityPickerHeader}>
+                  <Text style={styles.cityPickerTitle}>בחר עיר</Text>
+                  <TouchableOpacity
+                    style={styles.cityPickerCloseBtn}
+                    activeOpacity={0.85}
+                    onPress={() => {
+                      setIsCityPickerOpen(false);
+                      setCitySearch('');
+                    }}
+                  >
+                    <X size={18} color="#9CA3AF" />
+                  </TouchableOpacity>
+                </View>
+
+                <View style={styles.searchWrap}>
+                  <TextInput
+                    value={citySearch}
+                    onChangeText={setCitySearch}
+                    placeholder="חפש עיר..."
+                    placeholderTextColor="#9CA3AF"
+                    style={styles.searchInput}
+                  />
+                  <View style={styles.searchIcon}>
+                    <Search size={18} color="#9CA3AF" />
+                  </View>
+                </View>
+
+                <ScrollView style={{ maxHeight: Math.min(320, Math.round(screenHeight * 0.42)) }} showsVerticalScrollIndicator={false}>
+                  <TouchableOpacity
+                    activeOpacity={0.9}
+                    style={[
+                      styles.cityPickerRow,
+                      isAllCitiesSelected ? styles.cityPickerRowActive : null,
+                    ]}
+                    onPress={() => {
+                      // Toggle "all":
+                      // - First press: select all cities
+                      // - Second press: restore the previous selection (or none)
+                      if (isAllCitiesSelected) {
+                        setSelectedCities(prevCitiesBeforeAllRef.current ?? []);
+                        prevCitiesBeforeAllRef.current = null;
+                      } else {
+                        prevCitiesBeforeAllRef.current = selectedCities;
+                        // Selecting "all" should explicitly select all cities (but behaves like "no filter").
+                        setSelectedCities(allCities);
+                      }
+                      setIsCityPickerOpen(false);
+                      setCitySearch('');
+                    }}
+                  >
+                    <Text style={[styles.cityPickerRowText, isAllCitiesSelected ? styles.cityPickerRowTextActive : null]}>
+                      הכל
+                    </Text>
+                  </TouchableOpacity>
+                  {filteredCityOptions.map((c) => {
+                    const active = isAllCitiesSelected || selectedCities.includes(c);
+                    return (
+                      <TouchableOpacity
+                        key={c}
+                        activeOpacity={0.9}
+                        style={[styles.cityPickerRow, active ? styles.cityPickerRowActive : null]}
+                        onPress={() => {
+                          setSelectedCities([c]);
+                          prevCitiesBeforeAllRef.current = null;
+                          setIsCityPickerOpen(false);
+                          setCitySearch('');
+                        }}
+                      >
+                        <Text style={[styles.cityPickerRowText, active ? styles.cityPickerRowTextActive : null]}>
+                          {c}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
+              </View>
+            </View>
+          ) : null}
         </View>
       </KeyFabPanel>
 
@@ -2159,6 +2182,11 @@ const styles = StyleSheet.create({
   },
   filterScroll: {
     flex: 1,
+  },
+  filtersPanelWrap: {
+    flex: 1,
+    minHeight: 0,
+    position: 'relative',
   },
   filterScrollContent: {
     paddingHorizontal: 18,

@@ -19,7 +19,6 @@ export default function EditProfileScreen() {
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
   const [city, setCity] = useState('');
-  const [instagramUrl, setInstagramUrl] = useState('');
   const [images, setImages] = useState<string[]>([]);
   const [isUpdatingImages, setIsUpdatingImages] = useState(false);
 
@@ -36,7 +35,6 @@ export default function EditProfileScreen() {
           setPhone(data.phone || '');
           setEmail(data.email || '');
           setCity(data.city || '');
-          setInstagramUrl((data as any).instagram_url || '');
           const arr = Array.isArray((data as any).image_urls) ? (data as any).image_urls.filter(Boolean) : [];
           setImages(arr);
         }
@@ -70,7 +68,6 @@ export default function EditProfileScreen() {
           phone: phone || null,
           email: email || null,
           city: city || null,
-          instagram_url: instagramUrl || null,
           updated_at: new Date().toISOString(),
         })
         .eq('id', user.id);
@@ -257,19 +254,6 @@ export default function EditProfileScreen() {
             value={city}
             onChangeText={setCity}
             editable={!saving}
-          />
-        </View>
-        <View style={styles.inputGroup}>
-          <Text style={styles.label}>אינסטגרם (אופציונלי)</Text>
-          <TextInput
-            style={[styles.input, { writingDirection: 'ltr', textAlign: 'left' }]}
-            value={instagramUrl}
-            onChangeText={setInstagramUrl}
-            editable={!saving}
-            autoCapitalize="none"
-            autoCorrect={false}
-            placeholder="https://instagram.com/yourname"
-            placeholderTextColor="rgba(255,255,255,0.45)"
           />
         </View>
         <View style={styles.inputGroup}>

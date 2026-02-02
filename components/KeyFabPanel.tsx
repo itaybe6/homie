@@ -1,10 +1,9 @@
 import React, { useMemo, useState } from 'react';
-import { Dimensions, Platform, StyleSheet, Text, TouchableWithoutFeedback, View, ViewStyle } from 'react-native';
+import { Platform, StyleSheet, Text, TouchableWithoutFeedback, useWindowDimensions, View, ViewStyle } from 'react-native';
 import Animated, { FadeIn, FadeInDown, FadeOut, FadeOutDown, FadeOutUp, LinearTransition } from 'react-native-reanimated';
 import { X } from 'lucide-react-native';
 import { TouchableOpacity } from 'react-native';
 
-const { width, height } = Dimensions.get('window');
 const _defaultDuration = 450;
 
 export type KeyFabPanelProps = {
@@ -55,10 +54,9 @@ export function KeyFabPanel({
   topOffset = 90,
   panelStyle,
   duration = _defaultDuration,
-  openedWidth = width * 0.92,
+  openedWidth,
 }: KeyFabPanelProps) {
-  if (!isOpen) return null;
-
+  const { width, height } = useWindowDimensions();
   const [measuredHeight, setMeasuredHeight] = useState<number>(420);
 
   const resolvedTitle = (title ?? 'מצטרפים לדירה?').trim();
@@ -67,16 +65,34 @@ export function KeyFabPanel({
   const resolvedPrimaryLabel = (primaryActionLabel ?? 'הכניסו את הסיסמא').trim();
   const resolvedPrimaryAction = onPrimaryAction ?? onEnterPassword;
 
+  const resolvedOpenedWidth = typeof openedWidth === 'number' ? openedWidth : width * 0.92;
+
   const placement = useMemo(() => {
+    const availableHeight = Math.max(0, height - topOffset - bottomOffset);
+    const needsClamp = measuredHeight > availableHeight;
+
+    // If the panel can't fit between topOffset & bottomOffset, stretch it and rely on internal scrolling.
+    if (needsClamp) {
+      return { top: topOffset, bottom: bottomOffset };
+    }
+
     if (anchor === 'top') return { top: topOffset };
     if (anchor === 'center') {
-      const clamped = Math.max(topOffset, Math.min(height - measuredHeight - bottomOffset, (height - measuredHeight) / 2));
+      const clamped = Math.max(
+        topOffset,
+        Math.min(height - measuredHeight - bottomOffset, (height - measuredHeight) / 2),
+      );
       return { top: clamped };
     }
+
+    // anchor === 'bottom'
     return { bottom: bottomOffset };
-  }, [anchor, topOffset, bottomOffset, measuredHeight]);
+  }, [anchor, topOffset, bottomOffset, measuredHeight, height]);
 
   const exitAnim = anchor === 'top' ? FadeOutUp : FadeOutDown;
+
+  // Hooks must run consistently across renders; only short-circuit after them.
+  if (!isOpen) return null;
 
   return (
     <Animated.View
@@ -97,9 +113,9 @@ export function KeyFabPanel({
         style={[
           styles.panel,
           {
-            width: openedWidth,
+            width: resolvedOpenedWidth,
             ...placement,
-            left: (width - openedWidth) / 2,
+            left: (width - resolvedOpenedWidth) / 2,
           },
           panelStyle,
         ]}
@@ -211,6 +227,8 @@ const styles = StyleSheet.create({
   },
   content: {
     marginTop: 12,
+    flex: 1,
+    minHeight: 0,
   },
   bodyText: {
     color: '#374151',

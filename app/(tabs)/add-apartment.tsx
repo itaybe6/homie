@@ -114,6 +114,7 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
     return out;
   }, []);
   const screenWidth = Dimensions.get('window').width;
+  const formScrollRef = useRef<ScrollView>(null);
   const previewGalleryRef = useRef<ScrollView>(null);
   const addressInputRef = useRef<TextInput>(null);
   const skipNextAddressAutocompleteRef = useRef(false);
@@ -183,6 +184,14 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
   type Step = 1 | 2 | 3;
   const STEP_LABELS = ['בסיסי', 'מאפיינים', 'סיכום'] as const;
   const [step, setStep] = useState<Step>(1);
+
+  // When moving between steps, always reset scroll to the top so the next step starts at the beginning.
+  useEffect(() => {
+    const raf = requestAnimationFrame(() => {
+      formScrollRef.current?.scrollTo({ y: 0, animated: false });
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [step]);
 
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -815,10 +824,14 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
     }
 
     if (step === 2) {
-      const sqm = Number(digitsOnly(sizeSqm));
-      if (!Number.isFinite(sqm) || sqm <= 0) {
-        setError('אנא מלא/י גודל דירה תקין (מ״ר)');
-        return false;
+      // Apartment size (sqm) is optional. If user provided a value, validate it's a positive number.
+      const sqmDigits = digitsOnly(sizeSqm);
+      if (sqmDigits) {
+        const sqm = Number(sqmDigits);
+        if (!Number.isFinite(sqm) || sqm <= 0) {
+          setError('גודל דירה לא תקין (מ״ר)');
+          return false;
+        }
       }
       if (roommateCapacity === null) {
         setError('אנא בחר/י מספר שותפים');
@@ -1320,6 +1333,7 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
         </View>
 
         <ScrollView
+          ref={formScrollRef}
           contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="always"
           keyboardDismissMode={Platform.OS === 'ios' ? 'on-drag' : 'none'}
@@ -1761,14 +1775,12 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
                     </View>
 
                     <View style={styles.halfWidth}>
-                      <Text style={styles.fieldLabel}>
-                        גודל הדירה (מ״ר) <Text style={styles.required}>*</Text>
-                      </Text>
+                      <Text style={styles.fieldLabel}>גודל הדירה (מ״ר)</Text>
                       <View style={styles.unitWrap}>
                         <Text style={styles.unitSuffix}>מ״ר</Text>
                         <TextInput
                           style={styles.unitInput}
-                          placeholder="למשל: 85"
+                          placeholder="אופציונלי (למשל: 85)"
                           value={digitsOnly(sizeSqm)}
                           onChangeText={(t) => setSizeSqm(digitsOnly(t))}
                           keyboardType="number-pad"
@@ -1780,14 +1792,12 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
                   </View>
                 ) : (
                   <>
-                    <Text style={styles.fieldLabel}>
-                      גודל הדירה (מ״ר) <Text style={styles.required}>*</Text>
-                    </Text>
+                    <Text style={styles.fieldLabel}>גודל הדירה (מ״ר)</Text>
                     <View style={styles.unitWrap}>
                       <Text style={styles.unitSuffix}>מ״ר</Text>
                       <TextInput
                         style={styles.unitInput}
-                        placeholder="למשל: 85"
+                        placeholder="אופציונלי (למשל: 85)"
                         value={digitsOnly(sizeSqm)}
                         onChangeText={(t) => setSizeSqm(digitsOnly(t))}
                         keyboardType="number-pad"

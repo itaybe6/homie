@@ -13,7 +13,6 @@ export interface PendingSignupData {
   gender?: 'male' | 'female';
   city?: string;
   avatarUrl?: string;
-  instagramUrl?: string;
   /**
    * Local file URI selected during signup (e.g. file://...).
    * Uploaded after OTP verification when a session exists.

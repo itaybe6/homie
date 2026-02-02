@@ -7,6 +7,23 @@ export interface AuthUser {
   role?: 'user' | 'owner' | 'admin';
 }
 
+function resolveRoleFromSupabaseUser(
+  user: any,
+  profileRole?: 'user' | 'owner' | 'admin' | null,
+): 'user' | 'owner' | 'admin' | undefined {
+  const fromProfile = profileRole ?? undefined;
+  if (fromProfile) return fromProfile;
+
+  const metaRole =
+    (user?.user_metadata?.role as any) ??
+    (user?.app_metadata?.role as any) ??
+    undefined;
+
+  return metaRole === 'user' || metaRole === 'owner' || metaRole === 'admin'
+    ? metaRole
+    : undefined;
+}
+
 export const authService = {
   /**
    * Checks (server-side) if an email is already registered.
@@ -51,9 +68,8 @@ export const authService = {
     gender?: 'male' | 'female';
     city?: string;
     avatarUrl?: string;
-    instagramUrl?: string;
   }) {
-    const { email, fullName, role, phone, age, bio, gender, city, avatarUrl, instagramUrl } = params;
+    const { email, fullName, role, phone, age, bio, gender, city, avatarUrl } = params;
 
     // Sends an email OTP (6-digit code) when Email OTP is enabled in Supabase Auth settings.
     // shouldCreateUser ensures a new user is created if it doesn't exist yet.
@@ -70,7 +86,6 @@ export const authService = {
           gender: gender || null,
           city: city || null,
           avatar_url: avatarUrl || null,
-          instagram_url: instagramUrl || null,
         },
       },
     });
@@ -143,7 +158,6 @@ export const authService = {
     gender?: 'male' | 'female';
     city?: string;
     avatarUrl?: string;
-    instagramUrl?: string;
     createProfile?: boolean; // when false, do not upsert into users table
   }) {
     const {
@@ -157,7 +171,6 @@ export const authService = {
       gender,
       city,
       avatarUrl,
-      instagramUrl,
       createProfile = true,
     } = params;
 
@@ -176,7 +189,6 @@ export const authService = {
           gender: gender || null,
           city: city || null,
           avatar_url: avatarUrl || null,
-          instagram_url: instagramUrl || null,
         },
       },
     });
@@ -234,7 +246,6 @@ export const authService = {
               gender: gender || null,
               city: city || null,
               avatar_url: avatarUrl || null,
-              instagram_url: instagramUrl || null,
             }
           : {};
 
@@ -269,7 +280,7 @@ export const authService = {
     if (error) throw error;
 
     const authedUser = data.user;
-    let role: 'user' | 'owner' | 'admin' | undefined = undefined;
+    let role: 'user' | 'owner' | 'admin' | undefined = resolveRoleFromSupabaseUser(authedUser);
     if (authedUser?.id) {
       try {
         const { data: profile } = await supabase
@@ -277,7 +288,7 @@ export const authService = {
           .select('role')
           .eq('id', authedUser.id)
           .maybeSingle();
-        role = (profile as any)?.role;
+        role = resolveRoleFromSupabaseUser(authedUser, (profile as any)?.role);
       } catch {
         // ignore
       }
@@ -337,14 +348,14 @@ export const authService = {
     const user = session?.user;
     if (!user) return null;
 
-    let role: 'user' | 'owner' | 'admin' | undefined = undefined;
+    let role: 'user' | 'owner' | 'admin' | undefined = resolveRoleFromSupabaseUser(user);
     try {
       const { data: profile } = await supabase
         .from('users')
         .select('role')
         .eq('id', user.id)
         .maybeSingle();
-      role = (profile as any)?.role;
+      role = resolveRoleFromSupabaseUser(user, (profile as any)?.role);
     } catch {
       // ignore
     }
@@ -356,14 +367,14 @@ export const authService = {
     supabase.auth.onAuthStateChange((event, session) => {
       (async () => {
         if (session?.user) {
-          let role: 'user' | 'owner' | 'admin' | undefined = undefined;
+          let role: 'user' | 'owner' | 'admin' | undefined = resolveRoleFromSupabaseUser(session.user);
           try {
             const { data: profile } = await supabase
               .from('users')
               .select('role')
               .eq('id', session.user.id)
               .maybeSingle();
-            role = (profile as any)?.role;
+            role = resolveRoleFromSupabaseUser(session.user, (profile as any)?.role);
           } catch {
             // ignore
           }

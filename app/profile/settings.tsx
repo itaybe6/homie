@@ -17,7 +17,7 @@ import {
 import KeyboardAwareScrollView from 'react-native-keyboard-aware-scroll-view/lib/KeyboardAwareScrollView';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { Edit, FileText, LogOut, Trash2, ChevronLeft, MapPin, UserPlus2, X, Home, Plus, User as UserIcon, Mail, Phone, Hash, Calendar, Instagram } from 'lucide-react-native';
+import { Edit, FileText, LogOut, Trash2, ChevronLeft, MapPin, UserPlus2, X, Home, Plus, User as UserIcon, Mail, Phone, Hash, Calendar } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useAuthStore } from '@/stores/authStore';
 import { authService } from '@/lib/auth';
@@ -61,7 +61,6 @@ export default function ProfileSettingsScreen() {
   const [editEmail, setEditEmail] = useState('');
   const [editPhone, setEditPhone] = useState('');
   const [editCity, setEditCity] = useState('');
-  const [editInstagram, setEditInstagram] = useState('');
   const [editSaving, setEditSaving] = useState(false);
   // Animation values for edit sheet
   const sheetTranslateY = useRef(new Animated.Value(600)).current;
@@ -733,7 +732,6 @@ export default function ProfileSettingsScreen() {
                 setEditEmail((profile as any).email || '');
                 setEditPhone((profile as any).phone || '');
                 setEditCity((profile as any).city || '');
-                setEditInstagram(((profile as any).instagram_url as string) || '');
               }
               setShowEditModal(true);
             }}
@@ -1666,21 +1664,6 @@ export default function ProfileSettingsScreen() {
                 </View>
                 <View style={styles.fieldGroup}>
                   <View style={styles.labelRow}>
-                    <Instagram size={16} color={ICON_COLOR} />
-                    <Text style={styles.fieldLabel}>אינסטגרם</Text>
-                  </View>
-                  <TextInput
-                    style={styles.fieldInput}
-                    value={editInstagram}
-                    onChangeText={setEditInstagram}
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                    placeholder="@username או instagram.com/username"
-                    editable={!editSaving}
-                  />
-                </View>
-                <View style={styles.fieldGroup}>
-                  <View style={styles.labelRow}>
                     <FileText size={16} color={ICON_COLOR} />
                     <Text style={styles.fieldLabel}>אודות</Text>
                   </View>
@@ -1722,7 +1705,6 @@ export default function ProfileSettingsScreen() {
                             email: editEmail || null,
                             phone: editPhone || null,
                             city: editCity || null,
-                            instagram_url: editInstagram.trim() ? editInstagram.trim() : null,
                             updated_at: new Date().toISOString(),
                           })
                           .eq('id', user.id);

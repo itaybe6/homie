@@ -35,7 +35,6 @@ import {
   Camera,
   Copy,
   Image as ImageIcon,
-  Instagram,
   Eye,
   Heart,
 } from 'lucide-react-native';
@@ -60,30 +59,6 @@ type AvatarFabItem = {
   bg: string;
   accessibilityLabel: string;
 };
-
-function normalizeInstagramUrl(raw: string): string | null {
-  const trimmed = String(raw || '').trim();
-  if (!trimmed) return null;
-
-  // @handle -> https://instagram.com/handle
-  if (trimmed.startsWith('@')) {
-    const handle = trimmed.slice(1).trim().replace(/^\/+|\/+$/g, '');
-    return handle ? `https://instagram.com/${handle}` : null;
-  }
-
-  // plain handle -> https://instagram.com/handle
-  if (!trimmed.includes('/') && !trimmed.includes('://')) {
-    return `https://instagram.com/${trimmed}`;
-  }
-
-  // instagram.com/foo (no protocol) -> https://instagram.com/foo
-  if (!trimmed.includes('://') && trimmed.toLowerCase().includes('instagram.com')) {
-    return `https://${trimmed.replace(/^\/+/, '')}`;
-  }
-
-  // already a URL
-  return trimmed;
-}
 
 function AvatarPhotoFab({
   disabled,
@@ -1417,37 +1392,6 @@ export default function ProfileScreen() {
                 <Text style={styles.nameText} numberOfLines={2}>
                   {profile?.full_name || 'משתמש/ת'}
                 </Text>
-                {(() => {
-                  const igUrl = normalizeInstagramUrl((profile as any)?.instagram_url);
-                  if (!igUrl) return null;
-                  const iconSize = 16;
-                  const grad = ['#F58529', '#DD2A7B', '#8134AF', '#515BD4'] as const;
-                  return (
-                    <TouchableOpacity
-                      style={styles.igBtnHit}
-                      activeOpacity={0.9}
-                      accessibilityRole="button"
-                      accessibilityLabel="פתח אינסטגרם"
-                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                      onPress={async () => {
-                        try {
-                          await Linking.openURL(igUrl);
-                        } catch {
-                          Alert.alert('שגיאה', 'לא ניתן לפתוח את אינסטגרם');
-                        }
-                      }}
-                    >
-                      <LinearGradient
-                        colors={grad as any}
-                        start={{ x: 0, y: 0 }}
-                        end={{ x: 1, y: 1 }}
-                        style={styles.igBtnInner}
-                      >
-                        <Instagram size={iconSize} color="#FFFFFF" />
-                      </LinearGradient>
-                    </TouchableOpacity>
-                  );
-                })()}
               </View>
 
               {(profile?.address || profile?.city || profile?.age) ? (

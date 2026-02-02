@@ -55,6 +55,7 @@ import {
   Calendar,
   Heart,
   Copy,
+  Phone,
 } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { supabase } from '@/lib/supabase';
@@ -83,6 +84,7 @@ export default function ApartmentDetailsScreen() {
   const { id, returnTo, openAdd } = useLocalSearchParams();
   const { user } = useAuthStore();
   const removeApartment = useApartmentStore((state: any) => state.removeApartment);
+  const isViewerOwner = (user as any)?.role === 'owner';
 
   const openUserProfile = (targetUserId: string) => {
     const myId = String((user as any)?.id || '').trim();
@@ -147,6 +149,18 @@ export default function ApartmentDetailsScreen() {
   const [isKeyPanelOpen, setIsKeyPanelOpen] = useState(false);
   const [isViewerOpen, setViewerOpen] = useState(false);
   const [viewerIndex, setViewerIndex] = useState(0);
+
+  // Owner-type landlord vs regular-user owner (controls CTA to reduce confusion).
+  const isApartmentLandlordOwnerRole =
+    String((owner as any)?.role || '')
+      .trim()
+      .toLowerCase() === 'owner';
+  const [landlordPhoneOverride, setLandlordPhoneOverride] = useState<string>('');
+  const landlordPhoneRaw = String((owner as any)?.phone || landlordPhoneOverride || '').trim();
+  // Show the phone *icon* for owner-landlords even if phone isn't available yet.
+  const showLandlordPhoneIcon = isApartmentLandlordOwnerRole;
+  // Show the phone *number/pill* only when we actually have a phone.
+  const showLandlordPhoneNumber = isApartmentLandlordOwnerRole && !!landlordPhoneRaw;
   const mapboxToken = process.env.EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN as string | undefined;
   // Force Mapbox Standard style for Hebrew language support
   const mapboxStyleUrl = 'mapbox://styles/mapbox/streets-v12';
@@ -177,6 +191,92 @@ export default function ApartmentDetailsScreen() {
       Alert.alert('שגיאה', 'לא ניתן לפתוח את וואטסאפ');
     }
   };
+
+  const openLandlordPhone = async () => {
+    if (!showLandlordPhoneIcon) return;
+    const raw = landlordPhoneRaw;
+    if (!raw) {
+      Alert.alert('מספר לא זמין', 'בעל הדירה עדיין לא הוסיף מספר טלפון.');
+      return;
+    }
+
+    // On web, "tel:" is often blocked or behaves inconsistently; prefer copy.
+    if (Platform.OS === 'web') {
+      try {
+        await Clipboard.setStringAsync(raw);
+        Alert.alert('הועתק', 'מספר הטלפון הועתק ללוח');
+      } catch {
+        // ignore
+      }
+      return;
+    }
+
+    // Normalize to E.164-ish format for dialing (IL default).
+    const DEFAULT_COUNTRY_CODE = '972';
+    let digits = raw.startsWith('+') ? raw.slice(1).replace(/\D/g, '') : raw.replace(/\D/g, '');
+    if (!digits) {
+      Alert.alert('שגיאה', 'מספר הטלפון לא תקין');
+      return;
+    }
+    if (!digits.startsWith(DEFAULT_COUNTRY_CODE)) {
+      digits = DEFAULT_COUNTRY_CODE + digits.replace(/^0+/, '');
+    }
+    const telUrl = `tel:+${digits}`;
+    try {
+      await Linking.openURL(telUrl);
+    } catch {
+      // Fallback: copy if dialing failed
+      try {
+        await Clipboard.setStringAsync(raw);
+        Alert.alert('הועתק', 'לא הצלחנו לפתוח חיוג, המספר הועתק ללוח.');
+      } catch {
+        Alert.alert('שגיאה', 'לא הצלחנו לפתוח חיוג');
+      }
+    }
+  };
+
+  // Ensure owner-landlord phone is available even if it wasn't persisted to public.users yet.
+  // If I'm the landlord (owner of this apartment) and the phone is only in Auth metadata, copy it into users.phone.
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      if (!apartment?.owner_id) return;
+      if (!user?.id) return;
+      if (!isApartmentLandlordOwnerRole) return;
+
+      const ownerId = String((apartment as any)?.owner_id || '').trim();
+      const myId = String((user as any)?.id || '').trim();
+      if (!ownerId || !myId) return;
+      if (ownerId !== myId) return;
+
+      const currentPhone = String((owner as any)?.phone || '').trim();
+      if (currentPhone) return;
+
+      try {
+        const { data } = await supabase.auth.getUser();
+        const metaPhone =
+          String((data as any)?.user?.user_metadata?.phone || (data as any)?.user?.user_metadata?.phone_number || '')
+            .trim();
+        if (!metaPhone) return;
+        if (cancelled) return;
+
+        setLandlordPhoneOverride(metaPhone);
+
+        // Best-effort persist so other viewers can see it too.
+        try {
+          await supabase.from('users').update({ phone: metaPhone } as any).eq('id', myId);
+        } catch {
+          // ignore persistence failures (RLS etc.)
+        }
+      } catch {
+        // ignore
+      }
+    };
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, [apartment?.owner_id, user?.id, isApartmentLandlordOwnerRole, (owner as any)?.phone]);
 
   useEffect(() => {
     fetchApartmentDetails();
@@ -1799,9 +1899,38 @@ export default function ApartmentDetailsScreen() {
             <View style={{ flex: 1, alignItems: 'flex-end' }}>
               <Text style={styles.hostTitle}>{isOwner ? 'זאת הדירה שלך' : 'בעל הדירה'}</Text>
               <Text style={styles.hostSub} numberOfLines={1}>
-                {(isOwner ? user?.full_name : owner?.full_name) || 'בעל הדירה'}
+                {(isOwner ? (user as any)?.full_name : owner?.full_name) || 'בעל הדירה'}
               </Text>
+              {showLandlordPhoneNumber ? (
+                <TouchableOpacity
+                  style={styles.hostPhonePill}
+                  activeOpacity={0.9}
+                  onPress={openLandlordPhone}
+                  accessibilityRole="button"
+                  accessibilityLabel={`טלפון בעל הדירה ${landlordPhoneRaw}`}
+                >
+                  <Phone size={14} color="#5e3f2d" />
+                  <Text style={styles.hostPhoneText} numberOfLines={1}>
+                    {landlordPhoneRaw}
+                  </Text>
+                </TouchableOpacity>
+              ) : null}
             </View>
+            {/* Left: quick phone icon (owner landlords only) */}
+            {showLandlordPhoneIcon ? (
+              <TouchableOpacity
+                style={[
+                  styles.hostPhoneIconBtn,
+                  !landlordPhoneRaw ? { opacity: 0.55 } : null,
+                ]}
+                activeOpacity={0.9}
+                onPress={openLandlordPhone}
+                accessibilityRole="button"
+                accessibilityLabel="התקשר לבעל הדירה"
+              >
+                <Phone size={18} color="#5e3f2d" />
+              </TouchableOpacity>
+            ) : null}
           </View>
 
           {/* price card moved to floating overlay at bottom */}
@@ -1999,7 +2128,13 @@ export default function ApartmentDetailsScreen() {
                             key={`person-${p.id}-${idx}`}
                             style={styles.personCard}
                             activeOpacity={0.9}
+                            disabled={
+                              // Non-owners should not be able to open OWNER-role profiles.
+                              // In the apartment context, the only occupant that can be role=owner is the apartment owner itself.
+                              p.role === 'בעל דירה' && isApartmentLandlordOwnerRole && !isViewerOwner
+                            }
                             onPress={() => {
+                              if (p.role === 'בעל דירה' && isApartmentLandlordOwnerRole && !isViewerOwner) return;
                               openUserProfile(p.id);
                             }}
                           >
@@ -2072,11 +2207,13 @@ export default function ApartmentDetailsScreen() {
             <Text style={styles.ctaSubtitle} numberOfLines={2} ellipsizeMode="tail">
               {isOwner
                 ? 'כאן אפשר לראות מי ביקש להצטרף לדירה שלך, ולאשר או לדחות את הבקשות.'
-                : 'בקשו סיסמה מבעל הדירה, או הזינו סיסמה כדי להצטרף מיד.'}
+                : isApartmentLandlordOwnerRole
+                  ? 'בקשו סיסמה מבעל הדירה, או הזינו סיסמה כדי להצטרף מיד.'
+                  : 'כדי להתחבר לדירה עם בעל דירה רגיל – מבצעים מיזוג פרופילים והופכים לשותפים.'}
             </Text>
           </View>
           <View style={styles.ctaActionsRow}>
-            {!isOwner ? (
+            {!isOwner && isApartmentLandlordOwnerRole ? (
               <TouchableOpacity
                 style={[styles.keyIconBtn, isKeyDisabled ? { opacity: 0.45 } : null]}
                 activeOpacity={isKeyDisabled ? 1 : 0.9}
@@ -2091,79 +2228,96 @@ export default function ApartmentDetailsScreen() {
               </TouchableOpacity>
             ) : null}
 
-            <TouchableOpacity
-              style={styles.availabilityBtn}
-              activeOpacity={0.9}
-              onPress={() => {
-                if (isOwner) {
+            {isOwner ? (
+              <TouchableOpacity
+                style={styles.availabilityBtn}
+                activeOpacity={0.9}
+                onPress={() => {
                   setIsJoinRequestsOpen(true);
                   loadJoinRequestsForOwner();
-                  return;
-                }
-                if (hasRequestedJoin) {
-                  // On web, RN Alert may be a no-op; use our custom confirm modal.
-                  if (Platform.OS === 'web') {
-                    setConfirmState({
-                      visible: true,
-                      title: 'ביטול בקשה',
-                      message: 'לבטל את הבקשה להצטרף לדירה?',
-                      confirmLabel: 'בטל בקשה',
-                      cancelLabel: 'חזור',
-                      onConfirm: cancelJoinRequest,
-                    });
-                  } else {
-                    Alert.alert('ביטול בקשה', 'לבטל את הבקשה להצטרף לדירה?', [
-                      { text: 'חזור', style: 'cancel' },
-                      { text: 'בטל בקשה', style: 'destructive', onPress: cancelJoinRequest },
-                    ]);
+                }}
+                disabled={isLoadingJoinRequests}
+              >
+                <Text style={styles.availabilityBtnText}>
+                  {isLoadingJoinRequests ? 'טוען...' : 'צפה בבקשות'}
+                </Text>
+              </TouchableOpacity>
+            ) : isApartmentLandlordOwnerRole ? (
+              <TouchableOpacity
+                style={styles.availabilityBtn}
+                activeOpacity={0.9}
+                onPress={() => {
+                  if (hasRequestedJoin) {
+                    // On web, RN Alert may be a no-op; use our custom confirm modal.
+                    if (Platform.OS === 'web') {
+                      setConfirmState({
+                        visible: true,
+                        title: 'ביטול בקשה',
+                        message: 'לבטל את הבקשה להצטרף לדירה?',
+                        confirmLabel: 'בטל בקשה',
+                        cancelLabel: 'חזור',
+                        onConfirm: cancelJoinRequest,
+                      });
+                    } else {
+                      Alert.alert('ביטול בקשה', 'לבטל את הבקשה להצטרף לדירה?', [
+                        { text: 'חזור', style: 'cancel' },
+                        { text: 'בטל בקשה', style: 'destructive', onPress: cancelJoinRequest },
+                      ]);
+                    }
+                    return;
                   }
-                  return;
+                  // Open confirm popup only (actual submission happens inside the popup).
+                  setIsJoinRequestConfirmOpen(true);
+                  setIsJoinRequestConfirmArmed(false);
+                  if (joinRequestConfirmArmTimeoutRef.current) {
+                    clearTimeout(joinRequestConfirmArmTimeoutRef.current);
+                  }
+                  // Prevent accidental "double tap" immediately triggering the submit button on some platforms.
+                  joinRequestConfirmArmTimeoutRef.current = setTimeout(() => {
+                    setIsJoinRequestConfirmArmed(true);
+                  }, 450);
+                }}
+                disabled={
+                  isMember ||
+                  isRequestingJoin ||
+                  // Only block "submit" if already assigned elsewhere; allow cancel regardless.
+                  (!hasRequestedJoin && isAssignedAnywhere !== false)
                 }
-                // Open confirm popup only (actual submission happens inside the popup).
-                setIsJoinRequestConfirmOpen(true);
-                setIsJoinRequestConfirmArmed(false);
-                if (joinRequestConfirmArmTimeoutRef.current) {
-                  clearTimeout(joinRequestConfirmArmTimeoutRef.current);
-                }
-                // Prevent accidental "double tap" immediately triggering the submit button on some platforms.
-                joinRequestConfirmArmTimeoutRef.current = setTimeout(() => {
-                  setIsJoinRequestConfirmArmed(true);
-                }, 450);
-              }}
-              disabled={
-                isOwner
-                  ? isLoadingJoinRequests
-                  : isOwner ||
-                    isMember ||
-                    isRequestingJoin ||
-                    // Only block "submit" if already assigned elsewhere; allow cancel regardless.
-                    (!hasRequestedJoin && isAssignedAnywhere !== false)
-              }
-            >
-              <Text style={styles.availabilityBtnText}>
-                {isOwner
-                  ? isLoadingJoinRequests
-                    ? 'טוען...'
-                    : 'צפה בבקשות'
-                  : isMember
+              >
+                <Text style={styles.availabilityBtnText}>
+                  {isMember
                     ? 'בדוק זמינות'
-                  : !hasRequestedJoin && isAssignedAnywhere !== false
-                    ? 'לא זמין'
-                    : isRequestingJoin
-                      ? hasRequestedJoin
-                        ? 'מבטל...'
-                        : 'שולח...'
-                      : hasRequestedJoin
-                        ? 'בטל בקשה'
-                        : 'הגש בקשה'}
-              </Text>
-            </TouchableOpacity>
+                    : !hasRequestedJoin && isAssignedAnywhere !== false
+                      ? 'לא זמין'
+                      : isRequestingJoin
+                        ? hasRequestedJoin
+                          ? 'מבטל...'
+                          : 'שולח...'
+                        : hasRequestedJoin
+                          ? 'בטל בקשה'
+                          : 'הגש בקשה'}
+                </Text>
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity
+                style={styles.availabilityBtn}
+                activeOpacity={0.9}
+                onPress={() => {
+                  const targetId = String((owner as any)?.id || '').trim();
+                  if (!targetId) return;
+                  openUserProfile(targetId);
+                }}
+                disabled={!owner?.id}
+              >
+                <Text style={styles.availabilityBtnText}>מיזוג פרופילים</Text>
+              </TouchableOpacity>
+            )}
           </View>
         </View>
       </View>
 
       {/* Key button animated panel */}
-      {!isOwner ? (
+      {!isOwner && isApartmentLandlordOwnerRole ? (
         <KeyFabPanel
           isOpen={isKeyPanelOpen}
           onClose={() => setIsKeyPanelOpen(false)}
@@ -2176,7 +2330,7 @@ export default function ApartmentDetailsScreen() {
       ) : null}
 
       {/* "Submit join request" confirm popup (reuses KeyFabPanel animation) */}
-      {!isOwner ? (
+      {!isOwner && isApartmentLandlordOwnerRole ? (
         <KeyFabPanel
           isOpen={isJoinRequestConfirmOpen}
           onClose={() => {
@@ -3285,6 +3439,35 @@ const styles = StyleSheet.create({
   hostAvatar: { width: '100%', height: '100%' },
   hostTitle: { color: '#111827', fontSize: 13, fontWeight: '800' },
   hostSub: { color: '#6B7280', fontSize: 12 },
+  hostPhonePill: {
+    marginTop: 8,
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 999,
+    backgroundColor: 'rgba(94,63,45,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(94,63,45,0.22)',
+  },
+  hostPhoneText: {
+    color: '#5e3f2d',
+    fontSize: 12,
+    fontWeight: '900',
+    writingDirection: 'ltr',
+    textAlign: 'left',
+  },
+  hostPhoneIconBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(94,63,45,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(94,63,45,0.22)',
+  },
   proBadge: {
     backgroundColor: 'rgba(94,63,45,0.08)',
     borderColor: 'rgba(94,63,45,0.25)',

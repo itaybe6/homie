@@ -23,7 +23,8 @@ import Animated, {
   useSharedValue,
 } from 'react-native-reanimated';
 import { useRouter } from 'expo-router';
-import { Search, SlidersHorizontal, Map } from 'lucide-react-native';
+import { Search, SlidersHorizontal, Map, MapPin, LocateFixed } from 'lucide-react-native';
+import * as Location from 'expo-location';
 import { getAllCitiesWithNeighborhoods, getNeighborhoodsForCityName } from '@/lib/neighborhoods';
 import { supabase } from '@/lib/supabase';
 import { useApartmentStore } from '@/stores/apartmentStore';
@@ -32,6 +33,7 @@ import { Apartment } from '@/types/database';
 import ApartmentCard from '@/components/ApartmentCard';
 import FilterChipsBar, { defaultFilterChips, selectedFiltersFromIds } from '@/components/FilterChipsBar';
 import { KeyFabPanel } from '@/components/KeyFabPanel';
+import MapboxMap from '@/components/MapboxMap';
 import { alpha, colors } from '@/lib/theme';
 
 function parseOptionalInt(v: string): number | null {
@@ -157,6 +159,8 @@ export default function HomeScreen() {
   const router = useRouter();
   const { height: screenHeight } = useWindowDimensions();
   const PAGE_BG = '#FFFFFF';
+  const mapToken = process.env.EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN as string | undefined;
+  const mapStyleUrl = 'mapbox://styles/mapbox/streets-v12';
   const { apartments, setApartments, isLoading, setLoading } =
     useApartmentStore();
   const { user } = useAuthStore();
@@ -232,6 +236,40 @@ export default function HomeScreen() {
   const [isLoadingNeighborhoods, setIsLoadingNeighborhoods] = useState(false);
   const [chipSelected, setChipSelected] = useState<string[]>([]);
   // Removed cityPlaceId/sessionToken (no Google city autocomplete)
+  const [userLocation, setUserLocation] = useState<readonly [number, number] | null>(null); // [lng, lat]
+
+  // Best-effort: only fetch location if permission already granted (avoid prompting on Home).
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      try {
+        const perm = await Location.getForegroundPermissionsAsync();
+        if (perm.status !== 'granted') return;
+
+        // Fast path: last known position
+        const last = await Location.getLastKnownPositionAsync({});
+        const lastLng = last?.coords?.longitude;
+        const lastLat = last?.coords?.latitude;
+        if (!cancelled && typeof lastLng === 'number' && typeof lastLat === 'number') {
+          setUserLocation([lastLng, lastLat] as const);
+        }
+
+        // Refresh with a current fix (best-effort)
+        const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+        const lng = pos?.coords?.longitude;
+        const lat = pos?.coords?.latitude;
+        if (!cancelled && typeof lng === 'number' && typeof lat === 'number') {
+          setUserLocation([lng, lat] as const);
+        }
+      } catch {
+        // ignore (no location on Home)
+      }
+    };
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const filterBtnRef = useRef<View | null>(null);
   const DEFAULT_FILTER_TOP_OFFSET = 120;
@@ -291,17 +329,6 @@ export default function HomeScreen() {
     };
   });
 
-  const chipsStyle = useAnimatedStyle(() => {
-    const clamped = Math.min(120, Math.max(0, scrollY.value));
-    return {
-      transform: [
-        {
-          translateY: interpolate(clamped, [0, 120], [0, -8], Extrapolation.CLAMP),
-        },
-      ],
-    };
-  });
-
   // Header for the list – contains search row and filter chips so that
   // the entire grey area scrolls together.
   // IMPORTANT: avoid passing an inline component function to FlatList.
@@ -316,16 +343,6 @@ export default function HomeScreen() {
           <View style={styles.searchRow}>
           {/* Filter button on the left */}
           <View style={styles.actionsRowBody}>
-            {/* Map button (same style as filter); rendered first so with row-reverse the filter stays near the search */}
-            <TouchableOpacity
-              activeOpacity={0.9}
-              style={styles.actionBtnBody}
-              onPress={() => {
-                router.push('/(tabs)/map');
-              }}
-            >
-              <Map size={22} color={colors.primary} />
-            </TouchableOpacity>
             {/* Wrap in a real View ref so measureInWindow works reliably (esp. Android) */}
             <View ref={filterBtnRef} collapsable={false}>
               <TouchableOpacity
@@ -351,33 +368,68 @@ export default function HomeScreen() {
           </View>
         </View>
       </Animated.View>
-      <Animated.View style={chipsStyle}>
-        <FilterChipsBar
-          filters={defaultFilterChips}
-          selectedIds={chipSelected}
-          onChange={setChipSelected}
-          withShadow={false}
-          chipBorderWidth={1}
-          // Inactive chips match the ApartmentCard "בניין/מ״ר" tag pills
-          inactiveBackgroundColor={alpha(colors.primary, 0.08)}
-          inactiveBorderColor={alpha(colors.primary, 0.18)}
-          inactiveTextColor={colors.primary}
-          inactiveIconColor={colors.primary}
-          // Active chips: soft green highlight (less brown repetition)
-          activeBackgroundColor={alpha(colors.success, 0.86)}
-          activeBorderColor={alpha(colors.success, 0.6)}
-          activeTextColor={colors.white}
-          activeIconColor={colors.white}
-          onOpenDropdown={(chip) => {
-            if (chip.id === 'price' || chip.id === 'rooms') {
-              openFilterPanel();
-            }
-          }}
-          style={{ marginTop: 8, marginBottom: 20 }}
-        />
-      </Animated.View>
+
+      {/* Map preview card (tap → full map screen) */}
+      <View style={styles.mapPreviewWrap}>
+        <Pressable
+          onPress={() => router.push('/(tabs)/map')}
+          accessibilityRole="button"
+          accessibilityLabel="פתח מפה"
+          style={({ pressed }) => [styles.mapPreviewCard, pressed ? styles.mapPreviewCardPressed : null]}
+        >
+          <View pointerEvents="none" style={styles.mapPreviewMap}>
+            {mapToken ? (
+              <MapboxMap
+                accessToken={mapToken}
+                styleUrl={mapStyleUrl}
+                language="he"
+                center={userLocation ?? undefined}
+                zoom={userLocation ? 13 : 11}
+                points={{ type: 'FeatureCollection', features: [] }}
+                userLocation={userLocation ?? undefined}
+              />
+            ) : (
+              <View style={styles.mapPreviewFallback}>
+                <Map size={28} color={colors.primary} />
+                <Text style={styles.mapPreviewFallbackText}>מפה לא זמינה כרגע</Text>
+              </View>
+            )}
+          </View>
+
+          {/* Dark overlay for contrast */}
+          <View pointerEvents="none" style={styles.mapPreviewDarkOverlay} />
+
+          {/* Center location marker (shows where user is) */}
+          {userLocation ? (
+            <View pointerEvents="none" style={styles.mapPreviewCenterMarker}>
+              <LocateFixed size={28} color="#FFFFFF" />
+            </View>
+          ) : null}
+
+          {/* Bottom label */}
+          <View pointerEvents="none" style={styles.mapPreviewBottomBar}>
+            <View style={styles.mapPreviewBottomPill}>
+              <MapPin size={16} color="#FFFFFF" />
+            </View>
+            <Text style={styles.mapPreviewBottomSub} numberOfLines={1}>
+              {userLocation ? 'קרוב אליך' : 'לחץ/י למפה מלאה'}
+            </Text>
+          </View>
+        </Pressable>
+      </View>
     </Animated.View>
-  ), [headerOuterStyle, headerInnerStyle, chipsStyle, openFilterPanel, router, searchQuery, chipSelected]);
+  ), [
+    PAGE_BG,
+    headerOuterStyle,
+    headerInnerStyle,
+    openFilterPanel,
+    router,
+    searchQuery,
+    chipSelected,
+    mapToken,
+    mapStyleUrl,
+    userLocation,
+  ]);
 
   useEffect(() => {
     fetchApartments();
@@ -803,6 +855,28 @@ export default function HomeScreen() {
                 ) : null}
               </View>
 
+              <View style={styles.fieldGroup}>
+                <Text style={styles.fieldLabel}>תוספות</Text>
+                {/* Reuse the chips that used to appear on Home header */}
+                <View style={{ paddingHorizontal: 12 }}>
+                  <FilterChipsBar
+                    filters={defaultFilterChips}
+                    selectedIds={chipSelected}
+                    onChange={setChipSelected}
+                    withShadow={false}
+                    chipBorderWidth={1}
+                    inactiveBackgroundColor="#FFFFFF"
+                    inactiveBorderColor="#E5E7EB"
+                    inactiveTextColor={colors.primary}
+                    inactiveIconColor={colors.primary}
+                    activeBackgroundColor={alpha(colors.success, 0.86)}
+                    activeBorderColor={alpha(colors.success, 0.6)}
+                    activeTextColor={colors.white}
+                    activeIconColor={colors.white}
+                  />
+                </View>
+              </View>
+
               <View style={styles.rowBetween}>
                 <View style={[styles.fieldGroup, styles.fieldHalf]}>
                   <Text style={styles.fieldLabel}>מחיר מינימלי (₪)</Text>
@@ -1046,6 +1120,87 @@ const styles = StyleSheet.create({
     padding: 16,
     paddingBottom: 140, // Leave room for floating tab bar
     backgroundColor: '#FFFFFF',
+  },
+  mapPreviewWrap: {
+    width: '100%',
+    marginTop: 10,
+    marginBottom: 18,
+  },
+  mapPreviewCard: {
+    width: '100%',
+    height: 156,
+    borderRadius: 18,
+    overflow: 'hidden',
+    backgroundColor: '#F3F4F6',
+    borderWidth: 1,
+    borderColor: 'rgba(229,231,235,0.95)',
+    shadowColor: '#0B1220',
+    shadowOpacity: 0.10,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 7,
+  },
+  mapPreviewCardPressed: {
+    transform: [{ scale: 0.996 }],
+    shadowOpacity: 0.08,
+  },
+  mapPreviewMap: {
+    flex: 1,
+  },
+  mapPreviewDarkOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.28)',
+  },
+  mapPreviewFallback: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: alpha(colors.primary, 0.06),
+  },
+  mapPreviewFallbackText: {
+    color: colors.primary,
+    fontSize: 13,
+    fontWeight: '900',
+    textAlign: 'center',
+  },
+  mapPreviewCenterMarker: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    top: 0,
+    bottom: 0,
+  },
+  mapPreviewBottomBar: {
+    position: 'absolute',
+    left: 10,
+    right: 10,
+    bottom: 10,
+    alignItems: 'flex-end',
+    gap: 6,
+  },
+  mapPreviewBottomPill: {
+    width: 36,
+    height: 36,
+    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: alpha(colors.primary, 0.86),
+    borderWidth: 1,
+    borderColor: alpha(colors.primary, 0.20),
+  },
+  mapPreviewBottomSub: {
+    color: 'rgba(255,255,255,0.94)',
+    fontSize: 12,
+    fontWeight: '800',
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    paddingHorizontal: 2,
+    textShadowColor: 'rgba(0,0,0,0.40)',
+    textShadowRadius: 6,
+    textShadowOffset: { width: 0, height: 2 },
   },
   modalOverlay: {
     flex: 1,
