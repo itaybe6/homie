@@ -99,7 +99,33 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
   // Force Mapbox Standard style for Hebrew language support
   const mapboxStyleUrl = 'mapbox://styles/mapbox/streets-v12';
   const insets = useSafeAreaInsets();
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
   const datePickerBottomOffset = useMemo(() => 92 + (insets.bottom || 0) + 14, [insets.bottom]);
+  const panelBottomOffset = useMemo(() => {
+    // Keep panels above the fixed bottom CTA; if the keyboard is open (e.g. neighborhood search),
+    // lift the panel above the keyboard so it doesn't get hidden.
+    const kb = Number.isFinite(keyboardHeight) ? keyboardHeight : 0;
+    return Math.max(datePickerBottomOffset, kb > 0 ? kb + 12 : 0);
+  }, [datePickerBottomOffset, keyboardHeight]);
+
+  useEffect(() => {
+    // Lift bottom-anchored panels above the keyboard (iOS/Android).
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+
+    const onShow = (e: any) => {
+      const h = e?.endCoordinates?.height;
+      if (typeof h === 'number' && Number.isFinite(h)) setKeyboardHeight(h);
+    };
+    const onHide = () => setKeyboardHeight(0);
+
+    const subShow = Keyboard.addListener(showEvent as any, onShow);
+    const subHide = Keyboard.addListener(hideEvent as any, onHide);
+    return () => {
+      subShow.remove();
+      subHide.remove();
+    };
+  }, []);
   const moveInMonthOptions = useMemo(() => {
     // Month+year picker options (e.g. "ינואר 2026").
     // Show the next 48 months from the current month.
@@ -2275,7 +2301,7 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
           title={String(city || '').trim() ? `בחר שכונה (${city})` : 'בחר שכונה'}
           subtitle=""
           anchor="bottom"
-          bottomOffset={datePickerBottomOffset}
+          bottomOffset={panelBottomOffset}
         >
           <View style={{ gap: 10 }}>
             <TextInput

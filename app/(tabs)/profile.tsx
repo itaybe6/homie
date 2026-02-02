@@ -784,6 +784,9 @@ export default function ProfileScreen() {
       setAptMembers(membersMap);
 
       // Load shared profile groups (compact view)
+      if ((user as any)?.role === 'owner') {
+        setSharedGroups([]);
+      } else {
       try {
         const { data: membershipRows, error: membershipError } = await supabase
           .from('profile_group_members')
@@ -825,6 +828,7 @@ export default function ProfileScreen() {
         }
       } catch {
         setSharedGroups([]);
+      }
       }
     } catch (error) {
       console.error('Error fetching profile:', error);
@@ -1541,91 +1545,93 @@ export default function ProfileScreen() {
           </View>
         ) : null}
 
-        {/* Shared profile (if any) */}
-        <View style={styles.sectionDark}>
-          {sharedGroups.length > 0 ? (
-            sharedGroups.map((g) => (
-              <View key={g.id} style={styles.sharedCard}>
-                <View style={styles.sharedCardHeaderRow}>
-                  <Text style={styles.sharedCardTitle} numberOfLines={1}>
-                    {(g.name || 'פרופיל משותף').toString()}
-                  </Text>
-                  <View style={styles.sharedHeaderActions}>
-                    <TouchableOpacity
-                      style={[
-                        styles.sectionActionPill,
-                        styles.sectionActionPillDanger,
-                        leavingGroupId === g.id ? { opacity: 0.7 } : null,
-                      ]}
-                      activeOpacity={0.9}
-                      onPress={() => confirmLeaveGroup(g.id)}
-                      disabled={!!leavingGroupId}
-                      accessibilityRole="button"
-                      accessibilityLabel="עזוב קבוצה"
-                    >
-                      {leavingGroupId === g.id ? (
-                        <ActivityIndicator size="small" color="#DC2626" />
-                      ) : (
-                        <Text style={styles.sectionActionPillTextDanger}>עזוב/י</Text>
-                      )}
-                    </TouchableOpacity>
+        {/* Shared profile (hide for owner users) */}
+        {isOwner ? null : (
+          <View style={styles.sectionDark}>
+            {sharedGroups.length > 0 ? (
+              sharedGroups.map((g) => (
+                <View key={g.id} style={styles.sharedCard}>
+                  <View style={styles.sharedCardHeaderRow}>
+                    <Text style={styles.sharedCardTitle} numberOfLines={1}>
+                      {(g.name || 'פרופיל משותף').toString()}
+                    </Text>
+                    <View style={styles.sharedHeaderActions}>
+                      <TouchableOpacity
+                        style={[
+                          styles.sectionActionPill,
+                          styles.sectionActionPillDanger,
+                          leavingGroupId === g.id ? { opacity: 0.7 } : null,
+                        ]}
+                        activeOpacity={0.9}
+                        onPress={() => confirmLeaveGroup(g.id)}
+                        disabled={!!leavingGroupId}
+                        accessibilityRole="button"
+                        accessibilityLabel="עזוב קבוצה"
+                      >
+                        {leavingGroupId === g.id ? (
+                          <ActivityIndicator size="small" color="#DC2626" />
+                        ) : (
+                          <Text style={styles.sectionActionPillTextDanger}>עזוב/י</Text>
+                        )}
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+
+                  <View style={styles.sharedMembersGrid}>
+                    {g.members.map((m) => (
+                      <TouchableOpacity
+                        key={m.id}
+                        style={styles.sharedMemberTile}
+                        activeOpacity={0.9}
+                        onPress={() => {
+                          if (!m?.id) return;
+                          router.push({ pathname: '/user/[id]', params: { id: m.id } });
+                        }}
+                        disabled={String((user as any)?.id || '') === String(m?.id || '')}
+                        accessibilityRole="button"
+                        accessibilityLabel={
+                          String((user as any)?.id || '') === String(m?.id || '')
+                            ? 'זה הפרופיל שלך'
+                            : `פתח פרופיל של ${(m.full_name || 'משתמש/ת').toString()}`
+                        }
+                        accessibilityState={
+                          String((user as any)?.id || '') === String(m?.id || '')
+                            ? ({ disabled: true } as any)
+                            : undefined
+                        }
+                      >
+                        <View style={styles.sharedMemberAvatarWrap}>
+                          <Image
+                            source={{ uri: m.avatar_url || 'https://cdn-icons-png.flaticon.com/512/847/847969.png' }}
+                            style={styles.sharedMemberAvatar}
+                          />
+                        </View>
+                        <Text style={styles.sharedMemberName} numberOfLines={1}>
+                          {m.full_name || 'משתמש/ת'}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
                   </View>
                 </View>
-
-                <View style={styles.sharedMembersGrid}>
-                  {g.members.map((m) => (
-                    <TouchableOpacity
-                      key={m.id}
-                      style={styles.sharedMemberTile}
-                      activeOpacity={0.9}
-                      onPress={() => {
-                        if (!m?.id) return;
-                        router.push({ pathname: '/user/[id]', params: { id: m.id } });
-                      }}
-                      disabled={String((user as any)?.id || '') === String(m?.id || '')}
-                      accessibilityRole="button"
-                      accessibilityLabel={
-                        String((user as any)?.id || '') === String(m?.id || '')
-                          ? 'זה הפרופיל שלך'
-                          : `פתח פרופיל של ${(m.full_name || 'משתמש/ת').toString()}`
-                      }
-                      accessibilityState={
-                        String((user as any)?.id || '') === String(m?.id || '')
-                          ? ({ disabled: true } as any)
-                          : undefined
-                      }
-                    >
-                      <View style={styles.sharedMemberAvatarWrap}>
-                        <Image
-                          source={{ uri: m.avatar_url || 'https://cdn-icons-png.flaticon.com/512/847/847969.png' }}
-                          style={styles.sharedMemberAvatar}
-                        />
-                      </View>
-                      <Text style={styles.sharedMemberName} numberOfLines={1}>
-                        {m.full_name || 'משתמש/ת'}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
+              ))
+            ) : (
+              <View style={styles.sharedCard}>
+                <View style={styles.sharedCardHeaderRow}>
+                  <Text style={styles.sharedCardTitle} numberOfLines={1}>
+                    השותפים שלי
+                  </Text>
+                </View>
+                <View style={styles.sectionEmptyWrap}>
+                  <View style={styles.sectionEmptyIconPill}>
+                    <Inbox size={18} color={colors.primary} />
+                  </View>
+                  <Text style={styles.sectionEmptyTitle}>כרגע אין שותפים</Text>
+                  <Text style={styles.sectionEmptyText}>כשתצטרף/י לקבוצה או תזמין/י שותפים, הם יופיעו כאן.</Text>
                 </View>
               </View>
-            ))
-          ) : (
-            <View style={styles.sharedCard}>
-              <View style={styles.sharedCardHeaderRow}>
-                <Text style={styles.sharedCardTitle} numberOfLines={1}>
-                  השותפים שלי
-                </Text>
-              </View>
-              <View style={styles.sectionEmptyWrap}>
-                <View style={styles.sectionEmptyIconPill}>
-                <Inbox size={18} color={colors.primary} />
-                </View>
-                <Text style={styles.sectionEmptyTitle}>כרגע אין שותפים</Text>
-                <Text style={styles.sectionEmptyText}>כשתצטרף/י לקבוצה או תזמין/י שותפים, הם יופיעו כאן.</Text>
-              </View>
-            </View>
-          )}
-        </View>
+            )}
+          </View>
+        )}
 
         {/* My apartment(s) — match the card style used on other user's profile */}
         <View style={styles.sectionDark}>
@@ -1941,38 +1947,51 @@ export default function ProfileScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* Gallery section */}
-        <View style={styles.sectionDark}>
-          <View style={styles.galleryCard}>
-            <View style={styles.galleryHeaderRow}>
-              <Text style={styles.galleryHeaderTitle}>תמונות</Text>
-              <Text style={styles.galleryCountText}>{(profile?.image_urls?.length || 0)}/6</Text>
-            </View>
-            {profile?.image_urls?.length ? (
-              <View style={styles.galleryGrid}>
-                {profile.image_urls.map((url, idx) => (
-                  <TouchableOpacity
-                    key={url + idx}
-                    style={styles.galleryItem}
-                    activeOpacity={0.9}
-                    onPress={() => {
-                      if (ignoreNextGalleryPressRef.current) {
-                        ignoreNextGalleryPressRef.current = false;
-                        return;
-                      }
-                      setViewerIndex(idx);
-                    }}
-                    delayLongPress={350}
-                    onLongPress={() => {
-                      // Prevent the subsequent onPress from opening the viewer after long-press.
-                      ignoreNextGalleryPressRef.current = true;
-                      removeImageAt(idx);
-                    }}
-                  >
-                    <Image source={{ uri: url }} style={styles.galleryImg} />
-                  </TouchableOpacity>
-                ))}
-                {profile.image_urls.length < 6 && (
+        {/* Gallery section (hide for owner users) */}
+        {isOwner ? null : (
+          <View style={styles.sectionDark}>
+            <View style={styles.galleryCard}>
+              <View style={styles.galleryHeaderRow}>
+                <Text style={styles.galleryHeaderTitle}>תמונות</Text>
+                <Text style={styles.galleryCountText}>{(profile?.image_urls?.length || 0)}/6</Text>
+              </View>
+              {profile?.image_urls?.length ? (
+                <View style={styles.galleryGrid}>
+                  {profile.image_urls.map((url, idx) => (
+                    <TouchableOpacity
+                      key={url + idx}
+                      style={styles.galleryItem}
+                      activeOpacity={0.9}
+                      onPress={() => {
+                        if (ignoreNextGalleryPressRef.current) {
+                          ignoreNextGalleryPressRef.current = false;
+                          return;
+                        }
+                        setViewerIndex(idx);
+                      }}
+                      delayLongPress={350}
+                      onLongPress={() => {
+                        // Prevent the subsequent onPress from opening the viewer after long-press.
+                        ignoreNextGalleryPressRef.current = true;
+                        removeImageAt(idx);
+                      }}
+                    >
+                      <Image source={{ uri: url }} style={styles.galleryImg} />
+                    </TouchableOpacity>
+                  ))}
+                  {profile.image_urls.length < 6 && (
+                    <TouchableOpacity
+                      style={[styles.galleryAddTile, isAddingImage && { opacity: 0.75 }]}
+                      onPress={isAddingImage ? undefined : addGalleryImage}
+                      activeOpacity={0.9}
+                    >
+                      <Plus size={18} color={colors.primary} />
+                      <Text style={styles.galleryAddTileText}>הוסף</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              ) : (
+                <View style={styles.galleryGrid}>
                   <TouchableOpacity
                     style={[styles.galleryAddTile, isAddingImage && { opacity: 0.75 }]}
                     onPress={isAddingImage ? undefined : addGalleryImage}
@@ -1981,22 +2000,11 @@ export default function ProfileScreen() {
                     <Plus size={18} color={colors.primary} />
                     <Text style={styles.galleryAddTileText}>הוסף</Text>
                   </TouchableOpacity>
-                )}
-              </View>
-            ) : (
-              <View style={styles.galleryGrid}>
-                <TouchableOpacity
-                  style={[styles.galleryAddTile, isAddingImage && { opacity: 0.75 }]}
-                  onPress={isAddingImage ? undefined : addGalleryImage}
-                  activeOpacity={0.9}
-                >
-                  <Plus size={18} color={colors.primary} />
-                  <Text style={styles.galleryAddTileText}>הוסף</Text>
-                </TouchableOpacity>
-              </View>
-            )}
+                </View>
+              )}
+            </View>
           </View>
-        </View>
+        )}
 
         {/* moved logout and delete actions to /profile/settings */}
       </ScrollView>

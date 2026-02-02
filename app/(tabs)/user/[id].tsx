@@ -543,6 +543,15 @@ export default function UserProfileScreen() {
       }
     };
 
+    // Owner profiles don't have roommate groups – don't show / fetch this section.
+    if (String((profile as any)?.role || '').trim().toLowerCase() === 'owner') {
+      setGroupContext(null);
+      setGroupLoading(false);
+      return () => {
+        cancelled = true;
+      };
+    }
+
     if (profile?.id) {
       fetchGroupContext(profile.id);
     } else {
@@ -1790,73 +1799,83 @@ export default function UserProfileScreen() {
             )}
           </View>
 
-          {/* Partners / shared profile (always show section; show empty state when none) */}
-          <View style={styles.section}>
-            <View style={styles.sharedCard}>
-              <View style={styles.sharedCardHeaderRow}>
-                <Text style={styles.sharedCardTitle} numberOfLines={1}>
-                  {((groupContext?.name || 'שותפים') as any).toString()}
-                </Text>
-                <Text style={styles.sharedCardMeta} numberOfLines={1}>
-                  {groupLoading
-                    ? 'טוען...'
-                    : `${(groupContext?.members?.length || 0).toString()} שותפים`}
-                </Text>
-              </View>
+          {/* Partners / shared profile (hide for owner-role profiles and for landlords who own an apartment) */}
+          {(() => {
+            const roleLower = String((profile as any)?.role || '').trim().toLowerCase();
+            const pid = String((profile as any)?.id || '').trim();
+            const ownsApartment =
+              !!pid && profileApartments.some((a: any) => String(a?.owner_id || '') === pid);
+            if (roleLower === 'owner' || ownsApartment) return null;
 
-              {groupLoading ? (
-                <View style={styles.sectionEmptyWrap}>
-                  <ActivityIndicator size="small" color="#5e3f2d" />
-                  <Text style={styles.sectionEmptyText}>טוען שותפים...</Text>
-                </View>
-              ) : groupContext && groupContext.members.length >= 2 ? (
-                <View style={styles.sharedMembersGrid}>
-                  {groupContext.members.map((m) => {
-                    const isCurrent = String(m?.id || '') === String(profile?.id || '');
-                    return (
-                      <TouchableOpacity
-                        key={m.id}
-                        style={[styles.sharedMemberTile, isCurrent ? { opacity: 0.7 } : null]}
-                        activeOpacity={0.9}
-                        disabled={isCurrent}
-                        onPress={() => {
-                          if (!m?.id || isCurrent) return;
-                          router.push({ pathname: '/user/[id]', params: { id: m.id } });
-                        }}
-                        accessibilityRole="button"
-                        accessibilityLabel={
-                          isCurrent
-                            ? 'זה הפרופיל הנוכחי'
-                            : `פתח פרופיל של ${(m.full_name || 'משתמש/ת').toString()}`
-                        }
-                        accessibilityState={isCurrent ? ({ disabled: true } as any) : undefined}
-                      >
-                        <View style={styles.sharedMemberAvatarWrap}>
-                          <Image
-                            source={{ uri: m.avatar_url || 'https://cdn-icons-png.flaticon.com/512/847/847969.png' }}
-                            style={styles.sharedMemberAvatar}
-                          />
-                        </View>
-                        <Text style={styles.sharedMemberName} numberOfLines={1}>
-                          {m.full_name || 'משתמש/ת'}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-              ) : (
-                <View style={styles.sectionEmptyWrap}>
-                  <View style={styles.sectionEmptyIconPill}>
-                    <Users size={18} color="#5e3f2d" />
+            return (
+              <View style={styles.section}>
+                <View style={styles.sharedCard}>
+                  <View style={styles.sharedCardHeaderRow}>
+                    <Text style={styles.sharedCardTitle} numberOfLines={1}>
+                      {((groupContext?.name || 'שותפים') as any).toString()}
+                    </Text>
+                    <Text style={styles.sharedCardMeta} numberOfLines={1}>
+                      {groupLoading
+                        ? 'טוען...'
+                        : `${(groupContext?.members?.length || 0).toString()} שותפים`}
+                    </Text>
                   </View>
-                  <Text style={styles.sectionEmptyTitle}>עדיין אין שותפים</Text>
-                  <Text style={styles.sectionEmptyText}>
-                    כשיהיו שותפים מקושרים לפרופיל, הם יופיעו כאן.
-                  </Text>
+
+                  {groupLoading ? (
+                    <View style={styles.sectionEmptyWrap}>
+                      <ActivityIndicator size="small" color="#5e3f2d" />
+                      <Text style={styles.sectionEmptyText}>טוען שותפים...</Text>
+                    </View>
+                  ) : groupContext && groupContext.members.length >= 2 ? (
+                    <View style={styles.sharedMembersGrid}>
+                      {groupContext.members.map((m) => {
+                        const isCurrent = String(m?.id || '') === String(profile?.id || '');
+                        return (
+                          <TouchableOpacity
+                            key={m.id}
+                            style={[styles.sharedMemberTile, isCurrent ? { opacity: 0.7 } : null]}
+                            activeOpacity={0.9}
+                            disabled={isCurrent}
+                            onPress={() => {
+                              if (!m?.id || isCurrent) return;
+                              router.push({ pathname: '/user/[id]', params: { id: m.id } });
+                            }}
+                            accessibilityRole="button"
+                            accessibilityLabel={
+                              isCurrent
+                                ? 'זה הפרופיל הנוכחי'
+                                : `פתח פרופיל של ${(m.full_name || 'משתמש/ת').toString()}`
+                            }
+                            accessibilityState={isCurrent ? ({ disabled: true } as any) : undefined}
+                          >
+                            <View style={styles.sharedMemberAvatarWrap}>
+                              <Image
+                                source={{ uri: m.avatar_url || 'https://cdn-icons-png.flaticon.com/512/847/847969.png' }}
+                                style={styles.sharedMemberAvatar}
+                              />
+                            </View>
+                            <Text style={styles.sharedMemberName} numberOfLines={1}>
+                              {m.full_name || 'משתמש/ת'}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  ) : (
+                    <View style={styles.sectionEmptyWrap}>
+                      <View style={styles.sectionEmptyIconPill}>
+                        <Users size={18} color="#5e3f2d" />
+                      </View>
+                      <Text style={styles.sectionEmptyTitle}>עדיין אין שותפים</Text>
+                      <Text style={styles.sectionEmptyText}>
+                        כשיהיו שותפים מקושרים לפרופיל, הם יופיעו כאן.
+                      </Text>
+                    </View>
+                  )}
                 </View>
-              )}
-            </View>
-          </View>
+              </View>
+            );
+          })()}
 
       {/* Viewed user's apartment(s) (always show section; show empty state when none) */}
       <View style={styles.section}>
