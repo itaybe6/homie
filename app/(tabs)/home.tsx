@@ -411,9 +411,6 @@ export default function HomeScreen() {
             <View style={styles.mapPreviewBottomPill}>
               <MapPin size={16} color="#FFFFFF" />
             </View>
-            <Text style={styles.mapPreviewBottomSub} numberOfLines={1}>
-              {userLocation ? 'קרוב אליך' : 'לחץ/י למפה מלאה'}
-            </Text>
           </View>
         </Pressable>
       </View>
