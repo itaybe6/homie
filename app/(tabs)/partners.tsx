@@ -87,6 +87,8 @@ const genderPrefAliasMap: Record<string, 'male' | 'female' | 'any'> = {
   'לא משנה לי': 'any',
 };
 
+const OTHER_NEIGHBORHOOD_LABEL = 'אחר';
+
 const occupationAliasMap: Record<string, 'student' | 'worker'> = {
   student: 'student',
   סטודנט: 'student',
@@ -135,6 +137,20 @@ function normalizeOccupationPreference(value?: string | null): 'student' | 'work
   if (value && value.includes('סטודנט')) return 'student';
   if (value && value.includes('עובד')) return 'worker';
   return null;
+}
+
+function normalizeNeighborhoodList(value?: unknown): string[] {
+  if (!value) return [];
+  if (Array.isArray(value)) {
+    return value.map((n) => String(n || '').trim()).filter(Boolean);
+  }
+  if (typeof value === 'string') {
+    return value
+      .split(',')
+      .map((n) => n.trim())
+      .filter(Boolean);
+  }
+  return [];
 }
 
 function clampNumber(n: number, min: number, max: number) {
@@ -353,6 +369,9 @@ export default function PartnersScreen() {
   const [selectedCities, setSelectedCities] = useState<string[]>([]);
   const [citySearch, setCitySearch] = useState<string>('');
   const [isCityPickerOpen, setIsCityPickerOpen] = useState(false);
+  const [selectedNeighborhoods, setSelectedNeighborhoods] = useState<string[]>([]);
+  const [neighborhoodSearch, setNeighborhoodSearch] = useState<string>('');
+  const [isNeighborhoodPickerOpen, setIsNeighborhoodPickerOpen] = useState(false);
   const [matchScores, setMatchScores] = useState<Record<string, number | null>>({});
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
   const [includePassed, setIncludePassed] = useState(false);
@@ -367,6 +386,8 @@ export default function PartnersScreen() {
   const closeFilters = () => {
     setIsCityPickerOpen(false);
     setCitySearch('');
+    setIsNeighborhoodPickerOpen(false);
+    setNeighborhoodSearch('');
     closePartnersFilters();
     setIsFiltersOpen(false);
   };
@@ -386,6 +407,55 @@ export default function PartnersScreen() {
     if (!q) return list;
     return list.filter((c) => c.includes(q));
   }, [citySearch, allCities]);
+
+  const neighborhoodOptions = useMemo(() => {
+    const sourceCities =
+      selectedCities.length > 0 && !isAllCitiesSelected ? selectedCities : allCities;
+    const uniq = new Set<string>();
+    sourceCities.forEach((c) => {
+      const key = canonicalizeCityName(String(c || '').trim());
+      (cityNeighborhoods[key] || []).forEach((n) => {
+        const trimmed = String(n || '').trim();
+        if (trimmed) uniq.add(trimmed);
+      });
+    });
+    const list = Array.from(uniq);
+    list.sort((a, b) => a.localeCompare(b, 'he'));
+    list.push(OTHER_NEIGHBORHOOD_LABEL);
+    return list;
+  }, [selectedCities, isAllCitiesSelected, allCities]);
+
+  const filteredNeighborhoodOptions = useMemo(() => {
+    const q = neighborhoodSearch.trim();
+    const list = neighborhoodOptions;
+    if (!q) return list;
+    return list.filter((n) => n.includes(q));
+  }, [neighborhoodSearch, neighborhoodOptions]);
+
+  const selectedNeighborhoodLabel =
+    selectedNeighborhoods.length === 0
+      ? 'הכל'
+      : selectedNeighborhoods.length === 1
+        ? selectedNeighborhoods[0]
+        : `${selectedNeighborhoods.length} שכונות`;
+
+  const neighborhoodFilterState = useMemo(() => {
+    const cleaned = selectedNeighborhoods.map((n) => String(n || '').trim()).filter(Boolean);
+    const selectedSet = new Set(cleaned);
+    const otherSelected = selectedSet.has(OTHER_NEIGHBORHOOD_LABEL);
+    const selectedList = cleaned.filter((n) => n !== OTHER_NEIGHBORHOOD_LABEL);
+    const knownSet = new Set(neighborhoodOptions.filter((n) => n !== OTHER_NEIGHBORHOOD_LABEL));
+    return { selectedSet, selectedList, otherSelected, knownSet };
+  }, [selectedNeighborhoods, neighborhoodOptions]);
+
+  useEffect(() => {
+    if (selectedNeighborhoods.length === 0) return;
+    const valid = new Set(neighborhoodOptions);
+    const next = selectedNeighborhoods.filter((n) => valid.has(n));
+    if (next.length !== selectedNeighborhoods.length) {
+      setSelectedNeighborhoods(next);
+    }
+  }, [neighborhoodOptions, selectedNeighborhoods]);
 
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const translateX = useSharedValue(0);
@@ -601,22 +671,26 @@ export default function PartnersScreen() {
   const computeMatchPercentages = async (
     candidateIds: string[],
     userMap: Record<string, User>,
+    surveysOverride?: Record<string, UserSurveyResponse>,
   ): Promise<Record<string, number | null>> => {
     const authId = useAuthStore.getState().user?.id || currentUser?.id;
     if (!authId || !candidateIds.length) return {};
     const uniqueIds = Array.from(new Set([...candidateIds, authId]));
     try {
-      const { data: surveyRows, error } = await supabase
-        .from('user_survey_responses')
-        .select('*')
-        .in('user_id', uniqueIds);
-      if (error) {
-        console.error('failed to fetch survey responses for matching', error);
-        return {};
+      let surveys: Record<string, UserSurveyResponse> = surveysOverride || {};
+      if (!surveysOverride) {
+        const { data: surveyRows, error } = await supabase
+          .from('user_survey_responses')
+          .select('*')
+          .in('user_id', uniqueIds);
+        if (error) {
+          console.error('failed to fetch survey responses for matching', error);
+          return {};
+        }
+        surveys = Object.fromEntries(
+          (surveyRows || []).map((row) => [row.user_id, row as UserSurveyResponse]),
+        ) as Record<string, UserSurveyResponse>;
       }
-      const surveys = Object.fromEntries(
-        (surveyRows || []).map((row) => [row.user_id, row as UserSurveyResponse]),
-      ) as Record<string, UserSurveyResponse>;
       const mySurvey = surveys[authId];
       const results: Record<string, number | null> = {};
       if (!mySurvey) {
@@ -650,7 +724,19 @@ export default function PartnersScreen() {
     }
   };
 
-  const userPassesFilters = (u: User) => {
+  const userMatchesNeighborhoodFilter = (survey?: UserSurveyResponse | null) => {
+    if (!neighborhoodFilterState.selectedList.length && !neighborhoodFilterState.otherSelected) return true;
+    const preferred = normalizeNeighborhoodList((survey as any)?.preferred_neighborhoods);
+    const hasSelected = preferred.some((n) => neighborhoodFilterState.selectedList.includes(n));
+    if (hasSelected) return true;
+    if (neighborhoodFilterState.otherSelected) {
+      if (preferred.length === 0) return true;
+      return preferred.some((n) => !neighborhoodFilterState.knownSet.has(n));
+    }
+    return false;
+  };
+
+  const userPassesFilters = (u: User, survey?: UserSurveyResponse | null) => {
     // Gender filter
     if (gender !== 'any') {
       if (!u.gender || u.gender !== gender) return false;
@@ -665,10 +751,12 @@ export default function PartnersScreen() {
       if (typeof u.age !== 'number') return false;
       if (u.age < ageMin || u.age > ageMax) return false;
     }
+    // Neighborhoods filter (preferred neighborhoods from survey)
+    if (!userMatchesNeighborhoodFilter(survey)) return false;
     return true;
   };
 
-  const groupPassesFilters = (users: User[]) => {
+  const groupPassesFilters = (users: User[], surveyMap: Record<string, UserSurveyResponse | undefined>) => {
     // group size filter
     if (groupSize !== 'any') {
       if (users.length !== groupSize) return false;
@@ -689,7 +777,32 @@ export default function PartnersScreen() {
       const allInRange = users.every((u) => typeof u.age === 'number' && u.age >= ageMin && u.age <= ageMax);
       if (!allInRange) return false;
     }
+    // neighborhood filter: all members must match preferred neighborhoods (when active)
+    if (neighborhoodFilterState.selectedList.length || neighborhoodFilterState.otherSelected) {
+      const allMatch = users.every((u) => userMatchesNeighborhoodFilter(surveyMap[u.id]));
+      if (!allMatch) return false;
+    }
     return true;
+  };
+
+  const fetchSurveyMapByUserIds = async (userIds: string[]) => {
+    if (!userIds.length) return {} as Record<string, UserSurveyResponse>;
+    try {
+      const { data, error } = await supabase
+        .from('user_survey_responses')
+        .select('*')
+        .in('user_id', userIds);
+      if (error) {
+        console.error('failed to fetch survey responses for filters', error);
+        return {} as Record<string, UserSurveyResponse>;
+      }
+      return Object.fromEntries(
+        (data || []).map((row) => [row.user_id, row as UserSurveyResponse]),
+      ) as Record<string, UserSurveyResponse>;
+    } catch (error) {
+      console.error('failed to fetch survey responses for filters', error);
+      return {} as Record<string, UserSurveyResponse>;
+    }
   };
 
   const fetchUsersAndGroups = async (opts?: { includePassed?: boolean }) => {
@@ -752,6 +865,15 @@ export default function PartnersScreen() {
         groupUsersById = Object.fromEntries(((gUsers || []) as User[]).map((u) => [u.id, u]));
       }
 
+      const allSurveyIds = Array.from(
+        new Set([
+          ...((usersData || []) as User[]).map((u) => u.id),
+          ...Object.keys(groupUsersById),
+          ...(authId ? [authId] : []),
+        ]),
+      );
+      const surveysByUserId = await fetchSurveyMapByUserIds(allSurveyIds);
+
       // Build groups with their users
       const groupIdToUsers: Record<string, User[]> = {};
       members.forEach((m) => {
@@ -777,7 +899,7 @@ export default function PartnersScreen() {
           (g) =>
             g.users.length >= 2 &&
             !g.users.some((u) => u.id === authId) &&
-            groupPassesFilters(g.users)
+            groupPassesFilters(g.users, surveysByUserId)
         );
 
       // Fetch all apartments
@@ -942,7 +1064,7 @@ export default function PartnersScreen() {
 
       filteredSingles = filteredSingles.filter((u) => !memberIdsToExclude.has(u.id));
 
-      filteredSingles = filteredSingles.filter((u) => userPassesFilters(u));
+      filteredSingles = filteredSingles.filter((u) => userPassesFilters(u, surveysByUserId[u.id]));
 
       let combinedItems: BrowseItem[] = [];
       if (profileType === 'groups' || profileType === 'all') {
@@ -982,7 +1104,7 @@ export default function PartnersScreen() {
         userMap[currentUser.id] = currentUser as unknown as User;
       }
       const candidateIds = Array.from(candidateIdSet);
-      const newMatchScores = await computeMatchPercentages(candidateIds, userMap);
+      const newMatchScores = await computeMatchPercentages(candidateIds, userMap, surveysByUserId);
       if (Object.keys(newMatchScores).length) {
         setMatchScores(newMatchScores);
       }
@@ -1620,6 +1742,23 @@ export default function PartnersScreen() {
                   </TouchableOpacity>
                 </View>
 
+                {/* Neighborhood */}
+                <View style={styles.filterSection}>
+                  <Text style={styles.filterLabel}>שכונה</Text>
+                  <TouchableOpacity
+                    activeOpacity={0.9}
+                    style={styles.dropdownField}
+                    onPress={() => setIsNeighborhoodPickerOpen(true)}
+                    accessibilityRole="button"
+                    accessibilityLabel="בחירת שכונה"
+                  >
+                    <ChevronDown size={18} color="#9CA3AF" />
+                    <Text style={styles.dropdownText} numberOfLines={1}>
+                      {selectedNeighborhoodLabel}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+
                 {/* Gender (singles) */}
                 {profileType !== 'groups' ? (
                   <View style={styles.filterSection}>
@@ -1715,6 +1854,9 @@ export default function PartnersScreen() {
                   setSelectedCities([]);
                   setCitySearch('');
                   setIsCityPickerOpen(false);
+                  setSelectedNeighborhoods([]);
+                  setNeighborhoodSearch('');
+                  setIsNeighborhoodPickerOpen(false);
                   prevCitiesBeforeAllRef.current = null;
                   setIncludePassed(false);
                 }}
@@ -1815,6 +1957,91 @@ export default function PartnersScreen() {
                       >
                         <Text style={[styles.cityPickerRowText, active ? styles.cityPickerRowTextActive : null]}>
                           {c}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
+              </View>
+            </View>
+          ) : null}
+
+          {isNeighborhoodPickerOpen ? (
+            <View style={styles.cityPickerOverlay}>
+              <TouchableOpacity
+                style={styles.cityPickerBackdrop}
+                activeOpacity={1}
+                onPress={() => {
+                  setIsNeighborhoodPickerOpen(false);
+                  setNeighborhoodSearch('');
+                }}
+              />
+              <View style={styles.cityPickerPanel}>
+                <View style={styles.cityPickerHeader}>
+                  <Text style={styles.cityPickerTitle}>בחר שכונה</Text>
+                  <TouchableOpacity
+                    style={styles.cityPickerCloseBtn}
+                    activeOpacity={0.85}
+                    onPress={() => {
+                      setIsNeighborhoodPickerOpen(false);
+                      setNeighborhoodSearch('');
+                    }}
+                  >
+                    <X size={18} color="#9CA3AF" />
+                  </TouchableOpacity>
+                </View>
+
+                <View style={styles.searchWrap}>
+                  <TextInput
+                    value={neighborhoodSearch}
+                    onChangeText={setNeighborhoodSearch}
+                    placeholder="חפש שכונה..."
+                    placeholderTextColor="#9CA3AF"
+                    style={styles.searchInput}
+                  />
+                  <View style={styles.searchIcon}>
+                    <Search size={18} color="#9CA3AF" />
+                  </View>
+                </View>
+
+                <ScrollView style={{ maxHeight: Math.min(320, Math.round(screenHeight * 0.42)) }} showsVerticalScrollIndicator={false}>
+                  <TouchableOpacity
+                    activeOpacity={0.9}
+                    style={[
+                      styles.cityPickerRow,
+                      selectedNeighborhoods.length === 0 ? styles.cityPickerRowActive : null,
+                    ]}
+                    onPress={() => {
+                      setSelectedNeighborhoods([]);
+                    }}
+                  >
+                    <Text
+                      style={[
+                        styles.cityPickerRowText,
+                        selectedNeighborhoods.length === 0 ? styles.cityPickerRowTextActive : null,
+                      ]}
+                    >
+                      הכל
+                    </Text>
+                  </TouchableOpacity>
+                  {filteredNeighborhoodOptions.map((n) => {
+                    const active = selectedNeighborhoods.includes(n);
+                    return (
+                      <TouchableOpacity
+                        key={`hood-${n}`}
+                        activeOpacity={0.9}
+                        style={[styles.cityPickerRow, active ? styles.cityPickerRowActive : null]}
+                        onPress={() => {
+                          setSelectedNeighborhoods((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(n)) next.delete(n);
+                            else next.add(n);
+                            return Array.from(next);
+                          });
+                        }}
+                      >
+                        <Text style={[styles.cityPickerRowText, active ? styles.cityPickerRowTextActive : null]}>
+                          {n}
                         </Text>
                       </TouchableOpacity>
                     );

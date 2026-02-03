@@ -60,6 +60,16 @@ export default function TabLayout() {
     user?.id ? undefined : null
   );
 
+  const fetchOwnedApartmentId = async (userId: string): Promise<string | null> => {
+    const { data, error } = await supabase
+      .from('apartments')
+      .select('id')
+      .eq('owner_id', userId)
+      .limit(1);
+    if (error) throw error;
+    return data && data.length > 0 ? (data[0] as any).id : null;
+  };
+
   useEffect(() => {
     let cancelled = false;
     const checkOwnedApartment = async () => {
@@ -75,14 +85,8 @@ export default function TabLayout() {
       // unknown while checking
       setOwnedApartmentId(undefined);
       try {
-        const { data, error } = await supabase
-          .from('apartments')
-          .select('id')
-          .eq('owner_id', user.id)
-          .limit(1);
+        const firstId = await fetchOwnedApartmentId(user.id);
         if (cancelled) return;
-        if (error) throw error;
-        const firstId = data && data.length > 0 ? (data[0] as any).id : null;
         setOwnedApartmentId(firstId);
       } catch {
         if (cancelled) return;
@@ -232,42 +236,26 @@ export default function TabLayout() {
               onPress={async (e) => {
                 // Each user can upload max 1 apartment (by owner_id)
                 if (user?.id && !isOwner) {
-                  if (ownedApartmentId === undefined) {
-                    // Retry on demand so we don't get "stuck" if the background check failed
-                    if (isCheckingOwnedApartmentRef.current) return;
-                    isCheckingOwnedApartmentRef.current = true;
-                    try {
-                      const { data, error } = await supabase
-                        .from('apartments')
-                        .select('id')
-                        .eq('owner_id', user.id)
-                        .limit(1);
-                      if (error) throw error;
-                      const firstId = data && data.length > 0 ? (data[0] as any).id : null;
-                      setOwnedApartmentId(firstId);
-
-                      if (firstId) {
-                        Alert.alert(
-                          'לא ניתן להוסיף דירה',
-                          'אי אפשר להעלות עוד דירה כי כבר העלית דירה אחת.'
-                        );
-                        return;
-                      }
-                      router.push('/add-apartment' as any);
+                  // Always re-check on press to avoid stale state after deletions.
+                  if (isCheckingOwnedApartmentRef.current) return;
+                  isCheckingOwnedApartmentRef.current = true;
+                  try {
+                    const firstId = await fetchOwnedApartmentId(user.id);
+                    setOwnedApartmentId(firstId);
+                    if (firstId) {
+                      Alert.alert(
+                        'לא ניתן להוסיף דירה',
+                        'אי אפשר להעלות עוד דירה כי כבר העלית דירה אחת.'
+                      );
                       return;
-                    } catch {
-                      Alert.alert('שגיאה', 'לא הצלחנו לבדוק אם כבר העלית דירה. נסה שוב.');
-                      return;
-                    } finally {
-                      isCheckingOwnedApartmentRef.current = false;
                     }
-                  }
-                  if (ownedApartmentId !== null) {
-                    Alert.alert(
-                      'לא ניתן להוסיף דירה',
-                      'אי אפשר להעלות עוד דירה כי כבר העלית דירה אחת.'
-                    );
+                    router.push('/add-apartment' as any);
                     return;
+                  } catch {
+                    Alert.alert('שגיאה', 'לא הצלחנו לבדוק אם כבר העלית דירה. נסה שוב.');
+                    return;
+                  } finally {
+                    isCheckingOwnedApartmentRef.current = false;
                   }
                 }
                 router.push('/add-apartment' as any);

@@ -246,6 +246,7 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
   const [isAddressFocused, setIsAddressFocused] = useState(false);
   const [isNeighborhoodPickerOpen, setIsNeighborhoodPickerOpen] = useState(false);
   const [neighborhoodSearch, setNeighborhoodSearch] = useState('');
+  const [neighborhoodPanelOffset, setNeighborhoodPanelOffset] = useState(datePickerBottomOffset);
   const [selectedGeo, setSelectedGeo] = useState<{ lng: number; lat: number } | null>(null);
   const [isResolvingNeighborhood, setIsResolvingNeighborhood] = useState(false);
   const [selectedCity, setSelectedCity] = useState<{
@@ -260,6 +261,13 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
   useEffect(() => {
     if (isOwner && includeAsPartner) setIncludeAsPartner(false);
   }, [isOwner, includeAsPartner]);
+  useEffect(() => {
+    if (!isNeighborhoodPickerOpen) {
+      setNeighborhoodPanelOffset(datePickerBottomOffset);
+      return;
+    }
+    setNeighborhoodPanelOffset((prev) => Math.max(prev, panelBottomOffset));
+  }, [isNeighborhoodPickerOpen, panelBottomOffset, datePickerBottomOffset]);
   const roommateCapacityOptions = [2, 3, 4, 5];
   const [existingPartnerIds, setExistingPartnerIds] = useState<string[]>([]);
 
@@ -668,7 +676,9 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
     const c = String(city || '').trim();
     if (!c) return [];
     try {
-      return getNeighborhoodsForCityName(c);
+      const base = getNeighborhoodsForCityName(c) || [];
+      if (!base.length) return base;
+      return base.includes('אחר') ? base : [...base, 'אחר'];
     } catch {
       return [];
     }
@@ -676,8 +686,11 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
 
   const filteredNeighborhoodOptions = useMemo(() => {
     const q = String(neighborhoodSearch || '').trim();
-    if (!q) return neighborhoodOptions;
-    return neighborhoodOptions.filter((n) => String(n || '').includes(q));
+    const filtered = q
+      ? neighborhoodOptions.filter((n) => String(n || '').includes(q))
+      : neighborhoodOptions;
+    if (!neighborhoodOptions.length) return filtered;
+    return filtered.includes('אחר') ? filtered : [...filtered, 'אחר'];
   }, [neighborhoodOptions, neighborhoodSearch]);
 
   const selectedFeatureLabels = useMemo(() => {
@@ -1533,7 +1546,18 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
                           onPress={() => {
                             const street = String(f.text || '').trim();
                             const house = String(f.address || '').trim();
-                            const nextAddress = `${street}${house ? ` ${house}` : ''}`.trim();
+                            const placeLabel = String(f.place_name || '').trim();
+                            const placeFirst = placeLabel ? placeLabel.split(',')[0].trim() : '';
+                            const typed = String(address || '').trim();
+                            const typedHasNumber = /\d/.test(typed);
+                            const placeHasNumber = /\d/.test(placeFirst);
+                            const nextAddress = house
+                              ? `${street} ${house}`.trim()
+                              : placeHasNumber
+                                ? placeFirst
+                                : typedHasNumber
+                                  ? typed
+                                  : (placeFirst || street || typed);
                             // Prevent re-opening suggestions due to the address useEffect firing after selection
                             skipNextAddressAutocompleteRef.current = true;
                             setAddress(nextAddress || street || address);
@@ -2301,7 +2325,7 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
           title={String(city || '').trim() ? `בחר שכונה (${city})` : 'בחר שכונה'}
           subtitle=""
           anchor="bottom"
-          bottomOffset={panelBottomOffset}
+          bottomOffset={neighborhoodPanelOffset}
         >
           <View style={{ gap: 10 }}>
             <TextInput
