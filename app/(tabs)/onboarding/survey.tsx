@@ -159,9 +159,8 @@ function isQuestionAnswered(questionKey: string, s: SurveyState): boolean {
       return hasNonEmptyText((s as any).move_in_month_from) &&
         (!!(s as any).move_in_is_flexible ? hasNonEmptyText((s as any).move_in_month_to) : true);
     case 'roommates_range': {
-      const min = (s as any).preferred_roommates_min;
-      const max = (s as any).preferred_roommates_max;
-      return hasFiniteNumber(min) && hasFiniteNumber(max) && Number(max) >= Number(min);
+      const choices = (s as any).preferred_roommates_choices;
+      return Array.isArray(choices) && choices.length > 0;
     }
     case 'pets_allowed':
       return typeof s.pets_allowed === 'boolean';
@@ -204,7 +203,7 @@ const partnerShabbatPrefOptions = ['אין בעיה', 'מעדיפ/ה שלא'];
 const partnerDietPrefOptions = ['אין בעיה', 'מעדיפ/ה שלא טבעוני', 'כשר בלבד'];
 const partnerSmokingPrefOptions = ['אין בעיה', 'מעדיפ/ה שלא'];
 const studentYearOptions = ['שנה א׳', 'שנה ב׳', 'שנה ג׳', 'שנה ד׳', 'שנה ה׳', 'שנה ו׳', 'שנה ז׳'];
-// Roommates are selected via a single dropdown (0–4 roommates).
+// Roommates are selected via multi chips (0–4 roommates).
 const HEB_MONTH_NAMES = [
   'ינואר',
   'פברואר',
@@ -535,15 +534,6 @@ export default function SurveyScreen() {
       setState((prev) => ({ ...(prev as any), preferred_age_max: Math.min(min + 1, 60) } as any));
     }
   }, [(state as any).preferred_age_min]);
-
-  // Keep roommates min/max consistent (1–5). If max is set and falls below min, bump it up.
-  useEffect(() => {
-    const min = (state as any).preferred_roommates_min;
-    const max = (state as any).preferred_roommates_max;
-    if (typeof min === 'number' && typeof max === 'number' && max < min) {
-      setState((prev) => ({ ...(prev as any), preferred_roommates_max: min } as any));
-    }
-  }, [(state as any).preferred_roommates_min]);
 
   const setField = (key: keyof SurveyState, value: any) => {
     setState((prev) => ({ ...prev, [key]: value } as any));
@@ -1193,7 +1183,7 @@ function PartCarouselPagination({
       {
         key: 'roommates_range',
         title: 'טווח שותפים',
-        subtitle: 'בחר/י אופציה',
+        subtitle: 'בחר/י כמה אופציות',
         explanation: 'כמה שותפים את/ה רוצה לגור איתם',
         render: () => (
           <View style={{ gap: 10 }}>
@@ -1206,28 +1196,41 @@ function PartCarouselPagination({
                 'אני ועוד 4 שותפים',
               ];
 
-              const min = (state as any).preferred_roommates_min;
-              const max = (state as any).preferred_roommates_max;
-              const valueNum =
-                typeof min === 'number' && typeof max === 'number' && Number.isFinite(min) && Number.isFinite(max) && min === max
-                  ? min
-                  : null;
-              const currentValue =
-                typeof valueNum === 'number' && valueNum >= 0 && valueNum <= 4 ? options[valueNum] : null;
+              const storedChoices = Array.isArray((state as any).preferred_roommates_choices)
+                ? ((state as any).preferred_roommates_choices as any[])
+                    .map((v) => Number(v))
+                    .filter((v) => Number.isFinite(v) && v >= 0 && v < options.length)
+                : [];
+
+              const selectedIndices = Array.from(new Set(storedChoices)).sort((a, b) => a - b);
+              const selectedLabels = selectedIndices.map((idx) => options[idx]).filter(Boolean);
+
+              const updateSelection = (nextIndices: number[]) => {
+                const cleaned = Array.from(
+                  new Set(
+                    nextIndices
+                      .map((v) => Number(v))
+                      .filter((v) => Number.isFinite(v) && v >= 0 && v < options.length)
+                  )
+                ).sort((a, b) => a - b);
+                setState((prev) => ({
+                  ...(prev as any),
+                  preferred_roommates_choices: cleaned.length ? cleaned : null,
+                }) as any);
+              };
 
               return (
-                <SelectInput
+                <MultiChipSelect
                   label="כמה שותפים?"
                   options={options}
-                  value={currentValue}
-                  placeholder="בחר/י"
-                  onChange={(label) => {
-                    const idx = label ? options.indexOf(label) : -1;
-                    if (idx < 0) {
-                      setState((prev) => ({ ...(prev as any), preferred_roommates_min: null, preferred_roommates_max: null } as any));
-                      return;
-                    }
-                    setState((prev) => ({ ...(prev as any), preferred_roommates_min: idx, preferred_roommates_max: idx } as any));
+                  values={selectedLabels}
+                  onToggle={(label, nextActive) => {
+                    const idx = options.indexOf(label);
+                    if (idx < 0) return;
+                    const current = new Set(selectedIndices);
+                    if (nextActive) current.add(idx);
+                    else current.delete(idx);
+                    updateSelection(Array.from(current));
                   }}
                 />
               );
@@ -1407,7 +1410,7 @@ function PartCarouselPagination({
 
       // No defaults for cleanliness dropdown; require an explicit choice.
 
-      // No defaults for roommates dropdown; require an explicit choice.
+      // No defaults for roommates chips; require an explicit choice.
 
       return next ?? prev;
     });
@@ -2365,13 +2368,11 @@ function normalizePayload(
     move_in_month_from: (s as any).move_in_month_from ?? null,
     move_in_month_to: (s as any).move_in_month_to ?? null,
     move_in_is_flexible: (s as any).move_in_is_flexible ?? false,
-    preferred_roommates_min: (s as any).preferred_roommates_min ?? null,
-    preferred_roommates_max: (s as any).preferred_roommates_max ?? null,
-    preferred_roommates:
-      (s as any).preferred_roommates_max ??
-      (s as any).preferred_roommates_min ??
-      s.preferred_roommates ??
-      null,
+    preferred_roommates_choices: Array.isArray((s as any).preferred_roommates_choices)
+      ? ((s as any).preferred_roommates_choices as any[])
+          .map((v) => Number(v))
+          .filter((v) => Number.isFinite(v) && v >= 0 && v <= 4)
+      : null,
     // Nullable column; keep null when unanswered so we don't accidentally force "false" after removing the question.
     pets_allowed: s.pets_allowed ?? null,
     sublet_month_from: s.is_sublet ? (s.sublet_month_from ?? null) : null,

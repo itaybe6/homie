@@ -83,8 +83,7 @@ export default function ProfileSettingsScreen() {
   const [surveySaving, setSurveySaving] = useState(false);
   // Extra survey fields
   const [surveyNeighborhoods, setSurveyNeighborhoods] = useState('');
-  const [surveyRoommatesMin, setSurveyRoommatesMin] = useState<string>('');
-  const [surveyRoommatesMax, setSurveyRoommatesMax] = useState<string>('');
+  const [surveyRoommatesChoices, setSurveyRoommatesChoices] = useState<number[]>([]);
   const [surveyHasBalcony, setSurveyHasBalcony] = useState<boolean | null>(null);
   const [surveyWantsMasterRoom, setSurveyWantsMasterRoom] = useState<boolean | null>(null);
   const [surveyKeepsKosher, setSurveyKeepsKosher] = useState(false);
@@ -1301,22 +1300,40 @@ export default function ProfileSettingsScreen() {
                       <UserIcon size={16} color={ICON_COLOR} />
                       <Text style={styles.fieldLabel}>טווח שותפים מועדף</Text>
                     </View>
-                    <View style={{ flexDirection: 'row-reverse', gap: 12 }}>
-                      <TextInput
-                        style={[styles.fieldInput, { flex: 1 }]}
-                        value={surveyRoommatesMin}
-                        onChangeText={(t) => setSurveyRoommatesMin(t.replace(/[^0-9]/g, ''))}
-                        keyboardType="number-pad"
-                        placeholder="מינימום"
-                      />
-                      <TextInput
-                        style={[styles.fieldInput, { flex: 1 }]}
-                        value={surveyRoommatesMax}
-                        onChangeText={(t) => setSurveyRoommatesMax(t.replace(/[^0-9]/g, ''))}
-                        keyboardType="number-pad"
-                        placeholder="מקסימום"
-                      />
-                    </View>
+                    {(() => {
+                      const options = [
+                        { value: 0, label: 'אני לבד' },
+                        { value: 1, label: 'אני עם עוד שותף' },
+                        { value: 2, label: 'אני ועוד 2 שותפים' },
+                        { value: 3, label: 'אני ועוד 3 שותפים' },
+                        { value: 4, label: 'אני ועוד 4 שותפים' },
+                      ];
+                      return (
+                        <View style={{ flexDirection: 'row-reverse', flexWrap: 'wrap', gap: 8 }}>
+                          {options.map(({ value, label }) => {
+                            const active = surveyRoommatesChoices.includes(value);
+                            return (
+                              <TouchableOpacity
+                                key={`rm-${value}`}
+                                style={[styles.chipToggle, active && styles.chipToggleActive]}
+                                onPress={() =>
+                                  setSurveyRoommatesChoices((prev) => {
+                                    const next = prev.includes(value)
+                                      ? prev.filter((v) => v !== value)
+                                      : [...prev, value];
+                                    return next.sort((a, b) => a - b);
+                                  })
+                                }
+                              >
+                                <Text style={[styles.chipToggleText, active && styles.chipToggleTextActive]}>
+                                  {label}
+                                </Text>
+                              </TouchableOpacity>
+                            );
+                          })}
+                        </View>
+                      );
+                    })()}
                   </View>
                   <View style={styles.fieldRow}>
                     <View style={styles.fieldHalf}>
@@ -1396,11 +1413,7 @@ export default function ProfileSettingsScreen() {
                                 .filter(Boolean);
                               return arr.length ? arr : null;
                             })(),
-                            preferred_roommates_min: surveyRoommatesMin ? parseInt(surveyRoommatesMin) : null,
-                            preferred_roommates_max: surveyRoommatesMax ? parseInt(surveyRoommatesMax) : null,
-                            preferred_roommates:
-                              (surveyRoommatesMax ? parseInt(surveyRoommatesMax) : null) ??
-                              (surveyRoommatesMin ? parseInt(surveyRoommatesMin) : null),
+                            preferred_roommates_choices: surveyRoommatesChoices.length ? surveyRoommatesChoices : null,
                             has_balcony: surveyHasBalcony,
                             keeps_kosher: surveyKeepsKosher || false,
                             is_shomer_shabbat: surveyIsShomerShabbat || false,

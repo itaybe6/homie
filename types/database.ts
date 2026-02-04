@@ -198,9 +198,7 @@ export interface UserSurveyResponse {
   move_in_is_flexible?: boolean | null;
   // Legacy single month (deprecated)
   move_in_month?: string;
-  preferred_roommates?: number; // legacy single value (kept for backwards compat)
-  preferred_roommates_min?: number | null;
-  preferred_roommates_max?: number | null;
+  preferred_roommates_choices?: number[] | null;
   pets_allowed?: boolean; // whether the user wants an apartment that allows pets
   sublet_month_from?: string; // format: YYYY-MM
   sublet_month_to?: string;   // format: YYYY-MM

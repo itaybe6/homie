@@ -156,7 +156,15 @@ function buildCompatSurvey(
   if (survey?.floor_preference) compat.floor_preference = survey.floor_preference;
   if (typeof survey?.has_balcony === 'boolean') compat.has_balcony = survey.has_balcony;
   if (typeof survey?.pets_allowed === 'boolean') compat.pets_allowed = survey.pets_allowed;
-  if (typeof survey?.preferred_roommates === 'number') compat.preferred_roommates = survey.preferred_roommates;
+  {
+    const rawChoices = Array.isArray((survey as any)?.preferred_roommates_choices)
+      ? ((survey as any).preferred_roommates_choices as any[])
+      : [];
+    const cleaned = Array.from(
+      new Set(rawChoices.map((v) => Number(v)).filter((v) => Number.isFinite(v) && v >= 0 && v <= 4))
+    );
+    if (cleaned.length) compat.preferred_roommates_choices = cleaned;
+  }
   if ((survey as any)?.move_in_month_from) compat.move_in_month_from = (survey as any).move_in_month_from;
   if ((survey as any)?.move_in_month_to) compat.move_in_month_to = (survey as any).move_in_month_to;
   if (typeof (survey as any)?.move_in_is_flexible === 'boolean')
@@ -897,17 +905,15 @@ export default function UserProfileScreen() {
       add('apartment', 'תאריך כניסה', label);
     }
     {
-      const rmMin = (survey as any).preferred_roommates_min;
-      const rmMax = (survey as any).preferred_roommates_max;
-      const rmSingle =
-        typeof rmMin === 'number' && typeof rmMax === 'number' && rmMin === rmMax
-          ? rmMin
-          : typeof survey.preferred_roommates === 'number'
-            ? survey.preferred_roommates
-            : null;
-      if (typeof rmSingle === 'number') {
-        const label = formatPreferredRoommatesLabel(rmSingle);
-        if (label) add('apartment', 'מספר שותפים מועדף', label);
+      const rmChoicesRaw = Array.isArray((survey as any).preferred_roommates_choices)
+        ? ((survey as any).preferred_roommates_choices as any[])
+        : [];
+      const rmChoices = Array.from(
+        new Set(rmChoicesRaw.map((v) => Number(v)).filter((v) => Number.isFinite(v) && v >= 0 && v <= 4))
+      ).sort((a, b) => a - b);
+      if (rmChoices.length) {
+        const labels = rmChoices.map((n) => formatPreferredRoommatesLabel(n)).filter(Boolean);
+        if (labels.length) add('apartment', 'מספר שותפים מועדף', labels.join(', '));
       }
     }
     addBool('apartment', 'חיות מורשות', survey.pets_allowed);

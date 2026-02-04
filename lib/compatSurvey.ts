@@ -125,11 +125,15 @@ export function buildCompatSurvey(
   // tri-state: true/false/null (null = "לא משנה לי"). If missing -> keep undefined.
   if (survey && 'has_balcony' in survey) compat.has_balcony = (survey as any).has_balcony;
   if (typeof survey?.pets_allowed === 'boolean') compat.pets_allowed = survey.pets_allowed;
-  if (typeof survey?.preferred_roommates === 'number') compat.preferred_roommates = survey.preferred_roommates;
-  if (Number.isFinite((survey as any)?.preferred_roommates_min as number))
-    compat.preferred_roommates_min = Number((survey as any).preferred_roommates_min);
-  if (Number.isFinite((survey as any)?.preferred_roommates_max as number))
-    compat.preferred_roommates_max = Number((survey as any).preferred_roommates_max);
+  {
+    const rawChoices = Array.isArray((survey as any)?.preferred_roommates_choices)
+      ? ((survey as any).preferred_roommates_choices as any[])
+      : [];
+    const cleaned = Array.from(
+      new Set(rawChoices.map((v) => Number(v)).filter((v) => Number.isFinite(v) && v >= 0 && v <= 4))
+    );
+    if (cleaned.length) compat.preferred_roommates_choices = cleaned;
+  }
   if (typeof survey?.student_year === 'number') compat.student_year = survey.student_year;
   if ((survey as any)?.move_in_month_from) compat.move_in_month_from = (survey as any).move_in_month_from;
   if ((survey as any)?.move_in_month_to) compat.move_in_month_to = (survey as any).move_in_month_to;

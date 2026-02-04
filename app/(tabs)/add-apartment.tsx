@@ -494,6 +494,7 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
   const closeOverlays = () => {
     setCitySuggestions([]);
     setAddressSuggestions([]);
+    setIsDatePickerOpen(false);
     setIsNeighborhoodPickerOpen(false);
   };
 

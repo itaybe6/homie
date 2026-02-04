@@ -61,9 +61,8 @@ export type CompatUserSurvey = {
   is_sublet?: boolean | null;
   sublet_month_from?: string | null;
   sublet_month_to?: string | null;
-  preferred_roommates?: number | null;
-  preferred_roommates_min?: number | null;
-  preferred_roommates_max?: number | null;
+  preferred_roommates_choices?: number[] | null;
+  preferred_roommates?: number | null; // legacy single value
   pets_allowed?: boolean | null;
   // Acceptance/preferences for partner
   partner_smoking_preference?: PartnerSmokingPref;
@@ -374,32 +373,45 @@ function calculateBudgetCompatibility(me: Partial<CompatUserSurvey>, them: Parti
   return Math.max(0, 1 - gap / scale);
 }
 
-function coerceRoommateRange(s: Partial<CompatUserSurvey>): { min: number; max: number } | null {
-  const min = s.preferred_roommates_min;
-  const max = s.preferred_roommates_max;
-  if (Number.isFinite(min as number) && Number.isFinite(max as number) && (max as number) >= (min as number)) {
-    return { min: Number(min), max: Number(max) };
+function coerceRoommateChoices(s: Partial<CompatUserSurvey>): number[] | null {
+  const raw = (s as any).preferred_roommates_choices;
+  if (Array.isArray(raw)) {
+    const cleaned = Array.from(
+      new Set(raw.map((v) => Number(v)).filter((v) => Number.isFinite(v) && v >= 0 && v <= 4))
+    ).sort((a, b) => a - b);
+    if (cleaned.length) return cleaned;
   }
   if (Number.isFinite(s.preferred_roommates as number)) {
     const v = Number(s.preferred_roommates);
-    return { min: v, max: v };
+    if (v >= 0 && v <= 4) return [v];
+  }
+  const min = (s as any).preferred_roommates_min;
+  const max = (s as any).preferred_roommates_max;
+  if (Number.isFinite(min as number) && Number.isFinite(max as number) && (max as number) >= (min as number)) {
+    const out: number[] = [];
+    const from = Math.max(0, Math.min(Number(min), Number(max)));
+    const to = Math.min(4, Math.max(Number(min), Number(max)));
+    for (let i = from; i <= to; i += 1) out.push(i);
+    if (out.length) return out;
   }
   return null;
 }
 
-function calculateRoommateRangeCompatibility(me: Partial<CompatUserSurvey>, them: Partial<CompatUserSurvey>): number {
-  const a = coerceRoommateRange(me);
-  const b = coerceRoommateRange(them);
+function calculateRoommateChoicesCompatibility(me: Partial<CompatUserSurvey>, them: Partial<CompatUserSurvey>): number {
+  const a = coerceRoommateChoices(me);
+  const b = coerceRoommateChoices(them);
   if (!a || !b) return 0.5;
 
-  const overlap = Math.max(0, Math.min(a.max, b.max) - Math.max(a.min, b.min));
-  const union = Math.max(a.max, b.max) - Math.min(a.min, b.min);
+  const setA = new Set(a);
+  const setB = new Set(b);
+  let overlap = 0;
+  for (const v of setA) {
+    if (setB.has(v)) overlap += 1;
+  }
+  const union = new Set([...setA, ...setB]).size;
   if (union <= 0) return 0.5;
   if (overlap > 0) return Math.min(1, 0.7 + 0.3 * (overlap / union));
-
-  const gap = Math.max(a.min, b.min) - Math.min(a.max, b.max);
-  const scale = Math.max(a.max, b.max, 1);
-  return Math.max(0, 1 - gap / scale);
+  return 0.3;
 }
 
 function parseYearMonth(value?: string | null): number | null {
@@ -701,7 +713,7 @@ export function calculateMatchScore(
 
   // מס' שותפים (משקל 3)
   {
-    const roommatesScore = calculateRoommateRangeCompatibility(myAnswers, theirAnswers);
+    const roommatesScore = calculateRoommateChoicesCompatibility(myAnswers, theirAnswers);
     add(weights.roommateCount, [roommatesScore]);
   }
 

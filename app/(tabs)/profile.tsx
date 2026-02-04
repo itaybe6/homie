@@ -1271,18 +1271,16 @@ export default function ProfileScreen() {
         : formatMonthLabel(from);
       add('apartment', 'חודש כניסה', label);
     }
-    // Roommates (new UI stores 0..4 as preferred_roommates_min/max and also mirrors to preferred_roommates)
-    const rmMin = (surveyResponse as any).preferred_roommates_min;
-    const rmMax = (surveyResponse as any).preferred_roommates_max;
-    const rmSingle =
-      typeof rmMin === 'number' && typeof rmMax === 'number' && rmMin === rmMax
-        ? rmMin
-        : typeof surveyResponse.preferred_roommates === 'number'
-          ? surveyResponse.preferred_roommates
-          : null;
-    if (typeof rmSingle === 'number') {
-      const label = formatPreferredRoommatesLabel(rmSingle);
-      if (label) add('apartment', 'מספר שותפים מועדף', label);
+    // Roommates (multi-select choices stored as 0..4)
+    const rmChoicesRaw = Array.isArray((surveyResponse as any).preferred_roommates_choices)
+      ? ((surveyResponse as any).preferred_roommates_choices as any[])
+      : [];
+    const rmChoices = Array.from(
+      new Set(rmChoicesRaw.map((v) => Number(v)).filter((v) => Number.isFinite(v) && v >= 0 && v <= 4))
+    ).sort((a, b) => a - b);
+    if (rmChoices.length) {
+      const labels = rmChoices.map((n) => formatPreferredRoommatesLabel(n)).filter(Boolean);
+      if (labels.length) add('apartment', 'מספר שותפים מועדף', labels.join(', '));
     }
     addBool('apartment', 'חיות מורשות', surveyResponse.pets_allowed);
     // Some schemas store min/max instead of preferred_age_range; derive when missing.
