@@ -21,7 +21,15 @@ export type CookingStyle = 'קניות משותפות' | 'כל אחד לעצמו
 
 export type PartnerSmokingPref = 'אין בעיה' | 'מעדיפ/ה שלא' | null;
 export type PartnerShabbatPref = 'אין בעיה' | 'מעדיפ/ה שלא' | null;
-export type PartnerDietPref = 'אין בעיה' | 'מעדיפ/ה שלא טבעוני' | 'כשר בלבד' | null;
+// Partner diet preference is stored as UI labels (Hebrew). We keep legacy values for backwards-compat.
+export type PartnerDietPref =
+  | 'כשר בלבד'
+  | 'בית שאינו טבעוני'
+  | 'מסתדר עם כולם'
+  // legacy
+  | 'אין בעיה'
+  | 'מעדיפ/ה שלא טבעוני'
+  | null;
 export type PartnerPetsPref = 'אין בעיה' | 'מעדיפ/ה שלא' | null;
 
 export type CompatUserSurvey = {
@@ -176,11 +184,27 @@ function mapShabbatTolerance(pref: PartnerShabbatPref, targetIsShomer: boolean |
   return targetIsShomer ? 0.5 : 1;
 }
 
+export function normalizePartnerDietPreference(value?: string | null): PartnerDietPref {
+  const v = (value || '').replace(/\s+/g, ' ').trim();
+  if (!v) return null;
+  if (v === 'כשר בלבד') return 'כשר בלבד';
+  if (v === 'מסתדר עם כולם') return 'מסתדר עם כולם';
+  if (v === 'בית שאינו טבעוני') return 'בית שאינו טבעוני';
+  // legacy
+  if (v === 'אין בעיה') return 'מסתדר עם כולם';
+  if (v === 'מעדיפ/ה שלא טבעוני') return 'בית שאינו טבעוני';
+  // Heuristic fallbacks for older/freeform values
+  if (v.includes('כשר')) return 'כשר בלבד';
+  if (v.includes('טבעונ')) return 'בית שאינו טבעוני';
+  return null;
+}
+
 function dietToleranceScore(pref: PartnerDietPref, targetDiet?: DietType | null): number {
-  if (!pref || pref === 'אין בעיה') return 1;
+  const normalized = normalizePartnerDietPreference(pref);
+  if (!normalized || normalized === 'מסתדר עם כולם') return 1;
   // 'כשר בלבד' נספר במשקל "כשרות", כדי לא לספור פעמיים
-  if (pref === 'כשר בלבד') return 1;
-  // 'מעדיפ/ה שלא טבעוני'
+  if (normalized === 'כשר בלבד') return 1;
+  // 'בית שאינו טבעוני'
   if ((targetDiet || null) === 'טבעוני') return 0.5;
   return 1;
 }

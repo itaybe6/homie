@@ -60,6 +60,7 @@ import {
   CleaningFrequency,
   HostingPreference,
   CookingStyle,
+  normalizePartnerDietPreference,
 } from '@/utils/matchCalculator';
 
 // Keep swipe cards visually consistent (prevents the next card peeking below the current one)
@@ -660,8 +661,10 @@ export default function PartnersScreen() {
       compat.partner_smoking_preference = survey.partner_smoking_preference as PartnerSmokingPref;
     if (survey?.partner_pets_preference)
       compat.partner_pets_preference = survey.partner_pets_preference as PartnerPetsPref;
-    if (survey?.partner_diet_preference)
-      compat.partner_diet_preference = survey.partner_diet_preference as PartnerDietPref;
+    {
+      const normalized = normalizePartnerDietPreference(survey?.partner_diet_preference);
+      if (normalized) compat.partner_diet_preference = normalized as PartnerDietPref;
+    }
     if (survey?.partner_shabbat_preference)
       compat.partner_shabbat_preference = survey.partner_shabbat_preference as PartnerShabbatPref;
     const preferredGender = normalizeGenderPreference(survey?.preferred_gender);
@@ -1741,13 +1744,36 @@ export default function PartnersScreen() {
                     style={styles.dropdownField}
                     onPress={() => setIsCityPickerOpen(true)}
                     accessibilityRole="button"
-                    accessibilityLabel="בחירת עיר"
+                    accessibilityLabel="בחירת ערים"
                   >
                     <ChevronDown size={18} color="#9CA3AF" />
                     <Text style={styles.dropdownText} numberOfLines={1}>
                       {selectedCityLabel}
                     </Text>
                   </TouchableOpacity>
+
+                  {selectedCities.length > 0 && !isAllCitiesSelected ? (
+                    <View style={[styles.cityChipsWrap, { marginTop: 10 }]} accessibilityLabel="ערים נבחרות">
+                      {selectedCities.map((c) => (
+                        <TouchableOpacity
+                          key={`city-chip-${c}`}
+                          activeOpacity={0.9}
+                          style={[styles.cityChip, styles.cityChipActive]}
+                          accessibilityRole="button"
+                          accessibilityLabel={`הסר ${c}`}
+                          onPress={() => {
+                            prevCitiesBeforeAllRef.current = null;
+                            setSelectedCities((prev) => prev.filter((x) => x !== c));
+                          }}
+                        >
+                          <X size={14} color="#4F46E5" />
+                          <Text style={[styles.cityChipText, styles.cityChipTextActive]} numberOfLines={1}>
+                            {c}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  ) : null}
                 </View>
 
                 {/* Neighborhood */}
@@ -1896,7 +1922,7 @@ export default function PartnersScreen() {
               />
               <View style={styles.cityPickerPanel}>
                 <View style={styles.cityPickerHeader}>
-                  <Text style={styles.cityPickerTitle}>בחר עיר</Text>
+                  <Text style={styles.cityPickerTitle}>בחר ערים</Text>
                   <TouchableOpacity
                     style={styles.cityPickerCloseBtn}
                     activeOpacity={0.85}
@@ -1941,8 +1967,6 @@ export default function PartnersScreen() {
                         // Selecting "all" should explicitly select all cities (but behaves like "no filter").
                         setSelectedCities(allCities);
                       }
-                      setIsCityPickerOpen(false);
-                      setCitySearch('');
                     }}
                   >
                     <Text style={[styles.cityPickerRowText, isAllCitiesSelected ? styles.cityPickerRowTextActive : null]}>
@@ -1957,10 +1981,16 @@ export default function PartnersScreen() {
                         activeOpacity={0.9}
                         style={[styles.cityPickerRow, active ? styles.cityPickerRowActive : null]}
                         onPress={() => {
-                          setSelectedCities([c]);
                           prevCitiesBeforeAllRef.current = null;
-                          setIsCityPickerOpen(false);
-                          setCitySearch('');
+                          setSelectedCities((prev) => {
+                            // If "all" was selected, start a new explicit selection.
+                            if (isAllCitiesSelected) return [c];
+                            const next = new Set(prev);
+                            if (next.has(c)) next.delete(c);
+                            else next.add(c);
+                            return Array.from(next);
+                          });
+                          prevCitiesBeforeAllRef.current = null;
                         }}
                       >
                         <Text style={[styles.cityPickerRowText, active ? styles.cityPickerRowTextActive : null]}>

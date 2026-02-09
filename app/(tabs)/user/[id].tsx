@@ -41,6 +41,7 @@ import {
   PartnerShabbatPref,
   PartnerDietPref,
   PartnerPetsPref,
+  normalizePartnerDietPreference,
 } from '@/utils/matchCalculator';
 
 const genderAliasMap: Record<string, 'male' | 'female'> = {
@@ -181,8 +182,10 @@ function buildCompatSurvey(
     compat.partner_smoking_preference = survey.partner_smoking_preference as PartnerSmokingPref;
   if (survey?.partner_pets_preference)
     compat.partner_pets_preference = survey.partner_pets_preference as PartnerPetsPref;
-  if (survey?.partner_diet_preference)
-    compat.partner_diet_preference = survey.partner_diet_preference as PartnerDietPref;
+  {
+    const normalized = normalizePartnerDietPreference(survey?.partner_diet_preference);
+    if (normalized) compat.partner_diet_preference = normalized as PartnerDietPref;
+  }
   if (survey?.partner_shabbat_preference)
     compat.partner_shabbat_preference = survey.partner_shabbat_preference as PartnerShabbatPref;
 
@@ -931,9 +934,13 @@ export default function UserProfileScreen() {
             : null;
     add('partner', 'טווח גילאים רצוי', survey.preferred_age_range || derivedAgeRange);
     add('partner', 'מגדר שותפים', survey.preferred_gender);
-    add('partner', 'עיסוק שותפים', survey.preferred_occupation);
+    add('partner', 'עיסוק שותפים', survey.preferred_occupation === 'לא משנה' ? 'לא משנה לי' : survey.preferred_occupation);
     add('partner', 'שותפים ושבת', survey.partner_shabbat_preference);
-    add('partner', 'שותפים ותזונה', survey.partner_diet_preference);
+    add(
+      'partner',
+      'שותפים ותזונה',
+      normalizePartnerDietPreference(survey.partner_diet_preference) || survey.partner_diet_preference,
+    );
     add('partner', 'שותפים ועישון', survey.partner_smoking_preference);
     add('partner', 'שותפים וחיות', survey.partner_pets_preference);
 

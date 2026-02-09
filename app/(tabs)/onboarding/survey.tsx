@@ -200,7 +200,7 @@ const floorOptions = ['קרקע', 'בניין', 'לא משנה לי'];
 const genderPrefOptions = ['זכר', 'נקבה', 'לא משנה'];
 const occupationPrefOptions = ['סטודנט', 'עובד', 'לא משנה']; // legacy (kept for any older drafts)
 const partnerShabbatPrefOptions = ['אין בעיה', 'מעדיפ/ה שלא'];
-const partnerDietPrefOptions = ['אין בעיה', 'מעדיפ/ה שלא טבעוני', 'כשר בלבד'];
+const partnerDietPrefOptions = ['כשר בלבד', 'בית שאינו טבעוני', 'מסתדר עם כולם'];
 const partnerSmokingPrefOptions = ['אין בעיה', 'מעדיפ/ה שלא'];
 const studentYearOptions = ['שנה א׳', 'שנה ב׳', 'שנה ג׳', 'שנה ד׳', 'שנה ה׳', 'שנה ו׳', 'שנה ז׳'];
 // Roommates are selected via multi chips (0–4 roommates).
@@ -1074,7 +1074,7 @@ function PartCarouselPagination({
           </View>
         ),
       },
-      { key: 'floor', title: 'קומה מועדפת', explanation: 'איזו קומה את/ה מעדיף/ה - קרקע, בניין או לא משנה לי', render: () => <ChipSelect options={floorOptions} value={state.floor_preference || null} onChange={(v) => setField('floor_preference', v || null)} /> },
+      { key: 'floor', title: 'קומה מועדפת', explanation: 'איזה קומה אתה מעדיף?', render: () => <ChipSelect options={floorOptions} value={state.floor_preference || null} onChange={(v) => setField('floor_preference', v || null)} /> },
       {
         key: 'balcony',
         title: 'עם מרפסת/גינה?',
@@ -1284,19 +1284,19 @@ function PartCarouselPagination({
       { key: 'pref_gender', title: 'מגדר מועדף של השותפ/ה?', explanation: 'האם יש לך העדפה למגדר מסוים של השותפים', render: () => <ChipSelect options={genderPrefOptions} value={state.preferred_gender || null} onChange={(v) => setField('preferred_gender', v || null)} /> },
       {
         key: 'pref_occ',
-        title: 'אני רוצה שותף בסטטוס כמו שלי ?',
+        title: 'מעדיף שותף :',
         explanation: '',
         render: () => (
           <ChipSelect
-            options={['סטודנט', 'לא סטודנט']}
+            options={['סטודנט', 'לא סטודנט', 'לא משנה לי']}
             value={state.preferred_occupation || null}
             onChange={(v) => setField('preferred_occupation', v || null)}
           />
         ),
       },
       { key: 'partner_shabbat', title: 'שותפים שומרי שבת?', explanation: 'האם חשוב לך שהשותפים יהיו שומרי שבת או לא', render: () => <ChipSelect options={partnerShabbatPrefOptions} value={state.partner_shabbat_preference || null} onChange={(v) => setField('partner_shabbat_preference', v || null)} /> },
-      { key: 'partner_diet', title: 'שותפים עם תזונה מתאימה?', explanation: 'האם יש לך העדפה לגבי התזונה של השותפים - כשר, לא טבעוני וכו\'', render: () => <ChipSelect options={partnerDietPrefOptions} value={state.partner_diet_preference || null} onChange={(v) => setField('partner_diet_preference', v || null)} /> },
-      { key: 'partner_smoking', title: 'שותפים שמעשנים?', explanation: 'האם את/ה מוכן/ה לגור עם שותפים שמעשנים', render: () => <ChipSelect options={partnerSmokingPrefOptions} value={state.partner_smoking_preference || null} onChange={(v) => setField('partner_smoking_preference', v || null)} /> },
+      { key: 'partner_diet', title: 'התאמת התזונה בבית', explanation: 'שותפים עם סגנון תזונה מסויים', render: () => <ChipSelect options={partnerDietPrefOptions} value={state.partner_diet_preference || null} onChange={(v) => setField('partner_diet_preference', v || null)} /> },
+      { key: 'partner_smoking', title: 'שותפים שמעשנים?', explanation: 'מפריע לך שהשותפים מעשנים ?', render: () => <ChipSelect options={partnerSmokingPrefOptions} value={state.partner_smoking_preference || null} onChange={(v) => setField('partner_smoking_preference', v || null)} /> },
       { key: 'partner_pets', title: 'שותפים שמגיעים עם בעלי חיים?', explanation: 'האם זה מתאים לך ששותפ/ה יגיע/תגיע עם בעל חיים?', render: () => <ChipSelect options={['אין בעיה', 'מעדיפ/ה שלא']} value={state.partner_pets_preference || null} onChange={(v) => setField('partner_pets_preference', v || null)} /> },
     ];
 

@@ -1,4 +1,5 @@
 import type { User, UserSurveyResponse } from '@/types/database';
+import { normalizePartnerDietPreference } from '@/utils/matchCalculator';
 import type {
   CompatUserSurvey,
   CleaningFrequency,
@@ -152,8 +153,10 @@ export function buildCompatSurvey(
     compat.partner_smoking_preference = (survey as any).partner_smoking_preference as PartnerSmokingPref;
   if ((survey as any)?.partner_pets_preference)
     compat.partner_pets_preference = (survey as any).partner_pets_preference as PartnerPetsPref;
-  if ((survey as any)?.partner_diet_preference)
-    compat.partner_diet_preference = (survey as any).partner_diet_preference as PartnerDietPref;
+  {
+    const normalized = normalizePartnerDietPreference((survey as any)?.partner_diet_preference);
+    if (normalized) compat.partner_diet_preference = normalized as PartnerDietPref;
+  }
   if ((survey as any)?.partner_shabbat_preference)
     compat.partner_shabbat_preference = (survey as any).partner_shabbat_preference as PartnerShabbatPref;
 

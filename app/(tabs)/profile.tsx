@@ -51,6 +51,7 @@ import { useApartmentStore } from '@/stores/apartmentStore';
 import { User, Apartment, UserSurveyResponse } from '@/types/database';
 import { KeyFabPanel } from '@/components/KeyFabPanel';
 import { alpha, colors } from '@/lib/theme';
+import { normalizePartnerDietPreference } from '@/utils/matchCalculator';
 
 
 type AvatarFabItem = {
@@ -1297,9 +1298,17 @@ export default function ProfileScreen() {
     // השותפ/ה שאני מחפש/ת
     add('partner', 'טווח גילאים רצוי', surveyResponse.preferred_age_range || derivedAgeRange);
     add('partner', 'מגדר שותפים', surveyResponse.preferred_gender);
-    add('partner', 'עיסוק שותפים', surveyResponse.preferred_occupation);
+    add(
+      'partner',
+      'עיסוק שותפים',
+      surveyResponse.preferred_occupation === 'לא משנה' ? 'לא משנה לי' : surveyResponse.preferred_occupation,
+    );
     add('partner', 'שותפים ושבת', surveyResponse.partner_shabbat_preference);
-    add('partner', 'שותפים ותזונה', surveyResponse.partner_diet_preference);
+    add(
+      'partner',
+      'שותפים ותזונה',
+      normalizePartnerDietPreference(surveyResponse.partner_diet_preference) || surveyResponse.partner_diet_preference,
+    );
     add('partner', 'שותפים ועישון', surveyResponse.partner_smoking_preference);
     add('partner', 'שותפים וחיות', surveyResponse.partner_pets_preference);
 
