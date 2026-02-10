@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { Platform, View, Text, StyleSheet } from 'react-native';
+import { Alert, Platform, View, Text, StyleSheet } from 'react-native';
 import { Stack, usePathname } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useFrameworkReady } from '@/hooks/useFrameworkReady';
@@ -11,6 +11,39 @@ import GlobalTopBar from '@/components/GlobalTopBar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { isSupabaseConfigured } from '@/lib/supabase';
 import { AppAlertProvider } from '@/components/AppAlertProvider';
+import { emitAlert } from '@/lib/alertBus';
+
+// Render native `Alert.alert(...)` via our in-app modal, so we control RTL + styling.
+// Note: This must run from a file that is guaranteed to load (RootLayout),
+// not `app/entry.ts` (the app is bootstrapped via `expo-router/entry`).
+if (Platform.OS !== 'web') {
+  try {
+    const anyAlert = Alert as any;
+    if (!anyAlert.__homie_in_app_alert_patched__) {
+      const orig = Alert.alert.bind(Alert);
+      anyAlert.__homie_orig_alert__ = orig;
+
+      Alert.alert = ((title?: any, message?: any, buttons?: any, options?: any) => {
+        try {
+          emitAlert({
+            title: typeof title === 'string' ? title : String(title || ''),
+            message: typeof message === 'string' ? message : message == null ? '' : String(message),
+            buttons: Array.isArray(buttons) ? buttons : undefined,
+            options,
+          });
+          return;
+        } catch {
+          // Fallback to native system alert
+          return orig(title as any, message as any, buttons as any, options as any);
+        }
+      }) as any;
+
+      anyAlert.__homie_in_app_alert_patched__ = true;
+    }
+  } catch {
+    // ignore
+  }
+}
 
 export default function RootLayout() {
   useFrameworkReady();

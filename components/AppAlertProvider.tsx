@@ -8,8 +8,9 @@ import {
   type GestureResponderEvent,
   Platform,
 } from 'react-native';
+import { CheckCircle2, Info, TriangleAlert, XCircle } from 'lucide-react-native';
 import { subscribeAlerts, type NativeAlertButton, type NativeAlertPayload } from '@/lib/alertBus';
-import { colors } from '@/lib/theme';
+import { alpha, colors } from '@/lib/theme';
 
 type AlertButtonStyle = 'default' | 'cancel' | 'destructive';
 
@@ -165,6 +166,29 @@ export function AppAlertProvider({ children }: { children: React.ReactNode }) {
 
   const ctx = useMemo<AppAlertContextValue>(() => ({ alert, confirm, dismiss }), [alert, confirm, dismiss]);
 
+  const variant = useMemo<'success' | 'error' | 'warning' | 'info'>(() => {
+    const t = String(state.title || '').trim();
+    const m = String(state.message || '').trim();
+    const hay = `${t}\n${m}`;
+    if (t.includes('שגיאה') || hay.includes('לא ניתן') || hay.includes('לא הצלחנו') || hay.includes('נכשל')) return 'error';
+    if (t.includes('אזהרה') || t.includes('שים לב')) return 'warning';
+    if (t.includes('הצלחה') || t === 'נשלח' || t.includes('נשמר') || m.includes('נשלחה') || m.includes('נשלח')) return 'success';
+    return 'info';
+  }, [state.message, state.title]);
+
+  const variantMeta = useMemo(() => {
+    if (variant === 'success') {
+      return { Icon: CheckCircle2, color: colors.success, bg: alpha(colors.success, 0.12) };
+    }
+    if (variant === 'error') {
+      return { Icon: XCircle, color: '#FF3B30', bg: alpha('#FF3B30', 0.12) };
+    }
+    if (variant === 'warning') {
+      return { Icon: TriangleAlert, color: '#F59E0B', bg: alpha('#F59E0B', 0.14) };
+    }
+    return { Icon: Info, color: colors.primary, bg: alpha(colors.primary, 0.12) };
+  }, [variant]);
+
   const handleButtonPress = useCallback(
     (btn: AppAlertButton) => {
       dismiss();
@@ -190,6 +214,11 @@ export function AppAlertProvider({ children }: { children: React.ReactNode }) {
         <View style={styles.backdrop}>
           <Pressable style={StyleSheet.absoluteFill} onPress={onPressBackdrop} />
           <View style={styles.card}>
+            <View style={styles.iconWrap} accessible accessibilityRole="image">
+              <View style={[styles.iconCircle, { backgroundColor: variantMeta.bg }]}>
+                <variantMeta.Icon size={22} color={variantMeta.color} />
+              </View>
+            </View>
             <Text style={styles.title}>{state.title}</Text>
             {!!state.message ? <Text style={styles.message}>{state.message}</Text> : null}
             <View style={styles.divider} />
@@ -207,7 +236,7 @@ export function AppAlertProvider({ children }: { children: React.ReactNode }) {
                       state.buttons.length > 2
                         ? (idx !== state.buttons.length - 1 ? styles.btnDividerColumn : null)
                         : (idx !== state.buttons.length - 1 ? styles.btnDivider : null),
-                      pressed ? { backgroundColor: 'rgba(0,0,0,0.04)' } : null,
+                      pressed ? styles.btnPressed : null,
                     ]}
                     accessibilityRole="button"
                     accessibilityLabel={b.text}
@@ -229,7 +258,7 @@ export function AppAlertProvider({ children }: { children: React.ReactNode }) {
 const styles = StyleSheet.create({
   backdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.55)',
+    backgroundColor: alpha('#111827', 0.55),
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 18,
@@ -237,23 +266,38 @@ const styles = StyleSheet.create({
   card: {
     width: '100%',
     maxWidth: 420,
-    backgroundColor: 'rgba(242,242,247,0.98)', // iOS-like system alert background
-    borderRadius: 16,
+    backgroundColor: colors.white,
+    borderRadius: 18,
     paddingTop: 14,
-    paddingHorizontal: 14,
+    paddingHorizontal: 16,
     paddingBottom: 0,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.22)',
+    borderColor: alpha(colors.primary, 0.14),
     shadowColor: '#000',
-    shadowOpacity: 0.22,
-    shadowRadius: 26,
-    shadowOffset: { width: 0, height: 18 },
+    shadowOpacity: 0.18,
+    shadowRadius: 22,
+    shadowOffset: { width: 0, height: 14 },
     elevation: 10,
+  },
+  iconWrap: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 2,
+    marginBottom: 6,
+  },
+  iconCircle: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: alpha('#111827', 0.06),
   },
   title: {
     fontSize: 18,
     fontWeight: '900',
-    color: '#111827',
+    color: colors.primary,
     textAlign: 'right',
     writingDirection: 'rtl',
     marginBottom: 4,
@@ -261,7 +305,7 @@ const styles = StyleSheet.create({
   message: {
     fontSize: 14,
     fontWeight: '700',
-    color: '#374151',
+    color: colors.text,
     textAlign: 'right',
     writingDirection: 'rtl',
     lineHeight: 20,
@@ -269,7 +313,7 @@ const styles = StyleSheet.create({
   },
   divider: {
     height: StyleSheet.hairlineWidth,
-    backgroundColor: 'rgba(60,60,67,0.18)',
+    backgroundColor: alpha('#111827', 0.12),
   },
   buttonsRow: {
     flexDirection: 'row-reverse',
@@ -286,13 +330,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  btnPressed: { backgroundColor: alpha(colors.primary, 0.06) },
   btnDivider: {
     borderLeftWidth: StyleSheet.hairlineWidth,
-    borderLeftColor: 'rgba(60,60,67,0.18)',
+    borderLeftColor: alpha('#111827', 0.12),
   },
   btnDividerColumn: {
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: 'rgba(60,60,67,0.18)',
+    borderTopColor: alpha('#111827', 0.12),
   },
   btnText: {
     fontWeight: '800',

@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Platform, StyleSheet, Text, TouchableWithoutFeedback, useWindowDimensions, View, ViewStyle } from 'react-native';
+import { Modal, Platform, StyleSheet, Text, TouchableWithoutFeedback, useWindowDimensions, View, ViewStyle } from 'react-native';
 import Animated, { FadeIn, FadeInDown, FadeOut, FadeOutDown, FadeOutUp, LinearTransition } from 'react-native-reanimated';
 import { X } from 'lucide-react-native';
 import { TouchableOpacity } from 'react-native';
@@ -69,32 +69,32 @@ export function KeyFabPanel({
 
   const placement = useMemo(() => {
     const availableHeight = Math.max(0, height - topOffset - bottomOffset);
-    const needsClamp = measuredHeight > availableHeight;
+    // Always cap the panel height so it never "toggles" between clamped/unclamped
+    // placements when content size changes. This prevents anchor jitter on state updates.
+    const styleMaxHeight = (panelStyle as any)?.maxHeight;
+    const maxHeight =
+      typeof styleMaxHeight === 'number' ? Math.min(availableHeight, styleMaxHeight) : availableHeight;
 
-    // If the panel can't fit between topOffset & bottomOffset, stretch it and rely on internal scrolling.
-    if (needsClamp) {
-      return { top: topOffset, bottom: bottomOffset };
-    }
-
-    if (anchor === 'top') return { top: topOffset };
+    if (anchor === 'top') return { top: topOffset, maxHeight };
     if (anchor === 'center') {
+      const effectiveHeight = Math.min(measuredHeight, maxHeight);
       const clamped = Math.max(
         topOffset,
-        Math.min(height - measuredHeight - bottomOffset, (height - measuredHeight) / 2),
+        Math.min(height - effectiveHeight - bottomOffset, (height - effectiveHeight) / 2),
       );
-      return { top: clamped };
+      return { top: clamped, maxHeight };
     }
 
     // anchor === 'bottom'
-    return { bottom: bottomOffset };
-  }, [anchor, topOffset, bottomOffset, measuredHeight, height]);
+    return { bottom: bottomOffset, maxHeight };
+  }, [anchor, topOffset, bottomOffset, measuredHeight, height, panelStyle]);
 
   const exitAnim = anchor === 'top' ? FadeOutUp : FadeOutDown;
 
   // Hooks must run consistently across renders; only short-circuit after them.
   if (!isOpen) return null;
 
-  return (
+  const content = (
     <Animated.View
       entering={FadeIn.duration(duration)}
       exiting={FadeOut.duration(duration)}
@@ -112,15 +112,18 @@ export function KeyFabPanel({
         layout={LinearTransition.duration(duration)}
         style={[
           styles.panel,
+          panelStyle,
           {
             width: resolvedOpenedWidth,
             ...placement,
             left: (width - resolvedOpenedWidth) / 2,
           },
-          panelStyle,
         ]}
         onLayout={(e) => {
           const h = e.nativeEvent.layout.height;
+          // Only needed for anchor="center". For bottom/top anchors, measuring + reacting
+          // to intermediate layout heights can cause position thrashing on fast UI changes.
+          if (anchor !== 'center') return;
           if (h && Math.abs(h - measuredHeight) > 2) setMeasuredHeight(h);
         }}
       >
@@ -168,6 +171,17 @@ export function KeyFabPanel({
       </Animated.View>
     </Animated.View>
   );
+
+  // On web, render via Modal to escape clipping by parent overflow/stacking contexts.
+  if (Platform.OS === 'web') {
+    return (
+      <Modal transparent visible onRequestClose={onClose}>
+        {content}
+      </Modal>
+    );
+  }
+
+  return content;
 }
 
 const styles = StyleSheet.create({

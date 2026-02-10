@@ -41,6 +41,7 @@ import { computeGroupAwareLabel } from '@/lib/group';
 import RoommateCard from '@/components/RoommateCard';
 import GroupCardComponent from '@/components/GroupCard';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { cityNeighborhoods, canonicalizeCityName } from '@/assets/data/neighborhoods';
 import { Apartment } from '@/types/database';
 // GroupCard implemented inline below
@@ -475,6 +476,7 @@ export default function PartnersScreen() {
     }
   }, [neighborhoodOptions, selectedNeighborhoods]);
 
+  const tabBarHeight = useBottomTabBarHeight();
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const translateX = useSharedValue(0);
   const headerOffset = insets.top + 52 + -40;
@@ -487,6 +489,18 @@ export default function PartnersScreen() {
   const EXTRA_CARD_BOTTOM_SPACE = 52; // extra safety so the card never sits behind the bottom action buttons
   // estimate top chrome (status + logo area + small padding). We clamp so it behaves consistently across devices.
   const TOP_CHROME_ESTIMATE = Math.max(96, insets.top + 84);
+  // Filters panel: reserve enough top chrome so the sheet never gets clipped at the top.
+  // This forces inner scrolling when content is taller than the available height.
+  const filtersTopOffset =
+    Platform.OS === 'web'
+      ? Math.max(190, insets.top + 150)
+      : Math.max(TOP_CHROME_ESTIMATE, insets.top + 140);
+  // Keep it visually "down" and avoid floating too high.
+  const filtersSafeBottom = Platform.OS === 'web' ? 0 : insets.bottom + tabBarHeight;
+  const filtersBottomOffset = Platform.OS === 'web' ? 8 : Math.max(8, filtersSafeBottom + 12);
+  // Give the panel the full available space so inner ScrollView can work properly
+  const availableForFilters = screenHeight - filtersTopOffset - filtersBottomOffset;
+  const filtersPanelMaxHeight = Math.max(400, Math.round(availableForFilters - 10));
 
   // Dynamic card height: fills most of the screen and keeps a stable gap to the bottom action buttons.
   const swipeCardHeight = Math.round(
@@ -1675,24 +1689,34 @@ export default function PartnersScreen() {
         title="סינון תוצאות"
         subtitle=""
         anchor="bottom"
-        bottomOffset={Math.max(18, insets.bottom + 16)}
+        topOffset={filtersTopOffset}
+        bottomOffset={filtersBottomOffset}
         openedWidth={Math.min(screenWidth * 0.94, 520)}
         panelStyle={{
           backgroundColor: 'rgba(255,255,255,0.90)',
           borderColor: 'rgba(229,231,235,0.9)',
-          maxHeight: Math.round(screenHeight * 0.88),
+          maxHeight: filtersPanelMaxHeight,
         }}
         duration={420}
       >
         <View style={styles.filtersPanelWrap}>
           <ScrollView
-            style={styles.filterScroll}
+            style={[styles.filterScroll, { maxHeight: filtersPanelMaxHeight - 100 }]}
             contentContainerStyle={[
               styles.filterScrollContent,
-              // Keep bottom actions reachable when content grows (e.g., many city chips)
-              { paddingBottom: Math.max(18, insets.bottom + 24) },
+              // Keep bottom actions reachable when content grows (e.g., many city chips / groups filters)
+              {
+                paddingBottom:
+                  Platform.OS === 'web'
+                    ? 24
+                    : 32,
+              },
             ]}
-            showsVerticalScrollIndicator={false}
+            showsVerticalScrollIndicator={true}
+            scrollEnabled={true}
+            bounces={true}
+            alwaysBounceVertical={false}
+            nestedScrollEnabled={true}
             keyboardShouldPersistTaps="handled"
           >
                 {/* Profile type */}
@@ -1738,7 +1762,7 @@ export default function PartnersScreen() {
                 {/* Age */}
                 <View style={styles.filterSection}>
                   <View style={styles.sectionRow}>
-                    <Text style={styles.filterLabel}>טווח גילאים</Text>
+                    <Text style={styles.filterLabelInline}>טווח גילאים</Text>
                     <View style={styles.ageValuePill}>
                       <Text style={styles.ageValueText}>
                         {`${Math.min(ageMin, ageMax)} - ${Math.max(ageMin, ageMax)}`}
@@ -1893,8 +1917,8 @@ export default function PartnersScreen() {
                   </>
                 ) : null}
 
-                {/* Actions (inside scroll to avoid being clipped on smaller heights) */}
-                <View style={styles.filterFooter}>
+                {/* Actions (part of the same window content, below the filters) */}
+                <View style={styles.filterFooterInScroll}>
                   <View style={styles.filterActions}>
                     <TouchableOpacity
                       style={[styles.filterBtn, styles.resetBtn]}
@@ -2481,6 +2505,7 @@ const styles = StyleSheet.create({
     paddingTop: 18,
     paddingBottom: 16,
     gap: 18 as any,
+    alignItems: 'stretch',
   },
   filterSection: {
     marginBottom: 0,
@@ -2490,6 +2515,9 @@ const styles = StyleSheet.create({
     fontSize: 13,
     marginBottom: 10,
     textAlign: 'right',
+    writingDirection: 'rtl',
+    width: '100%',
+    alignSelf: 'flex-end',
   },
   dropdownField: {
     height: 50,
@@ -2548,6 +2576,9 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '900',
     textAlign: 'right',
+    writingDirection: 'rtl',
+    width: '100%',
+    alignSelf: 'flex-end',
   },
   cityPickerCloseBtn: {
     width: 36,
@@ -2577,6 +2608,9 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '800',
     textAlign: 'right',
+    writingDirection: 'rtl',
+    width: '100%',
+    alignSelf: 'flex-end',
   },
   cityPickerRowTextActive: {
     color: '#4F46E5',
@@ -2584,9 +2618,16 @@ const styles = StyleSheet.create({
   },
   sectionRow: {
     flexDirection: 'row-reverse',
-    alignItems: 'flex-end',
+    alignItems: 'center',
     justifyContent: 'space-between',
     marginBottom: 10,
+  },
+  filterLabelInline: {
+    color: '#6B7280',
+    fontSize: 13,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    flexShrink: 1,
   },
   ageValuePill: {
     backgroundColor: '#FFFFFF',
@@ -2831,11 +2872,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     textAlign: 'right',
   },
-  filterFooter: {
-    paddingHorizontal: 18,
-    paddingTop: 10,
-    paddingBottom: 0,
-    backgroundColor: 'rgba(255,255,255,0.35)',
+  filterFooterInScroll: {
+    marginTop: 8,
+    paddingTop: 14,
     borderTopWidth: 1,
     borderTopColor: 'rgba(229,231,235,0.65)',
   },
