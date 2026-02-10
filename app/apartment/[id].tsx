@@ -2609,14 +2609,19 @@ export default function ApartmentDetailsScreen() {
               </TouchableOpacity>
             ) : (
               <TouchableOpacity
-                style={styles.availabilityBtn}
+                style={[
+                  styles.availabilityBtn,
+                  (!owner?.id || mergeInviteLoading || hasPendingMergeInvite) ? { opacity: 0.65 } : null,
+                ]}
                 activeOpacity={0.9}
                 onPress={() => {
                   openMergeConfirm();
                 }}
-                disabled={!owner?.id}
+                disabled={!owner?.id || mergeInviteLoading || hasPendingMergeInvite}
               >
-                <Text style={styles.availabilityBtnText}>מיזוג פרופילים</Text>
+                <Text style={styles.availabilityBtnText}>
+                  {mergeInviteLoading ? 'שולח...' : hasPendingMergeInvite ? 'נשלחה בקשה' : 'מיזוג פרופילים'}
+                </Text>
               </TouchableOpacity>
             )}
           </View>
@@ -2711,6 +2716,8 @@ export default function ApartmentDetailsScreen() {
               </View>
               <View style={styles.mergeConfirmNote}>
                 <Text style={styles.mergeConfirmNoteText}>
+                  זה גם תהליך ההצטרפות לדירה: ברגע שהבקשה מאושרת, הפרופילים מתמזגים ואתם הופכים לשותפים — ואז אפשר להתחבר לדירה.
+                  {'\n'}
                   לא ניתן למזג אם לשני הצדדים כבר יש דירה משויכת (כבעלים או כשותפים), או אם המיזוג יחרוג מהמקסימום.
                 </Text>
               </View>
