@@ -147,6 +147,19 @@ export default function ApartmentDetailsScreen() {
   const insets = useSafeAreaInsets();
   const [ctaHeight, setCtaHeight] = useState(120);
   const [isKeyPanelOpen, setIsKeyPanelOpen] = useState(false);
+  const MAX_GROUP_MEMBERS = 4;
+  const mergePanelWidth = useMemo(() => {
+    // Reuse the same sizing as other panels for consistent look & feel.
+    return Math.min(420, Math.max(320, Math.round(screenWidth - 30)));
+  }, [screenWidth]);
+  const [isMergeConfirmOpen, setIsMergeConfirmOpen] = useState(false);
+  const [mergeInviteLoading, setMergeInviteLoading] = useState(false);
+  const [hasPendingMergeInvite, setHasPendingMergeInvite] = useState(false);
+  const mergeCheckIdRef = useRef(0);
+  const [mergeCapacity, setMergeCapacity] = useState<{
+    status: 'idle' | 'checking' | 'ok' | 'blocked';
+    message: string | null;
+  }>({ status: 'idle', message: null });
   const [isViewerOpen, setViewerOpen] = useState(false);
   const [viewerIndex, setViewerIndex] = useState(0);
 
@@ -232,6 +245,302 @@ export default function ApartmentDetailsScreen() {
       } catch {
         Alert.alert('שגיאה', 'לא הצלחנו לפתוח חיוג');
       }
+    }
+  };
+
+  // ===== Merge profiles (from apartment page) =====
+  const showMergeBlockedAlert = () => {
+    Alert.alert(
+      'לא ניתן למזג',
+      'לא ניתן לבצע מיזוג פרופילים אם לשני הצדדים כבר יש דירה משויכת (כבעלים או כשותפים).'
+    );
+  };
+
+  const getActiveGroupMemberIds = async (userId: string): Promise<string[]> => {
+    const uid = String(userId || '').trim();
+    if (!uid) return [];
+    try {
+      const { data: membership } = await supabase
+        .from('profile_group_members')
+        .select('group_id')
+        .eq('user_id', uid)
+        .eq('status', 'ACTIVE')
+        .maybeSingle();
+      const groupId = (membership as any)?.group_id as string | undefined;
+      if (!groupId) return [uid];
+      const { data: members } = await supabase
+        .from('profile_group_members')
+        .select('user_id')
+        .eq('group_id', groupId)
+        .eq('status', 'ACTIVE');
+      const ids = (members || [])
+        .map((r: any) => String(r?.user_id || '').trim())
+        .filter(Boolean);
+      const set = new Set<string>([uid, ...ids]);
+      return Array.from(set);
+    } catch {
+      return [uid];
+    }
+  };
+
+  const isMergeWithinCapacity = async (myId: string, targetId: string): Promise<boolean> => {
+    const myIds = await getActiveGroupMemberIds(String(myId));
+    const theirIds = await getActiveGroupMemberIds(String(targetId));
+    const union = new Set<string>([...myIds, ...theirIds]);
+    return union.size <= MAX_GROUP_MEMBERS;
+  };
+
+  // Detect if I already sent a pending merge invite to the apartment owner
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const myId = String((user as any)?.id || '').trim();
+        const targetId = String((owner as any)?.id || '').trim();
+        if (!myId || !targetId) {
+          if (!cancelled) setHasPendingMergeInvite(false);
+          return;
+        }
+        const { data: existing } = await supabase
+          .from('profile_group_invites')
+          .select('id')
+          .eq('inviter_id', myId)
+          .eq('invitee_id', targetId)
+          .eq('status', 'PENDING')
+          .maybeSingle();
+        if (!cancelled) setHasPendingMergeInvite(!!existing?.id);
+      } catch {
+        if (!cancelled) setHasPendingMergeInvite(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id, owner?.id]);
+
+  const openMergeConfirm = () => {
+    if (mergeInviteLoading) return;
+    if (hasPendingMergeInvite) return;
+    const myId = String((user as any)?.id || '').trim();
+    const targetId = String((owner as any)?.id || '').trim();
+    if (!myId || !targetId) return;
+    if (myId === targetId) return;
+    setIsMergeConfirmOpen(true);
+    setMergeCapacity({ status: 'checking', message: null });
+    const runId = ++mergeCheckIdRef.current;
+    (async () => {
+      try {
+        const ok = await isMergeWithinCapacity(myId, targetId);
+        if (runId !== mergeCheckIdRef.current) return;
+        if (ok) {
+          setMergeCapacity({ status: 'ok', message: null });
+        } else {
+          setMergeCapacity({
+            status: 'blocked',
+            message: `מיזוג זה ייצור פרופיל משותף עם יותר מ-${MAX_GROUP_MEMBERS} משתמשים. המקסימום הוא ${MAX_GROUP_MEMBERS}.`,
+          });
+        }
+      } catch {
+        if (runId !== mergeCheckIdRef.current) return;
+        // If we can't verify right now, allow the user to proceed; server-side flow will still validate.
+        setMergeCapacity({ status: 'ok', message: null });
+      }
+    })();
+  };
+
+  const sendMergeInviteToOwner = async () => {
+    const myId = String((user as any)?.id || '').trim();
+    const targetId = String((owner as any)?.id || '').trim();
+    if (!myId) {
+      Alert.alert('חיבור נדרש', 'כדי לשלוח בקשה למיזוג פרופילים צריך להתחבר.');
+      return;
+    }
+    if (!targetId) return;
+    if (myId === targetId) {
+      Alert.alert('שגיאה', 'לא ניתן לשלוח בקשה לעצמך.');
+      return;
+    }
+    if (hasPendingMergeInvite) {
+      Alert.alert('כבר שלחת', 'כבר קיימת בקשת מיזוג בהמתנה עבור משתמש זה.');
+      return;
+    }
+
+    try {
+      setMergeInviteLoading(true);
+
+      // Capacity check (max shared profile size).
+      try {
+        const ok = await isMergeWithinCapacity(myId, targetId);
+        if (!ok) {
+          Alert.alert(
+            'לא ניתן למזג',
+            `מיזוג זה ייצור פרופיל משותף עם יותר מ-${MAX_GROUP_MEMBERS} משתמשים. המקסימום הוא ${MAX_GROUP_MEMBERS}.`
+          );
+          setMergeInviteLoading(false);
+          return;
+        }
+      } catch {
+        // ignore; approval flow will validate too
+      }
+
+      // Block if both users are already associated with an apartment (owner or partner).
+      // Here, the apartment owner is definitely linked; we only need to detect if I'm linked too.
+      try {
+        const [meOwned, mePartner, ownerOwned, ownerPartner] = await Promise.all([
+          supabase.from('apartments').select('id').eq('owner_id', myId).limit(1),
+          supabase.from('apartments').select('id').contains('partner_ids', [myId] as any).limit(1),
+          supabase.from('apartments').select('id').eq('owner_id', targetId).limit(1),
+          supabase.from('apartments').select('id').contains('partner_ids', [targetId] as any).limit(1),
+        ]);
+        const isMeLinked = ((meOwned.data || []).length + (mePartner.data || []).length) > 0;
+        const isOwnerLinked = ((ownerOwned.data || []).length + (ownerPartner.data || []).length) > 0;
+        if (isMeLinked && isOwnerLinked) {
+          showMergeBlockedAlert();
+          setMergeInviteLoading(false);
+          return;
+        }
+      } catch {
+        // ignore; fallback to server-side validation
+      }
+
+      // Determine ACTIVE group ids for both sides.
+      // Key rule: if the target is already in an ACTIVE shared profile and I'm not in any,
+      // we should send the invite to THEIR group so they can approve and add me in.
+      const [
+        { data: myActiveMembership },
+        { data: targetActiveMembership },
+        { data: createdByMeGroup, error: gErr },
+      ] = await Promise.all([
+        supabase
+          .from('profile_group_members')
+          .select('group_id')
+          .eq('user_id', myId)
+          .eq('status', 'ACTIVE')
+          .maybeSingle(),
+        supabase
+          .from('profile_group_members')
+          .select('group_id')
+          .eq('user_id', targetId)
+          .eq('status', 'ACTIVE')
+          .maybeSingle(),
+        supabase
+          .from('profile_groups')
+          .select('*')
+          .eq('created_by', myId)
+          .in('status', ['PENDING', 'ACTIVE'])
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+      ]);
+      if (gErr) throw gErr;
+
+      const myActiveGroupId = (myActiveMembership as any)?.group_id as string | undefined;
+      const targetActiveGroupId = (targetActiveMembership as any)?.group_id as string | undefined;
+
+      let groupId: string | undefined;
+      if (myActiveGroupId) {
+        groupId = myActiveGroupId;
+      } else if (targetActiveGroupId) {
+        groupId = targetActiveGroupId;
+      } else {
+        groupId = (createdByMeGroup as any)?.id as string | undefined;
+      }
+
+      // Create group if none found
+      if (!groupId) {
+        let createdId: string | undefined;
+        try {
+          const { data: rpcGroup, error: rpcErr } = await supabase.rpc('create_profile_group_self', {
+            p_name: 'שותפים',
+            p_status: 'ACTIVE',
+          });
+          if (!rpcErr) {
+            createdId = (rpcGroup as any)?.id || (rpcGroup as any)?.group_id || (rpcGroup as any);
+          }
+        } catch {}
+
+        if (!createdId) {
+          const { data: newGroup, error: cErr } = await supabase
+            .from('profile_groups')
+            .insert({
+              created_by: myId,
+              name: 'שותפים',
+              status: 'ACTIVE',
+            })
+            .select('*')
+            .single();
+          if (cErr) throw cErr;
+          createdId = (newGroup as any)?.id;
+        }
+        groupId = createdId;
+      }
+
+      // If we reused a group I created that is still PENDING, activate it now
+      try {
+        if (
+          (createdByMeGroup as any)?.id &&
+          (createdByMeGroup as any)?.status &&
+          String((createdByMeGroup as any).status).toUpperCase() !== 'ACTIVE'
+        ) {
+          await supabase.from('profile_groups').update({ status: 'ACTIVE' }).eq('id', (createdByMeGroup as any).id);
+        }
+      } catch {}
+
+      // Ensure I (the inviter) am ACTIVE in this group before inviting anyone
+      // BUT: if we're inviting into the target's existing group (I'm solo), we intentionally
+      // do NOT add myself yet — they'll approve, and the approval flow will add/merge correctly.
+      if (!targetActiveGroupId || groupId !== targetActiveGroupId) {
+        try {
+          const { error: rpcErr } = await supabase.rpc('add_self_to_group', { p_group_id: groupId });
+          if (rpcErr) {
+            const insertMe = await supabase
+              .from('profile_group_members')
+              .insert([{ group_id: groupId, user_id: myId, status: 'ACTIVE' } as any], {
+                onConflict: 'group_id,user_id',
+                ignoreDuplicates: true,
+              } as any);
+            if ((insertMe as any)?.error || (insertMe as any)?.status === 409) {
+              await supabase
+                .from('profile_group_members')
+                .update({ status: 'ACTIVE' })
+                .eq('group_id', groupId as string)
+                .eq('user_id', myId);
+            }
+          }
+        } catch {
+          // ignore; worst case the invite still gets created and approver will join
+        }
+      }
+
+      // Prevent duplicate pending invite for same user in same group
+      const { data: pendingInvite } = await supabase
+        .from('profile_group_invites')
+        .select('id,status')
+        .eq('group_id', groupId)
+        .eq('invitee_id', targetId)
+        .eq('status', 'PENDING')
+        .maybeSingle();
+      if (pendingInvite?.id) {
+        Alert.alert('כבר שלחת', 'כבר קיימת בקשה בהמתנה עבור המשתמש הזה.');
+        setHasPendingMergeInvite(true);
+        return;
+      }
+
+      const { error: iErr } = await supabase.from('profile_group_invites').insert({
+        group_id: groupId,
+        inviter_id: myId,
+        invitee_id: targetId,
+      });
+      if (iErr) throw iErr;
+
+      Alert.alert('נשלח', 'הבקשה נשלחה.');
+      setHasPendingMergeInvite(true);
+    } catch (e: any) {
+      // eslint-disable-next-line no-console
+      console.error('send merge invite failed', e);
+      Alert.alert('שגיאה', e?.message || 'לא ניתן לשלוח את הבקשה כעת');
+    } finally {
+      setMergeInviteLoading(false);
     }
   };
 
@@ -2303,9 +2612,7 @@ export default function ApartmentDetailsScreen() {
                 style={styles.availabilityBtn}
                 activeOpacity={0.9}
                 onPress={() => {
-                  const targetId = String((owner as any)?.id || '').trim();
-                  if (!targetId) return;
-                  openUserProfile(targetId);
+                  openMergeConfirm();
                 }}
                 disabled={!owner?.id}
               >
@@ -2357,6 +2664,117 @@ export default function ApartmentDetailsScreen() {
           }}
           bottomOffset={ctaHeight + 14}
         />
+      ) : null}
+
+      {/* Merge profiles confirmation popup (reuses KeyFabPanel animation) */}
+      {!isOwner && !isApartmentLandlordOwnerRole ? (
+        <KeyFabPanel
+          isOpen={isMergeConfirmOpen}
+          onClose={() => {
+            setIsMergeConfirmOpen(false);
+            mergeCheckIdRef.current += 1;
+            setMergeCapacity({ status: 'idle', message: null });
+          }}
+          title="מיזוג פרופילים"
+          subtitle=""
+          anchor="center"
+          topOffset={insets.top + 24}
+          bottomOffset={insets.bottom + 24}
+          openedWidth={mergePanelWidth}
+          // Keep a small comfortable inner padding so text doesn't touch edges.
+          panelStyle={{ maxHeight: 520, borderRadius: 22, padding: 16 }}
+        >
+          <View style={styles.mergeConfirmBody}>
+            <Text style={styles.mergeConfirmTitle} numberOfLines={2}>
+              {`לפני ששולחים בקשה ל-${owner?.full_name?.split(' ')?.[0] || 'בעל/ת הדירה'}`}
+            </Text>
+            <View style={styles.mergeConfirmBullets}>
+              <View style={styles.mergeConfirmBulletRow}>
+                <View style={styles.mergeConfirmDot} />
+                <Text style={styles.mergeConfirmText}>
+                  מיזוג יוצר <Text style={styles.mergeConfirmStrong}>פרופיל משותף</Text> אחד.
+                </Text>
+              </View>
+              <View style={styles.mergeConfirmBulletRow}>
+                <View style={styles.mergeConfirmDot} />
+                <Text style={styles.mergeConfirmText}>
+                  הבקשה נשלחת עכשיו, והמיזוג יופעל רק אחרי <Text style={styles.mergeConfirmStrong}>אישור</Text> מהצד השני.
+                </Text>
+              </View>
+              <View style={styles.mergeConfirmBulletRow}>
+                <View style={styles.mergeConfirmDot} />
+                <Text style={styles.mergeConfirmText}>
+                  המקסימום בפרופיל משותף הוא <Text style={styles.mergeConfirmStrong}>{MAX_GROUP_MEMBERS}</Text> משתמשים
+                  {'\n'}
+                  (לדוגמה: <Text style={styles.mergeConfirmStrong}>2+2</Text> זה אפשרי).
+                </Text>
+              </View>
+              <View style={styles.mergeConfirmNote}>
+                <Text style={styles.mergeConfirmNoteText}>
+                  לא ניתן למזג אם לשני הצדדים כבר יש דירה משויכת (כבעלים או כשותפים), או אם המיזוג יחרוג מהמקסימום.
+                </Text>
+              </View>
+              {mergeCapacity.status === 'blocked' ? (
+                <View style={styles.mergeConfirmWarning}>
+                  <Text style={styles.mergeConfirmWarningText}>{mergeCapacity.message || 'לא ניתן למזג כרגע.'}</Text>
+                </View>
+              ) : null}
+            </View>
+
+            <View style={styles.mergeConfirmActions}>
+              <TouchableOpacity
+                style={styles.mergeConfirmCancelBtn}
+                activeOpacity={0.9}
+                onPress={() => {
+                  setIsMergeConfirmOpen(false);
+                  mergeCheckIdRef.current += 1;
+                  setMergeCapacity({ status: 'idle', message: null });
+                }}
+                accessibilityRole="button"
+                accessibilityLabel="ביטול מיזוג"
+              >
+                <Text style={styles.mergeConfirmCancelText}>ביטול</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.mergeConfirmApproveBtn,
+                  (mergeInviteLoading ||
+                    hasPendingMergeInvite ||
+                    mergeCapacity.status === 'checking' ||
+                    mergeCapacity.status === 'blocked')
+                    ? styles.mergeConfirmApproveDisabled
+                    : null,
+                ]}
+                activeOpacity={0.9}
+                disabled={
+                  mergeInviteLoading ||
+                  hasPendingMergeInvite ||
+                  mergeCapacity.status === 'checking' ||
+                  mergeCapacity.status === 'blocked'
+                }
+                onPress={() => {
+                  setIsMergeConfirmOpen(false);
+                  mergeCheckIdRef.current += 1;
+                  setMergeCapacity({ status: 'idle', message: null });
+                  sendMergeInviteToOwner();
+                }}
+                accessibilityRole="button"
+                accessibilityLabel="אישור ושליחת בקשה למיזוג"
+              >
+                <Text style={styles.mergeConfirmApproveText}>
+                  {mergeCapacity.status === 'checking'
+                    ? 'בודק...'
+                    : mergeInviteLoading
+                      ? 'שולח...'
+                      : hasPendingMergeInvite
+                        ? 'כבר נשלחה'
+                        : 'אישור'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyFabPanel>
       ) : null}
 
       {/* Join Requests animated panel (owner only) */}
@@ -4554,6 +4972,117 @@ const styles = StyleSheet.create({
   },
   confirmApproveDestructiveText: {
     color: '#DC2626',
+  },
+  mergeConfirmBody: {
+    paddingTop: 4,
+    paddingBottom: 2,
+    gap: 10,
+  },
+  mergeConfirmTitle: {
+    color: '#111827',
+    fontSize: 16,
+    fontWeight: '900',
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    lineHeight: 22,
+  },
+  mergeConfirmText: {
+    color: '#374151',
+    fontSize: 13,
+    fontWeight: '800',
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    lineHeight: 19,
+  },
+  mergeConfirmStrong: {
+    color: '#111827',
+    fontWeight: '900',
+  },
+  mergeConfirmBullets: {
+    gap: 10,
+  },
+  mergeConfirmBulletRow: {
+    flexDirection: 'row-reverse',
+    alignItems: 'flex-start',
+    gap: 10,
+  },
+  mergeConfirmDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginTop: 6,
+    backgroundColor: 'rgba(22,163,74,0.9)',
+  },
+  mergeConfirmNote: {
+    marginTop: 2,
+    backgroundColor: 'rgba(22,163,74,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(22,163,74,0.20)',
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  mergeConfirmNoteText: {
+    color: '#065F46',
+    fontSize: 12,
+    fontWeight: '800',
+    lineHeight: 18,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
+  mergeConfirmWarning: {
+    backgroundColor: 'rgba(248,113,113,0.10)',
+    borderWidth: 1,
+    borderColor: 'rgba(248,113,113,0.22)',
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  mergeConfirmWarningText: {
+    color: '#991B1B',
+    fontSize: 12,
+    fontWeight: '900',
+    lineHeight: 18,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
+  mergeConfirmActions: {
+    marginTop: 6,
+    flexDirection: 'row',
+    gap: 10,
+  },
+  mergeConfirmCancelBtn: {
+    flex: 1,
+    height: 44,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F3F4F6',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  mergeConfirmCancelText: {
+    color: '#111827',
+    fontSize: 14,
+    fontWeight: '900',
+  },
+  mergeConfirmApproveBtn: {
+    flex: 1,
+    height: 44,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#5e3f2d',
+    borderWidth: 1,
+    borderColor: '#5e3f2d',
+  },
+  mergeConfirmApproveDisabled: {
+    opacity: 0.65,
+  },
+  mergeConfirmApproveText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '900',
   },
   viewerRoot: {
     flex: 1,

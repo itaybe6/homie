@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import type { StoreApi, UseBoundStore } from 'zustand';
 
 type UiState = {
   partnersFiltersOpen: boolean;
@@ -8,7 +9,7 @@ type UiState = {
 
 const STORE_KEY = '__homie_ui_store__';
 
-export const useUiStore: ReturnType<typeof create<UiState>> =
+export const useUiStore: UseBoundStore<StoreApi<UiState>> =
   ((globalThis as any)[STORE_KEY] as any) ||
   (((globalThis as any)[STORE_KEY] = create<UiState>((set) => ({
     partnersFiltersOpen: false,

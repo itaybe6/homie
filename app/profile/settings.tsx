@@ -17,7 +17,25 @@ import {
 import KeyboardAwareScrollView from 'react-native-keyboard-aware-scroll-view/lib/KeyboardAwareScrollView';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { Edit, FileText, LogOut, Trash2, ChevronLeft, MapPin, UserPlus2, X, Home, Plus, User as UserIcon, Mail, Phone, Hash, Calendar } from 'lucide-react-native';
+import {
+  Edit,
+  FileText,
+  LogOut,
+  Trash2,
+  ChevronLeft,
+  MapPin,
+  UserPlus2,
+  X,
+  Home,
+  Plus,
+  User as UserIcon,
+  Mail,
+  Phone,
+  Hash,
+  Calendar,
+  Camera,
+  Image as ImageIcon,
+} from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useAuthStore } from '@/stores/authStore';
 import { authService } from '@/lib/auth';
@@ -36,6 +54,7 @@ export default function ProfileSettingsScreen() {
   const { user, setUser } = useAuthStore();
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [profile, setProfile] = useState<User | null>(null);
   const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
   const [hasSharedProfiles, setHasSharedProfiles] = useState(false);
@@ -649,21 +668,6 @@ export default function ProfileSettingsScreen() {
   const handleDeleteProfile = async () => {
     if (!user) return;
     try {
-      if (Platform.OS === 'web') {
-        const confirmed = typeof confirm === 'function'
-          ? confirm('האם אתה בטוח/ה שברצונך למחוק את הפרופיל? פעולה זו אינה ניתנת לשחזור.')
-          : true;
-        if (!confirmed) return;
-      } else {
-        const shouldProceed = await new Promise<boolean>((resolve) => {
-          Alert.alert('מחיקת פרופיל', 'האם אתה בטוח/ה שברצונך למחוק את הפרופיל? פעולה זו אינה ניתנת לשחזור.', [
-            { text: 'ביטול', style: 'cancel', onPress: () => resolve(false) },
-            { text: 'מחק', style: 'destructive', onPress: () => resolve(true) },
-          ]);
-        });
-        if (!shouldProceed) return;
-      }
-
       setIsDeleting(true);
       const { error: deleteError } = await supabase.rpc('delete_my_account');
       if (deleteError) {
@@ -809,7 +813,7 @@ export default function ProfileSettingsScreen() {
         <View style={styles.groupCard}>
           <TouchableOpacity
             style={styles.groupItem}
-            onPress={isDeleting ? undefined : handleDeleteProfile}
+            onPress={isDeleting ? undefined : () => setShowDeleteConfirm(true)}
             activeOpacity={0.9}
           >
             <View style={[styles.itemIcon, styles.dangerIcon]}>
@@ -1491,6 +1495,44 @@ export default function ProfileSettingsScreen() {
         </Modal>
       )}
 
+      {/* Confirm account deletion (in-app confirm; custom Hebrew buttons on web + native) */}
+      {showDeleteConfirm && (
+        <Modal visible transparent animationType="fade" onRequestClose={() => setShowDeleteConfirm(false)}>
+          <View style={styles.overlay}>
+            <View style={[styles.sheet, { maxHeight: undefined }]}>
+              <View style={[styles.sheetHeader, { paddingVertical: 8 }]}>
+                <Text style={styles.sheetTitle}>מחיקת חשבון</Text>
+              </View>
+              <Text style={[styles.sharedEmptyText, { textAlign: 'right', marginTop: 6 }]}>
+                האם אתה בטוח שאתה רוצה למחוק את החשבון? פעולה זו אינה ניתנת לשחזור.
+              </Text>
+
+              <View style={[styles.editActionsRow, { marginTop: 14, marginBottom: 0 }]}>
+                <TouchableOpacity
+                  style={styles.clearBtn}
+                  onPress={() => setShowDeleteConfirm(false)}
+                  disabled={isDeleting}
+                  activeOpacity={0.9}
+                >
+                  <Text style={styles.clearText}>ביטול</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.applyBtn, styles.dangerApplyBtn, isDeleting && { opacity: 0.75 }]}
+                  onPress={async () => {
+                    setShowDeleteConfirm(false);
+                    await handleDeleteProfile();
+                  }}
+                  disabled={isDeleting}
+                  activeOpacity={0.9}
+                >
+                  <Text style={styles.applyText}>אישור</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+      )}
+
       {/* Shared profiles modal */}
       {showSharedModal && (
         <Modal visible transparent animationType="fade" onRequestClose={() => setShowSharedModal(false)}>
@@ -1610,6 +1652,45 @@ export default function ProfileSettingsScreen() {
                 keyboardShouldPersistTaps="handled"
               >
                 <View style={styles.editCard}>
+                <View style={styles.editAvatarRow}>
+                  <View style={styles.editAvatarTexts}>
+                    <View style={styles.labelRow}>
+                      <ImageIcon size={16} color={ICON_COLOR} />
+                      <Text style={styles.fieldLabel}>תמונת פרופיל</Text>
+                    </View>
+                    <Text style={styles.editAvatarHint} numberOfLines={2}>
+                      לחצו על התמונה כדי להחליף
+                    </Text>
+                  </View>
+
+                  <TouchableOpacity
+                    style={[styles.editAvatarPressable, (editSaving || isUploadingAvatar) ? { opacity: 0.7 } : null]}
+                    onPress={pickAndUploadAvatar}
+                    disabled={editSaving || isUploadingAvatar}
+                    activeOpacity={0.9}
+                    accessibilityRole="button"
+                    accessibilityLabel="עריכת תמונת פרופיל"
+                  >
+                    <View style={styles.editAvatarWrap}>
+                      <Image
+                        source={{
+                          uri:
+                            profile?.avatar_url ||
+                            'https://cdn-icons-png.flaticon.com/512/847/847969.png',
+                        }}
+                        style={styles.editAvatarImg}
+                      />
+                      <View style={styles.editAvatarBadge}>
+                        {isUploadingAvatar ? (
+                          <ActivityIndicator size="small" color="#FFFFFF" />
+                        ) : (
+                          <Camera size={16} color="#FFFFFF" />
+                        )}
+                      </View>
+                    </View>
+                  </TouchableOpacity>
+                </View>
+
                 <View style={styles.fieldGroup}>
                   <View style={styles.labelRow}>
                     <UserIcon size={16} color={ICON_COLOR} />
@@ -1933,6 +2014,58 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.04,
     shadowRadius: 8,
     shadowOffset: { width: 0, height: 3 },
+  },
+  editAvatarRow: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 14,
+    paddingBottom: 6,
+  },
+  editAvatarTexts: {
+    flex: 1,
+    gap: 4,
+    alignItems: 'flex-end',
+  },
+  editAvatarHint: {
+    color: '#6B7280',
+    fontSize: 12,
+    textAlign: 'right',
+  },
+  editAvatarPressable: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  editAvatarWrap: {
+    position: 'relative',
+    padding: 2,
+    borderRadius: 999,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 2,
+    borderColor: '#D1D5DB',
+  },
+  editAvatarImg: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: '#F3F4F6',
+  },
+  editAvatarBadge: {
+    position: 'absolute',
+    left: -2,
+    bottom: -2,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: '#111827',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#FFFFFF',
+    shadowColor: '#000000',
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
   },
   fieldGroup: {
     gap: 8,

@@ -1534,19 +1534,31 @@ export default function ProfileScreen() {
                     <Eye size={18} color={colors.primary} />
                   </TouchableOpacity>
                 ) : null}
-                <TouchableOpacity
-                  style={[styles.surveyCTACtaPill, surveyResponse ? styles.surveyCTACtaPillBrown : null]}
-                  activeOpacity={0.9}
-                  onPress={() => {
-                    router.push({ pathname: '/(tabs)/onboarding/survey', params: { mode: 'edit' } } as any);
-                  }}
-                  accessibilityRole="button"
-                  accessibilityLabel={surveyResponse ? 'עריכת שאלון' : 'מילוי שאלון'}
-                >
-                  <Text style={[styles.surveyCTACtaPillText, surveyResponse ? styles.surveyCTACtaPillTextBrown : null]}>
-                    {surveyResponse ? 'עריכה' : 'מילוי'}
-                  </Text>
-                </TouchableOpacity>
+                {surveyResponse ? (
+                  <TouchableOpacity
+                    style={styles.surveyEyeBtn}
+                    activeOpacity={0.9}
+                    onPress={() => {
+                      router.push({ pathname: '/(tabs)/onboarding/survey', params: { mode: 'edit' } } as any);
+                    }}
+                    accessibilityRole="button"
+                    accessibilityLabel="עריכת שאלון"
+                  >
+                    <Edit size={18} color={colors.primary} />
+                  </TouchableOpacity>
+                ) : (
+                  <TouchableOpacity
+                    style={styles.surveyCTACtaPill}
+                    activeOpacity={0.9}
+                    onPress={() => {
+                      router.push({ pathname: '/(tabs)/onboarding/survey', params: { mode: 'edit' } } as any);
+                    }}
+                    accessibilityRole="button"
+                    accessibilityLabel="מילוי שאלון"
+                  >
+                    <Text style={styles.surveyCTACtaPillText}>מילוי</Text>
+                  </TouchableOpacity>
+                )}
               </View>
             </View>
           </View>

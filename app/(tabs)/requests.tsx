@@ -18,7 +18,7 @@ import {
   Pressable,
 } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
-import { Bell, Inbox, Filter, Home, Users, UserPlus2, UserPlus, Sparkles, MessageCircle, X } from 'lucide-react-native';
+import { Bell, Inbox, Filter, Home, Users, UserPlus2, UserPlus, Sparkles, MessageCircle, Check, X } from 'lucide-react-native';
 import WhatsAppSvg from '@/components/icons/WhatsAppSvg';
 import { FabButton } from '@/components/FabButton';
 import { supabase } from '@/lib/supabase';
@@ -86,6 +86,8 @@ export default function RequestsScreen() {
   const DEFAULT_AVATAR = 'https://cdn-icons-png.flaticon.com/512/847/847969.png';
   const APT_PLACEHOLDER = 'https://images.pexels.com/photos/1457842/pexels-photo-1457842.jpeg';
   // Use a vector icon to ensure it always renders (remote PNGs can fail/tint inconsistently)
+  const UI_PRIMARY = '#6D4C41';
+  const STICKY_FILTERS_H = 58;
 
   const mapMatchStatus = (status: string | null | undefined): UnifiedItem['status'] => {
     const raw = String(status || '').trim();
@@ -2251,7 +2253,40 @@ export default function RequestsScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={{ paddingTop: insets.top + 60, flex: 1 }}>
+      {/* Sticky filters row (header buttons are handled by the global top bar) */}
+      <View style={[styles.stickyFilters, { top: insets.top + 60, height: STICKY_FILTERS_H }]}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={{ direction: 'rtl' as any }}
+          contentContainerStyle={styles.segmentScrollContent}
+        >
+          {/* Keep "הכל" right-most in RTL */}
+          {[
+            { id: 'APARTMENTS' as const, label: 'דירות', Icon: Home },
+            { id: 'MERGE' as const, label: 'מיזוג פרופילים', Icon: Users },
+            { id: 'MATCHES' as const, label: 'מאצ׳ים', Icon: Sparkles },
+            { id: 'ALL' as const, label: 'הכל', Icon: Bell },
+          ].map(({ id, label, Icon }) => {
+            const active = inboxFilter === id;
+            return (
+              <TouchableOpacity
+                key={id}
+                activeOpacity={0.85}
+                onPress={() => setInboxFilter(id)}
+                style={[styles.segmentBtn, active ? styles.segmentBtnActive : null]}
+              >
+                <View style={styles.segmentBtnInner}>
+                  <Icon size={14} color={active ? '#FFFFFF' : '#6B7280'} />
+                  <Text style={[styles.segmentText, active ? styles.segmentTextActive : null]}>{label}</Text>
+                </View>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+      </View>
+
+      <View style={{ paddingTop: insets.top + 60 + STICKY_FILTERS_H, flex: 1 }}>
         <View style={styles.pageBody}>
           {(loading || notifLoading) ? (
             <View style={styles.centerContainer}>
@@ -2273,37 +2308,6 @@ export default function RequestsScreen() {
                 { flexGrow: 1 },
                 inboxRows.length === 0 ? { paddingTop: 8 } : null,
               ]}
-              ListHeaderComponent={
-                <View style={styles.filtersWrap}>
-                  <ScrollView
-                    horizontal
-                    showsHorizontalScrollIndicator={false}
-                    style={{ direction: 'rtl' as any }}
-                    contentContainerStyle={styles.segmentScrollContent}
-                  >
-                    {/* Keep "הכל" right-most in RTL */}
-                    {[
-                      { id: 'APARTMENTS' as const, label: 'דירות', Icon: Home },
-                      { id: 'MERGE' as const, label: 'מיזוג פרופילים', Icon: Users },
-                      { id: 'MATCHES' as const, label: 'מאצ׳ים', Icon: Sparkles },
-                      { id: 'ALL' as const, label: 'הכל', Icon: Bell },
-                    ].map(({ id, label, Icon }) => {
-                      const active = inboxFilter === id;
-                      return (
-                        <TouchableOpacity
-                          key={id}
-                          activeOpacity={0.85}
-                          onPress={() => setInboxFilter(id)}
-                          style={[styles.segmentBtn, active ? styles.segmentBtnActive : null]}
-                        >
-                          <Text style={[styles.segmentText, active ? styles.segmentTextActive : null]}>{label}</Text>
-                          <Icon size={14} color={active ? '#5e3f2d' : '#6B7280'} />
-                        </TouchableOpacity>
-                      );
-                    })}
-                  </ScrollView>
-                </View>
-              }
               ListEmptyComponent={
                 <View style={styles.emptyState}>
                   <View style={styles.emptyIconWrap}>
@@ -2316,7 +2320,7 @@ export default function RequestsScreen() {
               renderSectionHeader={({ section }) => (
                 <Text style={styles.igSectionHeader}>{(section as any).title}</Text>
               )}
-              ItemSeparatorComponent={() => <View style={styles.igSeparator} />}
+              ItemSeparatorComponent={() => <View style={styles.cardGap} />}
               renderItem={({ item: row }: any) => {
                 const createdAt = row.created_at as string;
                 const timeLabel = timeAgoHe(createdAt);
@@ -2330,64 +2334,85 @@ export default function RequestsScreen() {
                   const isApproved = isApprovedNotification(n);
                   const canOpenApartmentPanel = !!aptId;
 
+                  const badge = (() => {
+                    if (isApproved) return { bg: '#22C55E', Icon: MessageCircle };
+                    if (isPartnerRequestNotification(n)) return { bg: '#3B82F6', Icon: UserPlus };
+                    if (isMatchNotification(n)) return { bg: '#A855F7', Icon: Sparkles };
+                    if (isMergeProfileNotification(n)) return { bg: UI_PRIMARY, Icon: Users };
+                    if (isApartmentNotification(n)) return { bg: '#64748B', Icon: Home };
+                    return { bg: '#9CA3AF', Icon: Bell };
+                  })();
+
+                  const descParts = String(descText || '').split('\n').map((s) => s.trim()).filter(Boolean);
+                  const descPrimary = descParts[0] || '';
+                  const descSecondary = descParts.slice(1).join(' ');
+
                   return (
                     <Pressable
-                      style={styles.igRow}
+                      style={styles.cardRow}
                       onPress={() => {
                         if (!canOpenApartmentPanel) return;
                         openApartmentPanel(aptId as string);
                       }}
                     >
-                      <TouchableOpacity
-                        activeOpacity={0.85}
-                        style={styles.igAvatarWrap}
-                        onPress={() => {
-                          if (sender?.id) router.push({ pathname: '/user/[id]', params: { id: sender.id } } as any);
-                        }}
-                      >
-                        <Image source={{ uri: sender?.avatar_url || DEFAULT_AVATAR }} style={styles.igAvatarImg} />
-                      </TouchableOpacity>
+                      <View style={styles.cardTop}>
+                        <TouchableOpacity
+                          activeOpacity={0.85}
+                          style={styles.inboxAvatarWrap}
+                          onPress={() => {
+                            if (sender?.id) router.push({ pathname: '/user/[id]', params: { id: sender.id } } as any);
+                          }}
+                        >
+                          <Image source={{ uri: sender?.avatar_url || DEFAULT_AVATAR }} style={styles.inboxAvatarImg} />
+                          {badge.bg !== '#3B82F6' && badge.bg !== '#22C55E' ? (
+                            <View style={[styles.avatarBadge, { backgroundColor: badge.bg }]}>
+                              <badge.Icon size={12} color="#FFFFFF" strokeWidth={2.6} />
+                            </View>
+                          ) : null}
+                        </TouchableOpacity>
 
-                      <View style={styles.igBody}>
-                        <Text style={styles.igMessage} numberOfLines={2}>
-                          <Text style={styles.igTitleStrong}>{n.title}</Text>
-                          {!!descText ? <Text>{` ${descText}`}</Text> : null}
-                        </Text>
-                        <Text style={styles.igTimeBelow}>{timeLabel}</Text>
+                        <View style={styles.cardBody}>
+                          <Text style={styles.cardTitleLine}>
+                            <Text style={styles.cardTitleStrong}>{n.title}</Text>
+                            {!!descPrimary ? <Text>{` ${descPrimary}`}</Text> : null}
+                          </Text>
+                          {!!descSecondary ? <Text style={styles.cardSubtitle}>{descSecondary}</Text> : null}
+                        </View>
                       </View>
 
-                      {canApproveInvite ? (
-                        <View style={styles.igActions}>
-                          <TouchableOpacity
-                            style={[styles.igBtnPrimary, notifActionLoadingId === n.id ? { opacity: 0.7 } : null]}
-                            disabled={notifActionLoadingId === n.id}
-                            activeOpacity={0.85}
-                            onPress={() => handleApproveInviteFromNotification(n, aptId as string)}
-                          >
-                            <Text style={styles.igBtnPrimaryText}>{notifActionLoadingId === n.id ? '...' : 'אישור'}</Text>
-                          </TouchableOpacity>
+                      <View style={styles.cardFooter}>
+                        <Text style={styles.inboxCardTime}>{timeLabel}</Text>
+                        <View style={styles.cardFooterActions}>
+                          {canApproveInvite ? (
+                            <TouchableOpacity
+                              style={[styles.btnPrimary, notifActionLoadingId === n.id ? { opacity: 0.7 } : null]}
+                              disabled={notifActionLoadingId === n.id}
+                              activeOpacity={0.85}
+                              onPress={() => handleApproveInviteFromNotification(n, aptId as string)}
+                            >
+                              <Text style={styles.btnPrimaryText}>{notifActionLoadingId === n.id ? '...' : 'אישור'}</Text>
+                            </TouchableOpacity>
+                          ) : isApproved && sender?.phone ? (
+                            <TouchableOpacity
+                              style={styles.whatsappBtn}
+                              activeOpacity={0.85}
+                              accessibilityLabel="וואטסאפ"
+                              onPress={() => {
+                                const firstName = (sender?.full_name || '').split(' ')[0] || '';
+                                openWhatsApp(
+                                  sender.phone as string,
+                                  `היי${firstName ? ` ${firstName}` : ''}, תודה שאישרת את הבקשה שלי ב-Homie! אשמח לדבר ולתאם פגישה 🙂`
+                                );
+                              }}
+                            >
+                              <View style={styles.inboxWhatsappIconCircle}>
+                                <WhatsAppSvg size={14} color="#25D366" />
+                              </View>
+                              <Text style={styles.inboxWhatsappBtnText}>וואטסאפ</Text>
+                            </TouchableOpacity>
+                          ) : null}
                         </View>
-                      ) : isApproved && sender?.phone ? (
-                        <View style={styles.igActions}>
-                          <TouchableOpacity
-                            style={styles.igWhatsappBtn}
-                            activeOpacity={0.85}
-                            accessibilityLabel="וואטסאפ"
-                            onPress={() => {
-                              const firstName = (sender?.full_name || '').split(' ')[0] || '';
-                              openWhatsApp(
-                                sender.phone as string,
-                                `היי${firstName ? ` ${firstName}` : ''}, תודה שאישרת את הבקשה שלי ב-Homie! אשמח לדבר ולתאם פגישה 🙂`
-                              );
-                            }}
-                          >
-                            <View style={styles.igWhatsappIconCircle}>
-                              <WhatsAppSvg size={14} color="#25D366" />
-                            </View>
-                            <Text style={styles.igWhatsappBtnText}>וואטסאפ</Text>
-                          </TouchableOpacity>
-                        </View>
-                      ) : null}
+                      </View>
                     </Pressable>
                   );
                 }
@@ -2428,116 +2453,139 @@ export default function RequestsScreen() {
                     ? groupMembers.map((m) => (m as any)?.full_name).filter(Boolean).join(' • ')
                     : ((otherUser as any)?.full_name || '');
 
+                const badge = (() => {
+                  if (r.kind === 'APT' || r.kind === 'APT_INVITE') return { bg: '#64748B', Icon: Home };
+                  if (r.kind === 'GROUP') return { bg: UI_PRIMARY, Icon: Users };
+                  // MATCH
+                  if (r.status === 'APPROVED') return { bg: '#22C55E', Icon: Check };
+                  if (r.status === 'REJECTED') return { bg: '#EF4444', Icon: X };
+                  return { bg: '#3B82F6', Icon: UserPlus };
+                })();
+
+                const subParts = String(subtitle || '').split('\n').map((s) => s.trim()).filter(Boolean);
+                const subPrimary = subParts[0] || '';
+                const subSecondary = subParts.slice(1).join(' ');
+
                 return (
                   <Pressable
-                    style={styles.igRow}
+                    style={styles.cardRow}
                     onPress={() => {
                       if (!canOpenApartmentPanel) return;
                       openApartmentPanel(r.apartment_id as string);
                     }}
                   >
-                    <TouchableOpacity
-                      activeOpacity={0.85}
-                      style={styles.igAvatarWrap}
-                      onPress={() => {
-                        const id = r.sender_id;
-                        if (id) router.push({ pathname: '/user/[id]', params: { id } } as any);
-                      }}
-                    >
-                      <Image source={{ uri: (otherUser as any)?.avatar_url || DEFAULT_AVATAR }} style={styles.igAvatarImg} />
-                    </TouchableOpacity>
+                    <View style={styles.cardTop}>
+                      <TouchableOpacity
+                        activeOpacity={0.85}
+                        style={styles.inboxAvatarWrap}
+                        onPress={() => {
+                          const id = r.sender_id;
+                          if (id) router.push({ pathname: '/user/[id]', params: { id } } as any);
+                        }}
+                      >
+                        <Image source={{ uri: (otherUser as any)?.avatar_url || DEFAULT_AVATAR }} style={styles.inboxAvatarImg} />
+                        {badge.bg !== '#3B82F6' && badge.bg !== '#22C55E' ? (
+                          <View style={[styles.avatarBadge, { backgroundColor: badge.bg }]}>
+                            <badge.Icon size={12} color="#FFFFFF" strokeWidth={2.6} />
+                          </View>
+                        ) : null}
+                      </TouchableOpacity>
 
-                    <View style={styles.igBody}>
-                      <Text style={styles.igMessage} numberOfLines={r.kind === 'MATCH' ? 3 : 2}>
-                        <Text style={styles.igTitleStrong}>{title}</Text>
-                        {!!subtitle ? <Text>{` ${subtitle}`}</Text> : null}
-                      </Text>
-                      <Text style={styles.igTimeBelow}>{timeLabel}</Text>
+                      <View style={styles.cardBody}>
+                        <Text style={styles.cardTitleLine}>
+                          <Text style={styles.cardTitleStrong}>{title}</Text>
+                          {!!subPrimary ? <Text>{` ${subPrimary}`}</Text> : null}
+                        </Text>
+                        {!!subSecondary ? <Text style={styles.cardSubtitle}>{subSecondary}</Text> : null}
+                      </View>
                     </View>
 
-                    <View style={styles.igActions}>
-                      {r.kind === 'MATCH' ? (
-                        r.status === 'PENDING' ? (
-                          <View style={styles.igActionsRow}>
+                    <View style={styles.cardFooter}>
+                      <Text style={styles.inboxCardTime}>{timeLabel}</Text>
+                      <View style={styles.cardFooterActions}>
+                        {r.kind === 'MATCH' ? (
+                          r.status === 'PENDING' ? (
+                            <View style={styles.footerActionsRow}>
+                              <TouchableOpacity
+                                style={[styles.btnPrimary, actionId === r.id ? { opacity: 0.7 } : null]}
+                                disabled={actionId === r.id}
+                                activeOpacity={0.85}
+                                onPress={() => approveIncomingMatch(r)}
+                              >
+                                <Text style={styles.btnPrimaryText}>אישור</Text>
+                              </TouchableOpacity>
+                              <TouchableOpacity
+                                style={[styles.btnSecondary, actionId === r.id ? { opacity: 0.7 } : null]}
+                                disabled={actionId === r.id}
+                                activeOpacity={0.85}
+                                onPress={() => rejectIncomingMatch(r)}
+                              >
+                                <Text style={styles.btnSecondaryText}>דחייה</Text>
+                              </TouchableOpacity>
+                            </View>
+                          ) : (
+                            <Text style={styles.inboxStatusChipText}>
+                              {r.status === 'APPROVED' ? 'אושרה' : r.status === 'REJECTED' ? 'נדחתה' : 'עודכן'}
+                            </Text>
+                          )
+                        ) : r.status === 'PENDING' ? (
+                          <View style={styles.footerActionsRow}>
                             <TouchableOpacity
-                              style={[styles.igBtnPrimary, actionId === r.id ? { opacity: 0.7 } : null]}
+                              style={[styles.btnPrimary, actionId === r.id ? { opacity: 0.7 } : null]}
                               disabled={actionId === r.id}
                               activeOpacity={0.85}
-                              onPress={() => approveIncomingMatch(r)}
-                            >
-                              <Text style={styles.igBtnPrimaryText}>אישור</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity
-                              style={[styles.igBtnSecondary, actionId === r.id ? { opacity: 0.7 } : null]}
-                              disabled={actionId === r.id}
-                              activeOpacity={0.85}
-                              onPress={() => rejectIncomingMatch(r)}
-                            >
-                              <Text style={styles.igBtnSecondaryText}>דחייה</Text>
-                            </TouchableOpacity>
-                          </View>
-                        ) : (
-                          <Text style={styles.igStatusText}>
-                            {r.status === 'APPROVED' ? 'אושרה' : r.status === 'REJECTED' ? 'נדחתה' : 'עודכן'}
-                          </Text>
-                        )
-                      ) : r.status === 'PENDING' ? (
-                        <View style={styles.igActionsRow}>
-                          <TouchableOpacity
-                            style={[styles.igBtnPrimary, actionId === r.id ? { opacity: 0.7 } : null]}
-                            disabled={actionId === r.id}
-                            activeOpacity={0.85}
-                            onPress={() => {
-                              if (r.kind === 'APT' || r.kind === 'APT_INVITE') return approveIncoming(r);
-                              if (r.kind === 'MATCH') return approveIncomingMatch(r);
-                              if (r.kind === 'GROUP') return approveIncomingGroup(r);
-                            }}
-                          >
-                            <Text style={styles.igBtnPrimaryText}>אישור</Text>
-                          </TouchableOpacity>
-                          <TouchableOpacity
-                            style={[styles.igBtnSecondary, actionId === r.id ? { opacity: 0.7 } : null]}
-                            disabled={actionId === r.id}
-                            activeOpacity={0.85}
-                            onPress={() => {
-                              if (r.kind === 'APT' || r.kind === 'APT_INVITE') return rejectIncoming(r);
-                              if (r.kind === 'MATCH') return rejectIncomingMatch(r);
-                              if (r.kind === 'GROUP') return rejectIncomingGroup(r);
-                            }}
-                          >
-                            <Text style={styles.igBtnSecondaryText}>דחייה</Text>
-                          </TouchableOpacity>
-                        </View>
-                      ) : r.status === 'APPROVED' ? (
-                        <View style={styles.igActionsRow}>
-                          {((r.kind === 'APT' || r.kind === 'APT_INVITE') && !!(otherUser as any)?.phone) ? (
-                            <TouchableOpacity
-                              style={styles.igWhatsappBtn}
-                              activeOpacity={0.85}
-                              accessibilityLabel="וואטסאפ"
                               onPress={() => {
-                                const fullName = String((otherUser as any)?.full_name || '').trim();
-                                const firstName = fullName ? fullName.split(' ')[0] : '';
-                                const aptTitle = (apt as any)?.title || '';
-                                const aptCity = (apt as any)?.city || '';
-                                const message =
-                                  `היי${firstName ? ` ${firstName}` : ''}, בקשתך להצטרף לדירה${aptTitle ? `: ${aptTitle}` : ''}${aptCity ? ` (${aptCity})` : ''} אושרה ב-Homie. אשמח לתאם שיחה או צפייה.`;
-                                openWhatsApp(String((otherUser as any).phone), message);
+                                if (r.kind === 'APT' || r.kind === 'APT_INVITE') return approveIncoming(r);
+                                if (r.kind === 'MATCH') return approveIncomingMatch(r);
+                                if (r.kind === 'GROUP') return approveIncomingGroup(r);
                               }}
                             >
-                              <View style={styles.igWhatsappIconCircle}>
-                                <WhatsAppSvg size={14} color="#25D366" />
-                              </View>
-                              <Text style={styles.igWhatsappBtnText}>וואטסאפ</Text>
+                              <Text style={styles.btnPrimaryText}>אישור</Text>
                             </TouchableOpacity>
-                          ) : null}
-                          <Text style={styles.igStatusText}>אושר</Text>
-                        </View>
-                      ) : (
-                        <Text style={styles.igStatusText}>
-                          {r.status === 'REJECTED' ? 'נדחה' : 'עודכן'}
-                        </Text>
-                      )}
+                            <TouchableOpacity
+                              style={[styles.btnSecondary, actionId === r.id ? { opacity: 0.7 } : null]}
+                              disabled={actionId === r.id}
+                              activeOpacity={0.85}
+                              onPress={() => {
+                                if (r.kind === 'APT' || r.kind === 'APT_INVITE') return rejectIncoming(r);
+                                if (r.kind === 'MATCH') return rejectIncomingMatch(r);
+                                if (r.kind === 'GROUP') return rejectIncomingGroup(r);
+                              }}
+                            >
+                              <Text style={styles.btnSecondaryText}>דחייה</Text>
+                            </TouchableOpacity>
+                          </View>
+                        ) : r.status === 'APPROVED' ? (
+                          <View style={styles.footerActionsRow}>
+                            {((r.kind === 'APT' || r.kind === 'APT_INVITE') && !!(otherUser as any)?.phone) ? (
+                              <TouchableOpacity
+                                style={styles.whatsappBtn}
+                                activeOpacity={0.85}
+                                accessibilityLabel="וואטסאפ"
+                                onPress={() => {
+                                  const fullName = String((otherUser as any)?.full_name || '').trim();
+                                  const firstName = fullName ? fullName.split(' ')[0] : '';
+                                  const aptTitle = (apt as any)?.title || '';
+                                  const aptCity = (apt as any)?.city || '';
+                                  const message =
+                                    `היי${firstName ? ` ${firstName}` : ''}, בקשתך להצטרף לדירה${aptTitle ? `: ${aptTitle}` : ''}${aptCity ? ` (${aptCity})` : ''} אושרה ב-Homie. אשמח לתאם שיחה או צפייה.`;
+                                  openWhatsApp(String((otherUser as any).phone), message);
+                                }}
+                              >
+                                <View style={styles.inboxWhatsappIconCircle}>
+                                  <WhatsAppSvg size={14} color="#25D366" />
+                                </View>
+                                <Text style={styles.inboxWhatsappBtnText}>וואטסאפ</Text>
+                              </TouchableOpacity>
+                            ) : null}
+                            <Text style={styles.inboxStatusChipText}>אושר</Text>
+                          </View>
+                        ) : (
+                          <Text style={styles.inboxStatusChipText}>
+                            {r.status === 'REJECTED' ? 'נדחה' : 'עודכן'}
+                          </Text>
+                        )}
+                      </View>
                     </View>
                   </Pressable>
                 );
@@ -2713,26 +2761,31 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     // Keep the entire screen (including the area behind the global top bar) in the same gray.
-    backgroundColor: '#FAFAFA',
+    backgroundColor: '#F9FAFB',
   },
   pageBody: {
     flex: 1,
-    backgroundColor: '#FAFAFA',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
+    backgroundColor: '#F9FAFB',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
     overflow: 'visible',
     paddingTop: 0,
     paddingHorizontal: 0,
   },
-  filtersWrap: {
-    paddingHorizontal: 0,
-    paddingBottom: 4,
-    alignItems: 'flex-end',
+  stickyFilters: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    zIndex: 25,
+    backgroundColor: '#F9FAFB',
+    justifyContent: 'center',
+    borderBottomWidth: 1,
+    borderBottomColor: alpha('#E5E7EB', 0.65),
   },
   segmentScrollContent: {
     paddingHorizontal: 16,
-    paddingTop: 8,
-    paddingBottom: 2,
+    paddingTop: 10,
+    paddingBottom: 4,
     flexDirection: 'row-reverse',
     alignItems: 'center',
     gap: 8 as any,
@@ -2745,11 +2798,8 @@ const styles = StyleSheet.create({
     gap: 8 as any,
   },
   segmentBtn: {
-    flexDirection: 'row-reverse',
-    alignItems: 'center',
-    gap: 8 as any,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
     borderRadius: 999,
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
@@ -2760,9 +2810,19 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     elevation: 1,
   },
+  segmentBtnInner: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 8 as any,
+  },
   segmentBtnActive: {
-    borderColor: 'rgba(94,63,45,0.45)',
-    backgroundColor: 'rgba(94,63,45,0.10)',
+    borderColor: alpha('#6D4C41', 0.28),
+    backgroundColor: '#6D4C41',
+    shadowColor: '#000',
+    shadowOpacity: 0.10,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 3,
   },
   segmentText: {
     color: '#6B7280',
@@ -2770,7 +2830,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   segmentTextActive: {
-    color: '#5e3f2d',
+    color: '#FFFFFF',
   },
   statusChipsRow: {
     marginTop: 8,
@@ -2912,34 +2972,7 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#FAFAFA',
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingTop: 52,
-    paddingBottom: 8,
-  },
-  iconBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
-  },
-  iconBtnPlaceholder: {
-    width: 36,
-    height: 36,
-  },
-  headerTitle: {
-    color: '#0F0F14',
-    fontSize: 18,
-    fontWeight: '800',
+    backgroundColor: '#F9FAFB',
   },
   listContent: {
     flex: 1,
@@ -2963,43 +2996,110 @@ const styles = StyleSheet.create({
   igListContent: {
     paddingTop: 8,
     paddingBottom: 18,
-    backgroundColor: '#FAFAFA',
+    backgroundColor: '#F9FAFB',
+    paddingHorizontal: 16,
   },
   igSectionHeader: {
-    paddingHorizontal: 16,
+    paddingHorizontal: 2,
     paddingTop: 18,
     paddingBottom: 8,
-    color: '#111827',
-    fontSize: 13,
+    color: '#6B7280',
+    fontSize: 12,
     fontWeight: '900',
     textAlign: 'right',
   },
-  igSeparator: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: '#E5E7EB',
-    marginHorizontal: 16,
+  cardGap: {
+    height: 12,
   },
-  igRow: {
-    // Always: avatar on RIGHT, actions on LEFT (Instagram-like in Hebrew UI)
+  cardRow: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 18,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: alpha('#E5E7EB', 0.75),
+    shadowColor: '#000',
+    shadowOpacity: 0.035,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 2,
+  },
+  cardTop: {
     flexDirection: 'row-reverse',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: '#FAFAFA',
+    alignItems: 'flex-start',
+    gap: 12 as any,
   },
-  igAvatarWrap: {
+  inboxAvatarWrap: {
     width: 52,
     height: 52,
     borderRadius: 26,
     overflow: 'hidden',
     backgroundColor: '#F3F4F6',
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderWidth: 2,
+    borderColor: '#FFFFFF',
+    position: 'relative',
   },
-  igAvatarImg: {
+  inboxAvatarImg: {
     width: '100%',
     height: '100%',
     resizeMode: 'cover',
+  },
+  avatarBadge: {
+    position: 'absolute',
+    bottom: -2,
+    right: -2,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#FFFFFF',
+  },
+  cardBody: {
+    flex: 1,
+    alignItems: 'flex-end',
+  },
+  cardTitleLine: {
+    color: '#111827',
+    fontSize: 13,
+    lineHeight: 18,
+    textAlign: 'right',
+    flexShrink: 1,
+    alignSelf: 'stretch',
+  },
+  cardTitleStrong: {
+    fontWeight: '900',
+    color: '#111827',
+  },
+  cardSubtitle: {
+    marginTop: 4,
+    color: '#6B7280',
+    fontSize: 12,
+    lineHeight: 16,
+    textAlign: 'right',
+    alignSelf: 'stretch',
+  },
+  cardFooter: {
+    marginTop: 10,
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12 as any,
+  },
+  inboxCardTime: {
+    color: '#9CA3AF',
+    fontSize: 12,
+    fontWeight: '700',
+    textAlign: 'right',
+  },
+  cardFooterActions: {
+    alignItems: 'flex-start',
+    justifyContent: 'center',
+  },
+  footerActionsRow: {
+    flexDirection: 'row',
+    gap: 8 as any,
+    alignItems: 'center',
   },
   igAvatarGrid: {
     flex: 1,
@@ -3016,44 +3116,7 @@ const styles = StyleSheet.create({
     height: '100%',
     resizeMode: 'cover',
   },
-  igBody: {
-    flex: 1,
-    marginLeft: 12,
-    marginRight: 12,
-    alignItems: 'flex-end',
-  },
-  igMessage: {
-    color: '#111827',
-    fontSize: 13,
-    lineHeight: 18,
-    textAlign: 'right',
-  },
-  igTitleStrong: {
-    fontWeight: '900',
-    color: '#111827',
-  },
-  igTimeInline: {
-    color: '#9CA3AF',
-    fontWeight: '700',
-  },
-  igTimeBelow: {
-    marginTop: 4,
-    color: '#9CA3AF',
-    fontSize: 12,
-    fontWeight: '700',
-    textAlign: 'right',
-  },
-  igActions: {
-    // This column sits on the LEFT (because row-reverse), so keep buttons aligned left.
-    alignItems: 'flex-start',
-    justifyContent: 'center',
-  },
-  igActionsRow: {
-    flexDirection: 'row',
-    gap: 8 as any,
-    alignItems: 'center',
-  },
-  igWhatsappBtn: {
+  whatsappBtn: {
     backgroundColor: '#FFFFFF',
     paddingHorizontal: 12,
     paddingVertical: 8,
@@ -3071,7 +3134,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     elevation: 2,
   },
-  igWhatsappIconCircle: {
+  inboxWhatsappIconCircle: {
     width: 24,
     height: 24,
     borderRadius: 12,
@@ -3081,13 +3144,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  igWhatsappBtnText: {
+  inboxWhatsappBtnText: {
     color: '#25D366',
     fontSize: 12,
     fontWeight: '900',
   },
-  igBtnPrimary: {
-    backgroundColor: '#5e3f2d',
+  btnPrimary: {
+    backgroundColor: '#6D4C41',
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 10,
@@ -3095,12 +3158,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  igBtnPrimaryText: {
+  btnPrimaryText: {
     color: '#FFFFFF',
     fontSize: 12,
     fontWeight: '900',
   },
-  igBtnSecondary: {
+  btnSecondary: {
     backgroundColor: '#E5E7EB',
     paddingHorizontal: 12,
     paddingVertical: 8,
@@ -3109,15 +3172,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  igBtnSecondaryText: {
+  btnSecondaryText: {
     color: '#111827',
     fontSize: 12,
     fontWeight: '900',
   },
-  igStatusText: {
+  inboxStatusChipText: {
     color: '#6B7280',
     fontSize: 11,
-    fontWeight: '800',
+    fontWeight: '900',
+    backgroundColor: '#F3F4F6',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    overflow: 'hidden',
   },
   sectionTitle: {
     color: '#111827',

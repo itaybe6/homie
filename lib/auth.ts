@@ -298,9 +298,44 @@ export const authService = {
   },
 
   async signOut() {
-    // Use global scope to clear cookies on web as well
-    const { error } = await supabase.auth.signOut({ scope: 'global' as any });
-    if (error) throw error;
+    // Use global scope to clear cookies on web as well, but always clear local session too.
+    const isBenignSignOutError = (err: any) => {
+      const msg = String(err?.message || err || '').toLowerCase();
+      if (!msg) return false;
+      return (
+        msg.includes('invalid refresh token') ||
+        msg.includes('refresh token not found') ||
+        msg.includes('access token not found') ||
+        msg.includes('session not found') ||
+        msg.includes('no session') ||
+        msg.includes('missing session') ||
+        msg.includes('not logged in') ||
+        msg.includes('invalid jwt') ||
+        msg.includes('jwt expired') ||
+        msg.includes('token has expired')
+      );
+    };
+
+    let globalError: any = null;
+    try {
+      const { error } = await supabase.auth.signOut({ scope: 'global' as any });
+      if (error) globalError = error;
+    } catch (err) {
+      globalError = err;
+    }
+
+    let localError: any = null;
+    try {
+      await supabase.auth.signOut({ scope: 'local' });
+    } catch (err) {
+      localError = err;
+    }
+
+    if (!localError) return;
+    if (isBenignSignOutError(localError)) return;
+    if (globalError && isBenignSignOutError(globalError)) return;
+
+    throw localError ?? globalError;
   },
 
   async getCurrentUser() {

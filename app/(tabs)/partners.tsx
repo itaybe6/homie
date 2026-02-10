@@ -18,6 +18,7 @@ import {
   useWindowDimensions,
   Platform,
   PanResponder,
+  I18nManager,
 } from 'react-native';
 import Animated, {
   useSharedValue,
@@ -174,7 +175,9 @@ function AgeRangeSlider({
   const [trackWidth, setTrackWidth] = useState(1);
   const HANDLE = 26;
 
-  // Distance from RIGHT (RTL), in px: 0..trackWidth
+  const isRTLRef = useRef(I18nManager.isRTL);
+
+  // X position from LEFT, in px: 0..trackWidth
   const [posMin, setPosMin] = useState(0);
   const [posMax, setPosMax] = useState(0);
   const posMinRef = useRef(0);
@@ -185,6 +188,7 @@ function AgeRangeSlider({
   const minRef = useRef(min);
   const maxRef = useRef(max);
   const onChangeRef = useRef(onChange);
+  const isDraggingRef = useRef(false);
 
   useEffect(() => {
     trackWidthRef.current = trackWidth;
@@ -202,13 +206,17 @@ function AgeRangeSlider({
     const maxV = maxRef.current;
     const tw = trackWidthRef.current;
     const clamped = clampNumber(v, minV, maxV);
-    return ((clamped - minV) / Math.max(1, maxV - minV)) * tw;
+    const ratio = (clamped - minV) / Math.max(1, maxV - minV);
+    // In RTL we want Min on the right, Max on the left.
+    const visualRatio = isRTLRef.current ? 1 - ratio : ratio;
+    return visualRatio * tw;
   };
   const posToValue = (p: number) => {
     const minV = minRef.current;
     const maxV = maxRef.current;
     const tw = trackWidthRef.current;
-    const ratio = clampNumber(p / Math.max(1, tw), 0, 1);
+    const rawRatio = clampNumber(p / Math.max(1, tw), 0, 1);
+    const ratio = isRTLRef.current ? 1 - rawRatio : rawRatio;
     return Math.round(minV + ratio * (maxV - minV));
   };
 
@@ -220,6 +228,8 @@ function AgeRangeSlider({
   };
 
   useEffect(() => {
+    // Prevent props-driven updates from fighting the gesture while dragging (jitter on iOS prod/TestFlight).
+    if (isDraggingRef.current) return;
     setPositions(valueToPos(valueMin), valueToPos(valueMax));
   }, [trackWidth, valueMin, valueMax, min, max]);
 
@@ -232,22 +242,26 @@ function AgeRangeSlider({
         onMoveShouldSetPanResponderCapture: () => true,
         onPanResponderTerminationRequest: () => false,
         onPanResponderGrant: () => {
+          isDraggingRef.current = true;
           startMinRef.current = posMinRef.current;
         },
         onPanResponderMove: (_evt, gestureState) => {
-          const next = clampNumber(
-            startMinRef.current - gestureState.dx,
-            0,
-            posMaxRef.current,
-          );
+          const tw = trackWidthRef.current;
+          const rtl = isRTLRef.current;
+          const unclamped = startMinRef.current + gestureState.dx;
+          const minBound = rtl ? posMaxRef.current : 0;
+          const maxBound = rtl ? tw : posMaxRef.current;
+          const next = clampNumber(unclamped, minBound, maxBound);
           setPositions(next, posMaxRef.current);
         },
         onPanResponderRelease: () => {
+          isDraggingRef.current = false;
           const a = posToValue(posMinRef.current);
           const b = posToValue(posMaxRef.current);
           onChangeRef.current(Math.min(a, b), Math.max(a, b));
         },
         onPanResponderTerminate: () => {
+          isDraggingRef.current = false;
           const a = posToValue(posMinRef.current);
           const b = posToValue(posMaxRef.current);
           onChangeRef.current(Math.min(a, b), Math.max(a, b));
@@ -265,23 +279,26 @@ function AgeRangeSlider({
         onMoveShouldSetPanResponderCapture: () => true,
         onPanResponderTerminationRequest: () => false,
         onPanResponderGrant: () => {
+          isDraggingRef.current = true;
           startMaxRef.current = posMaxRef.current;
         },
         onPanResponderMove: (_evt, gestureState) => {
           const tw = trackWidthRef.current;
-          const next = clampNumber(
-            startMaxRef.current - gestureState.dx,
-            posMinRef.current,
-            tw,
-          );
+          const rtl = isRTLRef.current;
+          const unclamped = startMaxRef.current + gestureState.dx;
+          const minBound = rtl ? 0 : posMinRef.current;
+          const maxBound = rtl ? posMinRef.current : tw;
+          const next = clampNumber(unclamped, minBound, maxBound);
           setPositions(posMinRef.current, next);
         },
         onPanResponderRelease: () => {
+          isDraggingRef.current = false;
           const a = posToValue(posMinRef.current);
           const b = posToValue(posMaxRef.current);
           onChangeRef.current(Math.min(a, b), Math.max(a, b));
         },
         onPanResponderTerminate: () => {
+          isDraggingRef.current = false;
           const a = posToValue(posMinRef.current);
           const b = posToValue(posMaxRef.current);
           onChangeRef.current(Math.min(a, b), Math.max(a, b));
@@ -304,8 +321,8 @@ function AgeRangeSlider({
           style={[
             styles.rangeTrackActive,
             {
-              right: clampNumber(posMin, 0, trackWidth),
-              width: Math.max(0, posMax - posMin),
+              left: clampNumber(Math.min(posMin, posMax), 0, trackWidth),
+              width: Math.max(0, Math.abs(posMax - posMin)),
             },
           ]}
         />
@@ -315,7 +332,7 @@ function AgeRangeSlider({
           style={[
             styles.rangeThumb,
             {
-              right: clampNumber(posMin - HANDLE / 2, -HANDLE / 2, trackWidth - HANDLE / 2),
+              left: clampNumber(posMin - HANDLE / 2, -HANDLE / 2, trackWidth - HANDLE / 2),
             },
           ]}
         />
@@ -324,7 +341,7 @@ function AgeRangeSlider({
           style={[
             styles.rangeThumb,
             {
-              right: clampNumber(posMax - HANDLE / 2, -HANDLE / 2, trackWidth - HANDLE / 2),
+              left: clampNumber(posMax - HANDLE / 2, -HANDLE / 2, trackWidth - HANDLE / 2),
             },
           ]}
         />
@@ -1670,8 +1687,13 @@ export default function PartnersScreen() {
         <View style={styles.filtersPanelWrap}>
           <ScrollView
             style={styles.filterScroll}
-            contentContainerStyle={styles.filterScrollContent}
+            contentContainerStyle={[
+              styles.filterScrollContent,
+              // Keep bottom actions reachable when content grows (e.g., many city chips)
+              { paddingBottom: Math.max(18, insets.bottom + 24) },
+            ]}
             showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
           >
                 {/* Profile type */}
                 <View style={styles.filterSection}>
@@ -1870,45 +1892,46 @@ export default function PartnersScreen() {
                     </View>
                   </>
                 ) : null}
-          </ScrollView>
 
-          <View style={styles.filterFooter}>
-            <View style={styles.filterActions}>
-              <TouchableOpacity
-                style={[styles.filterBtn, styles.resetBtn]}
-                activeOpacity={0.9}
-                onPress={() => {
-                  setGender('any');
-                  setAgeMin(20);
-                  setAgeMax(40);
-                  setAgeActive(false);
-                  setProfileType('all');
-                  setGroupGender('any');
-                  setGroupSize('any');
-                  setSelectedCities([]);
-                  setCitySearch('');
-                  setIsCityPickerOpen(false);
-                  setSelectedNeighborhoods([]);
-                  setNeighborhoodSearch('');
-                  setIsNeighborhoodPickerOpen(false);
-                  prevCitiesBeforeAllRef.current = null;
-                  setIncludePassed(false);
-                }}
-              >
-                <Text style={styles.resetText}>איפוס</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.filterBtn, styles.applyBtn]}
-                activeOpacity={0.9}
-                onPress={() => {
-                  closeFilters();
-                  fetchUsersAndGroups();
-                }}
-              >
-                <Text style={styles.applyText}>הצג תוצאות</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
+                {/* Actions (inside scroll to avoid being clipped on smaller heights) */}
+                <View style={styles.filterFooter}>
+                  <View style={styles.filterActions}>
+                    <TouchableOpacity
+                      style={[styles.filterBtn, styles.resetBtn]}
+                      activeOpacity={0.9}
+                      onPress={() => {
+                        setGender('any');
+                        setAgeMin(20);
+                        setAgeMax(40);
+                        setAgeActive(false);
+                        setProfileType('all');
+                        setGroupGender('any');
+                        setGroupSize('any');
+                        setSelectedCities([]);
+                        setCitySearch('');
+                        setIsCityPickerOpen(false);
+                        setSelectedNeighborhoods([]);
+                        setNeighborhoodSearch('');
+                        setIsNeighborhoodPickerOpen(false);
+                        prevCitiesBeforeAllRef.current = null;
+                        setIncludePassed(false);
+                      }}
+                    >
+                      <Text style={styles.resetText}>איפוס</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.filterBtn, styles.applyBtn]}
+                      activeOpacity={0.9}
+                      onPress={() => {
+                        closeFilters();
+                        fetchUsersAndGroups();
+                      }}
+                    >
+                      <Text style={styles.applyText}>הצג תוצאות</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+          </ScrollView>
 
           {isCityPickerOpen ? (
             <View style={styles.cityPickerOverlay}>
