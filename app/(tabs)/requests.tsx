@@ -2333,6 +2333,7 @@ export default function RequestsScreen() {
                   const canApproveInvite = !!aptId && !isInviteApproved(n.description);
                   const isApproved = isApprovedNotification(n);
                   const canOpenApartmentPanel = !!aptId;
+                  const hasActionButtons = canApproveInvite || (isApproved && !!sender?.phone);
 
                   const badge = (() => {
                     if (isApproved) return { bg: '#22C55E', Icon: MessageCircle };
@@ -2346,10 +2347,17 @@ export default function RequestsScreen() {
                   const descParts = String(descText || '').split('\n').map((s) => s.trim()).filter(Boolean);
                   const descPrimary = descParts[0] || '';
                   const descSecondary = descParts.slice(1).join(' ');
+                  const isCompactNotificationCard = !hasActionButtons && !descSecondary;
+                  const isExtraCompactNotificationCard = isCompactNotificationCard && isMergeProfileNotification(n);
+                  const isMergeCompactNotificationCard = isExtraCompactNotificationCard;
 
                   return (
                     <Pressable
-                      style={styles.cardRow}
+                      style={[
+                        styles.cardRow,
+                        isCompactNotificationCard ? styles.cardRowCompact : null,
+                        isExtraCompactNotificationCard ? styles.cardRowExtraCompact : null,
+                      ]}
                       onPress={() => {
                         if (!canOpenApartmentPanel) return;
                         openApartmentPanel(aptId as string);
@@ -2358,13 +2366,13 @@ export default function RequestsScreen() {
                       <View style={styles.cardTop}>
                         <TouchableOpacity
                           activeOpacity={0.85}
-                          style={styles.inboxAvatarWrap}
+                          style={[styles.inboxAvatarWrap, isExtraCompactNotificationCard ? styles.inboxAvatarWrapCompact : null]}
                           onPress={() => {
                             if (sender?.id) router.push({ pathname: '/user/[id]', params: { id: sender.id } } as any);
                           }}
                         >
                           <Image source={{ uri: sender?.avatar_url || DEFAULT_AVATAR }} style={styles.inboxAvatarImg} />
-                          {badge.bg !== '#3B82F6' && badge.bg !== '#22C55E' ? (
+                          {badge.bg !== '#3B82F6' && badge.bg !== '#22C55E' && badge.bg !== UI_PRIMARY ? (
                             <View style={[styles.avatarBadge, { backgroundColor: badge.bg }]}>
                               <badge.Icon size={12} color="#FFFFFF" strokeWidth={2.6} />
                             </View>
@@ -2377,42 +2385,56 @@ export default function RequestsScreen() {
                             {!!descPrimary ? <Text>{` ${descPrimary}`}</Text> : null}
                           </Text>
                           {!!descSecondary ? <Text style={styles.cardSubtitle}>{descSecondary}</Text> : null}
-                        </View>
-                      </View>
-
-                      <View style={styles.cardFooter}>
-                        <Text style={styles.inboxCardTime}>{timeLabel}</Text>
-                        <View style={styles.cardFooterActions}>
-                          {canApproveInvite ? (
-                            <TouchableOpacity
-                              style={[styles.btnPrimary, notifActionLoadingId === n.id ? { opacity: 0.7 } : null]}
-                              disabled={notifActionLoadingId === n.id}
-                              activeOpacity={0.85}
-                              onPress={() => handleApproveInviteFromNotification(n, aptId as string)}
-                            >
-                              <Text style={styles.btnPrimaryText}>{notifActionLoadingId === n.id ? '...' : 'אישור'}</Text>
-                            </TouchableOpacity>
-                          ) : isApproved && sender?.phone ? (
-                            <TouchableOpacity
-                              style={styles.whatsappBtn}
-                              activeOpacity={0.85}
-                              accessibilityLabel="וואטסאפ"
-                              onPress={() => {
-                                const firstName = (sender?.full_name || '').split(' ')[0] || '';
-                                openWhatsApp(
-                                  sender.phone as string,
-                                  `היי${firstName ? ` ${firstName}` : ''}, תודה שאישרת את הבקשה שלי ב-Homie! אשמח לדבר ולתאם פגישה 🙂`
-                                );
-                              }}
-                            >
-                              <View style={styles.inboxWhatsappIconCircle}>
-                                <WhatsAppSvg size={14} color="#25D366" />
-                              </View>
-                              <Text style={styles.inboxWhatsappBtnText}>וואטסאפ</Text>
-                            </TouchableOpacity>
+                          {isMergeCompactNotificationCard ? <Text style={styles.mergeCompactTime}>{timeLabel}</Text> : null}
+                          {isMergeProfileNotification(n) ? (
+                            <Text style={styles.mergeHelpText}>
+                              לאחר האישור יחול מיזוג בין שני הפרופילים
+                            </Text>
                           ) : null}
                         </View>
                       </View>
+
+                      {!isMergeCompactNotificationCard ? (
+                        <View
+                          style={[
+                            styles.cardFooter,
+                            isCompactNotificationCard ? styles.cardFooterCompact : null,
+                            isExtraCompactNotificationCard ? styles.cardFooterExtraCompact : null,
+                          ]}
+                        >
+                          <Text style={styles.inboxCardTime}>{timeLabel}</Text>
+                          <View style={styles.cardFooterActions}>
+                            {canApproveInvite ? (
+                              <TouchableOpacity
+                                style={[styles.btnPrimary, notifActionLoadingId === n.id ? { opacity: 0.7 } : null]}
+                                disabled={notifActionLoadingId === n.id}
+                                activeOpacity={0.85}
+                                onPress={() => handleApproveInviteFromNotification(n, aptId as string)}
+                              >
+                                <Text style={styles.btnPrimaryText}>{notifActionLoadingId === n.id ? '...' : 'אישור'}</Text>
+                              </TouchableOpacity>
+                            ) : isApproved && sender?.phone ? (
+                              <TouchableOpacity
+                                style={styles.whatsappBtn}
+                                activeOpacity={0.85}
+                                accessibilityLabel="וואטסאפ"
+                                onPress={() => {
+                                  const firstName = (sender?.full_name || '').split(' ')[0] || '';
+                                  openWhatsApp(
+                                    sender.phone as string,
+                                    `היי${firstName ? ` ${firstName}` : ''}, תודה שאישרת את הבקשה שלי ב-Homie! אשמח לדבר ולתאם פגישה 🙂`
+                                  );
+                                }}
+                              >
+                                <View style={styles.inboxWhatsappIconCircle}>
+                                  <WhatsAppSvg size={14} color="#25D366" />
+                                </View>
+                                <Text style={styles.inboxWhatsappBtnText}>וואטסאפ</Text>
+                              </TouchableOpacity>
+                            ) : null}
+                          </View>
+                        </View>
+                      ) : null}
                     </Pressable>
                   );
                 }
@@ -2484,7 +2506,7 @@ export default function RequestsScreen() {
                         }}
                       >
                         <Image source={{ uri: (otherUser as any)?.avatar_url || DEFAULT_AVATAR }} style={styles.inboxAvatarImg} />
-                        {badge.bg !== '#3B82F6' && badge.bg !== '#22C55E' ? (
+                        {badge.bg !== '#3B82F6' && badge.bg !== '#22C55E' && badge.bg !== UI_PRIMARY ? (
                           <View style={[styles.avatarBadge, { backgroundColor: badge.bg }]}>
                             <badge.Icon size={12} color="#FFFFFF" strokeWidth={2.6} />
                           </View>
@@ -2497,6 +2519,11 @@ export default function RequestsScreen() {
                           {!!subPrimary ? <Text>{` ${subPrimary}`}</Text> : null}
                         </Text>
                         {!!subSecondary ? <Text style={styles.cardSubtitle}>{subSecondary}</Text> : null}
+                        {title === 'בקשת מיזוג פרופילים' ? (
+                          <Text style={styles.mergeHelpText}>
+                            לאחר האישור יחול מיזוג בין שני הפרופילים
+                          </Text>
+                        ) : null}
                       </View>
                     </View>
 
@@ -3023,6 +3050,14 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 3 },
     elevation: 2,
   },
+  cardRowCompact: {
+    paddingTop: 12,
+    paddingBottom: 12,
+  },
+  cardRowExtraCompact: {
+    paddingTop: 8,
+    paddingBottom: 8,
+  },
   cardTop: {
     flexDirection: 'row-reverse',
     alignItems: 'flex-start',
@@ -3037,6 +3072,11 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: '#FFFFFF',
     position: 'relative',
+  },
+  inboxAvatarWrapCompact: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
   },
   inboxAvatarImg: {
     width: '100%',
@@ -3086,11 +3126,34 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: 12 as any,
   },
+  cardFooterCompact: {
+    marginTop: 6,
+  },
+  cardFooterExtraCompact: {
+    marginTop: 4,
+  },
   inboxCardTime: {
     color: '#9CA3AF',
     fontSize: 12,
     fontWeight: '700',
     textAlign: 'right',
+  },
+  mergeCompactTime: {
+    marginTop: 4,
+    color: '#9CA3AF',
+    fontSize: 11,
+    fontWeight: '700',
+    textAlign: 'right',
+    alignSelf: 'stretch',
+  },
+  mergeHelpText: {
+    marginTop: 4,
+    color: '#9CA3AF',
+    fontSize: 11,
+    lineHeight: 14,
+    fontWeight: '600',
+    textAlign: 'right',
+    alignSelf: 'stretch',
   },
   cardFooterActions: {
     alignItems: 'flex-start',

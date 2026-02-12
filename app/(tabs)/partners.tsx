@@ -1030,6 +1030,9 @@ export default function PartnersScreen() {
       const list = (usersData || []) as User[];
       const interacted = new Set<string>();
       const interactedGroupIds = new Set<string>();
+      // When includePassed is true, track users/groups marked as NOT_RELEVANT to show ONLY those
+      const notRelevantUsers = new Set<string>();
+      const notRelevantGroupIds = new Set<string>();
       if (authId) {
         const myGroupIds = new Set(
           members.filter((m) => m.user_id === authId).map((m) => m.group_id),
@@ -1064,6 +1067,23 @@ export default function PartnersScreen() {
           // IMPORTANT: interaction filtering should be directional.
           // We only hide profiles that *I* (or one of my ACTIVE groups) already acted on (sent like/pass).
           // If someone acted on me (incoming request / NOT_RELEVANT), I should still be able to see them here.
+
+          // Track NOT_RELEVANT users/groups when includePassed is enabled
+          if (includePassedNow && isNotRelevant) {
+            // Outgoing: User -> User (I marked them as not relevant)
+            if (row.sender_id === authId && row.receiver_id) {
+              notRelevantUsers.add(row.receiver_id);
+            }
+            // Outgoing: User -> Group
+            if (row.sender_id === authId && row.receiver_group_id) {
+              notRelevantGroupIds.add(row.receiver_group_id);
+            }
+            // Outgoing: My Group -> User/Group
+            if (row.sender_group_id && myGroupIds.has(row.sender_group_id)) {
+              if (row.receiver_id) notRelevantUsers.add(row.receiver_id);
+              if (row.receiver_group_id) notRelevantGroupIds.add(row.receiver_group_id);
+            }
+          }
 
           // Outgoing: User -> User
           if (row.sender_id === authId && row.receiver_id && shouldHideForOutgoing) {
@@ -1102,7 +1122,13 @@ export default function PartnersScreen() {
 
       let filteredSingles = list.filter((u) => u.id !== authId);
 
-      filteredSingles = filteredSingles.filter((u) => !interacted.has(u.id));
+      // When includePassed is true, show ONLY users marked as NOT_RELEVANT
+      if (includePassedNow) {
+        filteredSingles = filteredSingles.filter((u) => notRelevantUsers.has(u.id));
+      } else {
+        // Normal mode: exclude already interacted users
+        filteredSingles = filteredSingles.filter((u) => !interacted.has(u.id));
+      }
 
       filteredSingles = filteredSingles.filter((u) => !memberIdsToExclude.has(u.id));
 
@@ -1110,8 +1136,9 @@ export default function PartnersScreen() {
 
       let combinedItems: BrowseItem[] = [];
       if (profileType === 'groups' || profileType === 'all') {
+        // When includePassed is true, show ONLY groups marked as NOT_RELEVANT
         const groupItems = activeGroups
-          .filter((g) => !interactedGroupIds.has(g.groupId))
+          .filter((g) => includePassedNow ? notRelevantGroupIds.has(g.groupId) : !interactedGroupIds.has(g.groupId))
           .map((g) => ({ type: 'group', groupId: g.groupId, users: g.users, apartment: g.apartment }) as BrowseItem);
         combinedItems.push(...groupItems);
       }
