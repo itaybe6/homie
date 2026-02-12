@@ -1,10 +1,9 @@
 import { View, Text, StyleSheet, TouchableOpacity, Image, ScrollView, NativeSyntheticEvent, NativeScrollEvent } from 'react-native';
 import { supabase } from '@/lib/supabase';
-import { MapPin, BedDouble, ShowerHead, Users, Building2, Trees, Ruler } from 'lucide-react-native';
+import { BedDouble, ShowerHead, Users } from 'lucide-react-native';
 import { Apartment } from '@/types/database';
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { LinearGradient } from 'expo-linear-gradient';
-import FavoriteHeartButton from '@/components/FavoriteHeartButton';
 import { formatTimeAgoHe } from '@/utils/time';
 import { alpha, colors } from '@/lib/theme';
 
@@ -220,28 +219,6 @@ export default function ApartmentCard({
   const neighborhood = String((apartment as any)?.neighborhood || '').trim();
   const address = String((apartment as any)?.address || (apartment as any)?.street_address || '').trim();
   const city = String((apartment as any)?.city || '').trim();
-  const apartmentType = String((apartment as any)?.apartment_type || '').toUpperCase();
-  const squareMetersRaw = (apartment as any)?.square_meters ?? (apartment as any)?.area ?? null;
-  const squareMeters =
-    typeof squareMetersRaw === 'number'
-      ? squareMetersRaw
-      : typeof squareMetersRaw === 'string'
-        ? Number(squareMetersRaw)
-        : null;
-
-  const formatSqm = (n: number) => {
-    if (!Number.isFinite(n) || n <= 0) return '';
-    const rounded = Math.round(n);
-    if (Math.abs(n - rounded) < 0.01) return String(rounded);
-    return n.toFixed(1).replace(/\.0$/, '');
-  };
-
-  const typeTagLabel =
-    apartmentType === 'GARDEN' ? 'דירת גן' : apartmentType === 'REGULAR' || !apartmentType ? 'בניין' : null;
-  const sqmTagLabel =
-    squareMeters !== null && Number.isFinite(squareMeters) && squareMeters > 0
-      ? `${formatSqm(squareMeters)} מ״ר`
-      : null;
 
   const locationLabel = useMemo(() => {
     const primary = (address || neighborhood || '').trim();
@@ -337,32 +314,52 @@ export default function ApartmentCard({
                 })}
               </ScrollView>
             </View>
-            {/* gradient overlay */}
-            {!isHome ? (
+            {/* Bottom text overlay (like apartment hero) */}
+            <View style={styles.imageTextOverlay} pointerEvents="none">
               <LinearGradient
-                colors={['rgba(0,0,0,0.6)', 'rgba(0,0,0,0.0)']}
-                start={{ x: 0.5, y: 1 }}
-                end={{ x: 0.5, y: 0 }}
-                pointerEvents="none"
-                style={styles.gradientOverlay}
+                colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.78)']}
+                start={{ x: 0.5, y: 0 }}
+                end={{ x: 0.5, y: 1 }}
+                style={styles.imageTextOverlayGradient}
               />
-            ) : null}
-            {/* Favorite */}
-            <FavoriteHeartButton
-              apartmentId={apartment.id}
-              containerStyle={styles.favoriteButton}
-              size={40}
-              iconSize={18}
-              activeBackgroundColor="#FFE6EC"
-              inactiveBackgroundColor="rgba(255,255,255,0.75)"
-              activeColor="#FF2D55"
-              inactiveColor={colors.primary}
-            />
+              <View style={styles.imageTextOverlayContent}>
+                <View style={styles.imageOverlayRow}>
+                  <View style={styles.imageOverlayRight}>
+                    <Text style={styles.imageTitle} numberOfLines={1}>
+                      {apartment.title}
+                    </Text>
+                    <Text style={styles.imageSubtitle} numberOfLines={1}>
+                      {locationLabel || city}
+                    </Text>
+                  </View>
+
+                  {timeAgoLabel ? (
+                    <Text style={styles.imageTimeAgoBottomLeft} numberOfLines={1}>
+                      {timeAgoLabel}
+                    </Text>
+                  ) : null}
+                </View>
+              </View>
+            </View>
+
+            {/* Price (replaces the heart button position) */}
+            <View
+              style={[
+                styles.priceBadge,
+                styles.priceBadgeTopLeft,
+                isHome ? styles.priceBadgeTopLeftHome : null,
+              ]}
+              pointerEvents="none"
+            >
+              <Text style={[styles.priceBadgeText, styles.priceBadgeTextTopLeft]}>
+                {priceLabel}
+              </Text>
+            </View>
             {/* Roommates badge */}
             {!isHome ? (
               <View style={styles.roommatesBadge} pointerEvents="none">
                 <View style={styles.badgeIconCircle}>
-                  <Users size={16} color={colors.white} strokeWidth={2.5} />
+                  <Users size={16} color={colors.primary} strokeWidth={2.5} />
                 </View>
                 <Text style={styles.roommatesBadgeText}>
                   {typeof maxRoommates === 'number' ? `${partnerSlotsUsed}/${maxRoommates}` : `${partnerSlotsUsed}`}
@@ -372,7 +369,7 @@ export default function ApartmentCard({
             {isHome ? (
               <View style={styles.roommatesBadgeHome} pointerEvents="none">
                 <View style={styles.badgeIconCircleHome}>
-                  <Users size={14} color={colors.white} strokeWidth={2.5} />
+                  <Users size={14} color={colors.primary} strokeWidth={2.5} />
                 </View>
                 <Text style={styles.roommatesBadgeHomeText}>
                   {typeof maxRoommates === 'number' ? `${partnerSlotsUsed}/${maxRoommates}` : `${partnerSlotsUsed}`}
@@ -380,42 +377,6 @@ export default function ApartmentCard({
               </View>
             ) : null}
             {/* Carousel dots */}
-            {!isHome ? (
-              <View style={styles.dotsRow} pointerEvents="none">
-                {carouselImages.map((_, i) => (
-                  <View key={`dot-${i}`} style={[styles.dot, { opacity: i === imageIdx ? 1 : 0.5 }]} />
-                ))}
-              </View>
-            ) : null}
-            {/* Price + dots row (home) / Price badge (default) */}
-            {isHome ? (
-              <View style={styles.overlayBottomRowHome} pointerEvents="none">
-                {carouselImages.length > 1 ? (
-                  <View style={styles.dotsPillHome}>
-                    {carouselImages.map((_, i) => (
-                      <View
-                        key={`dot-home-${i}`}
-                        style={[styles.dotHome, { opacity: i === imageIdx ? 1 : 0.45 }]}
-                      />
-                    ))}
-                  </View>
-                ) : (
-                  <View />
-                )}
-
-                <View style={[styles.priceBadge, styles.priceBadgeHome]}>
-                  <Text style={[styles.priceBadgeText, styles.priceBadgeTextHome]}>
-                    {priceLabel}
-                  </Text>
-                </View>
-              </View>
-            ) : (
-              <View style={styles.priceBadge}>
-                <Text style={styles.priceBadgeText}>
-                  {priceLabel}
-                </Text>
-              </View>
-            )}
           </View>
         </View>
         <TouchableOpacity
@@ -426,48 +387,10 @@ export default function ApartmentCard({
         >
           {isHome ? (
             <View style={styles.homeContentWrap}>
-              <View style={styles.homeTop}>
-                <View style={styles.titleRow}>
-                  <Text style={[styles.title, styles.titleHome]} numberOfLines={1}>
-                    {apartment.title}
-                  </Text>
-                    {timeAgoLabel ? (
-                      <Text style={[styles.timeAgoInline, styles.timeAgoInlineHome]} numberOfLines={1}>
-                        {timeAgoLabel}
-                      </Text>
-                    ) : null}
-                </View>
-
-                <Text style={styles.subtitleHome} numberOfLines={1}>
-                  {locationLabel || city}
-                </Text>
-
-                {typeTagLabel || sqmTagLabel ? (
-                  <View style={[styles.tagsRow, styles.tagsRowHome]}>
-                    {typeTagLabel ? (
-                      <View style={styles.tagPill}>
-                        {apartmentType === 'GARDEN' ? (
-                          <Trees size={14} color={colors.primary} />
-                        ) : (
-                          <Building2 size={14} color={colors.primary} />
-                        )}
-                        <Text style={styles.tagText}>{typeTagLabel}</Text>
-                      </View>
-                    ) : null}
-                    {sqmTagLabel ? (
-                      <View style={styles.tagPill}>
-                        <Ruler size={14} color={colors.primary} />
-                        <Text style={styles.tagText}>{sqmTagLabel}</Text>
-                      </View>
-                    ) : null}
-                  </View>
-                ) : null}
-              </View>
-
               <View style={styles.metaRowHome}>
                 <View style={styles.metaItemHome}>
                   <View style={[styles.iconCircle, styles.iconCircleCompact]}>
-                    <Users size={14} color={colors.primary} strokeWidth={2.5} />
+                    <Users size={16} color={colors.primary} strokeWidth={2.5} />
                   </View>
                   <Text style={styles.metaTextHome} numberOfLines={1}>
                     {roommatesCapacityLabel}
@@ -476,7 +399,7 @@ export default function ApartmentCard({
                 <View style={styles.metaDivider} />
                 <View style={styles.metaItemHome}>
                   <View style={[styles.iconCircle, styles.iconCircleCompact]}>
-                    <BedDouble size={14} color={colors.primary} strokeWidth={2.5} />
+                    <BedDouble size={16} color={colors.primary} strokeWidth={2.5} />
                   </View>
                   <Text style={styles.metaTextHome} numberOfLines={1}>
                     {apartment.bedrooms ?? ''} חדרי שינה
@@ -485,7 +408,7 @@ export default function ApartmentCard({
                 <View style={styles.metaDivider} />
                 <View style={styles.metaItemHome}>
                   <View style={[styles.iconCircle, styles.iconCircleCompact]}>
-                    <ShowerHead size={14} color={colors.primary} strokeWidth={2.5} />
+                    <ShowerHead size={16} color={colors.primary} strokeWidth={2.5} />
                   </View>
                   <Text style={styles.metaTextHome} numberOfLines={1}>
                     {apartment.bathrooms ?? ''} חדרי רחצה
@@ -495,62 +418,23 @@ export default function ApartmentCard({
             </View>
           ) : (
             <>
-              <View style={styles.titleRow}>
-                <Text style={styles.title} numberOfLines={1}>
-                  {apartment.title}
-                </Text>
-                {timeAgoLabel ? (
-                  <Text style={styles.timeAgoInline} numberOfLines={1}>
-                    {timeAgoLabel}
-                  </Text>
-                ) : null}
-              </View>
-
-              <View style={styles.locationRow}>
-                <MapPin size={16} color="#6B7280" />
-                <Text style={styles.location} numberOfLines={1}>
-                  {locationLabel || city}
-                </Text>
-              </View>
-
-              {typeTagLabel || sqmTagLabel ? (
-                <View style={[styles.tagsRow, styles.tagsRowDefault]}>
-                  {typeTagLabel ? (
-                    <View style={styles.tagPill}>
-                      {apartmentType === 'GARDEN' ? (
-                        <Trees size={14} color={colors.primary} />
-                      ) : (
-                        <Building2 size={14} color={colors.primary} />
-                      )}
-                      <Text style={styles.tagText}>{typeTagLabel}</Text>
-                    </View>
-                  ) : null}
-                  {sqmTagLabel ? (
-                    <View style={styles.tagPill}>
-                      <Ruler size={14} color={colors.primary} />
-                      <Text style={styles.tagText}>{sqmTagLabel}</Text>
-                    </View>
-                  ) : null}
-                </View>
-              ) : null}
-
               <View style={styles.bottomContainer}>
                 <View style={styles.statsRow}>
                   <View style={styles.stat}>
                     <View style={[styles.iconCircle, styles.iconCircleCompact]}>
-                      <Users size={14} color={colors.primary} strokeWidth={2.5} />
+                      <Users size={16} color={colors.primary} strokeWidth={2.5} />
                     </View>
                     <Text style={styles.statText}>{roommatesCapacityLabel}</Text>
                   </View>
                   <View style={styles.stat}>
                     <View style={[styles.iconCircle, styles.iconCircleCompact]}>
-                      <BedDouble size={14} color={colors.primary} strokeWidth={2.5} />
+                      <BedDouble size={16} color={colors.primary} strokeWidth={2.5} />
                     </View>
                     <Text style={styles.statText}>{apartment.bedrooms} חדרים</Text>
                   </View>
                   <View style={styles.stat}>
                     <View style={[styles.iconCircle, styles.iconCircleCompact]}>
-                      <ShowerHead size={14} color={colors.primary} strokeWidth={2.5} />
+                      <ShowerHead size={16} color={colors.primary} strokeWidth={2.5} />
                     </View>
                     <Text style={styles.statText}>{apartment.bathrooms} מקלחות</Text>
                   </View>
@@ -567,8 +451,11 @@ export default function ApartmentCard({
 const styles = StyleSheet.create({
   cardOuter: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 20,
+    borderRadius: 28,
     marginBottom: 16,
+    padding: 2,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
     // IMPORTANT: keep overflow visible so Android elevation shadow isn't clipped
     overflow: 'visible',
     // Stronger shadow for separation from background
@@ -580,17 +467,19 @@ const styles = StyleSheet.create({
   },
   cardInner: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 20,
+    borderRadius: 26,
     overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(229,231,235,0.65)',
   },
   cardOuterHome: {
-    borderRadius: 18,
+    borderRadius: 28,
     shadowOpacity: 0.12,
     shadowRadius: 20,
     elevation: 8,
   },
   cardInnerHome: {
-    borderRadius: 18,
+    borderRadius: 26,
   },
   imageWrap: {
     position: 'relative',
@@ -601,12 +490,12 @@ const styles = StyleSheet.create({
   },
   imageInner: {
     position: 'relative',
-    borderRadius: 20,
+    borderRadius: 22,
     overflow: 'hidden',
   },
   imageInnerHome: {
-    borderTopLeftRadius: 18,
-    borderTopRightRadius: 18,
+    borderTopLeftRadius: 26,
+    borderTopRightRadius: 26,
     borderBottomLeftRadius: 0,
     borderBottomRightRadius: 0,
   },
@@ -616,16 +505,58 @@ const styles = StyleSheet.create({
     backgroundColor: '#0B0B10',
   },
   imageHome: {
-    aspectRatio: 16 / 9,
+    // Slightly taller than 16:9 (per design feedback)
+    aspectRatio: 16 / 10,
   },
-  gradientOverlay: {
+  imageTextOverlay: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 6,
+  },
+  imageTextOverlayGradient: {
     ...StyleSheet.absoluteFillObject as any,
   },
-  favoriteButton: {
-    position: 'absolute',
-    top: 10,
-    left: 10,
-    zIndex: 20,
+  imageTextOverlayContent: {
+    paddingHorizontal: 14,
+    paddingTop: 18,
+    paddingBottom: 14,
+  },
+  imageOverlayRow: {
+    flexDirection: 'row-reverse',
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  imageOverlayRight: {
+    flex: 1,
+    alignItems: 'flex-end',
+    minWidth: 0,
+  },
+  imageTitle: {
+    flex: 1,
+    color: '#FFFFFF',
+    fontSize: 22,
+    fontWeight: '900',
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
+  imageTimeAgoBottomLeft: {
+    color: 'rgba(255,255,255,0.86)',
+    fontSize: 13,
+    fontWeight: '800',
+    textAlign: 'left',
+    writingDirection: 'rtl',
+    flexShrink: 0,
+  },
+  imageSubtitle: {
+    marginTop: 4,
+    color: 'rgba(255,255,255,0.86)',
+    fontSize: 14,
+    fontWeight: '800',
+    textAlign: 'right',
+    writingDirection: 'rtl',
   },
   roommatesBadge: {
     position: 'absolute',
@@ -640,8 +571,8 @@ const styles = StyleSheet.create({
     gap: 4,
     borderWidth: 1,
     // Match "בניין/מ״ר" tag pill but with an opaque background for better readability on images
-    borderColor: alpha(colors.success, 0.9),
-    backgroundColor: alpha(colors.success, 0.84),
+    borderColor: alpha(colors.primary, 0.18),
+    backgroundColor: 'rgba(255,255,255,0.90)',
     shadowColor: '#000',
     shadowOpacity: 0.16,
     shadowRadius: 10,
@@ -657,7 +588,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   roommatesBadgeText: {
-    color: colors.white,
+    color: colors.primary,
     fontSize: 13,
     fontWeight: '800',
     writingDirection: 'ltr',
@@ -674,9 +605,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 4,
     // Match "בניין/מ״ר" tag pill but with an opaque background for better readability on images
-    backgroundColor: alpha(colors.success, 0.84),
+    backgroundColor: 'rgba(255,255,255,0.90)',
     borderWidth: 1,
-    borderColor: alpha(colors.success, 0.9),
+    borderColor: alpha(colors.primary, 0.18),
     shadowColor: '#000',
     shadowOpacity: 0.10,
     shadowRadius: 8,
@@ -692,52 +623,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   roommatesBadgeHomeText: {
-    color: colors.white,
+    color: colors.primary,
     fontSize: 14,
     fontWeight: '800',
     writingDirection: 'ltr',
     textAlign: 'left',
-  },
-  dotsRow: {
-    position: 'absolute',
-    left: 12,
-    bottom: 12,
-    flexDirection: 'row',
-    gap: 6,
-    alignItems: 'center',
-  },
-  dot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#FFFFFF',
-  },
-  overlayBottomRowHome: {
-    position: 'absolute',
-    left: 12,
-    right: 12,
-    bottom: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  dotsPillHome: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    borderRadius: 999,
-    // Lighter, semi-transparent pill behind carousel dots
-    backgroundColor: 'rgba(255,255,255,0.78)',
-    borderWidth: 1,
-    borderColor: alpha(colors.primaryMuted, 0.18),
-  },
-  dotHome: {
-    width: 7,
-    height: 7,
-    borderRadius: 3.5,
-    backgroundColor: colors.primaryMuted,
   },
   priceBadge: {
     position: 'absolute',
@@ -745,44 +635,45 @@ const styles = StyleSheet.create({
     bottom: 12,
     flexDirection: 'row-reverse',
     alignItems: 'center',
-    backgroundColor: alpha(colors.success, 0.86),
+    backgroundColor: 'rgba(255,255,255,0.90)',
     borderRadius: 22,
     paddingHorizontal: 12,
     paddingVertical: 8,
-    borderWidth: 0,
+    borderWidth: 1,
+    borderColor: alpha(colors.primary, 0.18),
+    zIndex: 10,
   },
   priceBadgeText: {
-    color: '#FFFFFF',
+    color: colors.primary,
     fontSize: 16,
     fontWeight: '800',
     writingDirection: 'rtl',
     textAlign: 'right',
   },
-  priceBadgeHome: {
-    position: 'relative',
+  priceBadgeTopLeft: {
+    top: 10,
+    left: 10,
     right: undefined,
     bottom: undefined,
-    backgroundColor: alpha(colors.success, 0.86),
-    borderColor: 'rgba(255,255,255,0.18)',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
   },
-  priceBadgeTextHome: {
-    color: '#FFFFFF',
+  priceBadgeTopLeftHome: {
+    top: 12,
+    left: 12,
+  },
+  priceBadgeTextTopLeft: {
     writingDirection: 'ltr',
     textAlign: 'left',
   },
   content: {
     paddingHorizontal: 12,
-    paddingTop: 12,
-    paddingBottom: 10,
+    paddingTop: 10,
+    paddingBottom: 6,
     alignItems: 'flex-end',
   },
   contentHome: {
     paddingHorizontal: 14,
-    paddingTop: 12,
-    paddingBottom: 12,
-    minHeight: 96,
+    paddingTop: 10,
+    paddingBottom: 10,
     alignItems: 'stretch',
   },
   titleRow: {
@@ -804,9 +695,7 @@ const styles = StyleSheet.create({
     fontSize: 17,
   },
   homeContentWrap: {
-    flex: 1,
     width: '100%',
-    justifyContent: 'space-between',
   },
   homeTop: {
     width: '100%',
@@ -821,19 +710,6 @@ const styles = StyleSheet.create({
     textAlign: 'right',
     writingDirection: 'rtl',
   },
-  tagsRow: {
-    flexDirection: 'row-reverse',
-    alignItems: 'center',
-    gap: 8,
-    marginTop: 2,
-  },
-  tagsRowHome: {
-    marginBottom: 8,
-  },
-  tagsRowDefault: {
-    marginBottom: 8,
-    justifyContent: 'flex-end',
-  },
   timeAgoInline: {
     color: '#9CA3AF',
     fontSize: 12,
@@ -847,24 +723,6 @@ const styles = StyleSheet.create({
   timeAgoInlineHome: {
     fontSize: 11,
     marginTop: 2,
-  },
-  tagPill: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 999,
-    backgroundColor: colors.white,
-    borderWidth: 1,
-    borderColor: alpha(colors.primaryMuted, 0.25),
-    flexDirection: 'row-reverse',
-    alignItems: 'center',
-    gap: 6,
-  },
-  tagText: {
-    color: colors.primary,
-    fontSize: 12,
-    fontWeight: '800',
-    textAlign: 'right',
-    writingDirection: 'rtl',
   },
   featuresRowHome: {
     flexDirection: 'row-reverse',
@@ -913,8 +771,8 @@ const styles = StyleSheet.create({
   },
   metaTextHome: {
     color: '#374151',
-    fontSize: 11,
-    fontWeight: '700',
+    fontSize: 13,
+    fontWeight: '800',
     textAlign: 'right',
     writingDirection: 'rtl',
   },
@@ -941,9 +799,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   iconCircleCompact: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
   },
   locationRow: {
     flexDirection: 'row-reverse',
@@ -987,8 +845,8 @@ const styles = StyleSheet.create({
   },
   statText: {
     color: '#6B7280',
-    fontSize: 11,
-    fontWeight: '700',
+    fontSize: 13,
+    fontWeight: '800',
     textAlign: 'right',
     writingDirection: 'rtl',
   },

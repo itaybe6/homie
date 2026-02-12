@@ -926,7 +926,7 @@ export default function ApartmentDetailsScreen() {
   if (isLoading) {
     return (
       <View style={styles.centerContainer}>
-        <ActivityIndicator size="large" color="#5e3f2d" />
+        <ActivityIndicator size="large" color="#9CA3AF" />
       </View>
     );
   }
@@ -1963,15 +1963,44 @@ export default function ApartmentDetailsScreen() {
                 </TouchableOpacity>
               ) : null}
             </View>
-            <ShareMenuFab
-              message={`דירה ב-Homie: ${(apartment?.title || '').toString()} ${(apartment?.city || '').toString()}`.trim()}
-              size={36}
-              anchor="right"
-              menuOffsetY={40}
-              radiusMultiplier={2.1}
-              containerStyle={{ width: 36, height: 36 }}
-              mainButtonStyle={styles.circleBtnLight}
-            />
+            <View style={styles.topRightControls}>
+              {isOwner ? (
+                <View
+                  style={[
+                    styles.circleBtnLight,
+                    { backgroundColor: '#E5E7EB', borderColor: 'rgba(17, 24, 39, 0.08)' },
+                  ]}
+                  pointerEvents="none"
+                  accessibilityElementsHidden
+                  importantForAccessibility="no-hide-descendants"
+                >
+                  <Heart size={18} color="#9CA3AF" />
+                </View>
+              ) : (
+                <FavoriteHeartButton
+                  apartmentId={apartment.id}
+                  containerStyle={[styles.circleBtnLight]}
+                  size={36}
+                  iconSize={18}
+                  activeBackgroundColor="#FFE6EC"
+                  inactiveBackgroundColor="rgba(255,255,255,0.9)"
+                  activeColor="#FF2D55"
+                  inactiveColor="rgba(17,24,39,0.55)"
+                  accessibilityLabelInactive="סמן כמועדף"
+                  accessibilityLabelActive="הסר ממועדפים"
+                />
+              )}
+
+              <ShareMenuFab
+                message={`דירה ב-Homie: ${(apartment?.title || '').toString()} ${(apartment?.city || '').toString()}`.trim()}
+                size={36}
+                anchor="right"
+                menuOffsetY={40}
+                radiusMultiplier={2.1}
+                containerStyle={{ width: 36, height: 36 }}
+                mainButtonStyle={styles.circleBtnLight}
+              />
+            </View>
           </View>
 
           {galleryImages.length > 1 ? (
@@ -1983,58 +2012,32 @@ export default function ApartmentDetailsScreen() {
               </View>
             </View>
           ) : null}
-        </View>
 
-        {/* Header under image (price -> title -> location) */}
-        <View style={styles.topHeader}>
-          <View style={styles.heroPriceRow}>
-            <View style={styles.heroPriceMeta}>
-              <Text style={styles.heroPriceValue}>
-                <Text style={styles.heroCurrency}>₪</Text>
-                {apartment.price?.toLocaleString?.() ?? String(apartment.price ?? '')}
-              </Text>
-              <Text style={styles.heroPricePer}>/חודש</Text>
-            </View>
-
-            {isOwner ? (
-              <View
-                style={[
-                  styles.circleBtnLight,
-                  styles.heroFavBtn,
-                  { backgroundColor: '#E5E7EB', borderColor: 'rgba(17, 24, 39, 0.08)' },
-                ]}
-                pointerEvents="none"
-                accessibilityElementsHidden
-                importantForAccessibility="no-hide-descendants"
-              >
-                <Heart size={18} color="#9CA3AF" />
+          {/* Price/title overlay on image (with subtle dark gradient at bottom for readability) */}
+          <View style={styles.heroOverlay} pointerEvents="box-none">
+            <LinearGradient
+              colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.70)']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 0, y: 1 }}
+              style={styles.heroOverlayGradient}
+              pointerEvents="none"
+            />
+            <View style={styles.topHeader} pointerEvents="box-none">
+              <View style={styles.heroPriceRow}>
+                <View style={styles.heroPriceMeta}>
+                  <Text style={styles.heroPriceValue}>
+                    <Text style={styles.heroCurrency}>₪</Text>
+                    {apartment.price?.toLocaleString?.() ?? String(apartment.price ?? '')}
+                  </Text>
+                  <Text style={styles.heroPricePer}>/חודש</Text>
+                </View>
               </View>
-            ) : (
-              <FavoriteHeartButton
-                apartmentId={apartment.id}
-                containerStyle={[styles.circleBtnLight, styles.heroFavBtn]}
-                size={36}
-                iconSize={18}
-                activeBackgroundColor="#FFE6EC"
-                inactiveBackgroundColor="rgba(255,255,255,0.9)"
-                activeColor="#FF2D55"
-                inactiveColor="#5e3f2d"
-                accessibilityLabelInactive="סמן כמועדף"
-                accessibilityLabelActive="הסר ממועדפים"
-              />
-            )}
+
+              <Text style={styles.heroTitle} numberOfLines={2}>
+                {apartment.title}
+              </Text>
+            </View>
           </View>
-
-          <Text style={styles.heroTitle} numberOfLines={2}>
-            {apartment.title}
-          </Text>
-
-          {moveInDateLabel ? (
-            <Text style={styles.heroSubtitle} numberOfLines={1}>
-              <Text style={styles.heroSubtitleLabel}>תאריך כניסה: </Text>
-              <Text style={styles.heroSubtitleValue}>{moveInDateLabel}</Text>
-            </Text>
-          ) : null}
         </View>
 
 
@@ -2048,7 +2051,7 @@ export default function ApartmentDetailsScreen() {
               onPress={() => setIsMembersOpen(true)}
             >
               <View style={styles.statIconCircle}>
-                <Users size={22} color="#5e3f2d" />
+                <Users size={22} color="rgba(17,24,39,0.55)" />
               </View>
               <View style={styles.statLabelRow}>
                 {typeof maxRoommates === 'number' ? (
@@ -2065,7 +2068,7 @@ export default function ApartmentDetailsScreen() {
             </TouchableOpacity>
             <View style={styles.statLight}>
               <View style={styles.statIconCircle}>
-                <BedDouble size={22} color="#5e3f2d" />
+                <BedDouble size={22} color="rgba(17,24,39,0.55)" />
               </View>
               <View style={styles.statLabelRow}>
                 <Text style={styles.statNumber}>{apartment.bedrooms}</Text>
@@ -2074,11 +2077,26 @@ export default function ApartmentDetailsScreen() {
             </View>
             <View style={styles.statLight}>
               <View style={styles.statIconCircle}>
-                <ShowerHead size={22} color="#5e3f2d" />
+                <ShowerHead size={22} color="rgba(17,24,39,0.55)" />
               </View>
               <View style={styles.statLabelRow}>
                 <Text style={styles.statNumber}>{apartment.bathrooms}</Text>
                 <Text style={styles.statLabel}>מקלחות</Text>
+              </View>
+            </View>
+            <View style={styles.statLight}>
+              <View style={styles.statIconCircle}>
+                <Calendar size={22} color="rgba(17,24,39,0.55)" />
+              </View>
+              <View style={[styles.statLabelRow, styles.statLabelRowCenter]}>
+                <Text
+                  style={[styles.statNumber, styles.statDateNumber]}
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.9}
+                >
+                  {moveInDateLabel || '—'}
+                </Text>
               </View>
             </View>
           </View>
@@ -2104,7 +2122,7 @@ export default function ApartmentDetailsScreen() {
                   accessibilityRole="button"
                   accessibilityLabel="העתק קוד דירה"
                 >
-                  <Copy size={16} color="#5e3f2d" />
+                  <Copy size={16} color="rgba(17,24,39,0.55)" />
                   <Text style={styles.ownerPasscodeCopyText}>העתק</Text>
                 </TouchableOpacity>
               </View>
@@ -2132,28 +2150,28 @@ export default function ApartmentDetailsScreen() {
                     {typeTagLabel ? (
                       <View style={styles.tagPill}>
                         {apartmentType === 'GARDEN' ? (
-                            <Trees size={14} color="#5e3f2d" />
+                            <Trees size={14} color="rgba(17,24,39,0.55)" />
                         ) : (
-                            <Building2 size={14} color="#5e3f2d" />
+                            <Building2 size={14} color="rgba(17,24,39,0.55)" />
                         )}
                         <Text style={styles.tagText}>{typeTagLabel}</Text>
                       </View>
                     ) : null}
                     {floorTagLabel ? (
                       <View style={styles.tagPill}>
-                        <Layers size={14} color="#5e3f2d" />
+                        <Layers size={14} color="rgba(17,24,39,0.55)" />
                         <Text style={styles.tagText}>{floorTagLabel}</Text>
                       </View>
                     ) : null}
                     {gardenSqmTagLabel ? (
                       <View style={styles.tagPill}>
-                        <Trees size={14} color="#5e3f2d" />
+                        <Trees size={14} color="rgba(17,24,39,0.55)" />
                         <Text style={styles.tagText}>{gardenSqmTagLabel}</Text>
                       </View>
                     ) : null}
                     {sqmTagLabel ? (
                       <View style={styles.tagPill}>
-                        <Ruler size={14} color="#5e3f2d" />
+                        <Ruler size={14} color="rgba(17,24,39,0.55)" />
                         <Text style={styles.tagText}>{sqmTagLabel}</Text>
                       </View>
                     ) : null}
@@ -2179,9 +2197,9 @@ export default function ApartmentDetailsScreen() {
                       >
                         <Text style={styles.readMoreText}>{isDescExpanded ? 'קרא פחות' : 'קרא עוד'}</Text>
                         {isDescExpanded ? (
-                          <ChevronUp size={16} color="#5e3f2d" />
+                          <ChevronUp size={16} color="rgba(17,24,39,0.55)" />
                         ) : (
-                          <ChevronDown size={16} color="#5e3f2d" />
+                          <ChevronDown size={16} color="rgba(17,24,39,0.55)" />
                         )}
                       </TouchableOpacity>
                     ) : null}
@@ -2218,7 +2236,7 @@ export default function ApartmentDetailsScreen() {
                   accessibilityRole="button"
                   accessibilityLabel={`טלפון בעל הדירה ${landlordPhoneRaw}`}
                 >
-                  <Phone size={14} color="#5e3f2d" />
+                  <Phone size={14} color="rgba(17,24,39,0.55)" />
                   <Text style={styles.hostPhoneText} numberOfLines={1}>
                     {landlordPhoneRaw}
                   </Text>
@@ -2237,7 +2255,7 @@ export default function ApartmentDetailsScreen() {
                 accessibilityRole="button"
                 accessibilityLabel="התקשר לבעל הדירה"
               >
-                <Phone size={18} color="#5e3f2d" />
+                <Phone size={18} color="rgba(17,24,39,0.55)" />
               </TouchableOpacity>
             ) : null}
           </View>
@@ -2274,7 +2292,7 @@ export default function ApartmentDetailsScreen() {
                     return (
                       <View style={styles.featuresEmptyWrap}>
                         <View style={styles.featuresEmptyIconPill}>
-                          <Info size={18} color="#5e3f2d" />
+                          <Info size={18} color="rgba(17,24,39,0.55)" />
                         </View>
                         <Text style={styles.featuresEmptyTitle}>לא צוינו מאפיינים</Text>
                         <Text style={styles.featuresEmptyText}>
@@ -2286,7 +2304,7 @@ export default function ApartmentDetailsScreen() {
 
                   return items.map(({ key, label, Icon }) => (
                     <View key={`feat-${key}`} style={styles.featureLine}>
-                      <Icon size={20} color="#5e3f2d" />
+                      <Icon size={20} color="rgba(17,24,39,0.55)" />
                       <Text style={styles.featureText}>{label}</Text>
                     </View>
                   ));
@@ -2307,7 +2325,7 @@ export default function ApartmentDetailsScreen() {
                   </View>
                 ) : isGeocoding ? (
                   <View style={styles.mapFallback}>
-                    <ActivityIndicator size="small" color="#5e3f2d" />
+                    <ActivityIndicator size="small" color="#9CA3AF" />
                     <Text style={styles.mapFallbackText}>טוען מפה…</Text>
                   </View>
                 ) : geoError ? (
@@ -2325,7 +2343,7 @@ export default function ApartmentDetailsScreen() {
                         center={aptGeo ? ([aptGeo.lng, aptGeo.lat] as const) : undefined}
                         zoom={aptGeo ? 16.5 : 11}
                         points={aptGeo ? aptMapPoints : { type: 'FeatureCollection', features: [] }}
-                        pointColor="#5e3f2d"
+                        pointColor="#374151"
                         pulsePoints
                       />
                     </View>
@@ -2333,7 +2351,7 @@ export default function ApartmentDetailsScreen() {
                     {(String((apartment as any)?.city || '').trim() || String((apartment as any)?.address || '').trim()) ? (
                       <View style={styles.mapLocationBadge}>
                         <View style={styles.mapLocationIconPill}>
-                          <MapPin size={14} color="#5e3f2d" />
+                          <MapPin size={14} color="rgba(17,24,39,0.55)" />
                         </View>
                         <View style={styles.mapLocationTextWrap}>
                           <Text style={styles.mapLocationCity} numberOfLines={1}>
@@ -2533,7 +2551,7 @@ export default function ApartmentDetailsScreen() {
                 accessibilityRole="button"
                 accessibilityLabel="מפתח"
               >
-                <Key size={18} color={isKeyDisabled ? 'rgba(17,24,39,0.45)' : '#5e3f2d'} />
+                <Key size={18} color={isKeyDisabled ? 'rgba(17,24,39,0.45)' : 'rgba(17,24,39,0.55)'} />
               </TouchableOpacity>
             ) : null}
 
@@ -2801,7 +2819,7 @@ export default function ApartmentDetailsScreen() {
           >
             {isLoadingJoinRequests ? (
               <View style={{ paddingVertical: 14 }}>
-                <ActivityIndicator size="small" color="#5e3f2d" />
+                <ActivityIndicator size="small" color="#9CA3AF" />
               </View>
             ) : joinRequests.length > 0 ? (
               joinRequests.map((item) => {
@@ -2810,7 +2828,7 @@ export default function ApartmentDetailsScreen() {
                     ? { text: 'אושר', bg: 'rgba(16,185,129,0.16)', color: '#10B981' }
                     : item.status === 'REJECTED'
                       ? { text: 'נדחה', bg: 'rgba(248,113,113,0.18)', color: '#F87171' }
-                      : { text: 'ממתין', bg: 'rgba(94,63,45,0.12)', color: '#5e3f2d' };
+                      : { text: 'ממתין', bg: 'rgba(17,24,39,0.08)', color: '#374151' };
 
                 const isActing = joinRequestsActionId === item.reqId;
 
@@ -3053,7 +3071,7 @@ export default function ApartmentDetailsScreen() {
             >
               {isAdding ? (
                 <View style={{ paddingVertical: 20, alignItems: 'center' }}>
-                  <ActivityIndicator size="small" color="#5e3f2d" />
+                  <ActivityIndicator size="small" color="#9CA3AF" />
                 </View>
               ) : (
                 <>
@@ -3106,7 +3124,7 @@ export default function ApartmentDetailsScreen() {
                                 accessibilityRole="button"
                                 accessibilityLabel="שלח הזמנה לפרופיל משותף"
                               >
-                                <UserPlus size={16} color="#5e3f2d" />
+                                <UserPlus size={16} color="rgba(17,24,39,0.55)" />
                               </TouchableOpacity>
                               <View style={styles.groupAvatarLeft}>
                                 <View style={styles.groupAvatarStack}>
@@ -3158,7 +3176,7 @@ export default function ApartmentDetailsScreen() {
                           accessibilityRole="button"
                           accessibilityLabel="שלח הזמנה"
                         >
-                          <UserPlus size={16} color="#5e3f2d" />
+                          <UserPlus size={16} color="rgba(17,24,39,0.55)" />
                         </TouchableOpacity>
                         <View style={{ flex: 1 }}>
                           <Text style={styles.candidateName} numberOfLines={1}>{u.full_name}</Text>
@@ -3425,6 +3443,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 8,
   },
+  topRightControls: {
+    flexDirection: 'row',
+    gap: 8,
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    ...(Platform.OS !== 'web' ? ({ direction: 'ltr' } as const) : {}),
+  },
   circleBtnLight: {
     width: 36,
     height: 36,
@@ -3445,8 +3470,8 @@ const styles = StyleSheet.create({
   },
   topHeader: {
     paddingHorizontal: 20,
-    paddingTop: 4,
-    paddingBottom: 8,
+    paddingTop: 40,
+    paddingBottom: 14,
     writingDirection: 'rtl',
   },
   heroPriceRow: {
@@ -3465,19 +3490,19 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
   },
   heroPriceValue: {
-    color: '#5e3f2d',
+    color: '#FFFFFF',
     fontSize: 34,
     fontWeight: '900',
     letterSpacing: -0.5,
     writingDirection: 'ltr',
   },
   heroCurrency: {
-    color: '#5e3f2d',
+    color: 'rgba(255,255,255,0.95)',
     fontSize: 22,
     fontWeight: '900',
   },
   heroPricePer: {
-    color: '#6B7280',
+    color: 'rgba(255,255,255,0.85)',
     fontSize: 14,
     fontWeight: '700',
     writingDirection: 'rtl',
@@ -3523,7 +3548,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(94,63,45,0.16)',
   },
   ownerPasscodeCopyText: {
-    color: '#5e3f2d',
+    color: '#111827',
     fontSize: 12,
     fontWeight: '900',
     textAlign: 'center',
@@ -3607,8 +3632,14 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    paddingHorizontal: 16,
-    paddingBottom: 16,
+    height: 210,
+    justifyContent: 'flex-end',
+    borderBottomLeftRadius: 32,
+    borderBottomRightRadius: 32,
+    overflow: 'hidden',
+  },
+  heroOverlayGradient: {
+    ...StyleSheet.absoluteFillObject,
   },
   dotsWrap: {
     position: 'absolute',
@@ -3689,7 +3720,7 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
   heroTitle: {
-    color: '#111827',
+    color: '#FFFFFF',
     fontSize: 20,
     fontWeight: '800',
     lineHeight: 26,
@@ -3698,19 +3729,19 @@ const styles = StyleSheet.create({
   },
   heroSubtitle: {
     marginTop: 6,
-    color: '#6B7280',
+    color: 'rgba(255,255,255,0.85)',
     fontSize: 13,
     fontWeight: '700',
     textAlign: 'right',
     writingDirection: 'rtl',
   },
   heroSubtitleLabel: {
-    color: '#6B7280',
+    color: 'rgba(255,255,255,0.70)',
     fontSize: 13,
     fontWeight: '700',
   },
   heroSubtitleValue: {
-    color: '#111827',
+    color: '#FFFFFF',
     fontSize: 13,
     fontWeight: '800',
   },
@@ -3731,7 +3762,7 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   tagText: {
-    color: '#5e3f2d',
+    color: '#374151',
     fontSize: 12,
     fontWeight: '900',
     textAlign: 'right',
@@ -3749,7 +3780,7 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   readMoreText: {
-    color: '#5e3f2d',
+    color: '#374151',
     fontSize: 13,
     fontWeight: '900',
     textAlign: 'right',
@@ -3790,12 +3821,12 @@ const styles = StyleSheet.create({
     padding: 20,
   },
 
-  statsRowLight: { flexDirection: 'row-reverse', gap: 12, marginBottom: 12 },
+  statsRowLight: { flexDirection: 'row-reverse', gap: 8, marginBottom: 12 },
   statLight: {
     flex: 1,
     backgroundColor: '#FFFFFF',
     borderRadius: 12,
-    padding: 12,
+    padding: 10,
     aspectRatio: 1,
     flexDirection: 'column',
     alignItems: 'center',
@@ -3810,21 +3841,32 @@ const styles = StyleSheet.create({
       : { elevation: 4 }),
   },
   statIconCircle: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(94,63,45,0.08)',
-    marginBottom: 8,
+    backgroundColor: 'rgba(17,24,39,0.06)',
+    marginBottom: 6,
   },
   statLabelRow: {
     flexDirection: 'row-reverse',
     alignItems: 'center',
     gap: 6,
   },
-  statLabel: { color: '#111827', fontWeight: '800', fontSize: 14 },
-  statNumber: { color: '#111827', fontWeight: '900', fontSize: 16 },
+  statLabelRowCenter: {
+    width: '100%',
+    justifyContent: 'center',
+  },
+  statLabel: { color: '#111827', fontWeight: '800', fontSize: 12 },
+  statNumber: { color: '#111827', fontWeight: '900', fontSize: 12 },
+  statDateNumber: {
+    textAlign: 'center',
+    writingDirection: 'ltr',
+    includeFontPadding: false,
+    flexShrink: 1,
+    maxWidth: '100%',
+  },
   hostCard: {
     position: 'relative',
     flexDirection: 'row-reverse',
@@ -3877,7 +3919,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(94,63,45,0.22)',
   },
   hostPhoneText: {
-    color: '#5e3f2d',
+    color: '#111827',
     fontSize: 12,
     fontWeight: '900',
     writingDirection: 'ltr',
@@ -3901,7 +3943,7 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     borderRadius: 999,
   },
-  proBadgeText: { color: '#5e3f2d', fontSize: 11, fontWeight: '900' },
+  proBadgeText: { color: '#374151', fontSize: 11, fontWeight: '900' },
   priceCard: {
     flexDirection: 'row-reverse',
     alignItems: 'center',
@@ -4047,7 +4089,7 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   peopleCountText: {
-    color: '#5e3f2d',
+    color: '#374151',
     fontSize: 12,
     fontWeight: '900',
     textAlign: 'center',
@@ -4180,7 +4222,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(94,63,45,0.14)',
   },
   navBtnIconText: {
-    color: '#5e3f2d',
+    color: '#111827',
     fontSize: 14,
     fontWeight: '900',
   },
@@ -4777,7 +4819,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(94,63,45,0.35)',
   },
   candidateBadgeText: {
-    color: '#5e3f2d',
+    color: '#374151',
     fontSize: 11,
     fontWeight: '700',
   },

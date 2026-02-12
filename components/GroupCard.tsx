@@ -1,15 +1,17 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Image, StyleSheet, Text, TouchableOpacity, View, ViewStyle } from 'react-native';
+import { Image, StyleSheet, Text, TouchableOpacity, View, ViewStyle, Platform } from 'react-native';
 import { CalendarDays, Cigarette, MapPin, PawPrint, Sparkles, Sunset, User as UserIcon, UtensilsCrossed, Wallet } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Directions, Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, { Extrapolate, interpolate, measure, runOnJS, useAnimatedReaction, useAnimatedRef, useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
+import { BlurView } from 'expo-blur';
 
 import { Apartment, User, UserSurveyResponse } from '@/types/database';
 import MatchPercentBadge from '@/components/MatchPercentBadge';
 import SwipeUpIndicator from '@/components/SwipeUpIndicator';
 import { fetchUserSurvey } from '@/lib/survey';
 import { formatCurrencyILS, formatMonthLabel } from '@/lib/surveyHighlights';
+import { PreferencesSummaryGrid } from '@/components/PreferencesSummaryGrid';
 
 type DetailItem = { icon: any; label: string; value: string };
 
@@ -87,6 +89,8 @@ export default function GroupCard({
   mediaHeight,
   strongTextOverlay = false,
 }: GroupCardProps) {
+  // Force LIGHT look for the swipe-up panel (per design).
+  const isDark = false;
   const displayUsers = users.slice(0, 4);
   const extra = users.length - displayUsers.length;
   const resolvedMediaHeight =
@@ -100,14 +104,14 @@ export default function GroupCard({
 
   const palette = useMemo(
     () => ({
-      cardBg: 'rgba(255,255,255,0.92)',
-      accent: '#8B5A3C',
-      accentLight: 'rgba(139,90,60,0.12)',
-      text: '#3D2814',
-      textMuted: '#8C7A6A',
-      border: 'rgba(139,90,60,0.15)',
-      gradient1: '#FDF8F3',
-      gradient2: '#F5EDE5',
+      panelBg: '#F3F4F6',
+      panelBorder: 'rgba(229,231,235,0.95)',
+      cardBg: '#FFFFFF',
+      accent: '#6B7280',
+      accentLight: 'rgba(243,244,246,0.72)',
+      text: '#1F2937',
+      textMuted: '#6B7280',
+      border: 'rgba(229,231,235,0.95)',
     }),
     [],
   );
@@ -179,17 +183,15 @@ export default function GroupCard({
   }, [activeUserId, displayUsers, users]);
 
   const detailsMinHeight = useMemo(() => {
-    const selectedId = activeUser?.id || displayUsers[0]?.id || users?.[0]?.id;
-    const selectedDetailsCount = selectedId ? buildDetailsItems(surveysByUserId[selectedId]).length : 0;
-    const headerH = 52;
-    const membersStripH = (users?.length || 0) > 1 ? 82 : 0;
-    const rowH = 68;
-    const rows = Math.min(4, Math.max(2, selectedDetailsCount ? 3 : 2));
-    const desired = headerH + membersStripH + rows * rowH + 22;
-    const min = 210;
-    const max = Math.round(resolvedMediaHeight * 0.62);
+    // Header was removed; keep the panel compact.
+    const headerH = 22;
+    const membersStripH = (users?.length || 0) > 1 ? 92 : 0;
+    const contentH = loading ? 72 : 260;
+    const desired = headerH + membersStripH + contentH + 18;
+    const min = 220;
+    const max = Math.round(resolvedMediaHeight * 0.7);
     return Math.max(min, Math.min(max, Math.round(desired)));
-  }, [activeUser?.id, resolvedMediaHeight, surveysByUserId, users, displayUsers]);
+  }, [loading, resolvedMediaHeight, users]);
 
   const detailsPanelStyle = useAnimatedStyle(() => {
     if (!_WORKLET) return {};
@@ -277,32 +279,26 @@ export default function GroupCard({
             // Allow tapping "tabs" only when the panel is actually open.
             pointerEvents={isDetailsOpen ? 'auto' : 'none'}
           >
-            <Animated.View ref={detailsRef} style={[styles.detailsPanelInner, { minHeight: detailsMinHeight }]}>
-              <LinearGradient
-                colors={[palette.gradient1, palette.gradient2]}
-                start={[0, 0]}
-                end={[0, 1]}
-                style={StyleSheet.absoluteFillObject}
+            <Animated.View
+              ref={detailsRef}
+              style={[styles.detailsPanelInner, { minHeight: detailsMinHeight, borderColor: palette.panelBorder }]}
+            >
+              {/* Glass background */}
+              {Platform.OS === 'web' ? null : (
+                <BlurView
+                  intensity={60}
+                  tint="light"
+                  style={StyleSheet.absoluteFillObject}
+                />
+              )}
+              <View
+                pointerEvents="none"
+                style={[
+                  StyleSheet.absoluteFillObject,
+                  { backgroundColor: palette.panelBg, borderTopLeftRadius: 22, borderTopRightRadius: 22 },
+                ]}
               />
-              <View style={styles.detailsGrabber} />
-
-              <View style={styles.detailsHeaderRow}>
-                <View style={styles.detailsHeaderLeft}>
-                  <Text style={[styles.detailsTitle, { color: palette.text }]}>מה חשוב לנו</Text>
-                  <Text style={[styles.detailsSubtitle, { color: palette.textMuted }]}>פרטים מהשאלון</Text>
-                </View>
-                <TouchableOpacity
-                  activeOpacity={0.85}
-                  onPress={() => {
-                    openProgress.value = withSpring(0, { damping: 18, stiffness: 220 });
-                  }}
-                  style={[styles.detailsHintPill, { backgroundColor: palette.accentLight }]}
-                  accessibilityRole="button"
-                  accessibilityLabel="סגור"
-                >
-                  <Text style={[styles.detailsHint, { color: palette.accent }]}>↓ סגור</Text>
-                </TouchableOpacity>
-              </View>
+              <View style={[styles.detailsGrabber, { backgroundColor: isDark ? 'rgba(156,163,175,0.38)' : 'rgba(156,163,175,0.42)' }]} />
 
               {/* Shared profile members strip (avatars + names) */}
               {(users || []).length > 1 ? (
@@ -400,7 +396,7 @@ export default function GroupCard({
                         </Text>
                       );
                     }
-                    const details = buildDetailsItems(surveysByUserId[selected.id]);
+                    const selectedSurvey = surveysByUserId[selected.id] ?? null;
                     return (
                       <View key={selected.id} style={styles.memberBlock}>
                         <View style={[styles.selectedHeader, { backgroundColor: palette.cardBg, borderColor: palette.border }]}>
@@ -428,30 +424,49 @@ export default function GroupCard({
                             </Text>
                           </View>
                         </View>
-                        {details.length ? (
-                          <View style={styles.detailsGrid}>
-                            {details.slice(0, 4).map((it) => {
-                              const Icon = it.icon;
-                              return (
-                                <View
-                                  key={`${selected.id}:${it.label}:${it.value}`}
-                                  style={[styles.detailCard, { backgroundColor: palette.cardBg, borderColor: palette.border }]}
-                                >
-                                  <View style={[styles.detailIconWrap, { backgroundColor: palette.accentLight }]}>
-                                    <Icon size={16} color={palette.accent} strokeWidth={2.5} />
-                                  </View>
-                                  <View style={styles.detailTextWrap}>
-                                    <Text style={[styles.detailLabel, { color: palette.textMuted }]} numberOfLines={1}>
-                                      {it.label}
-                                    </Text>
-                                    <Text style={[styles.detailValue, { color: palette.text }]} numberOfLines={1}>
-                                      {it.value}
-                                    </Text>
-                                  </View>
-                                </View>
-                              );
-                            })}
-                          </View>
+                        {selectedSurvey ? (
+                          <PreferencesSummaryGrid
+                            budgetLabel={(() => {
+                              const min = (selectedSurvey as any).price_min;
+                              const max = (selectedSurvey as any).price_max;
+                              if (typeof min === 'number' && typeof max === 'number') {
+                                return `${formatCurrencyILS(min)} - ${formatCurrencyILS(max)}`;
+                              }
+                              if (typeof (selectedSurvey as any).price_range === 'number')
+                                return formatCurrencyILS((selectedSurvey as any).price_range);
+                              return null;
+                            })()}
+                            cityLabel={(() => {
+                              const cities = Array.isArray((selectedSurvey as any).preferred_cities)
+                                ? (selectedSurvey as any).preferred_cities
+                                : null;
+                              if (cities && cities.length) {
+                                const joined = cities
+                                  .filter(Boolean)
+                                  .map((c: any) => String(c).trim())
+                                  .filter(Boolean)
+                                  .join(', ');
+                                if (joined) return joined;
+                              }
+                              return (selectedSurvey as any).preferred_city || null;
+                            })()}
+                            moveInLabel={(() => {
+                              const from = (selectedSurvey as any).move_in_month_from || (selectedSurvey as any).move_in_month;
+                              const to = (selectedSurvey as any).move_in_month_to || from;
+                              const flexible = !!(selectedSurvey as any).move_in_is_flexible;
+                              const label =
+                                flexible && from && to && to !== from
+                                  ? `${formatMonthLabel(from)} - ${formatMonthLabel(to)}`
+                                  : formatMonthLabel(from);
+                              return label || null;
+                            })()}
+                            vibeLabel={(selectedSurvey as any).home_lifestyle || null}
+                            isSmoker={typeof (selectedSurvey as any).is_smoker === 'boolean' ? (selectedSurvey as any).is_smoker : null}
+                            keepsKosher={typeof (selectedSurvey as any).keeps_kosher === 'boolean' ? (selectedSurvey as any).keeps_kosher : null}
+                            isShomerShabbat={typeof (selectedSurvey as any).is_shomer_shabbat === 'boolean' ? (selectedSurvey as any).is_shomer_shabbat : null}
+                            hasPet={typeof (selectedSurvey as any).has_pet === 'boolean' ? (selectedSurvey as any).has_pet : null}
+                            appearance="light"
+                          />
                         ) : (
                           <Text style={[styles.detailsEmptyText, { color: palette.textMuted }]}>אין מידע מהשאלון</Text>
                         )}
@@ -792,6 +807,9 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     borderTopLeftRadius: 22,
     borderTopRightRadius: 22,
+    borderWidth: 1,
+    borderColor: 'transparent',
+    backgroundColor: '#F3F4F6',
   },
   detailsGrabber: {
     width: 52,
@@ -801,35 +819,7 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
     marginBottom: 10,
   },
-  detailsHeaderRow: {
-    flexDirection: 'row-reverse',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 10,
-  },
-  detailsHeaderLeft: {
-    alignItems: 'flex-end',
-  },
-  detailsTitle: {
-    fontSize: 18,
-    fontWeight: '900',
-    textAlign: 'right',
-  },
-  detailsSubtitle: {
-    marginTop: 2,
-    fontSize: 12,
-    fontWeight: '700',
-    textAlign: 'right',
-  },
-  detailsHintPill: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 999,
-  },
-  detailsHint: {
-    fontSize: 12,
-    fontWeight: '900',
-  },
+  // Header removed (design: no "סגור" button or title at top).
   loadingWrap: {
     paddingVertical: 10,
     alignItems: 'flex-end',
@@ -848,9 +838,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 12,
     borderRadius: 18,
-    backgroundColor: 'rgba(255,255,255,0.55)',
+    backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: 'rgba(139,90,60,0.14)',
+    borderColor: 'rgba(229,231,235,0.60)',
   },
   membersStripHeader: {
     flexDirection: 'row-reverse',
@@ -862,14 +852,14 @@ const styles = StyleSheet.create({
   membersStripDivider: {
     height: 1,
     flex: 1,
-    backgroundColor: 'rgba(139,90,60,0.16)',
+    backgroundColor: 'rgba(229,231,235,0.95)',
   },
   membersStripTitlePill: {
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 999,
     borderWidth: 1,
-    borderColor: 'rgba(139,90,60,0.18)',
+    borderColor: 'rgba(209,213,219,0.65)',
   },
   membersStripTitle: {
     fontSize: 12,

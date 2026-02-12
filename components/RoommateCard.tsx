@@ -1,15 +1,7 @@
 import React, { memo, useEffect, useMemo, useState } from 'react';
-import { View, Text, StyleSheet, Image, ViewStyle, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, Image, ViewStyle, TouchableOpacity, Platform } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import {
-  MapPin,
-  CalendarDays,
-  Wallet,
-  Sparkles,
-  Cigarette,
-  UtensilsCrossed,
-  Sunset,
-  PawPrint,
   User as UserIcon,
 } from 'lucide-react-native';
 import { User, UserSurveyResponse } from '@/types/database';
@@ -19,6 +11,7 @@ import SwipeUpIndicator from '@/components/SwipeUpIndicator';
 import { fetchUserSurvey } from '@/lib/survey';
 import { formatCurrencyILS, formatMonthLabel } from '@/lib/surveyHighlights';
 import { Directions, Gesture, GestureDetector } from 'react-native-gesture-handler';
+import { BlurView } from 'expo-blur';
 import Animated, {
   Extrapolate,
   interpolate,
@@ -30,6 +23,7 @@ import Animated, {
   useSharedValue,
   withSpring,
 } from 'react-native-reanimated';
+import { PreferencesSummaryGrid } from '@/components/PreferencesSummaryGrid';
 
 type RoommateCardProps = {
   user: User;
@@ -158,63 +152,17 @@ function RoommateCardBase({
     };
   }, [enableParallaxDetails, user?.id]);
 
-  const detailsItems = useMemo(() => {
-    if (!survey) return [];
-    const items: { icon: any; label: string; value: string }[] = [];
-    const push = (icon: any, label: string, value?: string) => {
-      const v = (value || '').trim();
-      if (!v) return;
-      items.push({ icon, label, value: v });
-    };
-
-    // Apartment / plans
-    const cities = Array.isArray((survey as any).preferred_cities) ? (survey as any).preferred_cities : null;
-    const citiesText =
-      cities && cities.length ? cities.filter(Boolean).map((c: any) => String(c).trim()).filter(Boolean).join(', ') : '';
-    const cityLabel = citiesText || survey.preferred_city || '';
-    push(MapPin, cities && cities.length > 1 ? 'ערים מועדפות' : 'עיר מועדפת', cityLabel);
-    const min = (survey as any).price_min;
-    const max = (survey as any).price_max;
-    if (typeof min === 'number' && typeof max === 'number') {
-      push(Wallet, 'תקציב חודשי', `${formatCurrencyILS(min)} - ${formatCurrencyILS(max)}`);
-    } else if (typeof survey.price_range === 'number') {
-      push(Wallet, 'תקציב חודשי', formatCurrencyILS(survey.price_range));
-    }
-    {
-      const from = (survey as any).move_in_month_from || survey.move_in_month;
-      const to = (survey as any).move_in_month_to || from;
-      const flexible = !!(survey as any).move_in_is_flexible;
-      const label =
-        flexible && from && to && to !== from
-          ? `${formatMonthLabel(from)} - ${formatMonthLabel(to)}`
-          : formatMonthLabel(from);
-      push(CalendarDays, 'כניסה מתוכננת', label);
-    }
-    push(Sparkles, 'וייב', ((survey as any).home_lifestyle || '') as string);
-
-    // Lifestyle
-    if (typeof survey.is_smoker === 'boolean') push(Cigarette, 'מעשן/ת', survey.is_smoker ? 'כן' : 'לא');
-    if (typeof survey.keeps_kosher === 'boolean') push(UtensilsCrossed, 'כשרות', survey.keeps_kosher ? 'כן' : 'לא');
-    if (typeof survey.is_shomer_shabbat === 'boolean') push(Sunset, 'שומר/ת שבת', survey.is_shomer_shabbat ? 'כן' : 'לא');
-    if (typeof survey.has_pet === 'boolean') push(PawPrint, 'חיית מחמד', survey.has_pet ? 'כן' : 'לא');
-
-    return items.slice(0, 10);
-  }, [survey]);
-
-  const palette = useMemo(
+  // Force LIGHT look for the swipe-up panel (per design).
+  const glass = useMemo(
     () => ({
-      // Modern elegant palette
-      bg: '#FDFBF9',
-      cardBg: 'rgba(255,255,255,0.92)',
-      accent: '#8B5A3C',
-      accentSoft: 'rgba(139,90,60,0.65)',
-      accentLight: 'rgba(139,90,60,0.12)',
-      text: '#3D2814',
-      textMuted: '#8C7A6A',
-      border: 'rgba(139,90,60,0.15)',
-      shadow: '#5E3F2D',
-      gradient1: '#FDF8F3',
-      gradient2: '#F5EDE5',
+      panelBg: '#F3F4F6',
+      panelBorder: 'rgba(229,231,235,0.95)',
+      textPrimary: '#1F2937',
+      textSecondary: '#6B7280',
+      closePillBg: 'rgba(243,244,246,0.72)',
+      closePillBorder: 'rgba(255,255,255,0.55)',
+      closeText: '#6B7280',
+      grabber: 'rgba(156,163,175,0.42)',
     }),
     [],
   );
@@ -222,16 +170,14 @@ function RoommateCardBase({
   // Keep the bottom panel tight: size it based on the amount of content,
   // but clamp to a reasonable range so it still feels like a "panel".
   const detailsMinHeight = useMemo(() => {
-    const headerH = 52;
-    const rowH = 34;
-    const emptyH = 42;
-    const rows = surveyLoading ? 1 : detailsItems.length;
-    const contentH = rows > 0 ? rows * rowH : emptyH;
-    const desired = headerH + contentH + 22; // paddings
-    const min = 170;
-    const max = Math.round(resolvedMediaHeight * 0.46);
+    // Header was removed; keep the panel compact.
+    const headerH = 22;
+    const contentH = surveyLoading ? 64 : survey ? 248 : 86;
+    const desired = headerH + contentH + 22;
+    const min = 190;
+    const max = Math.round(resolvedMediaHeight * 0.6);
     return Math.max(min, Math.min(max, Math.round(desired)));
-  }, [detailsItems.length, resolvedMediaHeight, surveyLoading]);
+  }, [resolvedMediaHeight, surveyLoading, survey]);
 
   const detailsRef = useAnimatedRef<Animated.View>();
   const openProgress = useSharedValue(0); // 0..1
@@ -369,68 +315,74 @@ function RoommateCardBase({
             >
               <Animated.View
                 ref={detailsRef}
-                style={[styles.detailsPanelInner, { minHeight: detailsMinHeight }]}
+                style={[styles.detailsPanelInner, { minHeight: detailsMinHeight, borderColor: glass.panelBorder }]}
               >
-                <LinearGradient
-                  colors={[palette.gradient1, palette.gradient2]}
-                  start={[0, 0]}
-                  end={[0, 1]}
-                  style={StyleSheet.absoluteFillObject}
+                {/* Glass background */}
+                {Platform.OS === 'web' ? null : (
+                  <BlurView
+                    intensity={60}
+                    tint="light"
+                    style={StyleSheet.absoluteFillObject}
+                  />
+                )}
+                <View
+                  pointerEvents="none"
+                  style={[
+                    StyleSheet.absoluteFillObject,
+                    { backgroundColor: glass.panelBg, borderRadius: 24 },
+                  ]}
                 />
                 {/* Decorative top bar */}
-                <View style={styles.detailsGrabber} />
-
-                {/* Header */}
-                <View style={styles.detailsHeaderRow}>
-                  <View style={styles.detailsHeaderLeft}>
-                    <Text style={[styles.detailsTitle, { color: palette.text }]}>מה חשוב לי</Text>
-                    <Text style={[styles.detailsSubtitle, { color: palette.textMuted }]}>פרטים מהשאלון</Text>
-                  </View>
-                  <TouchableOpacity
-                    activeOpacity={0.85}
-                    onPress={() => {
-                      openProgress.value = withSpring(0, { damping: 18, stiffness: 220 });
-                    }}
-                    style={[styles.detailsHintPill, { backgroundColor: palette.accentLight }]}
-                    accessibilityRole="button"
-                    accessibilityLabel="סגור"
-                  >
-                    <Text style={[styles.detailsHint, { color: palette.accent }]}>↓ סגור</Text>
-                  </TouchableOpacity>
-                </View>
+                <View style={[styles.detailsGrabber, { backgroundColor: glass.grabber }]} />
 
                 {/* Content */}
                 {surveyLoading ? (
                   <View style={styles.loadingWrap}>
-                    <Text style={[styles.detailsEmptyText, { color: palette.textMuted }]}>טוען פרטים…</Text>
+                    <Text style={[styles.detailsEmptyText, { color: glass.textSecondary }]}>טוען פרטים…</Text>
                   </View>
-                ) : detailsItems.length ? (
-                  <View style={styles.detailsGrid}>
-                    {detailsItems.map((it) => {
-                      const Icon = it.icon;
-                      return (
-                        <View
-                          key={`${it.label}:${it.value}`}
-                          style={[styles.detailCard, { backgroundColor: palette.cardBg, borderColor: palette.border }]}
-                        >
-                          <View style={[styles.detailIconWrap, { backgroundColor: palette.accentLight }]}>
-                            <Icon size={16} color={palette.accent} strokeWidth={2.5} />
-                          </View>
-                          <View style={styles.detailTextWrap}>
-                            <Text style={[styles.detailLabel, { color: palette.textMuted }]} numberOfLines={1}>
-                              {it.label}
-                            </Text>
-                            <Text style={[styles.detailValue, { color: palette.text }]} numberOfLines={1}>
-                              {it.value}
-                            </Text>
-                          </View>
-                        </View>
-                      );
-                    })}
-                  </View>
+                ) : survey ? (
+                  <PreferencesSummaryGrid
+                    budgetLabel={(() => {
+                      const min = (survey as any).price_min;
+                      const max = (survey as any).price_max;
+                      if (typeof min === 'number' && typeof max === 'number') {
+                        return `${formatCurrencyILS(min)} - ${formatCurrencyILS(max)}`;
+                      }
+                      if (typeof survey.price_range === 'number') return formatCurrencyILS(survey.price_range);
+                      return null;
+                    })()}
+                    cityLabel={(() => {
+                      const cities = Array.isArray((survey as any).preferred_cities) ? (survey as any).preferred_cities : null;
+                      if (cities && cities.length) {
+                        const joined = cities
+                          .filter(Boolean)
+                          .map((c: any) => String(c).trim())
+                          .filter(Boolean)
+                          .join(', ');
+                        if (joined) return joined;
+                      }
+                      return survey.preferred_city || null;
+                    })()}
+                    moveInLabel={(() => {
+                      const from = (survey as any).move_in_month_from || survey.move_in_month;
+                      const to = (survey as any).move_in_month_to || from;
+                      const flexible = !!(survey as any).move_in_is_flexible;
+                      const label =
+                        flexible && from && to && to !== from
+                          ? `${formatMonthLabel(from)} - ${formatMonthLabel(to)}`
+                          : formatMonthLabel(from);
+                      return label || null;
+                    })()}
+                    vibeLabel={((survey as any).home_lifestyle as any) || null}
+                    isSmoker={typeof survey.is_smoker === 'boolean' ? survey.is_smoker : null}
+                    keepsKosher={typeof survey.keeps_kosher === 'boolean' ? survey.keeps_kosher : null}
+                    isShomerShabbat={typeof survey.is_shomer_shabbat === 'boolean' ? survey.is_shomer_shabbat : null}
+                    hasPet={typeof survey.has_pet === 'boolean' ? survey.has_pet : null}
+                    appearance="light"
+                  />
                 ) : (
                   <View style={styles.emptyWrap}>
-                    <Text style={[styles.detailsEmptyText, { color: palette.textMuted }]}>
+                    <Text style={[styles.detailsEmptyText, { color: glass.textSecondary }]}>
                       אין מידע מהשאלון להצגה כרגע
                     </Text>
                   </View>
@@ -597,20 +549,25 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     justifyContent: 'flex-end',
     zIndex: 1,
+    // Ensure gaps (e.g. removed margins) stay gray, not white.
+    backgroundColor: '#F3F4F6',
   },
   detailsPanelInner: {
-    marginHorizontal: 10,
-    marginBottom: 10,
+    marginHorizontal: 0,
+    marginBottom: 0,
     paddingHorizontal: 14,
     paddingTop: 8,
-    paddingBottom: 16,
+    paddingBottom: 12,
     borderRadius: 24,
     overflow: 'hidden',
-    // Elegant shadow
-    shadowColor: '#3D2814',
-    shadowOpacity: 0.18,
+    borderWidth: 1,
+    borderColor: 'transparent',
+    backgroundColor: '#F3F4F6',
+    // Glass shadow
+    shadowColor: '#000',
+    shadowOpacity: 0.12,
     shadowRadius: 24,
-    shadowOffset: { width: 0, height: 12 },
+    shadowOffset: { width: 0, height: 14 },
     elevation: 16,
   },
   detailsGrabber: {
@@ -623,36 +580,6 @@ const styles = StyleSheet.create({
   },
   foregroundLayer: {
     zIndex: 2,
-  },
-  detailsHeaderRow: {
-    flexDirection: 'row-reverse',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    marginBottom: 14,
-  },
-  detailsHeaderLeft: {
-    alignItems: 'flex-end',
-  },
-  detailsTitle: {
-    fontSize: 18,
-    fontWeight: '900',
-    textAlign: 'right',
-    letterSpacing: -0.3,
-  },
-  detailsSubtitle: {
-    fontSize: 12,
-    fontWeight: '600',
-    textAlign: 'right',
-    marginTop: 2,
-  },
-  detailsHintPill: {
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 12,
-  },
-  detailsHint: {
-    fontSize: 11,
-    fontWeight: '800',
   },
   loadingWrap: {
     paddingVertical: 20,

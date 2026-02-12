@@ -316,8 +316,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: '#5e3f2d',
     marginTop: -28, // lifts it above the tab bar
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.18)',
+    borderWidth: 5,
+    borderColor: '#FFFFFF',
     ...Platform.select({
       ios: {
         shadowColor: '#000000',
@@ -336,7 +336,7 @@ const styles = StyleSheet.create({
   },
   centerButtonDisabled: {
     backgroundColor: '#9CA3AF',
-    borderColor: 'rgba(255,255,255,0.12)',
+    borderColor: 'rgba(255,255,255,0.85)',
   },
   centerButtonPressed: {
     transform: [{ scale: 0.98 }],

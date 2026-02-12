@@ -1,8 +1,9 @@
 import React, { useMemo, useState } from 'react';
-import { Modal, Platform, StyleSheet, Text, TouchableWithoutFeedback, useWindowDimensions, View, ViewStyle } from 'react-native';
+import { Modal, Platform, StyleSheet, Text, TouchableWithoutFeedback, useColorScheme, useWindowDimensions, View, ViewStyle } from 'react-native';
 import Animated, { FadeIn, FadeInDown, FadeOut, FadeOutDown, FadeOutUp, LinearTransition } from 'react-native-reanimated';
-import { X } from 'lucide-react-native';
+import { ChevronDown, X } from 'lucide-react-native';
 import { TouchableOpacity } from 'react-native';
+import { BlurView } from 'expo-blur';
 
 const _defaultDuration = 450;
 
@@ -37,6 +38,16 @@ export type KeyFabPanelProps = {
   panelStyle?: ViewStyle;
   duration?: number;
   openedWidth?: number;
+  /**
+   * Visual style variant for the panel chrome.
+   * - default: legacy brown-accent card
+   * - glass: modern translucent "glass" panel (Apple-like)
+   */
+  variant?: 'default' | 'glass';
+  /**
+   * Label for the close control (glass variant).
+   */
+  closeLabel?: string;
 };
 
 export function KeyFabPanel({
@@ -55,8 +66,12 @@ export function KeyFabPanel({
   panelStyle,
   duration = _defaultDuration,
   openedWidth,
+  variant = 'default',
+  closeLabel = 'סגור',
 }: KeyFabPanelProps) {
   const { width, height } = useWindowDimensions();
+  const scheme = useColorScheme();
+  const isDark = scheme === 'dark';
   const [measuredHeight, setMeasuredHeight] = useState<number>(420);
 
   const resolvedTitle = (title ?? 'מצטרפים לדירה?').trim();
@@ -66,6 +81,11 @@ export function KeyFabPanel({
   const resolvedPrimaryAction = onPrimaryAction ?? onEnterPassword;
 
   const resolvedOpenedWidth = typeof openedWidth === 'number' ? openedWidth : width * 0.92;
+
+  const chromeStyle = useMemo(() => {
+    if (variant !== 'glass') return null;
+    return isDark ? styles.panelGlassDark : styles.panelGlassLight;
+  }, [variant, isDark]);
 
   const placement = useMemo(() => {
     const availableHeight = Math.max(0, height - topOffset - bottomOffset);
@@ -112,6 +132,7 @@ export function KeyFabPanel({
         layout={LinearTransition.duration(duration)}
         style={[
           styles.panel,
+          chromeStyle,
           panelStyle,
           {
             width: resolvedOpenedWidth,
@@ -127,22 +148,58 @@ export function KeyFabPanel({
           if (h && Math.abs(h - measuredHeight) > 2) setMeasuredHeight(h);
         }}
       >
-        <View style={styles.headerRow}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.heading}>{resolvedTitle}</Text>
-            {resolvedSubtitle ? <Text style={styles.subheading}>{resolvedSubtitle}</Text> : null}
+        {variant === 'glass' ? (
+          <>
+            {/* Glass background */}
+            {Platform.OS === 'web' ? null : (
+              <BlurView
+                intensity={isDark ? 28 : 60}
+                tint={isDark ? 'dark' : 'light'}
+                style={StyleSheet.absoluteFill}
+              />
+            )}
+            <View style={styles.headerRowGlass}>
+              <TouchableOpacity
+                style={[styles.closePill, isDark ? styles.closePillDark : null]}
+                activeOpacity={0.9}
+                onPress={onClose}
+                accessibilityRole="button"
+                accessibilityLabel={closeLabel || 'סגור'}
+              >
+                <ChevronDown size={16} color={isDark ? '#9CA3AF' : '#6B7280'} />
+                <Text style={[styles.closePillText, isDark ? styles.closePillTextDark : null]}>
+                  {closeLabel}
+                </Text>
+              </TouchableOpacity>
+
+              <View style={{ flex: 1, alignItems: 'flex-end' }}>
+                <Text style={[styles.headingGlass, isDark ? styles.headingGlassDark : null]}>{resolvedTitle}</Text>
+                {resolvedSubtitle ? (
+                  <Text style={[styles.subheadingGlass, isDark ? styles.subheadingGlassDark : null]}>
+                    {resolvedSubtitle}
+                  </Text>
+                ) : null}
+              </View>
+            </View>
+          </>
+        ) : (
+          <View style={styles.headerRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.heading}>{resolvedTitle}</Text>
+              {resolvedSubtitle ? <Text style={styles.subheading}>{resolvedSubtitle}</Text> : null}
+            </View>
+            <TouchableWithoutFeedback onPress={onClose}>
+              <Animated.View
+                style={styles.closeBtn}
+                layout={LinearTransition.duration(duration)}
+                entering={FadeIn.duration(duration)}
+                exiting={FadeOut.duration(duration)}
+              >
+                <X size={18} color="#5e3f2d" />
+              </Animated.View>
+            </TouchableWithoutFeedback>
           </View>
-          <TouchableWithoutFeedback onPress={onClose}>
-            <Animated.View
-              style={styles.closeBtn}
-              layout={LinearTransition.duration(duration)}
-              entering={FadeIn.duration(duration)}
-              exiting={FadeOut.duration(duration)}
-            >
-              <X size={18} color="#5e3f2d" />
-            </Animated.View>
-          </TouchableWithoutFeedback>
-        </View>
+        )}
 
         <Animated.View
           entering={FadeInDown.duration(duration)}
@@ -207,8 +264,22 @@ const styles = StyleSheet.create({
         }
       : { elevation: 10 }),
   },
+  panelGlassLight: {
+    backgroundColor: 'rgba(255,255,255,0.82)',
+    borderColor: 'rgba(255,255,255,0.50)',
+  },
+  panelGlassDark: {
+    backgroundColor: 'rgba(17,24,39,0.82)',
+    borderColor: 'rgba(255,255,255,0.10)',
+  },
   headerRow: {
     flexDirection: 'row-reverse',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  headerRowGlass: {
+    flexDirection: 'row',
     alignItems: 'flex-start',
     justifyContent: 'space-between',
     gap: 10,
@@ -220,6 +291,17 @@ const styles = StyleSheet.create({
     textAlign: 'right',
     writingDirection: 'rtl',
   },
+  headingGlass: {
+    fontSize: 20,
+    fontWeight: '900',
+    color: '#1F2937',
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    lineHeight: 24,
+  },
+  headingGlassDark: {
+    color: '#F9FAFB',
+  },
   subheading: {
     marginTop: 6,
     color: '#6B7280',
@@ -228,6 +310,19 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     textAlign: 'right',
     writingDirection: 'rtl',
+  },
+  subheadingGlass: {
+    marginTop: 6,
+    color: '#6B7280',
+    fontSize: 12,
+    fontWeight: '700',
+    lineHeight: 16,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    opacity: 0.92,
+  },
+  subheadingGlassDark: {
+    color: '#9CA3AF',
   },
   closeBtn: {
     width: 34,
@@ -238,6 +333,32 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(94,63,45,0.10)',
     borderWidth: 1,
     borderColor: 'rgba(94,63,45,0.14)',
+  },
+  closePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: 'rgba(243,244,246,0.60)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.40)',
+  },
+  closePillDark: {
+    backgroundColor: 'rgba(55,65,81,0.45)',
+    borderColor: 'rgba(255,255,255,0.10)',
+  },
+  closePillText: {
+    color: '#6B7280',
+    fontSize: 12,
+    fontWeight: '800',
+    includeFontPadding: false,
+    lineHeight: 16,
+    writingDirection: 'rtl',
+  },
+  closePillTextDark: {
+    color: '#9CA3AF',
   },
   content: {
     marginTop: 12,
