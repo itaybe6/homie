@@ -14,9 +14,11 @@ import { authService } from '@/lib/auth';
 import { useAuthStore } from '@/stores/authStore';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Eye, EyeOff, ArrowLeft } from 'lucide-react-native';
+import * as AppleAuthentication from 'expo-apple-authentication';
 // Removed vector icon for Google since it is single-color; using multicolor image instead
 import LavaLamp from '../../components/LavaLamp';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
+import { onAppleSignIn } from '@/lib/appleSignIn';
 
 const ACCENT_BROWN = '#5e3f2d';
 const BG_DARK = '#2B1A12';
@@ -33,6 +35,7 @@ export default function LoginScreen() {
   const [isPasswordVisible, setPasswordVisible] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
+  const [isAppleSignInAvailable, setIsAppleSignInAvailable] = useState(false);
 
   // Prefill email when coming from register ("email already exists")
   useEffect(() => {
@@ -51,6 +54,13 @@ export default function LoginScreen() {
         // ignore – getCurrentUser already clears invalid refresh tokens locally
       }
     })();
+  }, []);
+
+  useEffect(() => {
+    if (Platform.OS !== 'ios') return;
+    AppleAuthentication.isAvailableAsync()
+      .then((available) => setIsAppleSignInAvailable(available))
+      .catch(() => setIsAppleSignInAvailable(false));
   }, []);
 
   const handleLogin = async () => {
@@ -90,6 +100,22 @@ export default function LoginScreen() {
        setIsLoading(false);
      }
    };
+
+  const handleAppleSignIn = async () => {
+    try {
+      setIsLoading(true);
+      setError('');
+
+      const credential = await onAppleSignIn();
+      if (!credential) return; // cancelled
+
+      // TODO: After wiring backend verification/login, navigate similarly to handleLogin()
+    } catch (e: any) {
+      setError(e?.message || 'שגיאה בהתחברות עם Apple');
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   return (
     <View style={{ flex: 1 }}>
@@ -196,6 +222,16 @@ export default function LoginScreen() {
                   </View>
                   <Text style={styles.oauthText}>Google</Text>
                 </TouchableOpacity>
+
+                {Platform.OS === 'ios' && isAppleSignInAvailable ? (
+                  <AppleAuthentication.AppleAuthenticationButton
+                    buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN}
+                    buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.BLACK}
+                    cornerRadius={12}
+                    style={styles.appleBtn}
+                    onPress={handleAppleSignIn}
+                  />
+                ) : null}
                 <TouchableOpacity style={styles.linkContainerCenter} onPress={() => router.replace('/auth/register')} disabled={isLoading}>
                   <Text style={styles.linkTextPurple}>אין לך חשבון? הרשם כאן</Text>
                 </TouchableOpacity>
@@ -383,6 +419,11 @@ const styles = StyleSheet.create({
     color: '#111827',
     fontSize: 14,
     fontWeight: '600',
+  },
+  appleBtn: {
+    width: '100%',
+    height: 45,
+    marginTop: 4,
   },
   linkContainerCenter: {
     alignItems: 'center',
