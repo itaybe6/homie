@@ -106,10 +106,33 @@ export default function LoginScreen() {
       setIsLoading(true);
       setError('');
 
-      const credential = await onAppleSignIn();
-      if (!credential) return; // cancelled
+      const res = await onAppleSignIn();
+      if (!res) return; // cancelled
 
-      // TODO: After wiring backend verification/login, navigate similarly to handleLogin()
+      const { user, role, needsProfileCompletion, suggestedFullName } = res as any;
+      if (user) {
+        if (needsProfileCompletion) {
+          router.replace({
+            pathname: '/auth/complete-profile',
+            params: {
+              email: user.email,
+              fullName: suggestedFullName || '',
+            },
+          } as any);
+          return;
+        }
+
+        // Owners should land on apartments ("דירות") and never on partners.
+        // Regular users land on partners by default.
+        const next =
+          role === 'admin'
+            ? '/admin'
+            : role === 'owner'
+              ? '/(tabs)/home'
+              : '/(tabs)/partners';
+        setUser({ id: user.id, email: user.email!, role });
+        router.replace(next as any);
+      }
     } catch (e: any) {
       setError(e?.message || 'שגיאה בהתחברות עם Apple');
     } finally {
@@ -201,7 +224,7 @@ export default function LoginScreen() {
 
                 <View style={styles.dividerRow}>
                   <View style={styles.line} />
-                  <Text style={styles.dividerText}>או התחברות עם</Text>
+                  <Text style={styles.dividerText}>התחברות או הרשמה עם אפל או גוגל</Text>
                   <View style={styles.line} />
                 </View>
 

@@ -1,4 +1,5 @@
 import * as AppleAuthentication from 'expo-apple-authentication';
+import { authService } from '@/lib/auth';
 
 export async function onAppleSignIn() {
   try {
@@ -19,10 +20,20 @@ export async function onAppleSignIn() {
     void email;
     void user;
 
-    // TODO: Send identityToken to your backend server to verify and create/login user
-    // The backend should verify the identityToken JWT with Apple's public keys
+    if (!identityToken) {
+      throw new Error('Apple לא החזיר identityToken. נסה שוב או בדוק הגדרות Sign in with Apple.');
+    }
 
-    return credential;
+    // Exchange Apple identity token for Supabase session
+    const { user: supaUser, role, needsProfileCompletion } =
+      await authService.signInWithAppleIdToken(identityToken);
+
+    const suggestedFullName = [credential.fullName?.givenName, credential.fullName?.familyName]
+      .filter(Boolean)
+      .join(' ')
+      .trim();
+
+    return { user: supaUser, role, needsProfileCompletion, suggestedFullName, credential };
   } catch (e: any) {
     if (e?.code === 'ERR_REQUEST_CANCELED') {
       // User canceled the sign-in flow - do nothing

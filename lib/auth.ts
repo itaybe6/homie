@@ -297,6 +297,65 @@ export const authService = {
     return { user: authedUser, role } as any;
   },
 
+  /**
+   * Native Apple sign-in for mobile apps.
+   * Expects an `identityToken` from `expo-apple-authentication` and exchanges it for a Supabase session.
+   */
+  async signInWithAppleIdToken(identityToken: string) {
+    const token = (identityToken || '').trim();
+    if (!token) throw new Error('לא התקבל token מ-Apple');
+
+    const { data, error } = await supabase.auth.signInWithIdToken({
+      provider: 'apple',
+      token,
+    });
+
+    if (error) throw error;
+
+    const authedUser = data.user;
+    if (!authedUser) throw new Error('לא התקבל משתמש מהשרת');
+
+    // This app assumes an email exists for routing/profile.
+    // If you choose to allow users without email in Supabase, update app types/flows accordingly.
+    if (!authedUser.email) {
+      throw new Error(
+        'התחברות עם Apple הצליחה אבל לא התקבל אימייל. בדוק ב-Supabase את ההגדרה "Allow users without an email" ועדכן את האפליקציה להתמודד עם משתמש בלי אימייל.'
+      );
+    }
+
+    let role: 'user' | 'owner' | 'admin' | undefined = resolveRoleFromSupabaseUser(authedUser);
+    let needsProfileCompletion = false;
+
+    if (authedUser?.id) {
+      try {
+        const { data: profile } = await supabase
+          .from('users')
+          .select('id, role, full_name, phone, city')
+          .eq('id', authedUser.id)
+          .maybeSingle();
+
+        role = resolveRoleFromSupabaseUser(authedUser, (profile as any)?.role);
+
+        const hasProfileRow = !!(profile as any)?.id;
+        const hasRole = !!(role === 'user' || role === 'owner' || role === 'admin');
+        const hasFullName = !!String((profile as any)?.full_name || '').trim();
+        const hasPhone = !!String((profile as any)?.phone || '').trim();
+        const hasCity = !!String((profile as any)?.city || '').trim();
+
+        // For Apple SSO first-time users, we require a minimal profile to exist.
+        needsProfileCompletion = !(hasProfileRow && hasRole && hasFullName && hasPhone && hasCity);
+      } catch {
+        // If we can't read profile (RLS/migration missing), do not block login, but let UI collect details later.
+        needsProfileCompletion = true;
+      }
+    }
+
+    // Default role for first-time SSO users without a profile row.
+    if (!role) role = 'user';
+
+    return { user: authedUser, role, needsProfileCompletion } as any;
+  },
+
   async signOut() {
     // Use global scope to clear cookies on web as well, but always clear local session too.
     const isBenignSignOutError = (err: any) => {
