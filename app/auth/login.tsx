@@ -36,6 +36,7 @@ export default function LoginScreen() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [isAppleSignInAvailable, setIsAppleSignInAvailable] = useState(false);
+  const GOOGLE_COMING_SOON = true;
 
   // Prefill email when coming from register ("email already exists")
   useEffect(() => {
@@ -229,9 +230,9 @@ export default function LoginScreen() {
                 </View>
 
                 <TouchableOpacity
-                  style={styles.oauthBtn}
+                  style={[styles.oauthBtn, (GOOGLE_COMING_SOON || isLoading) && styles.oauthBtnDisabled]}
                   onPress={handleGoogleSignIn}
-                  disabled={isLoading}
+                  disabled={GOOGLE_COMING_SOON || isLoading}
                   activeOpacity={0.9}
                 >
                   {/* Use local multi-color SVG for Google icon */}
@@ -244,6 +245,11 @@ export default function LoginScreen() {
                     })}
                   </View>
                   <Text style={styles.oauthText}>Google</Text>
+                  {GOOGLE_COMING_SOON ? (
+                    <View style={styles.soonPill} pointerEvents="none">
+                      <Text style={styles.soonText}>SOON</Text>
+                    </View>
+                  ) : null}
                 </TouchableOpacity>
 
                 {Platform.OS === 'ios' && isAppleSignInAvailable ? (
@@ -438,10 +444,28 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 6,
   },
+  oauthBtnDisabled: {
+    opacity: 0.6,
+  },
   oauthText: {
     color: '#111827',
     fontSize: 14,
     fontWeight: '600',
+  },
+  soonPill: {
+    marginLeft: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 999,
+    backgroundColor: 'rgba(94,63,45,0.10)',
+    borderWidth: 1,
+    borderColor: 'rgba(94,63,45,0.22)',
+  },
+  soonText: {
+    color: ACCENT_BROWN,
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.6,
   },
   appleBtn: {
     width: '100%',
