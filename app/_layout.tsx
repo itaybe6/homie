@@ -13,6 +13,33 @@ import { isSupabaseConfigured } from '@/lib/supabase';
 import { AppAlertProvider } from '@/components/AppAlertProvider';
 import { emitAlert } from '@/lib/alertBus';
 
+// Help locate Reanimated strict-mode warnings by printing a JS stack trace.
+// This is DEV-only and has no effect in production builds.
+if (__DEV__) {
+  try {
+    const anyConsole = console as any;
+    if (!anyConsole.__homie_reanimated_warn_patched__) {
+      const origWarn = console.warn.bind(console);
+      console.warn = (...args: any[]) => {
+        try {
+          const msg = typeof args?.[0] === 'string' ? args[0] : '';
+          if (msg.includes('[Reanimated] Reading from `value` during component render')) {
+            origWarn(...args);
+            origWarn('Reanimated value-read stack:', new Error().stack);
+            return;
+          }
+        } catch {
+          // ignore
+        }
+        origWarn(...args);
+      };
+      anyConsole.__homie_reanimated_warn_patched__ = true;
+    }
+  } catch {
+    // ignore
+  }
+}
+
 // Render native `Alert.alert(...)` via our in-app modal, so we control RTL + styling.
 // Note: This must run from a file that is guaranteed to load (RootLayout),
 // not `app/entry.ts` (the app is bootstrapped via `expo-router/entry`).

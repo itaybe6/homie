@@ -197,7 +197,7 @@ function RoommateCardBase({
   }, [enableParallaxDetails, initialDetailsOpen]);
 
   useAnimatedReaction(
-    () => openProgress.value >= 0.85,
+    () => (enableParallaxDetails ? openProgress.value >= 0.85 : false),
     (opened, prev) => {
       if (opened === prev) return;
       runOnJS(setIsDetailsOpen)(opened);
@@ -266,7 +266,10 @@ function RoommateCardBase({
     });
 
   const detailsPanelStyle = useAnimatedStyle(() => {
-    if (!_WORKLET) return {};
+    if (!enableParallaxDetails) return {};
+    // On web, Reanimated worklets execute on the JS thread; `_WORKLET` may be undefined there.
+    // Using `typeof` keeps this guard safe in both runtimes.
+    if (typeof _WORKLET === 'undefined') return {};
     const m = measure(detailsRef);
     const h = (m?.height ?? 0) > 0 ? (m?.height as number) : detailsMinHeight;
     return {
@@ -279,7 +282,8 @@ function RoommateCardBase({
   });
 
   const imageTranslateStyle = useAnimatedStyle(() => {
-    if (!_WORKLET) return {};
+    if (!enableParallaxDetails) return {};
+    if (typeof _WORKLET === 'undefined') return {};
     const m = measure(detailsRef);
     const h = (m?.height ?? 0) > 0 ? (m?.height as number) : detailsMinHeight;
     return {
@@ -361,7 +365,8 @@ function RoommateCardBase({
                           .join(', ');
                         if (joined) return joined;
                       }
-                      return survey.preferred_city || null;
+                      const legacy = (survey as any).preferred_city;
+                      return typeof legacy === 'string' && legacy.trim() ? legacy.trim() : null;
                     })()}
                     moveInLabel={(() => {
                       const from = (survey as any).move_in_month_from || survey.move_in_month;
@@ -429,7 +434,7 @@ function RoommateCardBase({
 
             {enableParallaxDetails ? (
               <SwipeUpIndicator
-                isOpened={openProgress.value >= 0.85}
+                isOpened={isDetailsOpen}
                 style={{ position: 'absolute', bottom: 14, alignSelf: 'center' }}
               />
             ) : null}

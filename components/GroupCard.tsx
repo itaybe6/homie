@@ -27,7 +27,8 @@ function buildDetailsItems(survey?: UserSurveyResponse | null): DetailItem[] {
   const cities = Array.isArray((survey as any).preferred_cities) ? (survey as any).preferred_cities : null;
   const citiesText =
     cities && cities.length ? cities.filter(Boolean).map((c: any) => String(c).trim()).filter(Boolean).join(', ') : '';
-  const cityLabel = citiesText || survey.preferred_city || '';
+  const legacyCity = (survey as any).preferred_city;
+  const cityLabel = citiesText || (typeof legacyCity === 'string' ? legacyCity : '') || '';
   push(MapPin, cities && cities.length > 1 ? 'ערים מועדפות' : 'עיר מועדפת', cityLabel);
   const min = (survey as any).price_min;
   const max = (survey as any).price_max;
@@ -138,7 +139,7 @@ export default function GroupCard({
   }, [groupId]);
 
   useAnimatedReaction(
-    () => openProgress.value >= 0.85,
+    () => (typeof _WORKLET === 'undefined' ? false : openProgress.value >= 0.85),
     (opened, prev) => {
       if (opened === prev) return;
       runOnJS(setIsDetailsOpen)(opened);
@@ -194,7 +195,8 @@ export default function GroupCard({
   }, [loading, resolvedMediaHeight, users]);
 
   const detailsPanelStyle = useAnimatedStyle(() => {
-    if (!_WORKLET) return {};
+    // On web, Reanimated worklets execute on the JS thread; `_WORKLET` may be undefined there.
+    if (typeof _WORKLET === 'undefined') return {};
     const m = measure(detailsRef);
     const h = (m?.height ?? 0) > 0 ? (m?.height as number) : detailsMinHeight;
     return {
@@ -203,7 +205,7 @@ export default function GroupCard({
   });
 
   const imageTranslateStyle = useAnimatedStyle(() => {
-    if (!_WORKLET) return {};
+    if (typeof _WORKLET === 'undefined') return {};
     const m = measure(detailsRef);
     const h = (m?.height ?? 0) > 0 ? (m?.height as number) : detailsMinHeight;
     return {
@@ -448,7 +450,8 @@ export default function GroupCard({
                                   .join(', ');
                                 if (joined) return joined;
                               }
-                              return (selectedSurvey as any).preferred_city || null;
+                              const legacy = (selectedSurvey as any).preferred_city;
+                              return typeof legacy === 'string' && legacy.trim() ? legacy.trim() : null;
                             })()}
                             moveInLabel={(() => {
                               const from = (selectedSurvey as any).move_in_month_from || (selectedSurvey as any).move_in_month;

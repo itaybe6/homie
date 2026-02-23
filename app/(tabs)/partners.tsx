@@ -349,8 +349,8 @@ function AgeRangeSlider({
       </View>
 
       <View style={styles.rangeLabelsRow}>
-        <Text style={styles.rangeLabelText}>{max}</Text>
         <Text style={styles.rangeLabelText}>{min}</Text>
+        <Text style={styles.rangeLabelText}>{max}</Text>
       </View>
     </View>
   );
@@ -479,6 +479,10 @@ export default function PartnersScreen() {
   const tabBarHeight = useBottomTabBarHeight();
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const translateX = useSharedValue(0);
+  // Flag set by onSwipe so the useEffect below knows to reset translateX
+  // only after React has rendered the new card (prevents the old card from
+  // flashing back to center between the animation end and the state update).
+  const swipeResetPendingRef = useRef(false);
   const headerOffset = insets.top + 52 + -40;
   const SWIPE_THRESHOLD = 120;
   const ACTIONS_BAR_HEIGHT = 76;
@@ -518,6 +522,38 @@ export default function PartnersScreen() {
 
   const isDeckExhausted = items.length > 0 && currentIndex >= items.length;
 
+  // Prefetch current + upcoming avatars to reduce flicker/blank frames on swipe.
+  useEffect(() => {
+    const uris: string[] = [];
+    const collect = (item?: BrowseItem) => {
+      if (!item) return;
+      if (item.type === 'user') {
+        const u = (item as any).user as User;
+        const uri = String(u?.avatar_url || '').trim();
+        if (uri) uris.push(uri);
+        return;
+      }
+      const users = ((item as any).users || []) as User[];
+      users.forEach((u) => {
+        const uri = String(u?.avatar_url || '').trim();
+        if (uri) uris.push(uri);
+      });
+    };
+
+    collect(items[currentIndex]);
+    collect(items[currentIndex + 1]);
+    collect(items[currentIndex + 2]);
+
+    Array.from(new Set(uris))
+      .filter((u) => /^https?:\/\//i.test(u))
+      .slice(0, 10)
+      .forEach((u) => {
+        try {
+          Image.prefetch(u);
+        } catch {}
+      });
+  }, [items, currentIndex]);
+
   const onSwipe = (type: 'like' | 'pass') => {
     const item = items[currentIndex];
     if (!item) return;
@@ -528,6 +564,8 @@ export default function PartnersScreen() {
       if (item.type === 'user') handlePass((item as any).user, { skipSlide: true });
       else handleGroupPass((item as any).groupId, (item as any).users, { skipSlide: true });
     }
+    // Signal the useEffect to reset translateX after the new card is rendered.
+    swipeResetPendingRef.current = true;
     // IMPORTANT: allow advancing past the last item so we can show a proper "end of deck" state.
     setCurrentIndex((i) => {
       const next = i + 1;
@@ -535,9 +573,22 @@ export default function PartnersScreen() {
     });
   };
 
+  // Reset the card's translateX only AFTER React has rendered the new card.
+  // Doing this inside the animation worklet callback (before the JS state update) caused
+  // the outgoing card to flash back to the center for one or more frames – the "jump".
+  // By deferring to useEffect we guarantee translateX is zeroed with the new content already
+  // in the tree, so the card appears at center with the correct data, with no flash.
+  useEffect(() => {
+    if (swipeResetPendingRef.current) {
+      swipeResetPendingRef.current = false;
+      translateX.value = 0;
+    }
+  }, [currentIndex]);
+
   const swipeGesture = Gesture.Pan()
     .enabled(!isDeckExhausted && !isDetailsOpen)
     .onChange((e) => {
+            translateX.value = 0;
       translateX.value = e.translationX;
     })
     .onEnd(() => {
@@ -545,15 +596,16 @@ export default function PartnersScreen() {
       if (translateX.value > SWIPE_THRESHOLD) {
         translateX.value = withTiming(screenWidth + 200, { duration: 180 }, (finished) => {
           if (finished) {
-            // Reset on the UI thread BEFORE swapping the underlying item (prevents the next card "jumping" in).
-            translateX.value = 0;
+            // Do NOT reset translateX here – the reset is deferred to a useEffect that
+            // fires after React has already rendered the new card. Resetting here (on the
+            // UI thread, before the JS state update) caused the old card to flash back to
+            // the center for one or more frames (the visible "jump").
             runOnJS(onSwipe)('like');
           }
         });
       } else if (translateX.value < -SWIPE_THRESHOLD) {
         translateX.value = withTiming(-screenWidth - 200, { duration: 180 }, (finished) => {
           if (finished) {
-            translateX.value = 0;
             runOnJS(onSwipe)('pass');
           }
         });
@@ -1414,7 +1466,8 @@ export default function PartnersScreen() {
     );
   }
 
-  const renderBrowseItem = (item: BrowseItem) => {
+  const renderBrowseItem = (item: BrowseItem, variant: 'front' | 'behind' = 'front') => {
+    const enableDetails = variant === 'front' && Platform.OS !== 'web';
     if (item.type === 'user') {
       return (
         <RoommateCard
@@ -1424,9 +1477,9 @@ export default function PartnersScreen() {
           onPass={handlePass}
           style={{ marginBottom: 0 }}
           mediaHeight={swipeCardHeight}
-          enableParallaxDetails
+          enableParallaxDetails={enableDetails}
           strongTextOverlay
-          onDetailsOpenChange={setIsDetailsOpen}
+          onDetailsOpenChange={enableDetails ? setIsDetailsOpen : undefined}
           onOpen={(u) =>
             router.push({
               pathname: '/(tabs)/user/[id]',
@@ -1447,7 +1500,7 @@ export default function PartnersScreen() {
         onPass={(groupId, users) => handleGroupPass(groupId, users)}
         mediaHeight={swipeCardHeight}
         strongTextOverlay
-        onDetailsOpenChange={setIsDetailsOpen}
+        onDetailsOpenChange={enableDetails ? setIsDetailsOpen : undefined}
         onOpen={(userId: string) =>
           router.push({
             pathname: '/(tabs)/user/[id]',
@@ -1470,7 +1523,7 @@ export default function PartnersScreen() {
     const outTarget = type === 'like' ? screenWidth + 200 : -screenWidth - 200;
     translateX.value = withTiming(outTarget, { duration: 180 }, (finished) => {
       if (finished) {
-        translateX.value = 0;
+        // Reset is deferred to the useEffect below (same reason as swipeGesture.onEnd).
         runOnJS(onSwipe)(type);
       }
     });
@@ -1638,14 +1691,25 @@ export default function PartnersScreen() {
           <View>
             <View style={[styles.cardStack, { height: swipeCardHeight }]}>
               {items[currentIndex + 1] ? (
-                <Animated.View pointerEvents="none" style={[styles.behindCard, behindCardAnimatedStyle]}>
-                  {renderBrowseItem(items[currentIndex + 1])}
+                <Animated.View
+                  pointerEvents="none"
+                  renderToHardwareTextureAndroid
+                  needsOffscreenAlphaCompositing
+                  shouldRasterizeIOS
+                  style={[styles.behindCard, behindCardAnimatedStyle]}
+                >
+                  {renderBrowseItem(items[currentIndex + 1], 'behind')}
                 </Animated.View>
               ) : null}
 
               <GestureDetector gesture={swipeGesture}>
-                <Animated.View style={[styles.animatedCard, cardAnimatedStyle]}>
-                  {renderBrowseItem(items[currentIndex])}
+                <Animated.View
+                  renderToHardwareTextureAndroid
+                  needsOffscreenAlphaCompositing
+                  shouldRasterizeIOS
+                  style={[styles.animatedCard, cardAnimatedStyle]}
+                >
+                  {renderBrowseItem(items[currentIndex], 'front')}
 
                   {/* Right swipe (LIKE) overlay */}
                   <Animated.View
@@ -2226,11 +2290,13 @@ const styles = StyleSheet.create({
     zIndex: 1,
     borderRadius: SWIPE_CARD_RADIUS,
     overflow: 'hidden',
+    backfaceVisibility: 'hidden',
   },
   animatedCard: {
     zIndex: 2,
     borderRadius: SWIPE_CARD_RADIUS,
     overflow: 'hidden',
+    backfaceVisibility: 'hidden',
   },
   swipeOverlay: {
     ...StyleSheet.absoluteFillObject,
@@ -2239,6 +2305,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     alignItems: 'center',
     justifyContent: 'center',
+    backfaceVisibility: 'hidden',
   },
   swipeOverlayIconWrap: {
     width: 112,
@@ -3023,6 +3090,7 @@ function GroupCard({
                     source={{ uri: u.avatar_url || DEFAULT_AVATAR }}
                     style={groupStyles.cellImage}
                     resizeMode="cover"
+                    fadeDuration={0}
                   />
                 ) : (
                   <View style={groupStyles.cellPlaceholder}>
