@@ -17,6 +17,7 @@ import { supabase } from '@/lib/supabase';
 import { alpha, colors } from '@/lib/theme';
 import { authService } from '@/lib/auth';
 import { useAuthStore } from '@/stores/authStore';
+import { formatDateHe } from '@/utils/time';
 
 type AdminTab = 'overview' | 'users' | 'owners' | 'apartments' | 'matches';
 
@@ -607,7 +608,7 @@ function UserRow({ user, aptCount }: { user: any; aptCount?: number }) {
         </View>
       </View>
       <View style={styles.rowRight}>
-        <Text style={styles.rowMeta}>{new Date(user.created_at).toLocaleDateString('he-IL')}</Text>
+        <Text style={styles.rowMeta}>{formatDateHe(user.created_at)}</Text>
       </View>
     </View>
   );
@@ -721,7 +722,7 @@ function MatchRow({ match, sender, receiver }: { match: any; sender: any; receiv
             {label}
           </Text>
         </View>
-        <Text style={styles.rowMeta}>{new Date(match.created_at).toLocaleDateString('he-IL')}</Text>
+        <Text style={styles.rowMeta}>{formatDateHe(match.created_at)}</Text>
       </View>
     </View>
   );

@@ -26,7 +26,7 @@ import { useAuthStore } from '@/stores/authStore';
 import { Apartment, Notification, User } from '@/types/database';
 import { computeGroupAwareLabel } from '@/lib/group';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { formatTimeAgoHe } from '@/utils/time';
+import { formatTimeAgoHe, toEpochMs } from '@/utils/time';
 import { insertNotificationOnce } from '@/lib/notifications';
 import { useNotificationsStore } from '@/stores/notificationsStore';
 import { alpha, colors } from '@/lib/theme';
@@ -2188,8 +2188,8 @@ export default function RequestsScreen() {
   };
 
   const bucketLabelHe = (iso: string): string => {
-    const t = Date.parse(iso || '');
-    if (!Number.isFinite(t)) return 'מוקדם יותר';
+    const t = toEpochMs(iso);
+    if (t === null) return 'מוקדם יותר';
     const now = Date.now();
     const diffDays = Math.floor((now - t) / (24 * 60 * 60 * 1000));
     if (diffDays <= 0) return 'היום';
@@ -2200,8 +2200,8 @@ export default function RequestsScreen() {
   };
 
   const timeAgoHe = (iso: string): string => {
-    const t = Date.parse(iso || '');
-    if (!Number.isFinite(t)) return 'לפני רגע';
+    const t = toEpochMs(iso);
+    if (t === null) return 'לפני רגע';
     const diffMs = Math.max(0, Date.now() - t);
     const totalMinutes = Math.floor(diffMs / (60 * 1000));
     if (totalMinutes < 1) return 'לפני רגע';
@@ -2227,8 +2227,8 @@ export default function RequestsScreen() {
       .map((n) => ({ kind: 'NOTIFICATION' as const, id: n.id, created_at: n.created_at, notification: n }));
     const reqs = (received || []).map((r) => ({ kind: 'REQUEST' as const, id: r.id, created_at: r.created_at, request: r }));
     return [...notifs, ...reqs].sort((a, b) => {
-      const ta = Date.parse(a.created_at || '') || 0;
-      const tb = Date.parse(b.created_at || '') || 0;
+      const ta = toEpochMs(a.created_at) ?? 0;
+      const tb = toEpochMs(b.created_at) ?? 0;
       return tb - ta;
     });
   }, [notifItems, received]);

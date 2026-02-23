@@ -19,6 +19,7 @@ import { User } from '@/types/database';
 import { computeGroupAwareLabel } from '@/lib/group';
 import { insertNotificationOnce } from '@/lib/notifications';
 import { alpha, colors } from '@/lib/theme';
+import { formatDateTimeHe } from '@/utils/time';
 
 type StatusFilterValue = 'ALL' | 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED' | 'NOT_RELEVANT';
 
@@ -601,7 +602,7 @@ export default function GroupRequestsScreen() {
                       )}
                     </View>
                     {!!item.created_at ? (
-                      <Text style={styles.cardMeta}>{new Date(item.created_at).toLocaleString()}</Text>
+                      <Text style={styles.cardMeta}>{formatDateTimeHe(item.created_at)}</Text>
                     ) : null}
                   </View>
 

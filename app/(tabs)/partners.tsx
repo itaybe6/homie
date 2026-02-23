@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   SafeAreaView,
   StyleSheet,
@@ -549,7 +549,7 @@ export default function PartnersScreen() {
       .slice(0, 10)
       .forEach((u) => {
         try {
-          Image.prefetch(u);
+          Image.prefetch(u).catch(() => {});
         } catch {}
       });
   }, [items, currentIndex]);
@@ -564,7 +564,7 @@ export default function PartnersScreen() {
       if (item.type === 'user') handlePass((item as any).user, { skipSlide: true });
       else handleGroupPass((item as any).groupId, (item as any).users, { skipSlide: true });
     }
-    // Signal the useEffect to reset translateX after the new card is rendered.
+    // Signal the effect to reset translateX after the new card is rendered.
     swipeResetPendingRef.current = true;
     // IMPORTANT: allow advancing past the last item so we can show a proper "end of deck" state.
     setCurrentIndex((i) => {
@@ -576,9 +576,9 @@ export default function PartnersScreen() {
   // Reset the card's translateX only AFTER React has rendered the new card.
   // Doing this inside the animation worklet callback (before the JS state update) caused
   // the outgoing card to flash back to the center for one or more frames – the "jump".
-  // By deferring to useEffect we guarantee translateX is zeroed with the new content already
+  // By deferring to an effect we guarantee translateX is zeroed with the new content already
   // in the tree, so the card appears at center with the correct data, with no flash.
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (swipeResetPendingRef.current) {
       swipeResetPendingRef.current = false;
       translateX.value = 0;
@@ -588,7 +588,6 @@ export default function PartnersScreen() {
   const swipeGesture = Gesture.Pan()
     .enabled(!isDeckExhausted && !isDetailsOpen)
     .onChange((e) => {
-            translateX.value = 0;
       translateX.value = e.translationX;
     })
     .onEnd(() => {
