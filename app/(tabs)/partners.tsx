@@ -376,6 +376,7 @@ export default function PartnersScreen() {
   const [items, setItems] = useState<BrowseItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [currentIndex, setCurrentIndex] = useState(0);
+  const [freezeBehindCard, setFreezeBehindCard] = useState(false);
   const [isFiltersOpen, setIsFiltersOpen] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [gender, setGender] = useState<'any' | 'male' | 'female'>('any');
@@ -566,6 +567,9 @@ export default function PartnersScreen() {
     }
     // Signal the effect to reset translateX after the new card is rendered.
     swipeResetPendingRef.current = true;
+    // Freeze the "behind" card during the swap to avoid a 1-frame flash where it advances
+    // to the next-next card while the new front card is still offscreen.
+    setFreezeBehindCard(true);
     // IMPORTANT: allow advancing past the last item so we can show a proper "end of deck" state.
     setCurrentIndex((i) => {
       const next = i + 1;
@@ -582,6 +586,7 @@ export default function PartnersScreen() {
     if (swipeResetPendingRef.current) {
       swipeResetPendingRef.current = false;
       translateX.value = 0;
+      setFreezeBehindCard(false);
     }
   }, [currentIndex]);
 
@@ -1468,8 +1473,10 @@ export default function PartnersScreen() {
   const renderBrowseItem = (item: BrowseItem, variant: 'front' | 'behind' = 'front') => {
     const enableDetails = variant === 'front' && Platform.OS !== 'web';
     if (item.type === 'user') {
+      const userId = String((item as any).user?.id ?? '');
       return (
         <RoommateCard
+          key={`deck-user-${userId}-${variant}`}
           user={(item as any).user}
           matchPercent={matchScores[(item as any).user.id] ?? null}
           onLike={handleLike}
@@ -1489,8 +1496,10 @@ export default function PartnersScreen() {
       );
     }
 
+    const groupId = String((item as any).groupId ?? '');
     return (
       <GroupCardComponent
+        key={`deck-group-${groupId}-${variant}`}
         groupId={(item as any).groupId}
         users={(item as any).users}
         apartment={(item as any).apartment}
@@ -1689,7 +1698,7 @@ export default function PartnersScreen() {
         ) : (
           <View>
             <View style={[styles.cardStack, { height: swipeCardHeight }]}>
-              {items[currentIndex + 1] ? (
+              {items[freezeBehindCard ? currentIndex : currentIndex + 1] ? (
                 <Animated.View
                   pointerEvents="none"
                   renderToHardwareTextureAndroid
@@ -1697,7 +1706,7 @@ export default function PartnersScreen() {
                   shouldRasterizeIOS
                   style={[styles.behindCard, behindCardAnimatedStyle]}
                 >
-                  {renderBrowseItem(items[currentIndex + 1], 'behind')}
+                  {renderBrowseItem(items[freezeBehindCard ? currentIndex : currentIndex + 1], 'behind')}
                 </Animated.View>
               ) : null}
 
