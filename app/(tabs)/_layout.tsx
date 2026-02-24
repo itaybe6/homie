@@ -59,12 +59,25 @@ export default function TabLayout() {
   const [ownedApartmentId, setOwnedApartmentId] = useState<string | null | undefined>(
     user?.id ? undefined : null
   );
+  const [partnerApartmentId, setPartnerApartmentId] = useState<string | null | undefined>(
+    user?.id ? undefined : null
+  );
 
   const fetchOwnedApartmentId = async (userId: string): Promise<string | null> => {
     const { data, error } = await supabase
       .from('apartments')
       .select('id')
       .eq('owner_id', userId)
+      .limit(1);
+    if (error) throw error;
+    return data && data.length > 0 ? (data[0] as any).id : null;
+  };
+
+  const fetchPartnerApartmentId = async (userId: string): Promise<string | null> => {
+    const { data, error } = await supabase
+      .from('apartments')
+      .select('id')
+      .contains('partner_ids', [userId] as any)
       .limit(1);
     if (error) throw error;
     return data && data.length > 0 ? (data[0] as any).id : null;
@@ -96,6 +109,32 @@ export default function TabLayout() {
     };
 
     checkOwnedApartment();
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const checkPartnerApartment = async () => {
+      if (!user?.id) {
+        setPartnerApartmentId(null);
+        return;
+      }
+      // unknown while checking
+      setPartnerApartmentId(undefined);
+      try {
+        const firstId = await fetchPartnerApartmentId(user.id);
+        if (cancelled) return;
+        setPartnerApartmentId(firstId);
+      } catch {
+        if (cancelled) return;
+        // If we can't verify, keep unknown so we don't accidentally allow an upload
+        setPartnerApartmentId(undefined);
+      }
+    };
+
+    checkPartnerApartment();
     return () => {
       cancelled = true;
     };
@@ -232,40 +271,67 @@ export default function TabLayout() {
           tabBarLabel: '',
           tabBarButton: (props) => (
             <FloatingCenterTabButton
-              isVisuallyDisabled={!isOwner && !!user?.id && ownedApartmentId !== null && ownedApartmentId !== undefined}
+              isVisuallyDisabled={
+                (!!user?.id &&
+                  partnerApartmentId !== null &&
+                  partnerApartmentId !== undefined) ||
+                (!isOwner && !!user?.id && ownedApartmentId !== null && ownedApartmentId !== undefined)
+              }
               onPress={async (e) => {
-                // Each user can upload max 1 apartment (by owner_id)
-                if (user?.id && !isOwner) {
-                  // Always re-check on press to avoid stale state after deletions.
-                  if (isCheckingOwnedApartmentRef.current) return;
-                  isCheckingOwnedApartmentRef.current = true;
-                  try {
-                    const firstId = await fetchOwnedApartmentId(user.id);
-                    setOwnedApartmentId(firstId);
-                    if (firstId) {
-                      Alert.alert(
-                        'לא ניתן להוסיף דירה',
-                        'אי אפשר להעלות עוד דירה כי כבר העלית דירה אחת.'
-                      );
-                      return;
-                    }
-                    router.push('/add-apartment' as any);
-                    return;
-                  } catch {
-                    Alert.alert('שגיאה', 'לא הצלחנו לבדוק אם כבר העלית דירה. נסה שוב.');
-                    return;
-                  } finally {
-                    isCheckingOwnedApartmentRef.current = false;
-                  }
+                if (!user?.id) {
+                  router.push('/add-apartment' as any);
+                  return;
                 }
-                router.push('/add-apartment' as any);
+
+                // Always re-check on press to avoid stale state (e.g. after leaving an apartment).
+                if (isCheckingOwnedApartmentRef.current) return;
+                isCheckingOwnedApartmentRef.current = true;
+                try {
+                  const [partnerId, ownedId] = await Promise.all([
+                    fetchPartnerApartmentId(user.id),
+                    !isOwner ? fetchOwnedApartmentId(user.id) : Promise.resolve(null),
+                  ]);
+                  setPartnerApartmentId(partnerId);
+                  setOwnedApartmentId(ownedId);
+
+                  if (partnerId) {
+                    Alert.alert(
+                      'לא ניתן להוסיף דירה',
+                      'אי אפשר להעלות דירה כשאת/ה משויך/ת כשותף בדירה קיימת. כדי להעלות דירה חדשה, צא/י מהדירה הקיימת.'
+                    );
+                    return;
+                  }
+
+                  if (!isOwner && ownedId) {
+                    Alert.alert(
+                      'לא ניתן להוסיף דירה',
+                      'אי אפשר להעלות עוד דירה כי כבר העלית דירה אחת.'
+                    );
+                    return;
+                  }
+
+                  router.push('/add-apartment' as any);
+                  return;
+                } catch {
+                  Alert.alert('שגיאה', 'לא הצלחנו לבדוק אם מותר לך להעלות דירה כרגע. נסה שוב.');
+                  return;
+                } finally {
+                  isCheckingOwnedApartmentRef.current = false;
+                }
               }}
               accessibilityLabel={props.accessibilityLabel}
               accessibilityState={props.accessibilityState as any}
               testID={props.testID}>
               <Plus
                 size={32}
-                color={!isOwner && !!user?.id && ownedApartmentId !== null && ownedApartmentId !== undefined ? '#E5E7EB' : '#FFFFFF'}
+                color={
+                  ((!!user?.id &&
+                    partnerApartmentId !== null &&
+                    partnerApartmentId !== undefined) ||
+                    (!isOwner && !!user?.id && ownedApartmentId !== null && ownedApartmentId !== undefined))
+                    ? '#E5E7EB'
+                    : '#FFFFFF'
+                }
               />
             </FloatingCenterTabButton>
           ),

@@ -1000,56 +1000,63 @@ export default function PartnersScreen() {
             groupPassesFilters(g.users, surveysByUserId)
         );
 
+      const normalizePartnerIds = (value: any): string[] => {
+        if (Array.isArray(value)) return value.map(String).filter(Boolean);
+        if (typeof value === 'string') {
+          try {
+            const parsed = JSON.parse(value);
+            if (Array.isArray(parsed)) return parsed.map(String).filter(Boolean);
+          } catch {}
+          return value
+            .replace(/^{|}$/g, '')
+            .split(',')
+            .map((s: string) => s.replace(/^"+|"+$/g, '').trim())
+            .filter(Boolean);
+        }
+        return [];
+      };
+
+      const getMaxRoommates = (apt: Apartment): number | null => {
+        const cap = (apt as any)?.roommate_capacity;
+        if (typeof cap === 'number' && Number.isFinite(cap)) return cap;
+        const legacy = (apt as any)?.max_roommates;
+        if (typeof legacy === 'number' && Number.isFinite(legacy)) return legacy;
+        return null;
+      };
+
+      const isApartmentFull = (apt?: Apartment): boolean => {
+        if (!apt) return false;
+        const max = getMaxRoommates(apt);
+        if (max === null) return false;
+        const used = normalizePartnerIds((apt as any)?.partner_ids).length;
+        return max - used <= 0;
+      };
+
       // Fetch all apartments
       const { data: apartmentsData, error: aptErr } = await supabase
         .from('apartments')
         .select('*');
-      
-      const apartmentsForGroups: Record<string, Apartment> = {};
-      
+
+      // Build a quick lookup: partner_id -> apartment
+      const partnerIdToApartment: Record<string, Apartment> = {};
       if (!aptErr && apartmentsData) {
-        // For each group, find if any member is in an apartment
-        for (const group of activeGroups) {
-          const groupUserIds = group.users.map(u => u.id);
-          
-          // Check each apartment
-          for (const apt of apartmentsData as Apartment[]) {
-            let partnerIds: string[] = [];
-            
-            // Handle partner_ids - could be array, JSON string, or PostgreSQL array string
-            if (apt.partner_ids) {
-              if (Array.isArray(apt.partner_ids)) {
-                partnerIds = apt.partner_ids;
-              } else if (typeof apt.partner_ids === 'string') {
-                try {
-                  // Try parsing as JSON
-                  const parsed = JSON.parse(apt.partner_ids);
-                  partnerIds = Array.isArray(parsed) ? parsed : [];
-                } catch {
-                  // Try parsing as PostgreSQL array format: {id1,id2,id3}
-                  const cleaned = (apt.partner_ids as string).replace(/[{}]/g, '');
-                  partnerIds = cleaned.split(',').map(s => s.trim()).filter(Boolean);
-                }
-              }
-            }
-            
-            // Check if any group member is in this apartment's partner_ids
-            const hasMatch = groupUserIds.some(userId => partnerIds.includes(userId));
-            
-            if (hasMatch) {
-              apartmentsForGroups[group.groupId] = apt;
-              console.log(`Found apartment ${apt.id} for group ${group.groupId}`);
-              break; // Found apartment for this group
-            }
-          }
+        for (const apt of apartmentsData as Apartment[]) {
+          const partnerIds = normalizePartnerIds((apt as any)?.partner_ids);
+          partnerIds.forEach((pid) => {
+            const key = String(pid || '').toLowerCase();
+            if (!key) return;
+            if (!partnerIdToApartment[key]) partnerIdToApartment[key] = apt;
+          });
         }
       }
-      
-      // Attach apartments to groups
-      activeGroups.forEach(group => {
-        if (apartmentsForGroups[group.groupId]) {
-          group.apartment = apartmentsForGroups[group.groupId];
-        }
+
+      // Attach apartments to groups (if any member is in a partner_ids list)
+      activeGroups.forEach((group) => {
+        const apt =
+          group.users
+            .map((u) => partnerIdToApartment[String(u?.id || '').toLowerCase()])
+            .find(Boolean) || null;
+        if (apt) group.apartment = apt;
       });
 
       // Only show merged profiles (groups)
@@ -1212,10 +1219,16 @@ export default function PartnersScreen() {
 
       filteredSingles = filteredSingles.filter((u) => userPassesFilters(u, surveysByUserId[u.id]));
 
+      // Hide profiles that are already in a full apartment (can't merge with them anyway)
+      const visibleGroups = activeGroups.filter((g) => !isApartmentFull(g.apartment));
+      filteredSingles = filteredSingles.filter(
+        (u) => !isApartmentFull(partnerIdToApartment[String(u?.id || '').toLowerCase()])
+      );
+
       let combinedItems: BrowseItem[] = [];
       if (profileType === 'groups' || profileType === 'all') {
         // When includePassed is true, show ONLY groups marked as NOT_RELEVANT
-        const groupItems = activeGroups
+        const groupItems = visibleGroups
           .filter((g) => includePassedNow ? notRelevantGroupIds.has(g.groupId) : !interactedGroupIds.has(g.groupId))
           .map((g) => ({ type: 'group', groupId: g.groupId, users: g.users, apartment: g.apartment }) as BrowseItem);
         combinedItems.push(...groupItems);

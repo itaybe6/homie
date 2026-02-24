@@ -307,6 +307,10 @@ function RoommateCardBase({
     return ['rgba(0,0,0,0)', 'rgba(0,0,0,0.6)'];
   }, [strongTextOverlay]);
 
+  const hasOverlayText = Boolean(user?.full_name || user?.bio);
+  // Keep the swipe hint above the bottom overlay text, so it won't cover bios/names.
+  const swipeIndicatorBottom = hasOverlayText ? (strongTextOverlay ? 48 : 48) : 14;
+
   return (
     <View style={[styles.card, style]}>
       <GestureDetector gesture={pressGesture}>
@@ -435,7 +439,7 @@ function RoommateCardBase({
             {enableParallaxDetails ? (
               <SwipeUpIndicator
                 isOpened={isDetailsOpen}
-                style={{ position: 'absolute', bottom: 14, alignSelf: 'center' }}
+                style={StyleSheet.flatten([styles.swipeIndicator, { bottom: swipeIndicatorBottom }])}
               />
             ) : null}
           </Animated.View>
@@ -524,6 +528,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 10,
     alignItems: 'flex-end',
+  },
+  swipeIndicator: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    alignItems: 'center',
   },
   overlayName: {
     color: '#FFFFFF',

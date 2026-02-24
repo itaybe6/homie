@@ -60,6 +60,11 @@ export default function ProfileSettingsScreen() {
   const [profile, setProfile] = useState<User | null>(null);
   const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
   const [avatarNotice, setAvatarNotice] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [avatarSuccessOverlay, setAvatarSuccessOverlay] = useState<{
+    visible: boolean;
+    message: string;
+    closeEditOnConfirm?: boolean;
+  }>({ visible: false, message: '', closeEditOnConfirm: false });
   const avatarNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [hasSharedProfiles, setHasSharedProfiles] = useState(false);
   const [showSharedModal, setShowSharedModal] = useState(false);
@@ -225,6 +230,17 @@ export default function ProfileSettingsScreen() {
     }, 2500);
   };
 
+  const dismissAvatarSuccessOverlay = () => {
+    const shouldCloseEdit = !!avatarSuccessOverlay.closeEditOnConfirm;
+    setAvatarSuccessOverlay((s) => ({ ...s, visible: false, closeEditOnConfirm: false }));
+    if (!shouldCloseEdit) return;
+    try {
+      closeEditAnimations(() => setShowEditModal(false));
+    } catch {
+      setShowEditModal(false);
+    }
+  };
+
   useEffect(() => {
     return () => {
       if (avatarNoticeTimerRef.current) {
@@ -241,10 +257,12 @@ export default function ProfileSettingsScreen() {
       backdropOpacity.setValue(0);
       openEditAnimations();
       setAvatarNotice(null);
+      setAvatarSuccessOverlay({ visible: false, message: '', closeEditOnConfirm: false });
     } else {
       // ensure values reset if modal was closed
       sheetTranslateY.setValue(600);
       backdropOpacity.setValue(0);
+      setAvatarSuccessOverlay({ visible: false, message: '', closeEditOnConfirm: false });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showEditModal]);
@@ -662,9 +680,8 @@ export default function ProfileSettingsScreen() {
       if (updateError) throw updateError;
 
       setProfile((prev) => (prev ? { ...prev, avatar_url: publicUrl } : prev));
-      // Avoid opening a second Modal (our in-app Alert) while the edit bottom-sheet Modal is open.
-      // On some Android devices this can block touches and feel like the app is "stuck".
-      showAvatarNotice('success', 'תמונת הפרופיל עודכנה');
+      setAvatarNotice(null);
+      // No success message after uploading avatar; we only show success after pressing "Save".
     } catch (e: any) {
       showAvatarNotice('error', e?.message || 'לא ניתן לעדכן את תמונת הפרופיל');
     } finally {
@@ -1877,13 +1894,17 @@ export default function ProfileSettingsScreen() {
                           })
                           .eq('id', user.id);
                         if (error) throw error;
-                        Alert.alert('הצלחה', 'הפרופיל עודכן');
-                        setShowEditModal(false);
                         // refresh local profile view
                         try {
                           const { data } = await supabase.from('users').select('*').eq('id', user.id).maybeSingle();
                           setProfile((data as any) || null);
                         } catch {}
+                        setAvatarNotice(null);
+                        setAvatarSuccessOverlay({
+                          visible: true,
+                          message: 'הפרופיל עודכן',
+                          closeEditOnConfirm: true,
+                        });
                       } catch (e: any) {
                         Alert.alert('שגיאה', e?.message || 'לא ניתן לשמור');
                       } finally {
@@ -1899,6 +1920,40 @@ export default function ProfileSettingsScreen() {
                 </View>
               </KeyboardAwareScrollView>
             </Animated.View>
+
+            {avatarSuccessOverlay.visible ? (
+              <View style={styles.avatarSuccessOverlay} pointerEvents="box-none">
+                <Pressable
+                  style={styles.avatarSuccessBackdrop}
+                  onPress={dismissAvatarSuccessOverlay}
+                  accessibilityRole="button"
+                  accessibilityLabel="סגור הודעת הצלחה"
+                />
+                <View style={styles.avatarSuccessCard} accessibilityRole="alert">
+                  <View style={styles.avatarSuccessBody}>
+                    <Text style={styles.avatarSuccessTitle}>הצלחה</Text>
+                    <Text style={styles.avatarSuccessMessage}>{avatarSuccessOverlay.message}</Text>
+
+                    <TouchableOpacity
+                      style={styles.avatarSuccessBtnHit}
+                      activeOpacity={0.9}
+                      onPress={dismissAvatarSuccessOverlay}
+                      accessibilityRole="button"
+                      accessibilityLabel="אישור"
+                    >
+                      <LinearGradient
+                        colors={['#111827', '#1F2937']}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 1 }}
+                        style={styles.avatarSuccessBtn}
+                      >
+                        <Text style={styles.avatarSuccessBtnText}>אישור</Text>
+                      </LinearGradient>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              </View>
+            ) : null}
           </Animated.View>
         </Modal>
       )}
@@ -2135,6 +2190,71 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.4)',
     justifyContent: 'flex-end',
     alignItems: 'stretch',
+  },
+  avatarSuccessOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 18,
+    zIndex: 50,
+  },
+  avatarSuccessBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(17,24,39,0.58)',
+  },
+  avatarSuccessCard: {
+    width: '100%',
+    maxWidth: 380,
+    borderRadius: 24,
+    backgroundColor: '#FFFFFF',
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(17,24,39,0.08)',
+    shadowColor: '#000000',
+    shadowOpacity: 0.14,
+    shadowRadius: 22,
+    shadowOffset: { width: 0, height: 16 },
+    elevation: 6,
+    ...(Platform.OS === 'web'
+      ? ({ boxShadow: '0 18px 46px rgba(0,0,0,0.22)' } as any)
+      : null),
+  },
+  avatarSuccessBody: {
+    padding: 18,
+    alignItems: 'center',
+  },
+  avatarSuccessTitle: {
+    color: '#111827',
+    fontSize: 20,
+    fontWeight: '900',
+    textAlign: 'center',
+    writingDirection: 'rtl',
+  },
+  avatarSuccessMessage: {
+    marginTop: 6,
+    color: '#6B7280',
+    fontSize: 14,
+    fontWeight: '700',
+    textAlign: 'center',
+    writingDirection: 'rtl',
+    lineHeight: 20,
+  },
+  avatarSuccessBtnHit: {
+    width: '100%',
+    marginTop: 14,
+  },
+  avatarSuccessBtn: {
+    width: '100%',
+    paddingVertical: 12,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarSuccessBtnText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '900',
+    letterSpacing: 0.2,
   },
   sheet: {
     width: '100%',

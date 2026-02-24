@@ -17,7 +17,8 @@ import {
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useNavigation } from '@react-navigation/native';
-import { Sparkles, Check, ChevronRight, X, Save } from 'lucide-react-native';
+import { Sparkles, Check, ChevronRight, X } from 'lucide-react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuthStore } from '@/stores/authStore';
@@ -1437,15 +1438,15 @@ function PartCarouselPagination({
 
   const progressRingSize = useMemo(() => {
     // Bigger, hero-like ring (similar to the reference). Clamp for small/large screens.
-    const scaled = Math.round(Math.min(screenWidth, screenHeight) * 0.34);
-    return Math.max(180, Math.min(240, scaled));
+    const scaled = Math.round(Math.min(screenWidth, screenHeight) * 0.40);
+    return Math.max(200, Math.min(280, scaled));
   }, [screenWidth, screenHeight]);
   // Keep the popup size consistent across all questions and prevent edge clipping on small screens
   const popupCardWidth = useMemo(() => Math.min(Math.max(screenWidth - 32, 320), 420), [screenWidth]);
-  const popupCardMaxHeight = useMemo(() => Math.min(Math.max(screenHeight - 180, 520), 680), [screenHeight]);
+  const popupCardMaxHeight = useMemo(() => Math.min(Math.max(screenHeight - 130, 600), 820), [screenHeight]);
   // Dynamic height: let the card shrink to its content (chips/questions), but cap it so long questions scroll.
-  const cardMaxHeight = useMemo(() => Math.min(popupCardMaxHeight, Math.round(screenHeight * 0.72)), [popupCardMaxHeight, screenHeight]);
-  const bodyMaxHeight = useMemo(() => Math.min(360, Math.round(screenHeight * 0.36)), [screenHeight]);
+  const cardMaxHeight = useMemo(() => Math.min(popupCardMaxHeight, Math.round(screenHeight * 0.88)), [popupCardMaxHeight, screenHeight]);
+  const bodyMaxHeight = useMemo(() => Math.min(520, Math.round(screenHeight * 0.52)), [screenHeight]);
 
   useLayoutEffect(() => {
     // Reset body height to a small value so it doesn't "carry over" a tall height from previous questions.
@@ -1869,7 +1870,14 @@ function PartCarouselPagination({
                   accessibilityRole="button"
                   accessibilityLabel="יציאה ושמירה"
                 >
-                  {saving ? <ActivityIndicator size="small" color={PRIMARY} /> : <Save size={18} color={PRIMARY} />}
+                  <LinearGradient
+                    colors={['rgba(255,255,255,0.96)', 'rgba(255,255,255,0.78)']}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={styles.exitBtnGradient}
+                  >
+                    {saving ? <ActivityIndicator size="small" color={PRIMARY} /> : <Check size={18} color={PRIMARY} strokeWidth={3.2} />}
+                  </LinearGradient>
                 </TouchableOpacity>
               ) : null}
 
@@ -2918,7 +2926,7 @@ function AnimatedNumber({ value }: { value: SharedValue<number> }) {
     <AnimatedTextInput
       underlineColorAndroid="transparent"
       editable={false}
-      value={String(Math.round(value.value))}
+      defaultValue="0"
       style={styles.sliderNumber}
       animatedProps={animatedProps}
     />
@@ -2933,7 +2941,7 @@ function AnimatedPercent({ value }: { value: SharedValue<number> }) {
     <AnimatedTextInput
       underlineColorAndroid="transparent"
       editable={false}
-      value={`${Math.round(value.value)}%`}
+      defaultValue="0%"
       style={styles.progressPercent}
       animatedProps={animatedProps}
     />
@@ -2977,9 +2985,7 @@ const ProgressRingLine = memo(function ProgressRingLine({
       backgroundColor: interpolateColor(
         p,
         inputRange,
-        ['rgba(255,255,255,0.18)', 'rgba(255,255,255,0.18)', '#FFFFFF'],
-        'RGB',
-        Extrapolation.CLAMP
+        ['rgba(255,255,255,0.18)', 'rgba(255,255,255,0.18)', '#FFFFFF']
       ),
     };
   });
@@ -3194,8 +3200,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 16,
     // Slightly lift the whole card+footer (questions + dots/indicator) away from the bottom edge.
-    paddingTop: 24,
-    paddingBottom: 160,
+    paddingTop: 10,
+    paddingBottom: 96,
     backgroundColor: 'rgba(0,0,0,0.18)',
     position: 'relative',
   },
@@ -3216,7 +3222,8 @@ const styles = StyleSheet.create({
   bgTitleWrap: {
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 12,
+    marginTop: -14,
+    marginBottom: 8,
     paddingHorizontal: 16,
     gap: 10,
     zIndex: 2,
@@ -3230,33 +3237,34 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     alignItems: 'center',
     justifyContent: 'center',
+    transform: [{ translateY: -10 }],
   },
   progressPercent: {
     color: '#FFFFFF',
     fontWeight: '900',
-    fontSize: 26,
+    fontSize: 34,
     textAlign: 'center',
     fontVariant: ['tabular-nums'],
     includeFontPadding: false,
-    lineHeight: 28,
+    lineHeight: 36,
   },
   progressLabel: {
     marginTop: 2,
     color: 'rgba(255,255,255,0.75)',
-    fontSize: 12,
+    fontSize: 14,
     fontWeight: '800',
     textAlign: 'center',
   },
   bgTitle: {
     color: '#FFFFFF',
-    fontSize: 24,
+    fontSize: 30,
     fontWeight: '900',
     textAlign: 'center',
   },
   bgSubtitle: {
     marginTop: 3,
     color: 'rgba(255,255,255,0.88)',
-    fontSize: 14,
+    fontSize: 16,
     fontWeight: '700',
     textAlign: 'center',
   },
@@ -3391,12 +3399,23 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: 'rgba(255,255,255,0.92)',
     borderWidth: 1,
-    borderColor: BORDER,
+    borderColor: 'rgba(94,63,45,0.16)',
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 5,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOpacity: 0.10,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 6,
+  },
+  exitBtnGradient: {
+    width: '100%',
+    height: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   popupHeader: {
     alignItems: 'center',
@@ -3420,7 +3439,7 @@ const styles = StyleSheet.create({
   },
   popupTitle: {
     color: PRIMARY,
-    fontSize: 20,
+    fontSize: 24,
     fontWeight: '900',
     textAlign: 'center',
   },

@@ -181,13 +181,22 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
     const checkLimit = async () => {
       if (!user?.id) return;
       try {
-        const { data, error } = await supabase
-          .from('apartments')
-          .select('id')
-          .eq('owner_id', user.id)
-          .limit(1);
+        const [{ data: partnerRows, error: partnerErr }, { data, error }] = await Promise.all([
+          supabase.from('apartments').select('id').contains('partner_ids', [user.id] as any).limit(1),
+          supabase.from('apartments').select('id').eq('owner_id', user.id).limit(1),
+        ]);
         if (cancelled) return;
+        if (partnerErr) throw partnerErr;
         if (error) throw error;
+
+        if (partnerRows && partnerRows.length > 0) {
+          Alert.alert(
+            'לא ניתן להוסיף דירה',
+            'אי אפשר להעלות דירה כשאת/ה משויך/ת כשותף בדירה קיימת. כדי להעלות דירה חדשה, צא/י מהדירה הקיימת.'
+          );
+          router.replace('/(tabs)/home');
+          return;
+        }
         if (data && data.length > 0) {
           Alert.alert(
             'לא ניתן להוסיף דירה',
@@ -352,7 +361,7 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
         return;
       }
       const cityPart = city.trim();
-      const query = cityPart ? `${q}, ${cityPart}` : q;
+      const query = cityPart && !q.includes(cityPart) ? `${q}, ${cityPart}` : q;
       const t = setTimeout(async () => {
         const results = await autocompleteMapbox({
           accessToken: mapboxToken,
@@ -722,7 +731,13 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
 
   const propertyTypeLabel = propertyType === 'garden' ? 'דירת גן' : 'בניין';
   const priceLabel = price ? `₪${formatWithCommas(price)}` : '—';
-  const locationLine = [address, neighborhood, city].filter(Boolean).join(', ');
+  const addressLine = String(address || '').trim();
+  const neighborhoodLine = String(neighborhood || '').trim();
+  const cityLine = String(city || '').trim();
+  const cityAlreadyInAddress = !!(cityLine && addressLine && addressLine.includes(cityLine));
+  const locationLine = [addressLine, neighborhoodLine, cityAlreadyInAddress ? '' : cityLine]
+    .filter((v) => String(v || '').trim())
+    .join(', ');
   const previewMapHeight = useMemo(() => {
     const target = screenWidth - 40; // match apartment page "more square" map card
     return Math.max(170, Math.min(260, target));
@@ -1115,6 +1130,23 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
         if (ownedErr) throw ownedErr;
         if (owned && owned.length > 0) {
           Alert.alert('לא ניתן להוסיף דירה', 'אי אפשר להעלות עוד דירה כי כבר העלית דירה אחת.');
+          setIsLoading(false);
+          router.replace('/(tabs)/home');
+          return;
+        }
+
+        // Enforce: a user cannot upload an apartment if they are already a partner in another apartment.
+        const { data: partnerRows, error: partnerErr } = await supabase
+          .from('apartments')
+          .select('id')
+          .contains('partner_ids', [authUser.id] as any)
+          .limit(1);
+        if (partnerErr) throw partnerErr;
+        if (partnerRows && partnerRows.length > 0) {
+          Alert.alert(
+            'לא ניתן להוסיף דירה',
+            'אי אפשר להעלות דירה כשאת/ה משויך/ת כשותף בדירה קיימת. כדי להעלות דירה חדשה, צא/י מהדירה הקיימת.'
+          );
           setIsLoading(false);
           router.replace('/(tabs)/home');
           return;
@@ -1551,20 +1583,12 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
                             const street = String(f.text || '').trim();
                             const house = String(f.address || '').trim();
                             const placeLabel = String(f.place_name || '').trim();
-                            const placeFirst = placeLabel ? placeLabel.split(',')[0].trim() : '';
                             const typed = String(address || '').trim();
-                            const typedHasNumber = /\d/.test(typed);
-                            const placeHasNumber = /\d/.test(placeFirst);
-                            const nextAddress = house
-                              ? `${street} ${house}`.trim()
-                              : placeHasNumber
-                                ? placeFirst
-                                : typedHasNumber
-                                  ? typed
-                                  : (placeFirst || street || typed);
+                            const fallbackStreetHouse = house ? `${street} ${house}`.trim() : street;
+                            const nextAddress = placeLabel || fallbackStreetHouse || typed;
                             // Prevent re-opening suggestions due to the address useEffect firing after selection
                             skipNextAddressAutocompleteRef.current = true;
-                            setAddress(nextAddress || street || address);
+                            setAddress(nextAddress || address);
                             setAddressSuggestions([]);
                             addressInputRef.current?.blur();
                             Keyboard.dismiss();
@@ -1834,7 +1858,7 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
                         <Text style={styles.unitSuffix}>מ״ר</Text>
                         <TextInput
                           style={styles.unitInput}
-                          placeholder="אופציונלי (למשל: 85)"
+                          placeholder="אופציונלי (85)"
                           value={digitsOnly(sizeSqm)}
                           onChangeText={(t) => setSizeSqm(digitsOnly(t))}
                           keyboardType="number-pad"
@@ -1851,7 +1875,7 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
                       <Text style={styles.unitSuffix}>מ״ר</Text>
                       <TextInput
                         style={styles.unitInput}
-                        placeholder="אופציונלי (למשל: 85)"
+                        placeholder="אופציונלי (85)"
                         value={digitsOnly(sizeSqm)}
                         onChangeText={(t) => setSizeSqm(digitsOnly(t))}
                         keyboardType="number-pad"
@@ -1967,7 +1991,7 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
                           disabled={isLoading}
                         >
                           <View style={[styles.featureIconWrap, active ? styles.featureIconWrapActive : null]}>
-                            <Icon size={18} color={active ? '#5e3f2d' : '#6B7280'} />
+                            <Icon size={18} color={active ? '#FFFFFF' : '#6B7280'} />
                           </View>
                           <Text
                             style={[
@@ -2808,7 +2832,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
     // Keep currency on the left and numbers aligned properly regardless of RTL layout
-    ...(Platform.OS !== 'web' ? ({ direction: 'ltr' } as const) : {}),
+    direction: 'ltr' as const,
   },
   moneySuffix: {
     color: '#6B7280',
@@ -2833,7 +2857,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    ...(Platform.OS !== 'web' ? ({ direction: 'ltr' } as const) : {}),
+    direction: 'ltr' as const,
   },
   unitSuffix: {
     color: '#6B7280',
@@ -3194,7 +3218,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     // Keep +/- order stable like the screenshot (plus on the left, minus on the right)
-    ...(Platform.OS !== 'web' ? ({ direction: 'ltr' } as const) : {}),
+    direction: 'ltr' as const,
     backgroundColor: '#F3F4F6',
     borderRadius: 10,
     overflow: 'hidden',
@@ -3408,8 +3432,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
   },
   featureCardActive: {
-    backgroundColor: alpha(colors.successMuted, 0.55),
-    borderColor: alpha(colors.success, 0.55),
+    backgroundColor: alpha(colors.success, 0.45),
+    borderColor: alpha(colors.success, 0.75),
   },
   previewHeader: {
     marginTop: 4,
@@ -4178,7 +4202,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   featureIconWrapActive: {
-    backgroundColor: 'rgba(94,63,45,0.12)',
+    backgroundColor: 'rgba(255,255,255,0.18)',
   },
   featureText: {
     flex: 1,
@@ -4189,7 +4213,7 @@ const styles = StyleSheet.create({
     writingDirection: 'rtl',
   },
   featureTextActive: {
-    color: '#5e3f2d',
+    color: '#FFFFFF',
   },
 });
 

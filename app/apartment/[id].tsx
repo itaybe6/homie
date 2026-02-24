@@ -19,6 +19,7 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { PinchGestureHandler, State } from 'react-native-gesture-handler';
 import { useNavigation } from '@react-navigation/native';
+import { createURL } from 'expo-linking';
 import {
   ArrowLeft,
   ArrowRight,
@@ -118,6 +119,13 @@ export default function ApartmentDetailsScreen() {
   >([]);
   const [isLoadingJoinRequests, setIsLoadingJoinRequests] = useState(false);
   const [joinRequestsActionId, setJoinRequestsActionId] = useState<string | null>(null);
+
+  const shareUrl = useMemo(() => {
+    const aptId = String(id || apartment?.id || '').trim();
+    if (!aptId) return '';
+    // Deep link based on app.json scheme ("homie") so the shared content is a clickable link.
+    return createURL(`/apartment/${aptId}`);
+  }, [id, apartment?.id]);
   const [addCandidates, setAddCandidates] = useState<User[]>([]);
   const [sharedGroups, setSharedGroups] = useState<{ id: string; members: Pick<User, 'id' | 'full_name' | 'avatar_url'>[] }[]>([]);
   const [isAdding, setIsAdding] = useState(false);
@@ -1964,6 +1972,21 @@ export default function ApartmentDetailsScreen() {
               ) : null}
             </View>
             <View style={styles.topRightControls}>
+              <ShareMenuFab
+                message={[
+                  `דירה ב-Homie: ${(apartment?.title || '').toString()} ${(apartment?.city || '').toString()}`.trim(),
+                  shareUrl,
+                ]
+                  .filter(Boolean)
+                  .join('\n')}
+                size={36}
+                anchor="right"
+                menuOffsetY={40}
+                radiusMultiplier={2.1}
+                containerStyle={{ width: 36, height: 36 }}
+                mainButtonStyle={styles.circleBtnLight}
+              />
+
               {isOwner ? (
                 <View
                   style={[
@@ -1990,16 +2013,6 @@ export default function ApartmentDetailsScreen() {
                   accessibilityLabelActive="הסר ממועדפים"
                 />
               )}
-
-              <ShareMenuFab
-                message={`דירה ב-Homie: ${(apartment?.title || '').toString()} ${(apartment?.city || '').toString()}`.trim()}
-                size={36}
-                anchor="right"
-                menuOffsetY={40}
-                radiusMultiplier={2.1}
-                containerStyle={{ width: 36, height: 36 }}
-                mainButtonStyle={styles.circleBtnLight}
-              />
             </View>
           </View>
 

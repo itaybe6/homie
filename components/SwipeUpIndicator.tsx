@@ -1,7 +1,7 @@
 import { ChevronUp } from 'lucide-react-native';
 import { MotiView } from 'moti';
 import React from 'react';
-import { Platform, View, ViewStyle } from 'react-native';
+import { Platform, StyleProp, View, ViewStyle } from 'react-native';
 import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
 
 export default function SwipeUpIndicator({
@@ -11,7 +11,7 @@ export default function SwipeUpIndicator({
 }: {
   isOpened: boolean;
   size?: number;
-  style?: ViewStyle;
+  style?: StyleProp<ViewStyle>;
 }) {
   // On web, `moti/svg` + `react-native-svg` can crash when animated props are applied via `setNativeProps`.
   // Render a static indicator instead.
