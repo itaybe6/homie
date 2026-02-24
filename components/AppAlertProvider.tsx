@@ -8,6 +8,7 @@ import {
   type GestureResponderEvent,
   Platform,
 } from 'react-native';
+import { BlurView } from 'expo-blur';
 import { CheckCircle2, Info, TriangleAlert, XCircle } from 'lucide-react-native';
 import { subscribeAlerts, type NativeAlertButton, type NativeAlertPayload } from '@/lib/alertBus';
 import { alpha, colors } from '@/lib/theme';
@@ -189,6 +190,24 @@ export function AppAlertProvider({ children }: { children: React.ReactNode }) {
     return { Icon: Info, color: colors.primary, bg: alpha(colors.primary, 0.12) };
   }, [variant]);
 
+  const showIcon = useMemo(() => {
+    // The preferences-survey prompt (and most "info" alerts) look cleaner without a centered icon.
+    if (variant === 'info') return false;
+    return true;
+  }, [variant]);
+
+  const primaryButtonIndex = useMemo(() => {
+    if (!state.buttons.length) return 0;
+    const destructiveIdx = state.buttons.findIndex((b) => b.style === 'destructive');
+    if (destructiveIdx >= 0) return destructiveIdx;
+    const nonCancel = state.buttons
+      .map((b, idx) => ({ b, idx }))
+      .filter(({ b }) => b.style !== 'cancel');
+    // Prefer the last non-cancel action as primary (common Alert/confirm patterns).
+    if (nonCancel.length) return nonCancel[nonCancel.length - 1].idx;
+    return state.buttons.length - 1;
+  }, [state.buttons]);
+
   const handleButtonPress = useCallback(
     (btn: AppAlertButton) => {
       dismiss();
@@ -212,38 +231,57 @@ export function AppAlertProvider({ children }: { children: React.ReactNode }) {
       {children}
       <Modal visible={state.visible} transparent animationType="fade" onRequestClose={dismiss}>
         <View style={styles.backdrop}>
+          {Platform.OS !== 'web' ? (
+            <BlurView intensity={22} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />
+          ) : null}
+          <View style={styles.backdropDim} pointerEvents="none" />
           <Pressable style={StyleSheet.absoluteFill} onPress={onPressBackdrop} />
           <View style={styles.card}>
-            <View style={styles.iconWrap} accessible accessibilityRole="image">
-              <View style={[styles.iconCircle, { backgroundColor: variantMeta.bg }]}>
-                <variantMeta.Icon size={22} color={variantMeta.color} />
+            {showIcon ? (
+              <View style={styles.iconRow} accessible accessibilityRole="image">
+                <View style={[styles.iconCircle, { backgroundColor: variantMeta.bg }]}>
+                  <variantMeta.Icon size={20} color={variantMeta.color} />
+                </View>
               </View>
-            </View>
+            ) : null}
             <Text style={styles.title}>{state.title}</Text>
             {!!state.message ? <Text style={styles.message}>{state.message}</Text> : null}
-            <View style={styles.divider} />
             <View style={state.buttons.length > 2 ? styles.buttonsColumn : styles.buttonsRow}>
               {state.buttons.map((b, idx) => {
                 const key = `${b.text}-${idx}`;
-                const isDestructive = b.style === 'destructive';
                 const isCancel = b.style === 'cancel';
+                const isDestructive = b.style === 'destructive';
+                const isPrimary = idx === primaryButtonIndex;
+                const buttonStyle =
+                  state.buttons.length > 2
+                    ? isPrimary
+                      ? isDestructive
+                        ? styles.btnPrimaryDestructive
+                        : styles.btnPrimary
+                      : styles.btnSecondary
+                    : isPrimary
+                      ? isDestructive
+                        ? styles.btnPrimaryDestructive
+                        : styles.btnPrimary
+                      : isCancel
+                        ? styles.btnSecondary
+                        : styles.btnSecondary;
+
+                const textStyle =
+                  isPrimary ? styles.btnTextOnPrimary : isDestructive ? styles.btnTextDestructive : styles.btnTextOnSecondary;
+
                 return (
                   <Pressable
                     key={key}
                     onPress={() => handleButtonPress(b)}
                     style={({ pressed }) => [
-                      styles.btn,
-                      state.buttons.length > 2
-                        ? (idx !== state.buttons.length - 1 ? styles.btnDividerColumn : null)
-                        : (idx !== state.buttons.length - 1 ? styles.btnDivider : null),
+                      styles.btnBase,
+                      buttonStyle,
                       pressed ? styles.btnPressed : null,
                     ]}
                     accessibilityRole="button"
-                    accessibilityLabel={b.text}
-                  >
-                    <Text style={[styles.btnText, isCancel ? styles.btnTextCancel : null, isDestructive ? styles.btnTextDestructive : null]}>
-                      {b.text}
-                    </Text>
+                    accessibilityLabel={b.text}>
+                    <Text style={[styles.btnText, textStyle]}>{b.text}</Text>
                   </Pressable>
                 );
               })}
@@ -258,95 +296,111 @@ export function AppAlertProvider({ children }: { children: React.ReactNode }) {
 const styles = StyleSheet.create({
   backdrop: {
     flex: 1,
-    backgroundColor: alpha('#111827', 0.55),
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 18,
+  },
+  backdropDim: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: alpha('#0B1220', 0.52),
   },
   card: {
     width: '100%',
     maxWidth: 420,
     backgroundColor: colors.white,
-    borderRadius: 18,
-    paddingTop: 14,
-    paddingHorizontal: 16,
-    paddingBottom: 0,
+    borderRadius: 22,
+    paddingTop: 18,
+    paddingHorizontal: 18,
+    paddingBottom: 16,
     borderWidth: 1,
-    borderColor: alpha(colors.primary, 0.14),
+    borderColor: alpha('#111827', 0.10),
     shadowColor: '#000',
-    shadowOpacity: 0.18,
-    shadowRadius: 22,
-    shadowOffset: { width: 0, height: 14 },
-    elevation: 10,
+    shadowOpacity: 0.20,
+    shadowRadius: 28,
+    shadowOffset: { width: 0, height: 18 },
+    elevation: 12,
   },
-  iconWrap: {
+  iconRow: {
+    flexDirection: 'row-reverse',
     alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 2,
-    marginBottom: 6,
+    justifyContent: 'flex-start',
+    marginBottom: 10,
   },
   iconCircle: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
     borderColor: alpha('#111827', 0.06),
   },
   title: {
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: '900',
-    color: colors.primary,
-    textAlign: 'right',
-    writingDirection: 'rtl',
-    marginBottom: 4,
-  },
-  message: {
-    fontSize: 14,
-    fontWeight: '700',
     color: colors.text,
     textAlign: 'right',
     writingDirection: 'rtl',
-    lineHeight: 20,
-    marginBottom: 12,
+    marginBottom: 6,
   },
-  divider: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: alpha('#111827', 0.12),
+  message: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: alpha(colors.text, 0.88),
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    lineHeight: 22,
+    marginBottom: 16,
   },
   buttonsRow: {
     flexDirection: 'row-reverse',
     alignItems: 'stretch',
+    gap: 10,
   },
   buttonsColumn: {
     flexDirection: 'column',
     alignItems: 'stretch',
+    gap: 10,
   },
-  btn: {
+  btnBase: {
     flex: 1,
+    minHeight: 46,
     paddingVertical: 12,
-    paddingHorizontal: 10,
+    paddingHorizontal: 14,
     alignItems: 'center',
     justifyContent: 'center',
+    borderRadius: 14,
   },
-  btnPressed: { backgroundColor: alpha(colors.primary, 0.06) },
-  btnDivider: {
-    borderLeftWidth: StyleSheet.hairlineWidth,
-    borderLeftColor: alpha('#111827', 0.12),
+  btnPrimary: {
+    backgroundColor: colors.primary,
+    borderWidth: 1,
+    borderColor: alpha(colors.primary, 0.24),
   },
-  btnDividerColumn: {
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: alpha('#111827', 0.12),
+  btnPrimaryDestructive: {
+    backgroundColor: '#FF3B30',
+    borderWidth: 1,
+    borderColor: alpha('#FF3B30', 0.25),
   },
+  btnSecondary: {
+    backgroundColor: alpha('#111827', 0.04),
+    borderWidth: 1,
+    borderColor: alpha('#111827', 0.10),
+  },
+  btnPressed: { opacity: 0.92, transform: [{ scale: 0.99 }] },
   btnText: {
     fontWeight: '800',
     fontSize: 16,
     textAlign: 'center',
-    color: colors.primary,
   },
-  btnTextCancel: { color: colors.primaryMuted, fontWeight: '900' },
-  btnTextDestructive: { color: '#FF3B30' },
+  btnTextOnPrimary: {
+    color: '#FFFFFF',
+  },
+  btnTextOnSecondary: {
+    color: colors.text,
+  },
+  btnTextDestructive: {
+    color: '#FF3B30',
+  },
 });
 
 

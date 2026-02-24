@@ -3,6 +3,7 @@ import {
   View,
   Text,
   StyleSheet,
+  Pressable,
   TouchableOpacity,
   Alert,
   ActivityIndicator,
@@ -37,6 +38,7 @@ import {
   Image as ImageIcon,
 } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { BlurView } from 'expo-blur';
 import { useAuthStore } from '@/stores/authStore';
 import { authService } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
@@ -57,6 +59,8 @@ export default function ProfileSettingsScreen() {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [profile, setProfile] = useState<User | null>(null);
   const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
+  const [avatarNotice, setAvatarNotice] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const avatarNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [hasSharedProfiles, setHasSharedProfiles] = useState(false);
   const [showSharedModal, setShowSharedModal] = useState(false);
   const [sharedLoading, setSharedLoading] = useState(false);
@@ -208,12 +212,35 @@ export default function ProfileSettingsScreen() {
     if (apt.image_url) return apt.image_url;
     return PLACEHOLDER;
   };
+
+  const showAvatarNotice = (type: 'success' | 'error', text: string) => {
+    setAvatarNotice({ type, text });
+    if (avatarNoticeTimerRef.current) {
+      clearTimeout(avatarNoticeTimerRef.current);
+      avatarNoticeTimerRef.current = null;
+    }
+    avatarNoticeTimerRef.current = setTimeout(() => {
+      setAvatarNotice(null);
+      avatarNoticeTimerRef.current = null;
+    }, 2500);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (avatarNoticeTimerRef.current) {
+        clearTimeout(avatarNoticeTimerRef.current);
+        avatarNoticeTimerRef.current = null;
+      }
+    };
+  }, []);
+
   useEffect(() => {
     if (showEditModal) {
       // reset starting positions before animating in
       sheetTranslateY.setValue(600);
       backdropOpacity.setValue(0);
       openEditAnimations();
+      setAvatarNotice(null);
     } else {
       // ensure values reset if modal was closed
       sheetTranslateY.setValue(600);
@@ -570,10 +597,25 @@ export default function ProfileSettingsScreen() {
 
   const pickAndUploadAvatar = async () => {
     try {
-      const perms = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!perms.granted) {
-        Alert.alert('הרשאה נדרשת', 'יש לאפשר גישה לגלריה כדי להעלות תמונה');
-        return;
+      // Web doesn't require explicit media-library permissions; requesting can cause a stuck UX in some browsers.
+      if (Platform.OS !== 'web') {
+        const perms = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (!perms.granted) {
+          const showDenied = () => Alert.alert('הרשאה נדרשת', 'יש לאפשר גישה לגלריה כדי להעלות תמונה');
+
+          // If we're inside the "Edit profile" sheet, close it first so the alert can't get hidden behind it.
+          if (showEditModal) {
+            try {
+              closeEditAnimations(() => setShowEditModal(false));
+            } catch {
+              setShowEditModal(false);
+            }
+            setTimeout(showDenied, 350);
+          } else {
+            showDenied();
+          }
+          return;
+        }
       }
 
       const result = await ImagePicker.launchImageLibraryAsync({
@@ -620,9 +662,11 @@ export default function ProfileSettingsScreen() {
       if (updateError) throw updateError;
 
       setProfile((prev) => (prev ? { ...prev, avatar_url: publicUrl } : prev));
-      Alert.alert('הצלחה', 'תמונת הפרופיל עודכנה');
+      // Avoid opening a second Modal (our in-app Alert) while the edit bottom-sheet Modal is open.
+      // On some Android devices this can block touches and feel like the app is "stuck".
+      showAvatarNotice('success', 'תמונת הפרופיל עודכנה');
     } catch (e: any) {
-      Alert.alert('שגיאה', e?.message || 'לא ניתן לעדכן את תמונת הפרופיל');
+      showAvatarNotice('error', e?.message || 'לא ניתן לעדכן את תמונת הפרופיל');
     } finally {
       setIsUploadingAvatar(false);
     }
@@ -1498,34 +1542,53 @@ export default function ProfileSettingsScreen() {
       {/* Confirm account deletion (in-app confirm; custom Hebrew buttons on web + native) */}
       {showDeleteConfirm && (
         <Modal visible transparent animationType="fade" onRequestClose={() => setShowDeleteConfirm(false)}>
-          <View style={styles.overlay}>
-            <View style={[styles.sheet, { maxHeight: undefined }]}>
-              <View style={[styles.sheetHeader, { paddingVertical: 8 }]}>
-                <Text style={styles.sheetTitle}>מחיקת חשבון</Text>
-              </View>
-              <Text style={[styles.sharedEmptyText, { textAlign: 'right', marginTop: 6 }]}>
+          <View style={styles.confirmOverlay}>
+            {Platform.OS !== 'web' ? (
+              <BlurView intensity={22} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />
+            ) : null}
+            <View style={styles.confirmDim} pointerEvents="none" />
+            <Pressable
+              style={StyleSheet.absoluteFill}
+              onPress={() => {
+                if (isDeleting) return;
+                setShowDeleteConfirm(false);
+              }}
+              accessibilityRole="button"
+              accessibilityLabel="סגור חלון מחיקת חשבון"
+            />
+
+            <View style={styles.confirmCard}>
+              <Text style={styles.confirmTitle}>מחיקת חשבון</Text>
+              <Text style={styles.confirmMessage}>
                 האם אתה בטוח שאתה רוצה למחוק את החשבון? פעולה זו אינה ניתנת לשחזור.
               </Text>
 
-              <View style={[styles.editActionsRow, { marginTop: 14, marginBottom: 0 }]}>
+              <View style={styles.confirmActions}>
                 <TouchableOpacity
-                  style={styles.clearBtn}
+                  style={[styles.confirmBtnSecondary, isDeleting && { opacity: 0.7 }]}
                   onPress={() => setShowDeleteConfirm(false)}
                   disabled={isDeleting}
                   activeOpacity={0.9}
+                  accessibilityRole="button"
+                  accessibilityLabel="בטל מחיקת חשבון"
                 >
-                  <Text style={styles.clearText}>ביטול</Text>
+                  <Text style={styles.confirmBtnSecondaryText}>ביטול</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
-                  style={[styles.applyBtn, styles.dangerApplyBtn, isDeleting && { opacity: 0.75 }]}
+                  style={[styles.confirmBtnDanger, isDeleting && { opacity: 0.78 }]}
                   onPress={async () => {
                     setShowDeleteConfirm(false);
                     await handleDeleteProfile();
                   }}
                   disabled={isDeleting}
                   activeOpacity={0.9}
+                  accessibilityRole="button"
+                  accessibilityLabel="מחק חשבון"
                 >
-                  <Text style={styles.applyText}>אישור</Text>
+                  <View style={styles.confirmBtnDangerContent}>
+                    <Trash2 size={18} color="#FFFFFF" />
+                    <Text style={styles.confirmBtnDangerText}>{isDeleting ? 'מוחק...' : 'מחק/י חשבון'}</Text>
+                  </View>
                 </TouchableOpacity>
               </View>
             </View>
@@ -1661,6 +1724,17 @@ export default function ProfileSettingsScreen() {
                     <Text style={styles.editAvatarHint} numberOfLines={2}>
                       לחצו על התמונה כדי להחליף
                     </Text>
+                  {avatarNotice ? (
+                    <Text
+                      style={[
+                        styles.editAvatarNotice,
+                        avatarNotice.type === 'success' ? styles.editAvatarNoticeSuccess : styles.editAvatarNoticeError,
+                      ]}
+                      numberOfLines={2}
+                    >
+                      {avatarNotice.text}
+                    </Text>
+                  ) : null}
                   </View>
 
                   <TouchableOpacity
@@ -1958,6 +2032,100 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 16,
   },
+  confirmOverlay: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    backgroundColor: 'transparent',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+  },
+  confirmDim: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: alpha('#0B1220', 0.52),
+  },
+  confirmCard: {
+    width: '100%',
+    maxWidth: 420,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 22,
+    paddingTop: 18,
+    paddingHorizontal: 18,
+    paddingBottom: 16,
+    borderWidth: 1,
+    borderColor: alpha('#111827', 0.1),
+    shadowColor: '#000',
+    shadowOpacity: 0.2,
+    shadowRadius: 28,
+    shadowOffset: { width: 0, height: 18 },
+    elevation: 12,
+  },
+  confirmTitle: {
+    color: '#111827',
+    fontSize: 20,
+    fontWeight: '900',
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    marginBottom: 6,
+  },
+  confirmMessage: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: alpha('#111827', 0.88),
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    lineHeight: 22,
+    marginBottom: 16,
+  },
+  confirmActions: {
+    flexDirection: 'row-reverse',
+    alignItems: 'stretch',
+    gap: 10,
+  },
+  confirmBtnSecondary: {
+    flex: 1,
+    minHeight: 46,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: alpha('#111827', 0.04),
+    borderWidth: 1,
+    borderColor: alpha('#111827', 0.1),
+  },
+  confirmBtnSecondaryText: {
+    color: '#111827',
+    fontSize: 16,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  confirmBtnDanger: {
+    flex: 1,
+    minHeight: 46,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#DC2626',
+    borderWidth: 1,
+    borderColor: alpha('#DC2626', 0.25),
+  },
+  confirmBtnDangerContent: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 8,
+  },
+  confirmBtnDangerText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '900',
+    textAlign: 'center',
+  },
   overlayBottom: {
     position: 'absolute',
     left: 0,
@@ -2031,6 +2199,19 @@ const styles = StyleSheet.create({
     color: '#6B7280',
     fontSize: 12,
     textAlign: 'right',
+  },
+  editAvatarNotice: {
+    marginTop: 4,
+    fontSize: 12,
+    fontWeight: '800',
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
+  editAvatarNoticeSuccess: {
+    color: '#16A34A',
+  },
+  editAvatarNoticeError: {
+    color: '#DC2626',
   },
   editAvatarPressable: {
     alignItems: 'center',

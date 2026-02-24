@@ -185,6 +185,11 @@ export default function ProfileScreen() {
   const [isLoading, setIsLoading] = useState(true);
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [avatarSuccessModal, setAvatarSuccessModal] = useState<{
+    visible: boolean;
+    message: string;
+    avatarUrl: string | null;
+  }>({ visible: false, message: '', avatarUrl: null });
   const [isDeleting, setIsDeleting] = useState(false);
   const [leavingGroupId, setLeavingGroupId] = useState<string | null>(null);
   const [leavingApartmentId, setLeavingApartmentId] = useState<string | null>(null);
@@ -967,6 +972,7 @@ export default function ProfileScreen() {
 
   const uploadAvatarFromUri = async (uri: string) => {
     if (!user?.id) return;
+    const hadAvatar = !!profile?.avatar_url;
     setIsSaving(true);
     try {
       // Check image dimensions and only resize if larger than 800px
@@ -1003,7 +1009,11 @@ export default function ProfileScreen() {
       if (updateError) throw updateError;
 
       setProfile((prev) => (prev ? { ...prev, avatar_url: publicUrl } : prev));
-      Alert.alert('הצלחה', profile?.avatar_url ? 'תמונת הפרופיל עודכנה' : 'תמונת הפרופיל נוספה');
+      setAvatarSuccessModal({
+        visible: true,
+        message: hadAvatar ? 'תמונת הפרופיל עודכנה' : 'תמונת הפרופיל נוספה',
+        avatarUrl: publicUrl,
+      });
     } catch (e: any) {
       Alert.alert('שגיאה', e?.message || 'לא ניתן להעלות תמונה');
     } finally {
@@ -2027,6 +2037,50 @@ export default function ProfileScreen() {
 
         {/* moved logout and delete actions to /profile/settings */}
       </ScrollView>
+
+      <Modal
+        visible={avatarSuccessModal.visible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setAvatarSuccessModal((s) => ({ ...s, visible: false }))}
+      >
+        <View style={styles.successOverlay}>
+          <TouchableOpacity
+            style={styles.successBackdrop}
+            activeOpacity={1}
+            onPress={() => setAvatarSuccessModal((s) => ({ ...s, visible: false }))}
+            accessibilityRole="button"
+            accessibilityLabel="סגור הודעת הצלחה"
+          />
+          <View style={styles.successCard} accessibilityRole="alert">
+            <View style={styles.successBody}>
+              {avatarSuccessModal.avatarUrl ? (
+                <Image source={{ uri: avatarSuccessModal.avatarUrl }} style={styles.successThumb} />
+              ) : null}
+              <Text style={styles.successTitle}>הצלחה</Text>
+              <Text style={styles.successMessage}>{avatarSuccessModal.message}</Text>
+
+              <TouchableOpacity
+                style={styles.successBtnHit}
+                activeOpacity={0.9}
+                onPress={() => setAvatarSuccessModal((s) => ({ ...s, visible: false }))}
+                accessibilityRole="button"
+                accessibilityLabel="אישור"
+              >
+                <LinearGradient
+                  colors={['#111827', '#1F2937']}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={styles.successBtn}
+                >
+                  <Text style={styles.successBtnText}>אישור</Text>
+                </LinearGradient>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       {viewerIndex !== null && (
         <Modal
           visible
@@ -2285,6 +2339,80 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 100,
+  },
+  successOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(17,24,39,0.58)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 18,
+  },
+  successBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  successCard: {
+    width: '100%',
+    maxWidth: 380,
+    borderRadius: 24,
+    backgroundColor: '#FFFFFF',
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(17,24,39,0.08)',
+    shadowColor: '#000000',
+    shadowOpacity: 0.14,
+    shadowRadius: 22,
+    shadowOffset: { width: 0, height: 16 },
+    elevation: 6,
+    ...(Platform.OS === 'web'
+      ? ({ boxShadow: '0 18px 46px rgba(0,0,0,0.22)' } as any)
+      : null),
+  },
+  successBody: {
+    padding: 18,
+    alignItems: 'center',
+  },
+  successThumb: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    marginTop: 2,
+    marginBottom: 10,
+    borderWidth: 2,
+    borderColor: 'rgba(34,197,94,0.30)',
+    backgroundColor: '#F3F4F6',
+  },
+  successTitle: {
+    color: '#111827',
+    fontSize: 20,
+    fontWeight: '900',
+    textAlign: 'center',
+    writingDirection: 'rtl',
+  },
+  successMessage: {
+    marginTop: 6,
+    color: '#6B7280',
+    fontSize: 14,
+    fontWeight: '700',
+    textAlign: 'center',
+    writingDirection: 'rtl',
+    lineHeight: 20,
+  },
+  successBtnHit: {
+    width: '100%',
+    marginTop: 14,
+  },
+  successBtn: {
+    width: '100%',
+    paddingVertical: 12,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  successBtnText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '900',
+    letterSpacing: 0.2,
   },
   addPhotoBtn: {
     position: 'absolute',

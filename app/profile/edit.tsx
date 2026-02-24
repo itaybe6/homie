@@ -92,10 +92,13 @@ export default function EditProfileScreen() {
         return;
       }
 
-      const perms = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!perms.granted) {
-        Alert.alert('הרשאה נדרשת', 'יש לאפשר גישה לגלריה כדי להעלות תמונות');
-        return;
+      // Web doesn't require explicit media-library permissions.
+      if (Platform.OS !== 'web') {
+        const perms = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (!perms.granted) {
+          Alert.alert('הרשאה נדרשת', 'יש לאפשר גישה לגלריה כדי להעלות תמונות');
+          return;
+        }
       }
 
       const result = await ImagePicker.launchImageLibraryAsync({

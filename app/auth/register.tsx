@@ -113,10 +113,13 @@ export default function RegisterScreen() {
 
   const handlePickImage = async () => {
     try {
-      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (status !== 'granted') {
-        setError('נדרשת הרשאה לגישה לגלריה');
-        return;
+      // Web doesn't require explicit media-library permissions.
+      if (Platform.OS !== 'web') {
+        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (status !== 'granted') {
+          setError('נדרשת הרשאה לגישה לגלריה');
+          return;
+        }
       }
 
       const result = await ImagePicker.launchImageLibraryAsync({

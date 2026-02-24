@@ -17,7 +17,7 @@ import {
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useNavigation } from '@react-navigation/native';
-import { Sparkles, Check, ChevronRight, X } from 'lucide-react-native';
+import { Sparkles, Check, ChevronRight, X, Save } from 'lucide-react-native';
 import { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuthStore } from '@/stores/authStore';
@@ -1869,7 +1869,7 @@ function PartCarouselPagination({
                   accessibilityRole="button"
                   accessibilityLabel="יציאה ושמירה"
                 >
-                  {saving ? <ActivityIndicator size="small" color={PRIMARY} /> : <X size={18} color={PRIMARY} />}
+                  {saving ? <ActivityIndicator size="small" color={PRIMARY} /> : <Save size={18} color={PRIMARY} />}
                 </TouchableOpacity>
               ) : null}
 

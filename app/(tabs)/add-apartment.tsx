@@ -908,10 +908,13 @@ export default function AddApartmentScreen(props?: { mode?: UpsertMode; apartmen
 
   const pickImages = async () => {
     try {
-      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('שגיאה', 'נדרש אישור לגישה לגלריה');
-        return;
+      // Web doesn't require explicit media-library permissions.
+      if (Platform.OS !== 'web') {
+        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (status !== 'granted') {
+          Alert.alert('שגיאה', 'נדרש אישור לגישה לגלריה');
+          return;
+        }
       }
 
       const result = await ImagePicker.launchImageLibraryAsync({
