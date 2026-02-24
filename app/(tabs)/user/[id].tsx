@@ -6,6 +6,7 @@ import {
   ScrollView,
   Image,
   ActivityIndicator,
+  Pressable,
   TouchableOpacity,
   Alert,
   Dimensions,
@@ -246,6 +247,11 @@ export default function UserProfileScreen() {
   const [meInApartment, setMeInApartment] = useState(false);
   const [profileInApartment, setProfileInApartment] = useState(false);
   const [mergeNotice, setMergeNotice] = useState<string | null>(null);
+  const [successModal, setSuccessModal] = useState<{ visible: boolean; title: string; message: string }>({
+    visible: false,
+    title: '',
+    message: '',
+  });
   const [groupRefreshKey, setGroupRefreshKey] = useState(0);
   type ProfileApartment = {
     id: string;
@@ -254,6 +260,9 @@ export default function UserProfileScreen() {
     image_urls?: any;
     bedrooms?: number | null;
     bathrooms?: number | null;
+    roommate_capacity?: number | null;
+    // legacy field in some environments
+    max_roommates?: number | null;
     owner_id?: string | null;
     partner_ids?: (string | null)[] | null;
   };
@@ -1105,7 +1114,7 @@ export default function UserProfileScreen() {
       try {
         setProfileAptLoading(true);
         const selectColumns =
-          'id, title, city, image_urls, bedrooms, bathrooms, owner_id, partner_ids';
+          'id, title, city, image_urls, bedrooms, bathrooms, roommate_capacity, max_roommates, owner_id, partner_ids';
         const owned = await supabase
           .from('apartments')
           .select(selectColumns)
@@ -1220,6 +1229,10 @@ export default function UserProfileScreen() {
     if (!profile?.id) return;
     if (me.id === profile.id) {
       Alert.alert('שגיאה', 'לא ניתן לשלוח בקשה לעצמך.');
+      return;
+    }
+    if (mergeBlockedByFullApartment) {
+      Alert.alert('לא ניתן למזג', 'הדירה של המשתמש/ת כבר מלאה ולכן אי אפשר להתמזג איתו/ה.');
       return;
     }
     if (mergeBlockedByTheirSharedGroup) {
@@ -1554,7 +1567,7 @@ export default function UserProfileScreen() {
       });
       if (iErr) throw iErr;
 
-      Alert.alert('נשלח', 'הבקשה נשלחה.');
+      setSuccessModal({ visible: true, title: 'נשלח', message: 'הבקשה נשלחה' });
       setHasPendingMergeInvite(true);
     } catch (e: any) {
       console.error('send merge invite failed', e);
@@ -1599,12 +1612,32 @@ export default function UserProfileScreen() {
   const galleryItemSize = galleryWidth
     ? Math.floor((galleryWidth - gap * 2) / 3)
     : defaultItemSize;
+
+  const getMaxRoommates = (apt: ProfileApartment | null | undefined): number | null => {
+    if (!apt) return null;
+    const cap = (apt as any)?.roommate_capacity;
+    if (typeof cap === 'number' && Number.isFinite(cap)) return cap;
+    const legacy = (apt as any)?.max_roommates;
+    if (typeof legacy === 'number' && Number.isFinite(legacy)) return legacy;
+    return null;
+  };
+
+  const profileInFullApartment = (() => {
+    return (profileApartments || []).some((apt) => {
+      const max = getMaxRoommates(apt);
+      if (max === null) return false;
+      const used = normalizePartnerIds((apt as any)?.partner_ids).length;
+      return max - used <= 0;
+    });
+  })();
+
   const isMeInViewedGroup =
     !!me?.id && !!groupContext?.members?.some((m) => m.id === me.id);
   const profileIsInSharedGroup =
     !!groupContext && Array.isArray(groupContext.members) && groupContext.members.length >= 2;
   const mergeBlockedByApartments =
     !!me?.id && !isMeInViewedGroup && meInApartment && profileInApartment;
+  const mergeBlockedByFullApartment = !isMeInViewedGroup && profileInFullApartment;
   // NEW RULE: shared profile can include up to MAX_GROUP_MEMBERS users.
   // Hard-block only if the viewed profile is already at max capacity (and I'm not in that group).
   const mergeBlockedByTheirSharedGroup =
@@ -1688,11 +1721,14 @@ export default function UserProfileScreen() {
             const isDisabled =
               groupLoading ||
               inviteLoading ||
-              hasPendingMergeInvite;
+              hasPendingMergeInvite ||
+              mergeBlockedByFullApartment;
             const label = groupLoading
               ? 'טוען...'
               : isMeInViewedGroup
                 ? 'פרופיל משותף'
+                : mergeBlockedByFullApartment
+                  ? 'דירה מלאה'
                 : inviteLoading
                   ? 'שולח...'
                   : hasPendingMergeInvite
@@ -1704,6 +1740,10 @@ export default function UserProfileScreen() {
                 router.push('/(tabs)/partners');
                 return;
               }
+              if (mergeBlockedByFullApartment) {
+                Alert.alert('לא ניתן למזג', 'הדירה של המשתמש/ת כבר מלאה ולכן אי אפשר להתמזג איתו/ה.');
+                return;
+              }
               openMergeConfirm();
             };
             const IconComp = isMeInViewedGroup ? Users : UserPlus2;
@@ -1711,7 +1751,7 @@ export default function UserProfileScreen() {
               <TouchableOpacity
                 style={[
                   styles.mergeHeaderBtn,
-                  (isDisabled || (meInApartment && profileInApartment)) ? styles.mergeBtnDisabled : null,
+                  isDisabled ? styles.mergeBtnDisabled : null,
                 ]}
                 activeOpacity={0.9}
                 onPress={onPress}
@@ -1779,11 +1819,14 @@ export default function UserProfileScreen() {
                 const isDisabled =
                   groupLoading ||
                   inviteLoading ||
-                  (!isMeInViewedGroup && hasPendingMergeInvite);
+                  (!isMeInViewedGroup && hasPendingMergeInvite) ||
+                  mergeBlockedByFullApartment;
                 const label = groupLoading
                   ? 'טוען...'
                   : isMeInViewedGroup
                     ? 'שותפים'
+                    : mergeBlockedByFullApartment
+                      ? 'דירה מלאה'
                     : inviteLoading
                       ? 'שולח...'
                       : hasPendingMergeInvite
@@ -1798,6 +1841,10 @@ export default function UserProfileScreen() {
                       if (groupLoading) return;
                       if (isMeInViewedGroup) {
                         router.push('/(tabs)/partners');
+                        return;
+                      }
+                      if (mergeBlockedByFullApartment) {
+                        Alert.alert('לא ניתן למזג', 'הדירה של המשתמש/ת כבר מלאה ולכן אי אפשר להתמזג איתו/ה.');
                         return;
                       }
                       openMergeConfirm();
@@ -2374,7 +2421,8 @@ export default function UserProfileScreen() {
                   groupLoading ||
                   hasPendingMergeInvite ||
                   mergeCapacity.status === 'checking' ||
-                  mergeCapacity.status === 'blocked')
+                  mergeCapacity.status === 'blocked' ||
+                  mergeBlockedByFullApartment)
                   ? styles.mergeConfirmApproveDisabled
                   : null,
               ]}
@@ -2384,7 +2432,8 @@ export default function UserProfileScreen() {
                 groupLoading ||
                 hasPendingMergeInvite ||
                 mergeCapacity.status === 'checking' ||
-                mergeCapacity.status === 'blocked'
+                mergeCapacity.status === 'blocked' ||
+                mergeBlockedByFullApartment
               }
               onPress={() => {
                 setIsMergeConfirmOpen(false);
@@ -2408,6 +2457,44 @@ export default function UserProfileScreen() {
           </View>
         </View>
       </KeyFabPanel>
+
+      <Modal
+        visible={successModal.visible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setSuccessModal((s) => ({ ...s, visible: false }))}
+      >
+        <View style={styles.successOverlay}>
+          <Pressable
+            style={styles.successBackdrop}
+            onPress={() => setSuccessModal((s) => ({ ...s, visible: false }))}
+            accessibilityRole="button"
+            accessibilityLabel="סגור הודעה"
+          />
+          <View style={styles.successCard} accessibilityRole="alert">
+            <View style={styles.successBody}>
+              <Text style={styles.successTitle}>{successModal.title || 'הצלחה'}</Text>
+              <Text style={styles.successMessage}>{successModal.message}</Text>
+              <TouchableOpacity
+                style={styles.successBtnHit}
+                activeOpacity={0.9}
+                onPress={() => setSuccessModal((s) => ({ ...s, visible: false }))}
+                accessibilityRole="button"
+                accessibilityLabel="אישור"
+              >
+                <LinearGradient
+                  colors={['#111827', '#1F2937']}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={styles.successBtn}
+                >
+                  <Text style={styles.successBtnText}>אישור</Text>
+                </LinearGradient>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -2425,6 +2512,70 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: '#FAFAFA',
     paddingHorizontal: 16,
+  },
+  successOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(17,24,39,0.58)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 18,
+  },
+  successBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  successCard: {
+    width: '100%',
+    maxWidth: 380,
+    borderRadius: 24,
+    backgroundColor: '#FFFFFF',
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(17,24,39,0.08)',
+    shadowColor: '#000000',
+    shadowOpacity: 0.14,
+    shadowRadius: 22,
+    shadowOffset: { width: 0, height: 16 },
+    elevation: 6,
+    ...(Platform.OS === 'web'
+      ? ({ boxShadow: '0 18px 46px rgba(0,0,0,0.22)' } as any)
+      : null),
+  },
+  successBody: {
+    padding: 18,
+    alignItems: 'center',
+  },
+  successTitle: {
+    color: '#111827',
+    fontSize: 20,
+    fontWeight: '900',
+    textAlign: 'center',
+    writingDirection: 'rtl',
+  },
+  successMessage: {
+    marginTop: 6,
+    color: '#6B7280',
+    fontSize: 14,
+    fontWeight: '700',
+    textAlign: 'center',
+    writingDirection: 'rtl',
+    lineHeight: 20,
+  },
+  successBtnHit: {
+    width: '100%',
+    marginTop: 14,
+  },
+  successBtn: {
+    width: '100%',
+    paddingVertical: 12,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  successBtnText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '900',
+    letterSpacing: 0.2,
   },
   scrollContent: {
     paddingHorizontal: 16,

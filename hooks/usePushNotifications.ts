@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
+import { notificationDescriptionToPublicText } from '@/lib/notifications';
 import { useAuthStore } from '@/stores/authStore';
 
 async function ensurePermissions(): Promise<boolean> {
@@ -78,7 +79,7 @@ export function usePushNotifications() {
         (payload) => {
           const n: any = payload.new;
           const title = n?.title || 'התראה חדשה';
-          const body = n?.description || 'יש לך התראה חדשה';
+          const body = notificationDescriptionToPublicText(n?.description) || 'יש לך התראה חדשה';
           Notifications.scheduleNotificationAsync({
             content: { title, body, sound: 'default' },
             trigger: null,

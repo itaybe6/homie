@@ -65,6 +65,7 @@ export default function ProfileSettingsScreen() {
     message: string;
     closeEditOnConfirm?: boolean;
   }>({ visible: false, message: '', closeEditOnConfirm: false });
+  const [successModal, setSuccessModal] = useState<{ visible: boolean; message: string }>({ visible: false, message: '' });
   const avatarNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [hasSharedProfiles, setHasSharedProfiles] = useState(false);
   const [showSharedModal, setShowSharedModal] = useState(false);
@@ -434,7 +435,7 @@ export default function ProfileSettingsScreen() {
       // Update local state
       setMyApartment((prev) => (prev ? ({ ...(prev as any), partner_ids: newPartnerIds } as Apartment) : prev));
       setAptMembers((prev) => prev.filter((m) => m.id !== user.id));
-      Alert.alert('הצלחה', 'יצאת מהדירה בהצלחה');
+      setSuccessModal({ visible: true, message: 'יצאת מהדירה בהצלחה' });
       setShowAptModal(false);
     } catch (e: any) {
       Alert.alert('שגיאה', e?.message || 'לא ניתן לצאת מהדירה כעת');
@@ -1990,6 +1991,44 @@ export default function ProfileSettingsScreen() {
           </Animated.View>
         </Modal>
       )}
+
+      <Modal
+        visible={successModal.visible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setSuccessModal((s) => ({ ...s, visible: false }))}
+      >
+        <View style={styles.successOverlay}>
+          <Pressable
+            style={styles.successBackdrop}
+            onPress={() => setSuccessModal((s) => ({ ...s, visible: false }))}
+            accessibilityRole="button"
+            accessibilityLabel="סגור הודעת הצלחה"
+          />
+          <View style={styles.successCard} accessibilityRole="alert">
+            <View style={styles.successBody}>
+              <Text style={styles.successTitle}>הצלחה</Text>
+              <Text style={styles.successMessage}>{successModal.message}</Text>
+              <TouchableOpacity
+                style={styles.successBtnHit}
+                activeOpacity={0.9}
+                onPress={() => setSuccessModal((s) => ({ ...s, visible: false }))}
+                accessibilityRole="button"
+                accessibilityLabel="אישור"
+              >
+                <LinearGradient
+                  colors={['#111827', '#1F2937']}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={styles.successBtn}
+                >
+                  <Text style={styles.successBtnText}>אישור</Text>
+                </LinearGradient>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -2190,6 +2229,70 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.4)',
     justifyContent: 'flex-end',
     alignItems: 'stretch',
+  },
+  successOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(17,24,39,0.58)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 18,
+  },
+  successBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  successCard: {
+    width: '100%',
+    maxWidth: 380,
+    borderRadius: 24,
+    backgroundColor: '#FFFFFF',
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(17,24,39,0.08)',
+    shadowColor: '#000000',
+    shadowOpacity: 0.14,
+    shadowRadius: 22,
+    shadowOffset: { width: 0, height: 16 },
+    elevation: 6,
+    ...(Platform.OS === 'web'
+      ? ({ boxShadow: '0 18px 46px rgba(0,0,0,0.22)' } as any)
+      : null),
+  },
+  successBody: {
+    padding: 18,
+    alignItems: 'center',
+  },
+  successTitle: {
+    color: '#111827',
+    fontSize: 20,
+    fontWeight: '900',
+    textAlign: 'center',
+    writingDirection: 'rtl',
+  },
+  successMessage: {
+    marginTop: 6,
+    color: '#6B7280',
+    fontSize: 14,
+    fontWeight: '700',
+    textAlign: 'center',
+    writingDirection: 'rtl',
+    lineHeight: 20,
+  },
+  successBtnHit: {
+    width: '100%',
+    marginTop: 14,
+  },
+  successBtn: {
+    width: '100%',
+    paddingVertical: 12,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  successBtnText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '900',
+    letterSpacing: 0.2,
   },
   avatarSuccessOverlay: {
     ...StyleSheet.absoluteFillObject,

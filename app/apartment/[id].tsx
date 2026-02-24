@@ -7,6 +7,7 @@ import {
   Image,
   TouchableOpacity,
   ActivityIndicator,
+  Pressable,
   Alert,
   Dimensions,
   Modal,
@@ -19,7 +20,6 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { PinchGestureHandler, State } from 'react-native-gesture-handler';
 import { useNavigation } from '@react-navigation/native';
-import { createURL } from 'expo-linking';
 import {
   ArrowLeft,
   ArrowRight,
@@ -123,8 +123,8 @@ export default function ApartmentDetailsScreen() {
   const shareUrl = useMemo(() => {
     const aptId = String(id || apartment?.id || '').trim();
     if (!aptId) return '';
-    // Deep link based on app.json scheme ("homie") so the shared content is a clickable link.
-    return createURL(`/apartment/${aptId}`);
+    // Use the app scheme ("homie") directly to avoid Expo dev links (exp://...).
+    return `homie://apartment/${encodeURIComponent(aptId)}`;
   }, [id, apartment?.id]);
   const [addCandidates, setAddCandidates] = useState<User[]>([]);
   const [sharedGroups, setSharedGroups] = useState<{ id: string; members: Pick<User, 'id' | 'full_name' | 'avatar_url'>[] }[]>([]);
@@ -163,6 +163,11 @@ export default function ApartmentDetailsScreen() {
   const [isMergeConfirmOpen, setIsMergeConfirmOpen] = useState(false);
   const [mergeInviteLoading, setMergeInviteLoading] = useState(false);
   const [hasPendingMergeInvite, setHasPendingMergeInvite] = useState(false);
+  const [successModal, setSuccessModal] = useState<{ visible: boolean; title: string; message: string }>({
+    visible: false,
+    title: '',
+    message: '',
+  });
   const mergeCheckIdRef = useRef(0);
   const [mergeCapacity, setMergeCapacity] = useState<{
     status: 'idle' | 'checking' | 'ok' | 'blocked';
@@ -541,7 +546,7 @@ export default function ApartmentDetailsScreen() {
       });
       if (iErr) throw iErr;
 
-      Alert.alert('נשלח', 'הבקשה נשלחה.');
+      setSuccessModal({ visible: true, title: 'נשלח', message: 'הבקשה נשלחה' });
       setHasPendingMergeInvite(true);
     } catch (e: any) {
       // eslint-disable-next-line no-console
@@ -1974,8 +1979,8 @@ export default function ApartmentDetailsScreen() {
             <View style={styles.topRightControls}>
               <ShareMenuFab
                 message={[
-                  `דירה ב-Homie: ${(apartment?.title || '').toString()} ${(apartment?.city || '').toString()}`.trim(),
                   shareUrl,
+                  `דירה ב-Homie: ${(apartment?.title || '').toString()} ${(apartment?.city || '').toString()}`.trim(),
                 ]
                   .filter(Boolean)
                   .join('\n')}
@@ -2815,6 +2820,44 @@ export default function ApartmentDetailsScreen() {
         </KeyFabPanel>
       ) : null}
 
+      <Modal
+        visible={successModal.visible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setSuccessModal((s) => ({ ...s, visible: false }))}
+      >
+        <View style={styles.successOverlay}>
+          <Pressable
+            style={styles.successBackdrop}
+            onPress={() => setSuccessModal((s) => ({ ...s, visible: false }))}
+            accessibilityRole="button"
+            accessibilityLabel="סגור הודעה"
+          />
+          <View style={styles.successCard} accessibilityRole="alert">
+            <View style={styles.successBody}>
+              <Text style={styles.successTitle}>{successModal.title || 'הצלחה'}</Text>
+              <Text style={styles.successMessage}>{successModal.message}</Text>
+              <TouchableOpacity
+                style={styles.successBtnHit}
+                activeOpacity={0.9}
+                onPress={() => setSuccessModal((s) => ({ ...s, visible: false }))}
+                accessibilityRole="button"
+                accessibilityLabel="אישור"
+              >
+                <LinearGradient
+                  colors={['#111827', '#1F2937']}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={styles.successBtn}
+                >
+                  <Text style={styles.successBtnText}>אישור</Text>
+                </LinearGradient>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       {/* Join Requests animated panel (owner only) */}
       {isOwner ? (
         <KeyFabPanel
@@ -3372,6 +3415,70 @@ const styles = StyleSheet.create({
     flex: 1,
     position: 'relative',
     backgroundColor: '#FAFAFA',
+  },
+  successOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(17,24,39,0.58)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 18,
+  },
+  successBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  successCard: {
+    width: '100%',
+    maxWidth: 380,
+    borderRadius: 24,
+    backgroundColor: '#FFFFFF',
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(17,24,39,0.08)',
+    shadowColor: '#000000',
+    shadowOpacity: 0.14,
+    shadowRadius: 22,
+    shadowOffset: { width: 0, height: 16 },
+    elevation: 6,
+    ...(Platform.OS === 'web'
+      ? ({ boxShadow: '0 18px 46px rgba(0,0,0,0.22)' } as any)
+      : null),
+  },
+  successBody: {
+    padding: 18,
+    alignItems: 'center',
+  },
+  successTitle: {
+    color: '#111827',
+    fontSize: 20,
+    fontWeight: '900',
+    textAlign: 'center',
+    writingDirection: 'rtl',
+  },
+  successMessage: {
+    marginTop: 6,
+    color: '#6B7280',
+    fontSize: 14,
+    fontWeight: '700',
+    textAlign: 'center',
+    writingDirection: 'rtl',
+    lineHeight: 20,
+  },
+  successBtnHit: {
+    width: '100%',
+    marginTop: 14,
+  },
+  successBtn: {
+    width: '100%',
+    paddingVertical: 12,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  successBtnText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '900',
+    letterSpacing: 0.2,
   },
   stickyCtaWrap: {
     left: 0,

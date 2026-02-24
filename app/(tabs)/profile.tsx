@@ -607,7 +607,49 @@ export default function ProfileScreen() {
         .eq('user_id', user.id);
       if (error) throw error;
 
-      Alert.alert('הצלחה', 'עזבת את הקבוצה.');
+      // If the group was tied to an apartment partnership, also remove the user from that apartment.
+      // Only remove from apartments where at least one other ACTIVE group member is also a partner.
+      try {
+        const { data: activeRows, error: activeErr } = await supabase
+          .from('profile_group_members')
+          .select('user_id')
+          .eq('group_id', groupId)
+          .eq('status', 'ACTIVE');
+        if (activeErr) throw activeErr;
+        const otherActiveMemberIds = (activeRows || [])
+          .map((r: any) => r.user_id)
+          .filter(Boolean)
+          .map(String)
+          .filter((id: string) => id !== String(user.id));
+
+        if (otherActiveMemberIds.length) {
+          const { data: aptRows, error: aptQueryErr } = await supabase
+            .from('apartments')
+            .select('id, owner_id, partner_ids')
+            .contains('partner_ids', [user.id] as any);
+          if (!aptQueryErr) {
+            const apts: any[] = (aptRows as any[]) || [];
+            for (const apt of apts) {
+              const isOwnerOfApt = String(apt?.owner_id || '') === String(user.id);
+              if (isOwnerOfApt) continue;
+              const currentPartners: string[] = Array.isArray(apt?.partner_ids)
+                ? (apt.partner_ids as string[]).map(String)
+                : [];
+              if (!currentPartners.length) continue;
+              const sharesWithGroup = currentPartners.some((pid) => otherActiveMemberIds.includes(String(pid)));
+              if (!sharesWithGroup) continue;
+
+              const nextPartners = currentPartners.filter((pid) => String(pid) !== String(user.id));
+              if (nextPartners.length === currentPartners.length) continue;
+              await supabase.from('apartments').update({ partner_ids: nextPartners }).eq('id', apt.id);
+            }
+          }
+        }
+      } catch {
+        // Best-effort only; leaving the group should still succeed.
+      }
+
+      setAvatarSuccessModal({ visible: true, message: 'עזבת את הקבוצה בהצלחה', avatarUrl: null });
       fetchProfile();
     } catch (e: any) {
       Alert.alert('שגיאה', e?.message || 'לא ניתן לעזוב את הקבוצה כעת');
@@ -652,7 +694,71 @@ export default function ProfileScreen() {
       const { error } = await supabase.from('apartments').update({ partner_ids: nextPartners } as any).eq('id', apt.id);
       if (error) throw error;
 
-      Alert.alert('הצלחה', 'עזבת את הדירה.');
+      // If the user left an apartment that they shared with their roommate group,
+      // also leave the relevant profile-group(s) (best-effort).
+      try {
+        const otherPartnersInApt = currentPartners
+          .map(String)
+          .filter((pid) => pid !== String(user.id));
+
+        if (otherPartnersInApt.length) {
+          const { data: myGroupRows, error: myGroupErr } = await supabase
+            .from('profile_group_members')
+            .select('group_id')
+            .eq('user_id', user.id)
+            .eq('status', 'ACTIVE');
+          if (myGroupErr) throw myGroupErr;
+          const groupIds = (myGroupRows || []).map((r: any) => r.group_id).filter(Boolean);
+
+          for (const gid of groupIds) {
+            const { data: memberRows, error: memberErr } = await supabase
+              .from('profile_group_members')
+              .select('user_id')
+              .eq('group_id', gid)
+              .eq('status', 'ACTIVE');
+            if (memberErr) continue;
+            const otherGroupMemberIds = (memberRows || [])
+              .map((r: any) => r.user_id)
+              .filter(Boolean)
+              .map(String)
+              .filter((id: string) => id !== String(user.id));
+            const isGroupRelatedToThisApartment = otherGroupMemberIds.some((id) => otherPartnersInApt.includes(String(id)));
+            if (!isGroupRelatedToThisApartment) continue;
+
+            // Leave the group
+            await supabase
+              .from('profile_group_members')
+              .update({ status: 'LEFT' } as any)
+              .eq('group_id', gid)
+              .eq('user_id', user.id);
+
+            // If only one (or zero) active members remain, archive the group (best-effort).
+            try {
+              const { data: remainingRows } = await supabase
+                .from('profile_group_members')
+                .select('user_id')
+                .eq('group_id', gid)
+                .eq('status', 'ACTIVE');
+              const remaining = (remainingRows || []).map((r: any) => r.user_id).filter(Boolean);
+              if (remaining.length <= 1) {
+                if (remaining.length === 1) {
+                  await supabase
+                    .from('profile_group_members')
+                    .update({ status: 'LEFT' } as any)
+                    .eq('group_id', gid)
+                    .eq('user_id', remaining[0]);
+                }
+                await supabase
+                  .from('profile_groups')
+                  .update({ status: 'ARCHIVED', updated_at: new Date().toISOString() } as any)
+                  .eq('id', gid);
+              }
+            } catch {}
+          }
+        }
+      } catch {}
+
+      setAvatarSuccessModal({ visible: true, message: 'עזבת את הדירה בהצלחה', avatarUrl: null });
       fetchProfile();
     } catch (e: any) {
       Alert.alert('שגיאה', e?.message || 'לא ניתן לעזוב את הדירה כעת');

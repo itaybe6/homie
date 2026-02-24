@@ -13,6 +13,18 @@ type InsertNotificationOnceInput = {
   event_key: string;
 };
 
+/**
+ * Returns the user-visible part of a notification description.
+ *
+ * We often append internal metadata after a `---` separator (e.g. EVENT_KEY, INVITE_APT),
+ * which should never be shown to users (push/local notifications, UI, etc).
+ */
+export function notificationDescriptionToPublicText(description: string): string {
+  const raw = String(description || '');
+  const parts = raw.split('---');
+  return String(parts[0] || '').trim();
+}
+
 function withEventKey(description: string, eventKey: string): string {
   const base = String(description || '').trimEnd();
   const key = String(eventKey || '').trim();
