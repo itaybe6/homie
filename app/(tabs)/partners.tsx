@@ -1089,6 +1089,9 @@ export default function PartnersScreen() {
       // When includePassed is true, track users/groups marked as NOT_RELEVANT to show ONLY those
       const notRelevantUsers = new Set<string>();
       const notRelevantGroupIds = new Set<string>();
+      // If a user/group has ANY outgoing non-NOT_RELEVANT status, it should not appear in "show again not relevant"
+      const outgoingNonNotRelevantUsers = new Set<string>();
+      const outgoingNonNotRelevantGroupIds = new Set<string>();
       if (authId) {
         const myGroupIds = new Set(
           members.filter((m) => m.user_id === authId).map((m) => m.group_id),
@@ -1098,6 +1101,17 @@ export default function PartnersScreen() {
           const status = String(row.status || '').trim().toUpperCase();
           const isNotRelevant = status === 'NOT_RELEVANT';
           const shouldHideForOutgoing = !(includePassedNow && isNotRelevant);
+
+          const isOutgoingFromUser = row.sender_id === authId;
+          const isOutgoingFromMyGroup = !!(row.sender_group_id && myGroupIds.has(row.sender_group_id));
+          const isOutgoing = isOutgoingFromUser || isOutgoingFromMyGroup;
+
+          // In includePassed mode, exclude profiles that have a newer/other outgoing status (e.g. PENDING/APPROVED)
+          // even if there's also a NOT_RELEVANT row lingering in the DB.
+          if (includePassedNow && isOutgoing && status && !isNotRelevant) {
+            if (row.receiver_id) outgoingNonNotRelevantUsers.add(row.receiver_id);
+            if (row.receiver_group_id) outgoingNonNotRelevantGroupIds.add(row.receiver_group_id);
+          }
 
           // APPROVED is a mutual "match": hide the other side regardless of direction.
           if (status === 'APPROVED') {
@@ -1159,6 +1173,14 @@ export default function PartnersScreen() {
             }
           }
         });
+      }
+
+      if (includePassedNow) {
+        outgoingNonNotRelevantUsers.forEach((id) => notRelevantUsers.delete(id));
+        outgoingNonNotRelevantGroupIds.forEach((id) => notRelevantGroupIds.delete(id));
+        // Extra safety: if there's any other interaction (e.g. PENDING/APPROVED), don't show it as NOT_RELEVANT
+        interacted.forEach((id) => notRelevantUsers.delete(id));
+        interactedGroupIds.forEach((id) => notRelevantGroupIds.delete(id));
       }
 
       // Exclude everyone who belongs to any merged/active group (by membership), not just visible groups
@@ -1293,7 +1315,7 @@ export default function PartnersScreen() {
       // prevent duplicate request rows
       const { data: existing, error: existingErr } = await supabase
         .from('matches')
-        .select('id')
+        .select('id, status')
         .eq('sender_id', currentUser.id)
         .eq('receiver_id', likedUser.id)
         .maybeSingle();
@@ -1302,8 +1324,19 @@ export default function PartnersScreen() {
         throw existingErr;
       }
       if (existing) {
-        Alert.alert('שמת לב', 'כבר שלחת בקשת שותפות למשתמש זה');
-        goNext();
+        const existingStatus = String((existing as any)?.status || '').trim().toUpperCase();
+        if (existingStatus === 'NOT_RELEVANT') {
+          const updatePayload: any = {
+            status: 'PENDING',
+            updated_at: new Date().toISOString(),
+          };
+          if (senderGroupId) updatePayload.sender_group_id = senderGroupId;
+          const { error: updateErr } = await supabase.from('matches').update(updatePayload).eq('id', (existing as any).id);
+          if (updateErr) throw updateErr;
+        } else {
+          Alert.alert('שמת לב', 'כבר שלחת בקשת שותפות למשתמש זה');
+        }
+        if (!opts?.skipSlide) goNext();
         return;
       }
 
@@ -1395,7 +1428,7 @@ export default function PartnersScreen() {
       // prevent duplicate request rows at group-level
       const { data: existing, error: existingErr } = await supabase
         .from('matches')
-        .select('id')
+        .select('id, status')
         .eq('sender_id', currentUser.id)
         .eq('receiver_group_id', groupId)
         .maybeSingle();
@@ -1403,8 +1436,17 @@ export default function PartnersScreen() {
         throw existingErr;
       }
       if (existing) {
-        Alert.alert('שמת לב', 'כבר שלחת בקשת שותפות לפרופיל המאוחד הזה');
-        goNext();
+        const existingStatus = String((existing as any)?.status || '').trim().toUpperCase();
+        if (existingStatus === 'NOT_RELEVANT') {
+          const { error: updateErr } = await supabase
+            .from('matches')
+            .update({ status: 'PENDING', updated_at: new Date().toISOString() } as any)
+            .eq('id', (existing as any).id);
+          if (updateErr) throw updateErr;
+        } else {
+          Alert.alert('שמת לב', 'כבר שלחת בקשת שותפות לפרופיל המאוחד הזה');
+        }
+        if (!opts?.skipSlide) goNext();
         return;
       }
 

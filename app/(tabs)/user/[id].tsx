@@ -228,7 +228,8 @@ export default function UserProfileScreen() {
   const surveyScrollRef = React.useRef<ScrollView>(null);
   const segW = useSharedValue(1);
   const tabIdx = useSharedValue(0);
-  const [viewerIndex, setViewerIndex] = useState<number | null>(null);
+  const [isViewerOpen, setIsViewerOpen] = useState(false);
+  const [viewerIndex, setViewerIndex] = useState(0);
   const me = useAuthStore((s) => s.user);
   const myId = String((me as any)?.id || '').trim();
   type GroupMember = Pick<User, 'id' | 'full_name' | 'avatar_url'>;
@@ -284,6 +285,11 @@ export default function UserProfileScreen() {
     const t = setTimeout(() => setMatchTickerReady(true), 2700);
     return () => clearTimeout(t);
   }, [profile?.id]);
+
+  // Ensure viewer closes when navigating between different users.
+  useEffect(() => {
+    setIsViewerOpen(false);
+  }, [routeUserId]);
   const showMergeBlockedAlert = () => {
     const title = 'לא ניתן למזג פרופילים';
     const msg =
@@ -1558,6 +1564,20 @@ export default function UserProfileScreen() {
     }
   };
 
+  // Keep image viewer state valid across loading states.
+  // Must be declared before any early returns to avoid hook-order violations.
+  const galleryUrls = profile ? normalizeImageUrls((profile as any).image_urls) : [];
+  useEffect(() => {
+    if (!isViewerOpen) return;
+    if (!galleryUrls.length) {
+      setIsViewerOpen(false);
+      return;
+    }
+    if (viewerIndex < 0 || viewerIndex >= galleryUrls.length) {
+      setViewerIndex(0);
+    }
+  }, [isViewerOpen, viewerIndex, galleryUrls.length]);
+
   if (isLoading) {
     return (
       <View style={styles.center}>
@@ -1574,7 +1594,6 @@ export default function UserProfileScreen() {
     );
   }
 
-  const galleryUrls = normalizeImageUrls((profile as any).image_urls);
   const gap = 6;
   const defaultItemSize = Math.floor((Dimensions.get('window').width - 16 * 2 - gap * 2) / 3);
   const galleryItemSize = galleryWidth
@@ -2125,7 +2144,10 @@ export default function UserProfileScreen() {
                 <TouchableOpacity
                   key={url + idx}
                   activeOpacity={0.9}
-                  onPress={() => setViewerIndex(idx)}
+                  onPress={() => {
+                    setViewerIndex(idx);
+                    setIsViewerOpen(true);
+                  }}
                   style={[
                     styles.galleryItem,
                     {
@@ -2155,34 +2177,29 @@ export default function UserProfileScreen() {
         </View>
       </View>
 
-      {viewerIndex !== null && (
-        <Modal
-          visible
-          transparent
-          animationType="fade"
-          onRequestClose={() => setViewerIndex(null)}
-        >
-          <View style={styles.viewerOverlay}>
-            <TouchableOpacity
-              style={styles.viewerBackdrop}
-              activeOpacity={1}
-              onPress={() => setViewerIndex(null)}
-            />
-            <TouchableOpacity
-              style={[styles.viewerCloseBtn, { top: 20 }]}
-              onPress={() => setViewerIndex(null)}
-              activeOpacity={0.9}
-            >
-              <X size={18} color="#E5E7EB" />
-            </TouchableOpacity>
-            <Image
-              source={{ uri: galleryUrls[viewerIndex] || '' }}
-              style={styles.viewerImage}
-              resizeMode="contain"
-            />
-          </View>
-        </Modal>
-      )}
+      <Modal
+        visible={isViewerOpen}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setIsViewerOpen(false)}
+      >
+        <View style={styles.viewerOverlay}>
+          <TouchableOpacity style={styles.viewerBackdrop} activeOpacity={1} onPress={() => setIsViewerOpen(false)} />
+          <TouchableOpacity
+            style={[styles.viewerCloseBtn, { top: (insets.top || 0) + 12 }]}
+            onPress={() => setIsViewerOpen(false)}
+            activeOpacity={0.9}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            accessibilityRole="button"
+            accessibilityLabel="סגור תמונה"
+          >
+            <X size={18} color="#E5E7EB" />
+          </TouchableOpacity>
+          {isViewerOpen ? (
+            <Image source={{ uri: galleryUrls[viewerIndex] || '' }} style={styles.viewerImage} resizeMode="contain" />
+          ) : null}
+        </View>
+      </Modal>
         </View>
       </ScrollView>
 
@@ -3468,7 +3485,7 @@ const styles = StyleSheet.create({
   },
   viewerOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.95)',
+    backgroundColor: 'transparent',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -3478,12 +3495,13 @@ const styles = StyleSheet.create({
     right: 0,
     top: 0,
     bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.82)',
   },
   viewerImage: {
     width: '92%',
     height: '70%',
     borderRadius: 12,
-    backgroundColor: '#111827',
+    backgroundColor: 'transparent',
   },
   viewerCloseBtn: {
     position: 'absolute',
