@@ -32,6 +32,7 @@ import Animated, {
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { ChevronLeft, ChevronRight, ChevronDown, Heart, X, Share2, Users, RefreshCw, User as UserIcon, Search } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { Image as ExpoImage } from 'expo-image';
 import { Redirect, useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { colors } from '@/lib/theme';
@@ -484,6 +485,10 @@ export default function PartnersScreen() {
   // only after React has rendered the new card (prevents the old card from
   // flashing back to center between the animation end and the state update).
   const swipeResetPendingRef = useRef(false);
+  // When we move via "slideTo" (arrows/programmatic next/prev), we want the new card
+  // to spring in from the opposite side AFTER React rendered the new content.
+  // We store the last direction here so the layout-effect can run the correct entry animation.
+  const pendingSlideDirectionRef = useRef<'next' | 'prev' | null>(null);
   const headerOffset = insets.top + 52 + -40;
   const SWIPE_THRESHOLD = 120;
   const ACTIONS_BAR_HEIGHT = 76;
@@ -550,7 +555,7 @@ export default function PartnersScreen() {
       .slice(0, 10)
       .forEach((u) => {
         try {
-          Image.prefetch(u).catch(() => {});
+          ExpoImage.prefetch(u).catch(() => {});
         } catch {}
       });
   }, [items, currentIndex]);
@@ -567,6 +572,7 @@ export default function PartnersScreen() {
     }
     // Signal the effect to reset translateX after the new card is rendered.
     swipeResetPendingRef.current = true;
+    pendingSlideDirectionRef.current = null;
     // Freeze the "behind" card during the swap to avoid a 1-frame flash where it advances
     // to the next-next card while the new front card is still offscreen.
     setFreezeBehindCard(true);
@@ -585,10 +591,20 @@ export default function PartnersScreen() {
   useLayoutEffect(() => {
     if (swipeResetPendingRef.current) {
       swipeResetPendingRef.current = false;
-      translateX.value = 0;
+      const slideDir = pendingSlideDirectionRef.current;
+      pendingSlideDirectionRef.current = null;
+
+      if (slideDir) {
+        // "Next" => previous card exited left, so new card enters from right.
+        translateX.value = slideDir === 'next' ? screenWidth : -screenWidth;
+        translateX.value = withSpring(0, { damping: 18, stiffness: 160 });
+      } else {
+        // Swipe / button-triggered swipe: just snap the new card to center.
+        translateX.value = 0;
+      }
       setFreezeBehindCard(false);
     }
-  }, [currentIndex]);
+  }, [currentIndex, screenWidth]);
 
   const swipeGesture = Gesture.Pan()
     .enabled(!isDeckExhausted && !isDetailsOpen)
@@ -1289,14 +1305,25 @@ export default function PartnersScreen() {
     setIsRefreshing(false);
   };
 
+  const onSlideComplete = (nextIndex: number, direction: 'next' | 'prev') => {
+    swipeResetPendingRef.current = true;
+    pendingSlideDirectionRef.current = direction;
+    setFreezeBehindCard(true);
+    setCurrentIndex(nextIndex);
+  };
+
   const slideTo = (nextIndex: number, direction: 'next' | 'prev') => {
     if (nextIndex < 0 || nextIndex >= items.length) return;
     const outTarget = direction === 'next' ? -screenWidth : screenWidth;
     translateX.value = withTiming(outTarget, { duration: 220 }, (finished) => {
       if (finished) {
-        runOnJS(setCurrentIndex)(nextIndex);
+        // Defer translateX reset to useLayoutEffect (same as gesture swipe).
+        // Resetting here causes the old card to flash back for a frame before React
+        // renders the new content – the visible "jump" in the image.
+        // Still, we *do* move the shared value to the correct offscreen side now (while the
+        // outgoing card is already offscreen) so the incoming card never renders from the wrong side.
         translateX.value = direction === 'next' ? screenWidth : -screenWidth;
-        translateX.value = withSpring(0, { damping: 18, stiffness: 160 });
+        runOnJS(onSlideComplete)(nextIndex, direction);
       }
     });
   };

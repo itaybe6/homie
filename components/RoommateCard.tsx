@@ -1,6 +1,7 @@
 import React, { memo, useEffect, useMemo, useState } from 'react';
-import { View, Text, StyleSheet, Image, ViewStyle, TouchableOpacity, Platform } from 'react-native';
+import { View, Text, StyleSheet, ViewStyle, TouchableOpacity, Platform } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { Image as ExpoImage } from 'expo-image';
 import {
   User as UserIcon,
 } from 'lucide-react-native';
@@ -403,7 +404,13 @@ function RoommateCardBase({
           {/* Foreground (image) shifts up when opening details */}
           <Animated.View style={[StyleSheet.absoluteFillObject, styles.foregroundLayer, imageTranslateStyle]}>
             {hasAvatar ? (
-              <Image source={{ uri: user.avatar_url || DEFAULT_AVATAR }} style={styles.image} resizeMode="cover" />
+              <ExpoImage
+                source={{ uri: user.avatar_url || DEFAULT_AVATAR }}
+                style={styles.image}
+                contentFit="cover"
+                transition={180}
+                cachePolicy="memory-disk"
+              />
             ) : (
               <View style={styles.placeholderWrap}>
                 <UserIcon size={164} color="#9CA3AF" />
