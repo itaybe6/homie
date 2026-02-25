@@ -2071,14 +2071,14 @@ export default function ApartmentDetailsScreen() {
               <View style={styles.statIconCircle}>
                 <Users size={22} color="rgba(17,24,39,0.55)" />
               </View>
-              <View style={styles.statLabelRow}>
+              <View style={[styles.statLabelRow, styles.statLabelRowWrap]}>
                 {typeof maxRoommates === 'number' ? (
-                  <Text numberOfLines={1} ellipsizeMode="clip" style={{ color: '#111827' }}>
-                    <Text style={styles.statLabel}>{`מתאימה\u00A0ל`}</Text>
-                    <Text style={styles.statNumber}>{maxRoommates}</Text>
-                  </Text>
+                  <>
+                    <Text style={[styles.statLabel, styles.statTextCentered]}>מתאימה ל</Text>
+                    <Text style={[styles.statNumber, styles.statTextCentered]}>{maxRoommates}</Text>
+                  </>
                 ) : (
-                  <Text style={styles.statLabel} numberOfLines={1} ellipsizeMode="clip">
+                  <Text style={[styles.statLabel, styles.statTextCentered]} numberOfLines={2} ellipsizeMode="tail">
                     קיבולת לא צוינה
                   </Text>
                 )}
@@ -2102,21 +2102,14 @@ export default function ApartmentDetailsScreen() {
                 <Text style={styles.statLabel}>מקלחות</Text>
               </View>
             </View>
-            <View style={styles.statLight}>
-              <View style={styles.statIconCircle}>
-                <Calendar size={22} color="rgba(17,24,39,0.55)" />
-              </View>
-              <View style={[styles.statLabelRow, styles.statLabelRowCenter]}>
-                <Text
-                  style={[styles.statNumber, styles.statDateNumber]}
-                  numberOfLines={1}
-                  adjustsFontSizeToFit
-                  minimumFontScale={0.9}
-                >
-                  {moveInDateLabel || '—'}
-                </Text>
-              </View>
-            </View>
+          </View>
+
+          <View style={styles.moveInPill} accessibilityRole="text">
+            <Calendar size={16} color="rgba(17,24,39,0.55)" />
+            <Text style={styles.moveInPillLabel}>תאריך כניסה</Text>
+            <Text style={styles.moveInPillValue} numberOfLines={1} ellipsizeMode="tail">
+              {moveInDateLabel || '—'}
+            </Text>
           </View>
 
           {/* Apartment join passcode (owner only) */}
@@ -3974,16 +3967,63 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 6,
   },
+  statLabelRowWrap: {
+    maxWidth: '100%',
+    justifyContent: 'center',
+    flexWrap: 'wrap',
+  },
   statLabelRowCenter: {
     width: '100%',
     justifyContent: 'center',
   },
-  statLabel: { color: '#111827', fontWeight: '800', fontSize: 12 },
-  statNumber: { color: '#111827', fontWeight: '900', fontSize: 12 },
+  statTextCentered: {
+    textAlign: 'center',
+    writingDirection: 'rtl',
+    flexShrink: 1,
+  },
+  statLabel: { color: '#111827', fontWeight: '800', fontSize: 12, flexShrink: 1 },
+  statNumber: { color: '#111827', fontWeight: '900', fontSize: 12, flexShrink: 1 },
   statDateNumber: {
     textAlign: 'center',
     writingDirection: 'ltr',
     includeFontPadding: false,
+    flexShrink: 1,
+    maxWidth: '100%',
+  },
+  moveInPill: {
+    alignSelf: 'stretch',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    flexWrap: 'wrap',
+    ...(Platform.OS === 'ios'
+      ? {
+          shadowColor: '#000',
+          shadowOpacity: 0.06,
+          shadowRadius: 8,
+          shadowOffset: { width: 0, height: 4 },
+        }
+      : { elevation: 3 }),
+  },
+  moveInPillLabel: {
+    color: '#374151',
+    fontSize: 12,
+    fontWeight: '900',
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    flexShrink: 1,
+  },
+  moveInPillValue: {
+    color: '#111827',
+    fontSize: 12,
+    fontWeight: '900',
+    textAlign: 'left',
+    writingDirection: 'ltr',
     flexShrink: 1,
     maxWidth: '100%',
   },
