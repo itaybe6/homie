@@ -1222,7 +1222,6 @@ function PartCarouselPagination({
 
               return (
                 <MultiChipSelect
-                  label="כמה שותפים?"
                   options={options}
                   values={selectedLabels}
                   onToggle={(label, nextActive) => {

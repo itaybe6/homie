@@ -69,6 +69,9 @@ import {
 const DEFAULT_SWIPE_CARD_MEDIA_HEIGHT = 520;
 const SWIPE_CARD_RADIUS = 20;
 
+// Filter UI accent (selected states) – green instead of the default primary.
+const FILTER_ACCENT = colors.success;
+
 const genderAliasMap: Record<string, 'male' | 'female'> = {
   male: 'male',
   men: 'male',
@@ -2060,7 +2063,7 @@ export default function PartnersScreen() {
                             setSelectedCities((prev) => prev.filter((x) => x !== c));
                           }}
                         >
-                          <X size={14} color="#4F46E5" />
+                          <X size={14} color={FILTER_ACCENT} />
                           <Text style={[styles.cityChipText, styles.cityChipTextActive]} numberOfLines={1}>
                             {c}
                           </Text>
@@ -2855,8 +2858,8 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   cityPickerRowActive: {
-    backgroundColor: 'rgba(79,70,229,0.08)',
-    borderColor: 'rgba(79,70,229,0.22)',
+    backgroundColor: alpha(FILTER_ACCENT, 0.10),
+    borderColor: alpha(FILTER_ACCENT, 0.28),
   },
   cityPickerRowText: {
     color: '#374151',
@@ -2868,7 +2871,7 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-end',
   },
   cityPickerRowTextActive: {
-    color: '#4F46E5',
+    color: FILTER_ACCENT,
     fontWeight: '900',
   },
   sectionRow: {
@@ -2923,7 +2926,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     height: 6,
     borderRadius: 999,
-    backgroundColor: colors.primary,
+    backgroundColor: FILTER_ACCENT,
   },
   rangeThumb: {
     position: 'absolute',
@@ -2932,7 +2935,7 @@ const styles = StyleSheet.create({
     borderRadius: 13,
     backgroundColor: '#FFFFFF',
     borderWidth: 2,
-    borderColor: colors.primary,
+    borderColor: FILTER_ACCENT,
     shadowColor: '#000',
     shadowOpacity: 0.12,
     shadowRadius: 10,
@@ -3057,8 +3060,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   cityChipActive: {
-    backgroundColor: 'rgba(79,70,229,0.08)',
-    borderColor: 'rgba(79,70,229,0.18)',
+    backgroundColor: alpha(FILTER_ACCENT, 0.10),
+    borderColor: alpha(FILTER_ACCENT, 0.22),
   },
   cityChipInactive: {
     backgroundColor: 'rgba(243,244,246,0.85)',
@@ -3070,7 +3073,7 @@ const styles = StyleSheet.create({
     textAlign: 'right',
   },
   cityChipTextActive: {
-    color: colors.primary,
+    color: FILTER_ACCENT,
   },
   cityChipTextInactive: {
     color: '#6B7280',
@@ -3088,8 +3091,8 @@ const styles = StyleSheet.create({
     borderWidth: 2,
   },
   pillBtnActive: {
-    backgroundColor: alpha(colors.primary, 0.08),
-    borderColor: colors.primary,
+    backgroundColor: alpha(FILTER_ACCENT, 0.10),
+    borderColor: FILTER_ACCENT,
   },
   pillBtnInactive: {
     backgroundColor: '#FFFFFF',
@@ -3100,7 +3103,7 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
   pillTextActive: {
-    color: colors.primary,
+    color: FILTER_ACCENT,
   },
   pillTextInactive: {
     color: '#6B7280',
