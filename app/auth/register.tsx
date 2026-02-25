@@ -36,12 +36,15 @@ import { TERMS_OF_USE_HE } from '@/lib/termsOfUse';
 const PRIMARY = '#5e3f2d';
 // Keep the auth background consistent with the login screen
 const BG_DARK = '#2B1A12';
+const KeyboardAwareScroll = KeyboardAwareScrollView as unknown as any;
 
 export default function RegisterScreen() {
   const router = useRouter();
   const setUser = useAuthStore((state) => state.setUser);
   const setPending = usePendingSignupStore((s) => s.setPending);
   const insets = useSafeAreaInsets();
+  const scrollRef = useRef<any>(null);
+  const bioInputRef = useRef<TextInput>(null);
   const mapboxToken = process.env.EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN as string | undefined;
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
@@ -342,10 +345,14 @@ export default function RegisterScreen() {
           <ChevronRight size={24} color="#FFFFFF" />
         </TouchableOpacity>
       ) : null}
-      <KeyboardAwareScrollView
+      <KeyboardAwareScroll
+        style={{ flex: 1 }}
         enableOnAndroid
-        extraScrollHeight={Platform.OS === 'ios' ? 16 : 24}
-        keyboardOpeningTime={0}
+        extraScrollHeight={Platform.OS === 'ios' ? 16 : 96}
+        keyboardOpeningTime={Platform.OS === 'ios' ? 0 : 250}
+        innerRef={(ref: any) => {
+          scrollRef.current = ref;
+        }}
         // Ensure autocomplete suggestions can be selected with a single tap while the keyboard is open.
         // "handled" still allows the first tap to dismiss the keyboard in some cases (esp. iOS).
         keyboardShouldPersistTaps="always"
@@ -578,10 +585,18 @@ export default function RegisterScreen() {
 
                     <Text style={styles.label}>קצת עלייך</Text>
                     <TextInput
+                      ref={bioInputRef}
                       style={[styles.input, styles.inputMultiline]}
                       placeholder="כמה מילים עלייך..."
                       value={bio}
                       onChangeText={setBio}
+                      onFocus={() => {
+                        // On Android, keyboard height is only known shortly after opening.
+                        // Force-scroll this multiline field into view so it won't be covered.
+                        requestAnimationFrame(() => {
+                          scrollRef.current?.scrollToFocusedInput?.(bioInputRef.current);
+                        });
+                      }}
                       multiline
                       editable={!isLoading}
                       placeholderTextColor="#9DA4AE"
@@ -782,7 +797,7 @@ export default function RegisterScreen() {
           ) : null}
         </View>
       </View>
-      </KeyboardAwareScrollView>
+      </KeyboardAwareScroll>
       {/* Gender / Age pickers – reuse the same animated panel UX as the apartment "key" button */}
       <KeyFabPanel
         isOpen={isGenderPickerOpen}

@@ -35,7 +35,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Image as ExpoImage } from 'expo-image';
 import { Redirect, useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
-import { colors } from '@/lib/theme';
+import { alpha, colors } from '@/lib/theme';
 import { useAuthStore } from '@/stores/authStore';
 import { User, UserSurveyResponse } from '@/types/database';
 import { computeGroupAwareLabel } from '@/lib/group';
@@ -191,6 +191,9 @@ function AgeRangeSlider({
   const maxRef = useRef(max);
   const onChangeRef = useRef(onChange);
   const isDraggingRef = useRef(false);
+  const pendingEmitPosRef = useRef<{ minPos: number; maxPos: number } | null>(null);
+  const rafEmitRef = useRef<number | null>(null);
+  const lastEmittedRef = useRef<{ minV: number; maxV: number } | null>(null);
 
   useEffect(() => {
     trackWidthRef.current = trackWidth;
@@ -202,6 +205,11 @@ function AgeRangeSlider({
   useEffect(() => {
     onChangeRef.current = onChange;
   }, [onChange]);
+  useEffect(() => {
+    return () => {
+      if (rafEmitRef.current != null) cancelAnimationFrame(rafEmitRef.current);
+    };
+  }, []);
 
   const valueToPos = (v: number) => {
     const minV = minRef.current;
@@ -220,6 +228,23 @@ function AgeRangeSlider({
     const rawRatio = clampNumber(p / Math.max(1, tw), 0, 1);
     const ratio = isRTLRef.current ? 1 - rawRatio : rawRatio;
     return Math.round(minV + ratio * (maxV - minV));
+  };
+
+  const scheduleEmit = () => {
+    if (rafEmitRef.current != null) return;
+    rafEmitRef.current = requestAnimationFrame(() => {
+      rafEmitRef.current = null;
+      const pending = pendingEmitPosRef.current;
+      if (!pending) return;
+      const a = posToValue(pending.minPos);
+      const b = posToValue(pending.maxPos);
+      const minV = Math.min(a, b);
+      const maxV = Math.max(a, b);
+      const last = lastEmittedRef.current;
+      if (last && last.minV === minV && last.maxV === maxV) return;
+      lastEmittedRef.current = { minV, maxV };
+      onChangeRef.current(minV, maxV);
+    });
   };
 
   const setPositions = (nextMin: number, nextMax: number) => {
@@ -255,6 +280,8 @@ function AgeRangeSlider({
           const maxBound = rtl ? tw : posMaxRef.current;
           const next = clampNumber(unclamped, minBound, maxBound);
           setPositions(next, posMaxRef.current);
+          pendingEmitPosRef.current = { minPos: next, maxPos: posMaxRef.current };
+          scheduleEmit();
         },
         onPanResponderRelease: () => {
           isDraggingRef.current = false;
@@ -292,6 +319,8 @@ function AgeRangeSlider({
           const maxBound = rtl ? posMinRef.current : tw;
           const next = clampNumber(unclamped, minBound, maxBound);
           setPositions(posMinRef.current, next);
+          pendingEmitPosRef.current = { minPos: posMinRef.current, maxPos: next };
+          scheduleEmit();
         },
         onPanResponderRelease: () => {
           isDraggingRef.current = false;
@@ -1874,8 +1903,8 @@ export default function PartnersScreen() {
         bottomOffset={filtersBottomOffset}
         openedWidth={Math.min(screenWidth * 0.94, 520)}
         panelStyle={{
-          backgroundColor: 'rgba(255,255,255,0.90)',
-          borderColor: 'rgba(229,231,235,0.9)',
+          backgroundColor: colors.white,
+          borderColor: colors.border,
           maxHeight: filtersPanelMaxHeight,
         }}
         duration={420}
@@ -1911,7 +1940,8 @@ export default function PartnersScreen() {
                         {
                           right:
                             `${(
-                              [{ key: 'singles' }, { key: 'groups' }, { key: 'all' }]
+                              // Index 0 should be the RIGHT-most segment (works consistently with our RTL/LTR flex setup).
+                              [{ key: 'all' }, { key: 'groups' }, { key: 'singles' }]
                                 .findIndex((o: any) => o.key === profileType)
                               * 33.3333
                             ).toFixed(4)}%`,
@@ -1919,9 +1949,9 @@ export default function PartnersScreen() {
                       ]}
                     />
                     {[
-                      { key: 'singles', label: 'בודדים' },
-                      { key: 'groups', label: 'קבוצות' },
                       { key: 'all', label: 'כולם' },
+                      { key: 'groups', label: 'קבוצות' },
+                      { key: 'singles', label: 'בודדים' },
                     ].map((opt: any) => {
                       const active = profileType === opt.key;
                       return (
@@ -2852,7 +2882,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     height: 6,
     borderRadius: 999,
-    backgroundColor: '#4F46E5',
+    backgroundColor: colors.primary,
   },
   rangeThumb: {
     position: 'absolute',
@@ -2861,7 +2891,7 @@ const styles = StyleSheet.create({
     borderRadius: 13,
     backgroundColor: '#FFFFFF',
     borderWidth: 2,
-    borderColor: '#4F46E5',
+    borderColor: colors.primary,
     shadowColor: '#000',
     shadowOpacity: 0.12,
     shadowRadius: 10,
@@ -2887,7 +2917,8 @@ const styles = StyleSheet.create({
   },
   segmentWrap: {
     position: 'relative',
-    flexDirection: 'row-reverse',
+    // Make the FIRST option appear on the RIGHT in both RTL and LTR.
+    flexDirection: I18nManager.isRTL ? 'row' : 'row-reverse',
     backgroundColor: 'rgba(243,244,246,0.95)',
     borderRadius: 18,
     padding: 4,
@@ -2998,7 +3029,7 @@ const styles = StyleSheet.create({
     textAlign: 'right',
   },
   cityChipTextActive: {
-    color: '#4F46E5',
+    color: colors.primary,
   },
   cityChipTextInactive: {
     color: '#6B7280',
@@ -3016,8 +3047,8 @@ const styles = StyleSheet.create({
     borderWidth: 2,
   },
   pillBtnActive: {
-    backgroundColor: 'rgba(79,70,229,0.08)',
-    borderColor: '#4F46E5',
+    backgroundColor: alpha(colors.primary, 0.08),
+    borderColor: colors.primary,
   },
   pillBtnInactive: {
     backgroundColor: '#FFFFFF',
@@ -3028,7 +3059,7 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
   pillTextActive: {
-    color: '#4F46E5',
+    color: colors.primary,
   },
   pillTextInactive: {
     color: '#6B7280',
