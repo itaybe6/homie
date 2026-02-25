@@ -1,10 +1,10 @@
 import { Tabs, useRouter, usePathname } from 'expo-router';
-import { StyleSheet, Alert, Pressable, View, Platform } from 'react-native';
+import { StyleSheet, Alert, Pressable, View, Platform, Modal, Text, TouchableOpacity } from 'react-native';
 import { useEffect, useRef, useState } from 'react';
 import { useAuthStore } from '@/stores/authStore';
 import { fetchUserSurvey } from '@/lib/survey';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Home, Users, Plus, Search, User as UserIcon, Heart } from 'lucide-react-native';
+import { Home, Users, Plus, Search, User as UserIcon, Heart, ClipboardList, HelpCircle, X } from 'lucide-react-native';
 import { supabase } from '@/lib/supabase';
 
 function FloatingCenterTabButton({
@@ -42,6 +42,68 @@ function FloatingCenterTabButton({
   );
 }
 
+function SurveyPromptModal({
+  visible,
+  onDismiss,
+  onGoToSurvey,
+}: {
+  visible: boolean;
+  onDismiss: () => void;
+  onGoToSurvey: () => void;
+}) {
+  return (
+    <Modal
+      visible={visible}
+      transparent
+      animationType="fade"
+      statusBarTranslucent
+      onRequestClose={onDismiss}>
+      <View style={surveyModalStyles.overlay}>
+        <View style={surveyModalStyles.card}>
+          <Pressable
+            onPress={onDismiss}
+            accessibilityRole="button"
+            accessibilityLabel="סגור"
+            hitSlop={12}
+            style={({ pressed }) => [
+              surveyModalStyles.closeButton,
+              pressed && surveyModalStyles.closeButtonPressed,
+            ]}>
+            <X size={18} color="#6B7280" />
+          </Pressable>
+
+          {/* Icon badge */}
+          <View style={surveyModalStyles.iconWrap}>
+            <View style={surveyModalStyles.iconCircle}>
+              <HelpCircle size={28} color="#FFFFFF" />
+            </View>
+          </View>
+
+          {/* Title */}
+          <Text style={surveyModalStyles.title}>שאלון העדפות</Text>
+
+          {/* Description */}
+          <Text style={surveyModalStyles.description}>
+            כדי שנמצא לך התאמות טובות,{'\n'}נשמח שתמלא/י את השאלון הקצר.
+          </Text>
+
+          {/* Divider */}
+          <View style={surveyModalStyles.divider} />
+
+          {/* Buttons */}
+          <TouchableOpacity
+            style={surveyModalStyles.primaryButton}
+            onPress={onGoToSurvey}
+            activeOpacity={0.85}>
+            <ClipboardList size={18} color="#FFFFFF" style={{ marginLeft: 6 }} />
+            <Text style={surveyModalStyles.primaryButtonText}>לשאלון</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
 export default function TabLayout() {
   const router = useRouter();
   const pathname = usePathname();
@@ -52,6 +114,7 @@ export default function TabLayout() {
   const isCheckingSurveyRef = useRef(false);
   const isCheckingOwnedApartmentRef = useRef(false);
   const insets = useSafeAreaInsets();
+  const [showSurveyModal, setShowSurveyModal] = useState(false);
   const isSurveyRoute =
     typeof pathname === 'string' && pathname.includes('/onboarding/survey');
   const isAddApartmentTabRoute =
@@ -184,18 +247,7 @@ export default function TabLayout() {
           typeof pathname === 'string' && pathname.includes('/onboarding/survey');
         if ((!hasRow || !completed) && !isOnSurveyScreen) {
           hasPromptedRef.current = true;
-          Alert.alert(
-            'שאלון העדפות',
-            'כדי שנמצא לך התאמות טובות, נשמח שתמלא/י את השאלון הקצר.',
-            [
-              { text: 'לא עכשיו', style: 'cancel' },
-              {
-                text: 'לשאלון',
-                onPress: () => router.push('/(tabs)/onboarding/survey'),
-              },
-            ],
-            { cancelable: true }
-          );
+          setShowSurveyModal(true);
         } else {
           hasPromptedRef.current = true;
         }
@@ -209,6 +261,15 @@ export default function TabLayout() {
   }, [user, pathname]);
 
   return (
+    <>
+      <SurveyPromptModal
+        visible={showSurveyModal}
+        onDismiss={() => setShowSurveyModal(false)}
+        onGoToSurvey={() => {
+          setShowSurveyModal(false);
+          router.push('/(tabs)/onboarding/survey');
+        }}
+      />
     <Tabs
       screenOptions={{
         headerShown: false,
@@ -363,8 +424,117 @@ export default function TabLayout() {
       <Tabs.Screen name="onboarding/survey" options={{ href: null }} />
       <Tabs.Screen name="notifications" options={{ href: null }} />
     </Tabs>
+    </>
   );
 }
+
+const surveyModalStyles = StyleSheet.create({
+  overlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 28,
+  },
+  card: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 24,
+    paddingHorizontal: 24,
+    paddingTop: 16,
+    paddingBottom: 24,
+    width: '100%',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.18,
+    shadowRadius: 24,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 12,
+  },
+  closeButton: {
+    position: 'absolute',
+    top: 12,
+    left: 12,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#F9FAFB',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 2,
+    shadowColor: '#000',
+    shadowOpacity: 0.08,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 3,
+  },
+  closeButtonPressed: {
+    transform: [{ scale: 0.97 }],
+    opacity: 0.9,
+  },
+  iconWrap: {
+    marginTop: -30,
+    marginBottom: 16,
+  },
+  iconCircle: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: '#22C55E',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#22C55E',
+    shadowOpacity: 0.4,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 8,
+    borderWidth: 4,
+    borderColor: '#FFFFFF',
+  },
+  title: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#111827',
+    textAlign: 'center',
+    marginBottom: 10,
+    writingDirection: 'rtl',
+  },
+  description: {
+    fontSize: 15,
+    color: '#6B7280',
+    textAlign: 'center',
+    lineHeight: 22,
+    writingDirection: 'rtl',
+  },
+  divider: {
+    height: 1,
+    backgroundColor: '#F3F4F6',
+    width: '100%',
+    marginVertical: 20,
+  },
+  primaryButton: {
+    flexDirection: 'row-reverse',
+    backgroundColor: '#22C55E',
+    borderRadius: 14,
+    paddingVertical: 14,
+    paddingHorizontal: 32,
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#22C55E',
+    shadowOpacity: 0.35,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 6,
+  },
+  primaryButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '700',
+    writingDirection: 'rtl',
+  },
+});
 
 // Removed custom TabPill. Using standard bottom tab bar with icons and labels.
 
