@@ -17,7 +17,6 @@ import {
   Share,
   useWindowDimensions,
   Platform,
-  PanResponder,
   I18nManager,
 } from 'react-native';
 import Animated, {
@@ -167,176 +166,220 @@ function AgeRangeSlider({
   valueMin,
   valueMax,
   onChange,
+  onPreviewChange,
 }: {
   min: number;
   max: number;
   valueMin: number;
   valueMax: number;
   onChange: (minV: number, maxV: number) => void;
+  onPreviewChange?: (minV: number, maxV: number) => void;
 }) {
-  const [trackWidth, setTrackWidth] = useState(1);
   const HANDLE = 26;
+  const isRTL = I18nManager.isRTL;
 
-  const isRTLRef = useRef(I18nManager.isRTL);
-
-  // X position from LEFT, in px: 0..trackWidth
-  const [posMin, setPosMin] = useState(0);
-  const [posMax, setPosMax] = useState(0);
-  const posMinRef = useRef(0);
-  const posMaxRef = useRef(0);
-  const startMinRef = useRef(0);
-  const startMaxRef = useRef(0);
+  const [trackWidth, setTrackWidth] = useState(1);
   const trackWidthRef = useRef(1);
-  const minRef = useRef(min);
-  const maxRef = useRef(max);
-  const onChangeRef = useRef(onChange);
   const isDraggingRef = useRef(false);
-  const pendingEmitPosRef = useRef<{ minPos: number; maxPos: number } | null>(null);
-  const rafEmitRef = useRef<number | null>(null);
-  const lastEmittedRef = useRef<{ minV: number; maxV: number } | null>(null);
+  const onChangeRef = useRef(onChange);
+  const onPreviewChangeRef = useRef(onPreviewChange);
 
-  useEffect(() => {
-    trackWidthRef.current = trackWidth;
-  }, [trackWidth]);
-  useEffect(() => {
-    minRef.current = min;
-    maxRef.current = max;
-  }, [min, max]);
+  const trackWidthSV = useSharedValue(1);
+  const minSV = useSharedValue(min);
+  const maxSV = useSharedValue(max);
+  const posMinSV = useSharedValue(0);
+  const posMaxSV = useSharedValue(0);
+  const startMinSV = useSharedValue(0);
+  const startMaxSV = useSharedValue(0);
+  const lastPreviewMinSV = useSharedValue(-1);
+  const lastPreviewMaxSV = useSharedValue(-1);
+
   useEffect(() => {
     onChangeRef.current = onChange;
   }, [onChange]);
   useEffect(() => {
-    return () => {
-      if (rafEmitRef.current != null) cancelAnimationFrame(rafEmitRef.current);
-    };
-  }, []);
+    onPreviewChangeRef.current = onPreviewChange;
+  }, [onPreviewChange]);
 
-  const valueToPos = (v: number) => {
-    const minV = minRef.current;
-    const maxV = maxRef.current;
+  useEffect(() => {
+    minSV.value = min;
+    maxSV.value = max;
+  }, [min, max]);
+
+  useEffect(() => {
+    trackWidthRef.current = trackWidth;
+    trackWidthSV.value = trackWidth;
+  }, [trackWidth]);
+
+  const clampW = (n: number, minN: number, maxN: number) => {
+    'worklet';
+    return Math.max(minN, Math.min(maxN, n));
+  };
+
+  const valueToPosJS = (v: number) => {
     const tw = trackWidthRef.current;
-    const clamped = clampNumber(v, minV, maxV);
-    const ratio = (clamped - minV) / Math.max(1, maxV - minV);
-    // In RTL we want Min on the right, Max on the left.
-    const visualRatio = isRTLRef.current ? 1 - ratio : ratio;
+    const clamped = clampNumber(v, min, max);
+    const ratio = (clamped - min) / Math.max(1, max - min);
+    const visualRatio = isRTL ? 1 - ratio : ratio;
     return visualRatio * tw;
   };
-  const posToValue = (p: number) => {
-    const minV = minRef.current;
-    const maxV = maxRef.current;
-    const tw = trackWidthRef.current;
-    const rawRatio = clampNumber(p / Math.max(1, tw), 0, 1);
-    const ratio = isRTLRef.current ? 1 - rawRatio : rawRatio;
-    return Math.round(minV + ratio * (maxV - minV));
+
+  const emitCommitChange = (minV: number, maxV: number) => {
+    onChangeRef.current(minV, maxV);
   };
 
-  const scheduleEmit = () => {
-    if (rafEmitRef.current != null) return;
-    rafEmitRef.current = requestAnimationFrame(() => {
-      rafEmitRef.current = null;
-      const pending = pendingEmitPosRef.current;
-      if (!pending) return;
-      const a = posToValue(pending.minPos);
-      const b = posToValue(pending.maxPos);
-      const minV = Math.min(a, b);
-      const maxV = Math.max(a, b);
-      const last = lastEmittedRef.current;
-      if (last && last.minV === minV && last.maxV === maxV) return;
-      lastEmittedRef.current = { minV, maxV };
-      onChangeRef.current(minV, maxV);
-    });
+  const emitPreviewChange = (minV: number, maxV: number) => {
+    onPreviewChangeRef.current?.(minV, maxV);
   };
 
-  const setPositions = (nextMin: number, nextMax: number) => {
-    posMinRef.current = nextMin;
-    posMaxRef.current = nextMax;
-    setPosMin(nextMin);
-    setPosMax(nextMax);
+  const setDragging = (v: boolean) => {
+    isDraggingRef.current = v;
   };
 
   useEffect(() => {
-    // Prevent props-driven updates from fighting the gesture while dragging (jitter on iOS prod/TestFlight).
+    // Prevent props-driven updates from fighting the gesture while dragging.
     if (isDraggingRef.current) return;
-    setPositions(valueToPos(valueMin), valueToPos(valueMax));
-  }, [trackWidth, valueMin, valueMax, min, max]);
+    posMinSV.value = valueToPosJS(valueMin);
+    posMaxSV.value = valueToPosJS(valueMax);
+  }, [trackWidth, valueMin, valueMax, min, max, isRTL]);
 
-  const minResponder = useMemo(
-    () =>
-      PanResponder.create({
-        onStartShouldSetPanResponder: () => true,
-        onStartShouldSetPanResponderCapture: () => true,
-        onMoveShouldSetPanResponder: () => true,
-        onMoveShouldSetPanResponderCapture: () => true,
-        onPanResponderTerminationRequest: () => false,
-        onPanResponderGrant: () => {
-          isDraggingRef.current = true;
-          startMinRef.current = posMinRef.current;
-        },
-        onPanResponderMove: (_evt, gestureState) => {
-          const tw = trackWidthRef.current;
-          const rtl = isRTLRef.current;
-          const unclamped = startMinRef.current + gestureState.dx;
-          const minBound = rtl ? posMaxRef.current : 0;
-          const maxBound = rtl ? tw : posMaxRef.current;
-          const next = clampNumber(unclamped, minBound, maxBound);
-          setPositions(next, posMaxRef.current);
-          pendingEmitPosRef.current = { minPos: next, maxPos: posMaxRef.current };
-          scheduleEmit();
-        },
-        onPanResponderRelease: () => {
-          isDraggingRef.current = false;
-          const a = posToValue(posMinRef.current);
-          const b = posToValue(posMaxRef.current);
-          onChangeRef.current(Math.min(a, b), Math.max(a, b));
-        },
-        onPanResponderTerminate: () => {
-          isDraggingRef.current = false;
-          const a = posToValue(posMinRef.current);
-          const b = posToValue(posMaxRef.current);
-          onChangeRef.current(Math.min(a, b), Math.max(a, b));
-        },
-      }),
-    [],
-  );
+  const activeStyle = useAnimatedStyle(() => {
+    const tw = trackWidthSV.value;
+    const a = posMinSV.value;
+    const b = posMaxSV.value;
+    return {
+      left: clampW(Math.min(a, b), 0, tw),
+      width: Math.max(0, Math.abs(b - a)),
+    };
+  });
 
-  const maxResponder = useMemo(
-    () =>
-      PanResponder.create({
-        onStartShouldSetPanResponder: () => true,
-        onStartShouldSetPanResponderCapture: () => true,
-        onMoveShouldSetPanResponder: () => true,
-        onMoveShouldSetPanResponderCapture: () => true,
-        onPanResponderTerminationRequest: () => false,
-        onPanResponderGrant: () => {
-          isDraggingRef.current = true;
-          startMaxRef.current = posMaxRef.current;
-        },
-        onPanResponderMove: (_evt, gestureState) => {
-          const tw = trackWidthRef.current;
-          const rtl = isRTLRef.current;
-          const unclamped = startMaxRef.current + gestureState.dx;
-          const minBound = rtl ? 0 : posMinRef.current;
-          const maxBound = rtl ? posMinRef.current : tw;
-          const next = clampNumber(unclamped, minBound, maxBound);
-          setPositions(posMinRef.current, next);
-          pendingEmitPosRef.current = { minPos: posMinRef.current, maxPos: next };
-          scheduleEmit();
-        },
-        onPanResponderRelease: () => {
-          isDraggingRef.current = false;
-          const a = posToValue(posMinRef.current);
-          const b = posToValue(posMaxRef.current);
-          onChangeRef.current(Math.min(a, b), Math.max(a, b));
-        },
-        onPanResponderTerminate: () => {
-          isDraggingRef.current = false;
-          const a = posToValue(posMinRef.current);
-          const b = posToValue(posMaxRef.current);
-          onChangeRef.current(Math.min(a, b), Math.max(a, b));
-        },
-      }),
-    [],
-  );
+  const minThumbStyle = useAnimatedStyle(() => {
+    const tw = trackWidthSV.value;
+    return {
+      left: clampW(posMinSV.value - HANDLE / 2, -HANDLE / 2, tw - HANDLE / 2),
+    };
+  });
+
+  const maxThumbStyle = useAnimatedStyle(() => {
+    const tw = trackWidthSV.value;
+    return {
+      left: clampW(posMaxSV.value - HANDLE / 2, -HANDLE / 2, tw - HANDLE / 2),
+    };
+  });
+
+  const posToValueW = (p: number) => {
+    'worklet';
+    const minV = minSV.value;
+    const maxV = maxSV.value;
+    const tw = Math.max(1, trackWidthSV.value);
+    const rawRatio = clampW(p / tw, 0, 1);
+    const ratio = isRTL ? 1 - rawRatio : rawRatio;
+    return Math.round(minV + ratio * (maxV - minV));
+  };
+
+  const minGesture = useMemo(() => {
+    return Gesture.Pan()
+      .hitSlop({ top: 14, bottom: 14, left: 18, right: 18 })
+      .onBegin(() => {
+        startMinSV.value = posMinSV.value;
+        runOnJS(setDragging)(true);
+        const a = posToValueW(posMinSV.value);
+        const b = posToValueW(posMaxSV.value);
+        const minV = Math.min(a, b);
+        const maxV = Math.max(a, b);
+        lastPreviewMinSV.value = minV;
+        lastPreviewMaxSV.value = maxV;
+        runOnJS(emitPreviewChange)(minV, maxV);
+      })
+      .onUpdate((e: any) => {
+        const tw = trackWidthSV.value;
+        const unclamped = startMinSV.value + e.translationX;
+        const minBound = isRTL ? posMaxSV.value : 0;
+        const maxBound = isRTL ? tw : posMaxSV.value;
+        posMinSV.value = clampW(unclamped, minBound, maxBound);
+
+        const a = posToValueW(posMinSV.value);
+        const b = posToValueW(posMaxSV.value);
+        const minV = Math.min(a, b);
+        const maxV = Math.max(a, b);
+        if (minV !== lastPreviewMinSV.value || maxV !== lastPreviewMaxSV.value) {
+          lastPreviewMinSV.value = minV;
+          lastPreviewMaxSV.value = maxV;
+          runOnJS(emitPreviewChange)(minV, maxV);
+        }
+      })
+      .onFinalize(() => {
+        const a = posToValueW(posMinSV.value);
+        const b = posToValueW(posMaxSV.value);
+        runOnJS(emitCommitChange)(Math.min(a, b), Math.max(a, b));
+        runOnJS(setDragging)(false);
+      });
+  }, [
+    clampW,
+    emitCommitChange,
+    emitPreviewChange,
+    isRTL,
+    lastPreviewMaxSV,
+    lastPreviewMinSV,
+    posMinSV,
+    posMaxSV,
+    posToValueW,
+    setDragging,
+    startMinSV,
+    trackWidthSV,
+  ]);
+
+  const maxGesture = useMemo(() => {
+    return Gesture.Pan()
+      .hitSlop({ top: 14, bottom: 14, left: 18, right: 18 })
+      .onBegin(() => {
+        startMaxSV.value = posMaxSV.value;
+        runOnJS(setDragging)(true);
+        const a = posToValueW(posMinSV.value);
+        const b = posToValueW(posMaxSV.value);
+        const minV = Math.min(a, b);
+        const maxV = Math.max(a, b);
+        lastPreviewMinSV.value = minV;
+        lastPreviewMaxSV.value = maxV;
+        runOnJS(emitPreviewChange)(minV, maxV);
+      })
+      .onUpdate((e: any) => {
+        const tw = trackWidthSV.value;
+        const unclamped = startMaxSV.value + e.translationX;
+        const minBound = isRTL ? 0 : posMinSV.value;
+        const maxBound = isRTL ? posMinSV.value : tw;
+        posMaxSV.value = clampW(unclamped, minBound, maxBound);
+
+        const a = posToValueW(posMinSV.value);
+        const b = posToValueW(posMaxSV.value);
+        const minV = Math.min(a, b);
+        const maxV = Math.max(a, b);
+        if (minV !== lastPreviewMinSV.value || maxV !== lastPreviewMaxSV.value) {
+          lastPreviewMinSV.value = minV;
+          lastPreviewMaxSV.value = maxV;
+          runOnJS(emitPreviewChange)(minV, maxV);
+        }
+      })
+      .onFinalize(() => {
+        const a = posToValueW(posMinSV.value);
+        const b = posToValueW(posMaxSV.value);
+        runOnJS(emitCommitChange)(Math.min(a, b), Math.max(a, b));
+        runOnJS(setDragging)(false);
+      });
+  }, [
+    clampW,
+    emitCommitChange,
+    emitPreviewChange,
+    isRTL,
+    lastPreviewMaxSV,
+    lastPreviewMinSV,
+    posMinSV,
+    posMaxSV,
+    posToValueW,
+    setDragging,
+    startMaxSV,
+    trackWidthSV,
+  ]);
 
   return (
     <View style={styles.rangeWrap}>
@@ -348,34 +391,14 @@ function AgeRangeSlider({
         }}
       >
         <View style={styles.rangeTrackBg} />
-        <View
-          style={[
-            styles.rangeTrackActive,
-            {
-              left: clampNumber(Math.min(posMin, posMax), 0, trackWidth),
-              width: Math.max(0, Math.abs(posMax - posMin)),
-            },
-          ]}
-        />
+        <Animated.View style={[styles.rangeTrackActive, activeStyle]} />
 
-        <View
-          {...minResponder.panHandlers}
-          style={[
-            styles.rangeThumb,
-            {
-              left: clampNumber(posMin - HANDLE / 2, -HANDLE / 2, trackWidth - HANDLE / 2),
-            },
-          ]}
-        />
-        <View
-          {...maxResponder.panHandlers}
-          style={[
-            styles.rangeThumb,
-            {
-              left: clampNumber(posMax - HANDLE / 2, -HANDLE / 2, trackWidth - HANDLE / 2),
-            },
-          ]}
-        />
+        <GestureDetector gesture={minGesture}>
+          <Animated.View style={[styles.rangeThumb, minThumbStyle]} />
+        </GestureDetector>
+        <GestureDetector gesture={maxGesture}>
+          <Animated.View style={[styles.rangeThumb, maxThumbStyle]} />
+        </GestureDetector>
       </View>
 
       <View style={styles.rangeLabelsRow}>
@@ -412,6 +435,8 @@ export default function PartnersScreen() {
   const [gender, setGender] = useState<'any' | 'male' | 'female'>('any');
   const [ageMin, setAgeMin] = useState<number>(20);
   const [ageMax, setAgeMax] = useState<number>(40);
+  const [ageMinDraft, setAgeMinDraft] = useState<number>(20);
+  const [ageMaxDraft, setAgeMaxDraft] = useState<number>(40);
   const [ageActive, setAgeActive] = useState<boolean>(false);
   const [profileType, setProfileType] = useState<'all' | 'singles' | 'groups'>('all');
   const [groupGender, setGroupGender] = useState<'any' | 'male' | 'female'>('any');
@@ -427,6 +452,12 @@ export default function PartnersScreen() {
   const [includePassed, setIncludePassed] = useState(false);
 
   const closePartnersFilters = useUiStore((s) => s.closePartnersFilters);
+
+  // Keep the UI "preview" values aligned with committed values (e.g. reset button).
+  useEffect(() => {
+    setAgeMinDraft(ageMin);
+    setAgeMaxDraft(ageMax);
+  }, [ageMin, ageMax]);
 
   // Fallback open signal (dev/HMR safe)
   useEffect(() => {
@@ -1976,7 +2007,7 @@ export default function PartnersScreen() {
                     <Text style={styles.filterLabelInline}>טווח גילאים</Text>
                     <View style={styles.ageValuePill}>
                       <Text style={styles.ageValueText}>
-                        {`${Math.min(ageMin, ageMax)} - ${Math.max(ageMin, ageMax)}`}
+                        {`${Math.min(ageMinDraft, ageMaxDraft)} - ${Math.max(ageMinDraft, ageMaxDraft)}`}
                       </Text>
                     </View>
                   </View>
@@ -1985,9 +2016,15 @@ export default function PartnersScreen() {
                     max={41}
                     valueMin={Math.min(ageMin, ageMax)}
                     valueMax={Math.max(ageMin, ageMax)}
+                    onPreviewChange={(minV, maxV) => {
+                      setAgeMinDraft(minV);
+                      setAgeMaxDraft(maxV);
+                    }}
                     onChange={(minV, maxV) => {
                       setAgeMin(minV);
                       setAgeMax(maxV);
+                      setAgeMinDraft(minV);
+                      setAgeMaxDraft(maxV);
                       setAgeActive(true);
                     }}
                   />
@@ -2138,6 +2175,8 @@ export default function PartnersScreen() {
                         setGender('any');
                         setAgeMin(20);
                         setAgeMax(40);
+                        setAgeMinDraft(20);
+                        setAgeMaxDraft(40);
                         setAgeActive(false);
                         setProfileType('all');
                         setGroupGender('any');
@@ -2784,6 +2823,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     marginBottom: 10,
+    gap: 10 as any,
   },
   cityPickerTitle: {
     color: '#111827',
@@ -2791,8 +2831,8 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     textAlign: 'right',
     writingDirection: 'rtl',
-    width: '100%',
-    alignSelf: 'flex-end',
+    flex: 1,
+    marginHorizontal: 6,
   },
   cityPickerCloseBtn: {
     width: 36,
@@ -2803,6 +2843,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(243,244,246,0.95)',
     borderWidth: 1,
     borderColor: 'rgba(229,231,235,0.9)',
+    flexShrink: 0,
   },
   cityPickerRow: {
     paddingVertical: 12,
