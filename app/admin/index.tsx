@@ -10,9 +10,10 @@ import {
   Image,
   TextInput,
   Modal,
+  Alert,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { BarChart2, Users, Home as HomeIcon, CheckCircle2, XCircle, Gauge, Phone, MapPin } from 'lucide-react-native';
+import { BarChart2, Users, Home as HomeIcon, CheckCircle2, XCircle, Gauge, Phone, MapPin, Pencil, Trash2 } from 'lucide-react-native';
 import { supabase } from '@/lib/supabase';
 import { alpha, colors } from '@/lib/theme';
 import { authService } from '@/lib/auth';
@@ -52,6 +53,12 @@ export default function AdminDashboard() {
   const [withImages, setWithImages] = useState<boolean>(false);
   const [withPartners, setWithPartners] = useState<boolean>(false);
   const [isFiltersOpen, setIsFiltersOpen] = useState<boolean>(false);
+
+  // Admin apartment actions
+  const [editApt, setEditApt] = useState<any | null>(null);
+  const [editAptTitle, setEditAptTitle] = useState<string>('');
+  const [editAptSaving, setEditAptSaving] = useState<boolean>(false);
+  const [deleteAptBusyId, setDeleteAptBusyId] = useState<string | null>(null);
 
   // Guard: only admins
   useEffect(() => {
@@ -242,6 +249,59 @@ export default function AdminDashboard() {
     [totalUsers, totalApartments, regularUsersCount, ownersCount, matchesApproved, matchesPending, assignedCount, unassignedCount],
   );
 
+  async function saveApartmentTitle() {
+    const apt = editApt;
+    if (!apt?.id) return;
+    const nextTitle = editAptTitle.trim();
+    if (!nextTitle) {
+      Alert.alert('כותרת חסרה', 'אנא הזן כותרת לדירה.');
+      return;
+    }
+    try {
+      setEditAptSaving(true);
+      const { error } = await supabase.from('apartments').update({ title: nextTitle }).eq('id', apt.id);
+      if (error) {
+        Alert.alert('שגיאה', error.message || 'לא הצלחנו לעדכן את כותרת הדירה.');
+        return;
+      }
+      setEditApt(null);
+      setEditAptTitle('');
+      setReloadKey((k) => k + 1);
+    } catch {
+      Alert.alert('שגיאה', 'לא הצלחנו לעדכן את כותרת הדירה.');
+    } finally {
+      setEditAptSaving(false);
+    }
+  }
+
+  function confirmDeleteApartment(apt: any) {
+    if (!apt?.id) return;
+    const title = String(apt?.title || 'דירה');
+    const city = String(apt?.city || '');
+    Alert.alert('מחיקת דירה', `למחוק את "${title}"${city ? ` (${city})` : ''}?`, [
+      { text: 'ביטול', style: 'cancel' },
+      {
+        text: 'מחק',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            setDeleteAptBusyId(apt.id);
+            const { error } = await supabase.from('apartments').delete().eq('id', apt.id);
+            if (error) {
+              Alert.alert('שגיאה', error.message || 'לא הצלחנו למחוק את הדירה.');
+              return;
+            }
+            setReloadKey((k) => k + 1);
+          } catch {
+            Alert.alert('שגיאה', 'לא הצלחנו למחוק את הדירה.');
+          } finally {
+            setDeleteAptBusyId(null);
+          }
+        },
+      },
+    ]);
+  }
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
@@ -323,7 +383,17 @@ export default function AdminDashboard() {
               keyExtractor={(item) => item.id}
               ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
               renderItem={({ item }) => (
-                <ApartmentRow apt={item} partners={apartmentPartners[item.id]} owner={userById[item.owner_id]} />
+                <ApartmentRow
+                  apt={item}
+                  partners={apartmentPartners[item.id]}
+                  owner={userById[item.owner_id]}
+                  onEditTitle={() => {
+                    setEditApt(item);
+                    setEditAptTitle(String(item?.title || ''));
+                  }}
+                  onDelete={() => confirmDeleteApartment(item)}
+                  deleteBusy={deleteAptBusyId === item.id}
+                />
               )}
               scrollEnabled={false}
             />
@@ -404,7 +474,17 @@ export default function AdminDashboard() {
             keyExtractor={(item) => item.id}
             ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
             renderItem={({ item }) => (
-              <ApartmentRow apt={item} partners={apartmentPartners[item.id]} owner={userById[item.owner_id]} />
+              <ApartmentRow
+                apt={item}
+                partners={apartmentPartners[item.id]}
+                owner={userById[item.owner_id]}
+                onEditTitle={() => {
+                  setEditApt(item);
+                  setEditAptTitle(String(item?.title || ''));
+                }}
+                onDelete={() => confirmDeleteApartment(item)}
+                deleteBusy={deleteAptBusyId === item.id}
+              />
             )}
           />
 
@@ -520,6 +600,46 @@ export default function AdminDashboard() {
           />
         </View>
       )}
+
+      <Modal visible={!!editApt} animationType="fade" transparent onRequestClose={() => (!editAptSaving ? setEditApt(null) : null)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>עריכת כותרת דירה</Text>
+              <TouchableOpacity onPress={() => (!editAptSaving ? setEditApt(null) : null)}>
+                <Text style={styles.modalClose}>סגור</Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.filtersWrap}>
+              <TextInput
+                style={styles.searchInput}
+                placeholder="כותרת דירה..."
+                placeholderTextColor="#9CA3AF"
+                value={editAptTitle}
+                onChangeText={setEditAptTitle}
+                textAlign="right"
+                editable={!editAptSaving}
+              />
+            </View>
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                onPress={() => {
+                  if (editAptSaving) return;
+                  setEditApt(null);
+                }}
+                style={styles.clearBtn}
+                disabled={editAptSaving}>
+                <Text style={styles.clearText}>ביטול</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={saveApartmentTitle} style={styles.applyBtn} disabled={editAptSaving} activeOpacity={0.9}>
+                <Text style={styles.applyText}>{editAptSaving ? 'שומר...' : 'שמור'}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -627,7 +747,21 @@ function InfoChip({ label, value, icon }: { label: string; value: string; icon?:
   );
 }
 
-function ApartmentRow({ apt, partners, owner }: { apt: any; partners?: any[]; owner?: any }) {
+function ApartmentRow({
+  apt,
+  partners,
+  owner,
+  onEditTitle,
+  onDelete,
+  deleteBusy,
+}: {
+  apt: any;
+  partners?: any[];
+  owner?: any;
+  onEditTitle?: () => void;
+  onDelete?: () => void;
+  deleteBusy?: boolean;
+}) {
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const images = apt.image_urls && apt.image_urls.length > 0 ? apt.image_urls : apt.image_url ? [apt.image_url] : [];
   const hasImages = images.length > 0;
@@ -692,6 +826,27 @@ function ApartmentRow({ apt, partners, owner }: { apt: any; partners?: any[]; ow
                 )
               )}
             </View>
+          </View>
+        )}
+
+        {(onEditTitle || onDelete) && (
+          <View style={styles.aptActionsRow}>
+            {onDelete ? (
+              <TouchableOpacity
+                style={[styles.aptActionBtn, styles.aptActionBtnDanger, deleteBusy && styles.aptActionBtnDisabled]}
+                activeOpacity={0.9}
+                onPress={onDelete}
+                disabled={!!deleteBusy}>
+                <Trash2 size={16} color={deleteBusy ? '#9CA3AF' : '#EF4444'} />
+                <Text style={[styles.aptActionText, styles.aptActionTextDanger]}>{deleteBusy ? 'מוחק...' : 'מחק'}</Text>
+              </TouchableOpacity>
+            ) : null}
+            {onEditTitle ? (
+              <TouchableOpacity style={styles.aptActionBtn} activeOpacity={0.9} onPress={onEditTitle} disabled={!!deleteBusy}>
+                <Pencil size={16} color={PRIMARY} />
+                <Text style={styles.aptActionText}>ערוך כותרת</Text>
+              </TouchableOpacity>
+            ) : null}
           </View>
         )}
       </View>
@@ -1176,6 +1331,41 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginRight: 6,
     textAlign: 'right',
+  },
+  aptActionsRow: {
+    marginTop: 10,
+    flexDirection: 'row-reverse',
+    gap: 10,
+    justifyContent: 'flex-start',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+  },
+  aptActionBtn: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(94,63,45,0.30)',
+    backgroundColor: 'rgba(94,63,45,0.08)',
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: 12,
+  },
+  aptActionBtnDanger: {
+    borderColor: 'rgba(239,68,68,0.35)',
+    backgroundColor: 'rgba(239,68,68,0.08)',
+  },
+  aptActionBtnDisabled: {
+    opacity: 0.7,
+  },
+  aptActionText: {
+    color: PRIMARY,
+    fontSize: 12,
+    fontWeight: '800',
+    textAlign: 'right',
+  },
+  aptActionTextDanger: {
+    color: '#EF4444',
   },
   partnersRow: {
     flexDirection: 'row-reverse',
