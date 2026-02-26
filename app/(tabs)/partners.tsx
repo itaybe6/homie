@@ -876,6 +876,12 @@ export default function PartnersScreen() {
         });
         return results;
       }
+      if (mySurvey?.is_completed !== true) {
+        candidateIds.forEach((id) => {
+          if (id !== authId) results[id] = null;
+        });
+        return results;
+      }
 
       if (currentUser) {
         userMap[authId] = currentUser as unknown as User;

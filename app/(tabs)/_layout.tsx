@@ -3,6 +3,7 @@ import { StyleSheet, Alert, Pressable, View, Platform, Modal, Text, TouchableOpa
 import { useEffect, useRef, useState } from 'react';
 import { useAuthStore } from '@/stores/authStore';
 import { fetchUserSurvey } from '@/lib/survey';
+import { colors } from '@/lib/theme';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Home, Users, Plus, Search, User as UserIcon, Heart, ClipboardList, HelpCircle, X } from 'lucide-react-native';
 import { supabase } from '@/lib/supabase';
@@ -481,10 +482,10 @@ const surveyModalStyles = StyleSheet.create({
     width: 60,
     height: 60,
     borderRadius: 30,
-    backgroundColor: '#22C55E',
+    backgroundColor: colors.success,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#22C55E',
+    shadowColor: colors.success,
     shadowOpacity: 0.4,
     shadowRadius: 12,
     shadowOffset: { width: 0, height: 4 },
@@ -515,14 +516,14 @@ const surveyModalStyles = StyleSheet.create({
   },
   primaryButton: {
     flexDirection: 'row-reverse',
-    backgroundColor: '#22C55E',
+    backgroundColor: colors.success,
     borderRadius: 14,
     paddingVertical: 14,
     paddingHorizontal: 32,
     width: '100%',
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#22C55E',
+    shadowColor: colors.success,
     shadowOpacity: 0.35,
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 4 },

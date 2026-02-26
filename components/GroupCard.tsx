@@ -62,6 +62,7 @@ export type GroupCardProps = {
   users: User[];
   apartment?: Apartment;
   matchScores?: Record<string, number | null>;
+  showMatchBadge?: boolean;
   onLike: (groupId: string, users: User[]) => void;
   onPass: (groupId: string, users: User[]) => void;
   onOpen: (userId: string) => void;
@@ -81,6 +82,7 @@ export default function GroupCard({
   users,
   apartment,
   matchScores,
+  showMatchBadge = true,
   onLike,
   onPass,
   onOpen,
@@ -508,12 +510,14 @@ export default function GroupCard({
               )}
 
               {/* Match percent (top-right) */}
-              <MatchPercentBadge
-                value={activeMatchPercent}
-                triggerKey={`${groupId}-${activeUser?.id || 'active'}`}
-                size={74}
-                style={[styles.matchBadge, styles.matchBadgeTopRight]}
-              />
+              {showMatchBadge ? (
+                <MatchPercentBadge
+                  value={activeMatchPercent}
+                  triggerKey={`${groupId}-${activeUser?.id || 'active'}`}
+                  size={74}
+                  style={[styles.matchBadge, styles.matchBadgeTopRight]}
+                />
+              ) : null}
 
               {/* Bottom overlay for active user */}
               <View style={[styles.cellBottomOverlay, strongTextOverlay ? styles.cellBottomOverlayStrong : null]}>

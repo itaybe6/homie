@@ -37,6 +37,7 @@ type RoommateCardProps = {
   onDetailsOpenChange?: (isOpen: boolean) => void;
   style?: ViewStyle;
   matchPercent?: number | null;
+  showMatchBadge?: boolean;
   mediaHeight?: number;
   strongTextOverlay?: boolean;
 };
@@ -52,6 +53,7 @@ function RoommateCardBase({
   onDetailsOpenChange,
   style,
   matchPercent,
+  showMatchBadge = true,
   mediaHeight,
   strongTextOverlay = false,
 }: RoommateCardProps) {
@@ -419,7 +421,14 @@ function RoommateCardBase({
                 </Text>
               </View>
             )}
-            <MatchPercentBadge value={matchPercent} triggerKey={user?.id || null} size={74} style={styles.matchBadge} />
+            {showMatchBadge ? (
+              <MatchPercentBadge
+                value={matchPercent}
+                triggerKey={user?.id || null}
+                size={74}
+                style={styles.matchBadge}
+              />
+            ) : null}
             <View style={[styles.bottomOverlayWrap, strongTextOverlay ? styles.bottomOverlayWrapStrong : null]}>
               <LinearGradient
                 colors={bottomOverlayColors as any}

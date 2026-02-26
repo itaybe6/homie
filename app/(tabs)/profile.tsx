@@ -5,6 +5,7 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
+  Pressable,
   TextInput,
   ActivityIndicator,
   Alert,
@@ -550,12 +551,17 @@ export default function ProfileScreen() {
       const url = profile.image_urls[idx];
       if (!url) return;
 
-      const shouldProceed = await new Promise<boolean>((resolve) => {
-        Alert.alert('מחיקת תמונה', 'למחוק את התמונה הזו?', [
-          { text: 'ביטול', style: 'cancel', onPress: () => resolve(false) },
-          { text: 'מחק', style: 'destructive', onPress: () => resolve(true) },
-        ]);
-      });
+      const shouldProceed =
+        Platform.OS === 'web'
+          ? typeof confirm === 'function'
+            ? confirm('למחוק את התמונה הזו?')
+            : true
+          : await new Promise<boolean>((resolve) => {
+              Alert.alert('מחיקת תמונה', 'למחוק את התמונה הזו?', [
+                { text: 'ביטול', style: 'cancel', onPress: () => resolve(false) },
+                { text: 'מחק', style: 'destructive', onPress: () => resolve(true) },
+              ]);
+            });
       if (!shouldProceed) return;
 
       setIsDeletingImage(true);
@@ -576,7 +582,12 @@ export default function ProfileScreen() {
         }
       } catch {}
     } catch (e: any) {
-      Alert.alert('שגיאה', e?.message || 'לא ניתן למחוק את התמונה');
+      const msg = e?.message || 'לא ניתן למחוק את התמונה';
+      if (Platform.OS === 'web' && typeof alert === 'function') {
+        alert(msg);
+      } else {
+        Alert.alert('שגיאה', msg);
+      }
     } finally {
       setIsDeletingImage(false);
     }
@@ -2195,35 +2206,43 @@ export default function ProfileScreen() {
           onRequestClose={() => setViewerIndex(null)}
         >
           <View style={styles.viewerOverlay}>
-            <View style={[styles.viewerTopBar, { top: 12 + (insets.top || 0) }]}>
-              <TouchableOpacity
-                style={styles.viewerCloseBtn}
+            <View pointerEvents="box-none" style={[styles.viewerTopBar, { top: 12 + (insets.top || 0) }]}>
+              <Pressable
+                style={({ pressed }) => [styles.viewerCloseBtn, pressed ? { opacity: 0.85 } : null]}
                 onPress={() => setViewerIndex(null)}
-                activeOpacity={0.9}
+                accessibilityRole="button"
+                accessibilityLabel="סגור צפייה בתמונה"
               >
                 <X size={18} color="#E5E7EB" />
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.viewerDeleteBtn}
+              </Pressable>
+              <Pressable
+                style={({ pressed }) => [
+                  styles.viewerDeleteBtn,
+                  (pressed && !isDeletingImage) ? { opacity: 0.85 } : null,
+                  isDeletingImage ? { opacity: 0.75 } : null,
+                ]}
                 onPress={() => {
+                  if (isDeletingImage) return;
                   if (viewerIndex !== null) removeImageAt(viewerIndex);
                 }}
-                disabled={isDeletingImage}
-                activeOpacity={0.9}
+                accessibilityRole="button"
+                accessibilityLabel="מחק תמונה"
               >
                 {isDeletingImage ? (
                   <ActivityIndicator size="small" color="#F87171" />
                 ) : (
                   <Trash2 size={18} color="#F87171" />
                 )}
-              </TouchableOpacity>
+              </Pressable>
             </View>
             {viewerIndex !== null && (
-              <Image
-                source={{ uri: profile?.image_urls?.[viewerIndex] || '' }}
-                style={styles.viewerImage}
-                resizeMode="contain"
-              />
+              <View pointerEvents="none" style={styles.viewerImageWrap}>
+                <Image
+                  source={{ uri: profile?.image_urls?.[viewerIndex] || '' }}
+                  style={styles.viewerImage}
+                  resizeMode="contain"
+                />
+              </View>
             )}
           </View>
         </Modal>
@@ -2558,9 +2577,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  viewerImage: {
+  viewerImageWrap: {
     width: '92%',
     height: '70%',
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
+  viewerImage: {
+    width: '100%',
+    height: '100%',
     borderRadius: 12,
     backgroundColor: '#FFFFFF',
   },
@@ -2572,7 +2597,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    zIndex: 3,
+    zIndex: 9999,
+    elevation: 20,
   },
   viewerDeleteBtn: {
     width: 40,
