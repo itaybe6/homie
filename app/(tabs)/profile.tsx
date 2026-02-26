@@ -20,6 +20,7 @@ import { useRouter, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   LogOut,
+  Check,
   Edit,
   Save,
   X,
@@ -208,11 +209,28 @@ export default function ProfileScreen() {
   >([]);
   const [surveyResponse, setSurveyResponse] = useState<UserSurveyResponse | null>(null);
   const ignoreNextGalleryPressRef = useRef(false);
+  const [isGalleryEditMode, setIsGalleryEditMode] = useState(false);
+  const [selectedGalleryIndexes, setSelectedGalleryIndexes] = useState<Set<number>>(new Set());
+
+  useEffect(() => {
+    // Keep selection state consistent when the gallery changes.
+    setSelectedGalleryIndexes(new Set());
+    setIsGalleryEditMode(false);
+  }, [profile?.image_urls?.length]);
 
   useEffect(() => {
     // Owners should not see the survey UI. Close it if it was opened somehow.
     if (isOwner && isSurveyOpen) setIsSurveyOpen(false);
   }, [isOwner, isSurveyOpen]);
+
+  const toggleGallerySelection = (idx: number) => {
+    setSelectedGalleryIndexes((prev) => {
+      const next = new Set(prev);
+      if (next.has(idx)) next.delete(idx);
+      else next.add(idx);
+      return next;
+    });
+  };
 
   const ownedApartments = useMemo(() => {
     const uid = (user as any)?.id as string | undefined;
@@ -588,6 +606,62 @@ export default function ProfileScreen() {
       } else {
         Alert.alert('שגיאה', msg);
       }
+    } finally {
+      setIsDeletingImage(false);
+    }
+  };
+
+  const removeSelectedImages = async () => {
+    try {
+      if (!user?.id || !profile?.image_urls?.length) return;
+      const indices = Array.from(selectedGalleryIndexes).filter((i) => Number.isFinite(i));
+      if (!indices.length) return;
+
+      const urlsToRemove = indices
+        .map((i) => profile.image_urls[i])
+        .filter(Boolean) as string[];
+      if (!urlsToRemove.length) return;
+
+      const message = `למחוק ${urlsToRemove.length} תמונות?`;
+      const shouldProceed =
+        Platform.OS === 'web'
+          ? typeof confirm === 'function'
+            ? confirm(message)
+            : true
+          : await new Promise<boolean>((resolve) => {
+              Alert.alert('מחיקת תמונות', message, [
+                { text: 'ביטול', style: 'cancel', onPress: () => resolve(false) },
+                { text: 'מחק', style: 'destructive', onPress: () => resolve(true) },
+              ]);
+            });
+      if (!shouldProceed) return;
+
+      setIsDeletingImage(true);
+      const next = profile.image_urls.filter((_, i) => !selectedGalleryIndexes.has(i));
+      const { error: updateErr } = await supabase
+        .from('users')
+        .update({ image_urls: next, updated_at: new Date().toISOString() })
+        .eq('id', user.id);
+      if (updateErr) throw updateErr;
+
+      setProfile((prev) => (prev ? ({ ...prev, image_urls: next } as any) : prev));
+      setViewerIndex(null);
+      setSelectedGalleryIndexes(new Set());
+      setIsGalleryEditMode(false);
+
+      // Best-effort delete from storage (can fail if URL isn't from our bucket).
+      try {
+        const paths = urlsToRemove
+          .map((u) => getObjectPathFromPublicUrl(u))
+          .filter(Boolean) as string[];
+        if (paths.length) {
+          await supabase.storage.from('user-images').remove(paths);
+        }
+      } catch {}
+    } catch (e: any) {
+      const msg = e?.message || 'לא ניתן למחוק את התמונות';
+      if (Platform.OS === 'web' && typeof alert === 'function') alert(msg);
+      else Alert.alert('שגיאה', msg);
     } finally {
       setIsDeletingImage(false);
     }
@@ -2099,33 +2173,99 @@ export default function ProfileScreen() {
             <View style={styles.galleryCard}>
               <View style={styles.galleryHeaderRow}>
                 <Text style={styles.galleryHeaderTitle}>תמונות</Text>
-                <Text style={styles.galleryCountText}>{(profile?.image_urls?.length || 0)}/6</Text>
+                <View style={styles.galleryHeaderActions}>
+                  <Text style={styles.galleryCountText}>{(profile?.image_urls?.length || 0)}/6</Text>
+                  {profile?.image_urls?.length ? (
+                    <Pressable
+                      onPress={() => {
+                        if (isDeletingImage) return;
+                        setIsGalleryEditMode((v) => {
+                          const next = !v;
+                          if (!next) setSelectedGalleryIndexes(new Set());
+                          return next;
+                        });
+                      }}
+                      style={({ pressed }) => [
+                        styles.galleryHeaderIconBtn,
+                        isGalleryEditMode ? styles.galleryHeaderIconBtnActive : null,
+                        pressed ? { opacity: 0.9 } : null,
+                        isDeletingImage ? { opacity: 0.6 } : null,
+                      ]}
+                      accessibilityRole="button"
+                      accessibilityLabel={isGalleryEditMode ? 'סיים עריכת תמונות' : 'עריכת תמונות'}
+                    >
+                      {isGalleryEditMode ? (
+                        <X size={16} color="#FFFFFF" />
+                      ) : (
+                        <Edit size={16} color="#5e3f2d" />
+                      )}
+                    </Pressable>
+                  ) : null}
+                  {isGalleryEditMode ? (
+                    <Pressable
+                      onPress={() => {
+                        if (isDeletingImage) return;
+                        removeSelectedImages();
+                      }}
+                      disabled={isDeletingImage || selectedGalleryIndexes.size === 0}
+                      style={({ pressed }) => [
+                        styles.galleryHeaderPill,
+                        styles.galleryHeaderPillDanger,
+                        (isDeletingImage || selectedGalleryIndexes.size === 0) ? { opacity: 0.55 } : null,
+                        pressed ? { opacity: 0.9 } : null,
+                      ]}
+                      accessibilityRole="button"
+                      accessibilityLabel="מחק תמונות מסומנות"
+                    >
+                      <Trash2 size={14} color="#DC2626" />
+                      <Text style={styles.galleryHeaderPillTextDanger}>
+                        {`מחק (${selectedGalleryIndexes.size})`}
+                      </Text>
+                    </Pressable>
+                  ) : null}
+                </View>
               </View>
               {profile?.image_urls?.length ? (
                 <View style={styles.galleryGrid}>
                   {profile.image_urls.map((url, idx) => (
-                    <TouchableOpacity
+                    <Pressable
                       key={url + idx}
                       style={styles.galleryItem}
-                      activeOpacity={0.9}
                       onPress={() => {
                         if (ignoreNextGalleryPressRef.current) {
                           ignoreNextGalleryPressRef.current = false;
+                          return;
+                        }
+                        if (isGalleryEditMode) {
+                          toggleGallerySelection(idx);
                           return;
                         }
                         setViewerIndex(idx);
                       }}
                       delayLongPress={350}
                       onLongPress={() => {
-                        // Prevent the subsequent onPress from opening the viewer after long-press.
+                        // Long-press enters edit mode and selects the item (instead of immediate delete).
                         ignoreNextGalleryPressRef.current = true;
-                        removeImageAt(idx);
+                        if (!isGalleryEditMode) setIsGalleryEditMode(true);
+                        toggleGallerySelection(idx);
                       }}
                     >
                       <Image source={{ uri: url }} style={styles.galleryImg} />
-                    </TouchableOpacity>
+                      {isGalleryEditMode ? (
+                        <View pointerEvents="none" style={styles.gallerySelectOverlay}>
+                          <View
+                            style={[
+                              styles.gallerySelectBadge,
+                              selectedGalleryIndexes.has(idx) ? styles.gallerySelectBadgeSelected : null,
+                            ]}
+                          >
+                            {selectedGalleryIndexes.has(idx) ? <Check size={14} color="#FFFFFF" /> : null}
+                          </View>
+                        </View>
+                      ) : null}
+                    </Pressable>
                   ))}
-                  {profile.image_urls.length < 6 && (
+                  {!isGalleryEditMode && profile.image_urls.length < 6 && (
                     <TouchableOpacity
                       style={[styles.galleryAddTile, isAddingImage && { opacity: 0.75 }]}
                       onPress={isAddingImage ? undefined : addGalleryImage}
@@ -2214,25 +2354,6 @@ export default function ProfileScreen() {
                 accessibilityLabel="סגור צפייה בתמונה"
               >
                 <X size={18} color="#E5E7EB" />
-              </Pressable>
-              <Pressable
-                style={({ pressed }) => [
-                  styles.viewerDeleteBtn,
-                  (pressed && !isDeletingImage) ? { opacity: 0.85 } : null,
-                  isDeletingImage ? { opacity: 0.75 } : null,
-                ]}
-                onPress={() => {
-                  if (isDeletingImage) return;
-                  if (viewerIndex !== null) removeImageAt(viewerIndex);
-                }}
-                accessibilityRole="button"
-                accessibilityLabel="מחק תמונה"
-              >
-                {isDeletingImage ? (
-                  <ActivityIndicator size="small" color="#F87171" />
-                ) : (
-                  <Trash2 size={18} color="#F87171" />
-                )}
               </Pressable>
             </View>
             {viewerIndex !== null && (
@@ -2799,10 +2920,61 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     textAlign: 'right',
   },
+  galleryHeaderActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   galleryCountText: {
     color: '#6B7280',
     fontSize: 12,
     fontWeight: '700',
+  },
+  galleryHeaderPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: 'rgba(94,63,45,0.25)',
+    backgroundColor: 'rgba(94,63,45,0.06)',
+  },
+  galleryHeaderPillActive: {
+    backgroundColor: '#5e3f2d',
+    borderColor: 'rgba(94,63,45,0.65)',
+  },
+  galleryHeaderPillDanger: {
+    borderColor: 'rgba(220,38,38,0.35)',
+    backgroundColor: 'rgba(220,38,38,0.06)',
+  },
+  galleryHeaderPillText: {
+    color: '#5e3f2d',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  galleryHeaderPillTextActive: {
+    color: '#FFFFFF',
+  },
+  galleryHeaderPillTextDanger: {
+    color: '#DC2626',
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  galleryHeaderIconBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(94,63,45,0.25)',
+    backgroundColor: 'rgba(94,63,45,0.06)',
+  },
+  galleryHeaderIconBtnActive: {
+    backgroundColor: '#5e3f2d',
+    borderColor: 'rgba(94,63,45,0.65)',
   },
   galleryAddBtn: {
     backgroundColor: '#5e3f2d',
@@ -2842,6 +3014,30 @@ const styles = StyleSheet.create({
     shadowRadius: 12,
     shadowOffset: { width: 0, height: 8 },
     elevation: 4,
+  },
+  gallerySelectOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    alignItems: 'flex-start',
+    justifyContent: 'flex-start',
+    padding: 8,
+  },
+  gallerySelectBadge: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.85)',
+    backgroundColor: 'rgba(0,0,0,0.25)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  gallerySelectBadgeSelected: {
+    backgroundColor: '#16A34A',
+    borderColor: 'rgba(22,163,74,0.95)',
   },
   galleryAddTile: {
     width: '31%',
